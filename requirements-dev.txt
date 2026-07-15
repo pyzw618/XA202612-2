@@ -1,0 +1,30 @@
+﻿# Kylin-MemoryHub 开发依赖
+# 安装: pip install -r requirements-dev.txt
+
+# 包含生产依赖
+-r requirements.txt
+
+# 测试框架
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.0.0
+pytest-mock>=3.12.0
+
+# 代码格式化
+black>=24.0.0
+ruff>=0.3.0
+
+# 类型检查
+mypy>=1.8.0
+
+# 预提交钩子
+pre-commit>=3.6.0
+
+# 文档生成
+mkdocs>=1.5.0
+mkdocs-material>=9.5.0
+
+# 评估模块依赖
+pandas>=2.2.0
+matplotlib>=3.8.0
+scikit-learn>=1.4.0

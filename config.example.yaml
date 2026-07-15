@@ -1,0 +1,95 @@
+﻿# Kylin-MemoryHub 配置文件示例
+# 复制此文件为 config.yaml 并根据实际环境修改
+
+# ==================== 存储配置 ====================
+storage:
+  # SQLite 数据库路径
+  db_path: "data/memoryhub.db"
+  
+  # FAISS 向量索引路径
+  vector_index_path: "data/vector_index"
+  
+  # 证据链存储路径 (JSONL格式)
+  evidence_path: "data/evidence"
+  
+  # 检索缓存最大条目数
+  cache_max_size: 1000
+
+# ==================== 检索配置 ====================
+retrieval:
+  # 默认返回 Top-K 结果数
+  default_top_k: 5
+  
+  # 混合检索权重 (总和建议为 1.0)
+  vector_weight: 0.6      # 向量检索权重
+  keyword_weight: 0.3     # BM25 关键词检索权重
+  metadata_weight: 0.1    # 元数据过滤权重
+  
+  # 是否启用 Reranker 重排序
+  rerank_enabled: true
+  
+  # 检索缓存 TTL (秒)
+  cache_ttl_seconds: 300
+
+# ==================== LLM 配置 ====================
+llm:
+  # 提供商: "openai" (兼容 OpenAI API) | "ollama" (本地推理)
+  provider: "ollama"
+  
+  # API 基础地址
+  # OpenAI 兼容: https://api.openai.com/v1 或其他兼容端点
+  # Ollama: http://localhost:11434/v1
+  api_base: "http://localhost:11434/v1"
+  
+  # API 密钥 (OpenAI 兼容模式需要)
+  api_key: ""
+  
+  # 模型名称
+  # OpenAI: "gpt-4o-mini", "gpt-4o"
+  # Ollama: "qwen2:1.5b", "qwen2:7b", "llama3:8b"
+  model: "qwen2:7b"
+  
+  # 生成温度 (0.0 - 2.0)
+  temperature: 0.1
+  
+  # 最大生成 token 数
+  max_tokens: 2048
+
+# ==================== Embedding 配置 ====================
+embedding:
+  # 提供商: "kylin" (麒麟 SDK) | "mock" (开发测试)
+  provider: "kylin"
+  
+  # 向量维度
+  dimension: 1024
+  
+  # 模型名称 (kylin 模式下填写)
+  model_name: "kylin-embedding-v1"
+
+# ==================== 安全配置 ====================
+safety:
+  # 敏感信息正则匹配规则
+  sensitive_patterns:
+    - '(?i)(api[_-]?key|secret|password|token)\s*[:=]\s*\S+'
+    - '\b\d{18}\b'                    # 身份证号
+    - '\b1[3-9]\d{9}\b'               # 手机号
+    - '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'  # 邮箱
+  
+  # 是否自动脱敏
+  auto_mask: true
+  
+  # 检测到敏感信息时是否拒绝入库
+  reject_on_detect: false
+
+# ==================== 应用配置 ====================
+# 调试模式 (生产环境请设为 false)
+debug: false
+
+# 日志级别: DEBUG | INFO | WARNING | ERROR
+log_level: "INFO"
+
+# 服务监听地址
+host: "0.0.0.0"
+
+# 服务监听端口
+port: 8000
