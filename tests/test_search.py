@@ -11,10 +11,10 @@ try:
 except AttributeError:
     sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
 
-# 将 src 加入路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# 将项目根目录加入路径
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.mock_embedding import MockEmbeddingClient
+from src.embedding import create_embedding_client
 from src.memory_store import MemoryStore
 from src.search_engine import MemorySearchEngine
 
@@ -24,9 +24,10 @@ def main():
     print("OS Agent Memory Engine — BM25 + FAISS 检索测试")
     print("=" * 60)
 
-    # ---- 1. 初始化 Mock SDK ----
-    print("\n[1] 初始化 Mock Embedding SDK (dim=768, latency=100ms)...")
-    embed_client = MockEmbeddingClient(dim=768, latency=0.1, seed=42)
+    # ---- 1. 初始化 Embedding 客户端 ----
+    print("\n[1] 初始化 Embedding 客户端 (dim=768)...")
+    embed_client = create_embedding_client(dim=768, latency=0.1, seed=42)
+    print(f"  当前使用: {type(embed_client).__name__}")
 
     # ---- 2. 准备 10 条假数据 ----
     fake_data = [

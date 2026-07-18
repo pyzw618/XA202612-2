@@ -7,6 +7,7 @@ Search Engine — BM25 + FAISS 双路检索引擎。
 两者可以独立使用，也可以混合（Hybrid）打分。
 """
 
+import os
 import numpy as np
 from typing import List, Tuple, Optional
 
@@ -26,17 +27,40 @@ except ImportError:
     from memory_store import MemoryStore, MemoryRecord
 
 
-# ---------- 简易中文分词 ----------
+# ---------- 中文分词 ----------
 
-def _simple_tokenize(text: str) -> List[str]:
+try:
+    import jieba
+except ImportError:
+    jieba = None
+
+
+def _tokenize(text: str) -> List[str]:
     """
-    简易分词：按非字母数字字符切分 + 单字拆开（中文场景）。
-    生产环境建议替换为 jieba 分词。
+    中文分词：jieba 精确模式 + 英文/数字保留。
+
+    例：
+      "数据库登录密码" → ["数据库", "登录", "密码"]
+      "我的系统密码是Admin@123" → ["系统", "密码", "Admin", "123"]
     """
-    import re
-    # 先按空白/标点切分
-    tokens = re.findall(r'[一-鿿]|[a-zA-Z0-9]+', text.lower())
+    if jieba is None:
+        # 降级：简易正则分词
+        import re
+        return re.findall(r'[一-鿿]|[a-zA-Z0-9]+', text.lower())
+
+    # jieba 分词 + 过滤空字符和纯标点
+    tokens = []
+    for word in jieba.cut(text.lower()):
+        word = word.strip()
+        if word and not _is_punct_only(word):
+            tokens.append(word)
     return tokens
+
+
+def _is_punct_only(s: str) -> bool:
+    """判断字符串是否仅由标点/空白构成。"""
+    import re
+    return not re.search(r'[a-zA-Z0-9一-鿿]', s)
 
 
 # ---------- BM25 检索器 ----------
@@ -48,7 +72,7 @@ class BM25Retriever:
     对记忆库中所有文本建立倒排索引，查询时返回 BM25 打分排序结果。
     """
 
-    def __init__(self, tokenizer=_simple_tokenize):
+    def __init__(self, tokenizer=_tokenize):
         self._tokenizer = tokenizer
         self._bm25 = None
         self._corpus: List[str] = []
@@ -149,6 +173,34 @@ class FaissRetriever:
                 results.append((self._idx_to_id[idx], float(dist)))
         return results
 
+    def save(self, path: str):
+        """将 FAISS 索引和映射持久化到磁盘。"""
+        if self._index is None:
+            raise RuntimeError("索引未构建，无法保存")
+        faiss.write_index(self._index, path)
+        # 映射表保存为 numpy 文件
+        import json as _json
+        meta_path = path + ".meta"
+        with open(meta_path, "w", encoding="utf-8") as f:
+            _json.dump({
+                "dim": self.dim,
+                "id_to_idx": self._id_to_idx,
+                "idx_to_id": {str(k): v for k, v in self._idx_to_id.items()},
+            }, f)
+
+    def load(self, path: str):
+        """从磁盘加载 FAISS 索引和映射。"""
+        if faiss is None:
+            raise ImportError("faiss-cpu 未安装")
+        self._index = faiss.read_index(path)
+        import json as _json
+        meta_path = path + ".meta"
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = _json.load(f)
+        self.dim = meta["dim"]
+        self._id_to_idx = meta["id_to_idx"]
+        self._idx_to_id = {int(k): v for k, v in meta["idx_to_id"].items()}
+
     @property
     def is_ready(self) -> bool:
         return self._index is not None
@@ -163,25 +215,50 @@ class MemorySearchEngine:
     用法:
         store = MemoryStore()
         engine = MemorySearchEngine(store)
-        engine.build_index()                    # 建立双路索引
+        engine.build_index()                    # 建立双路索引并持久化
         results = engine.search("系统密码")      # 默认 Hybrid 模式
     """
 
-    def __init__(self, store: MemoryStore, embedding_dim: int = 768):
+    def __init__(self, store: MemoryStore, embedding_dim: int = 768, index_dir: Optional[str] = None):
         self.store = store
         self.bm25 = BM25Retriever()
         self.faiss = FaissRetriever(dim=embedding_dim)
 
+        if index_dir is None:
+            from .memory_store import DEFAULT_DB_DIR
+            index_dir = DEFAULT_DB_DIR
+        self._index_dir = index_dir
+        self._faiss_path = os.path.join(index_dir, "faiss.index")
+
     def build_index(self):
-        """根据 store 中的数据重新构建 BM25 和 FAISS 索引。"""
+        """根据 store 中的数据重建 BM25 和 FAISS 索引，并持久化到磁盘。"""
         records = self.store.get_all()
 
-        # BM25 索引
+        # BM25 索引（纯内存，每次重建）
         texts = [r.content for r in records]
         self.bm25.index(texts)
 
-        # FAISS 索引
-        self.faiss.index(records)
+        # FAISS 索引（构建后持久化）
+        if records:
+            self.faiss.index(records)
+            os.makedirs(self._index_dir, exist_ok=True)
+            self.faiss.save(self._faiss_path)
+
+    def load_index(self) -> bool:
+        """
+        尝试从磁盘加载已持久化的 FAISS 索引。
+        返回 True 表示加载成功，False 表示需要重建。
+        """
+        if os.path.exists(self._faiss_path):
+            try:
+                self.faiss.load(self._faiss_path)
+                # BM25 仍需从 store 重建（无磁盘持久化）
+                texts = [r.content for r in self.store.get_all()]
+                self.bm25.index(texts)
+                return True
+            except Exception:
+                pass
+        return False
 
     def search_bm25(self, query: str, top_k: int = 5) -> List[dict]:
         """纯 BM25 关键词搜索。"""
