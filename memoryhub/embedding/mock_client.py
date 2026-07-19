@@ -1,54 +1,59 @@
 """
-Mock Embedding 客户端
+Mock Embedding 客户端实现。
 
-开发和测试用，不依赖真实 SDK。
+用于开发环境，用确定性随机向量替代真实 Embedding 推理。
+同一文本永远返回相同向量，保证可复现。
 """
 
+import time
 import hashlib
 import random
+from typing import List
 
-from memoryhub.embedding.base import BaseEmbeddingClient
+from .base import BaseEmbeddingClient
+
+DEFAULT_DIM = 768
+SIMULATED_LATENCY = 0.1
 
 
 class MockEmbeddingClient(BaseEmbeddingClient):
     """
-    Mock Embedding 客户端
+    模拟的 Embedding 客户端。
 
-    使用方式:
-        client = MockEmbeddingClient(dimension=1024)
-        vector = client.embed("任意文本")  # 返回确定性伪向量
-
-    特点:
-        - 相同文本返回相同向量（基于 hash 的确定性）
-        - 不同文本返回不同向量
-        - 不依赖任何外部服务
-        - 适合开发调试和单元测试
+    使用 SHA256 哈希 + 固定随机种子，保证：
+    - 同一文本 → 同一向量（确定性）
+    - 不同文本 → 不同向量
+    - time.sleep(latency) 模拟真实推理耗时
     """
 
-    def __init__(self, dimension: int = 1024):
-        self.dimension = dimension
+    def __init__(self, dim: int = DEFAULT_DIM, latency: float = SIMULATED_LATENCY, seed: int = 42):
+        self.dim = dim
+        self.latency = latency
+        self.seed = seed
 
-    def embed(self, text: str) -> list[float]:
-        """
-        生成确定性伪向量
+    # ---- 实现抽象方法 ----
 
-        实现: 基于 text 的 hash 值生成伪随机向量，
-             保证相同文本总是返回相同结果。
-        """
-        # 基于 hash 的确定性伪向量生成
-        seed = int(hashlib.md5(text.encode()).hexdigest(), 16) % (2**32)
-        rng = random.Random(seed)
-        vector = [rng.gauss(0, 1) for _ in range(self.dimension)]
-        # 归一化
-        norm = sum(x**2 for x in vector) ** 0.5
-        return [x / norm for x in vector]
+    def embed(self, text: str) -> List[float]:
+        time.sleep(self.latency)
+        rng = random.Random(self._deterministic_seed(text))
+        return [rng.uniform(-1.0, 1.0) for _ in range(self.dim)]
 
-    def batch_embed(self, texts: list[str]) -> list[list[float]]:
-        """批量调用 embed"""
-        return [self.embed(t) for t in texts]
+    def embed_batch(self, texts: List[str]) -> List[List[float]]:
+        time.sleep(self.latency)
+        return [self._embed_no_latency(t) for t in texts]
 
     def get_dimension(self) -> int:
-        return self.dimension
+        return self.dim
 
     def is_available(self) -> bool:
-        return True
+        return True  # Mock 始终可用
+
+    # ---- 内部方法 ----
+
+    def _deterministic_seed(self, text: str) -> int:
+        hash_bytes = hashlib.sha256(text.encode("utf-8")).digest()
+        return int.from_bytes(hash_bytes[:4], byteorder="big")
+
+    def _embed_no_latency(self, text: str) -> List[float]:
+        rng = random.Random(self._deterministic_seed(text))
+        return [rng.uniform(-1.0, 1.0) for _ in range(self.dim)]
