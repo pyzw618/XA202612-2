@@ -49,7 +49,7 @@ def main():
 
     # ---- 3. 生成 Embedding 并存入 MemoryStore ----
     print(f"\n[3] 生成 Embedding（模拟每次 100ms 延迟）...")
-    store = MemoryStore()
+    store = MemoryStore(":memory:")  # 使用内存数据库，避免测试数据污染本地文件
     for i, text in enumerate(fake_data, 1):
         vec = embed_client.embed(text)
         store.add(content=text, embedding=vec)
