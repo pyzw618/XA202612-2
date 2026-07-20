@@ -1,0 +1,44 @@
+{
+  "dataset": "evaluation\\datasets\\longmemeval\\longmemeval_oracle.json",
+  "file_bytes": 15388478,
+  "questions": 500,
+  "sessions": 948,
+  "events": 10960,
+  "elapsed_seconds": 5.0665517000015825,
+  "throughput_events_per_second": 2163.2069796103287,
+  "quality_score_mean": 0.9399999999999641,
+  "status_counts": {
+    "accepted": 10960
+  },
+  "source_counts": {
+    "user_behavior": 5479,
+    "tool_result": 5481
+  },
+  "role_counts": {
+    "user": 5479,
+    "assistant": 5481
+  },
+  "question_type_counts": {
+    "temporal-reasoning": 133,
+    "multi-session": 133,
+    "knowledge-update": 78,
+    "single-session-preference": 30,
+    "single-session-assistant": 56,
+    "single-session-user": 70
+  },
+  "empty_text": 0,
+  "timestamp_failures": 0,
+  "redaction_counts": {
+    "email": 12
+  },
+  "issue_counts": {
+    "freshness:stale_event": 10960,
+    "security:redacted_sensitive_value": 12
+  },
+  "latency_ms": {
+    "mean": 0.45036184306569343,
+    "p50": 0.3133,
+    "p95": 0.9358,
+    "p99": 1.0891
+  }
+}

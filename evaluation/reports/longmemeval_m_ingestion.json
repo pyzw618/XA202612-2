@@ -1,0 +1,47 @@
+{
+  "dataset": "evaluation\\datasets\\longmemeval\\longmemeval_m_cleaned.json",
+  "file_bytes": 2737100077,
+  "questions": 500,
+  "sessions": 237655,
+  "events": 2446993,
+  "elapsed_seconds": 972.9438862999668,
+  "throughput_events_per_second": 2515.0402139898656,
+  "quality_score_mean": 0.9399999999573468,
+  "status_counts": {
+    "accepted": 2446993
+  },
+  "source_counts": {
+    "user_behavior": 1213940,
+    "tool_result": 1233053
+  },
+  "role_counts": {
+    "user": 1213940,
+    "assistant": 1233053
+  },
+  "question_type_counts": {
+    "single-session-assistant": 56,
+    "single-session-user": 70,
+    "multi-session": 133,
+    "knowledge-update": 78,
+    "temporal-reasoning": 133,
+    "single-session-preference": 30
+  },
+  "empty_text": 779,
+  "timestamp_failures": 0,
+  "redaction_counts": {
+    "email": 2512,
+    "api_key": 155,
+    "token": 544,
+    "phone": 12
+  },
+  "issue_counts": {
+    "freshness:stale_event": 2446993,
+    "security:redacted_sensitive_value": 3106
+  },
+  "latency_ms": {
+    "mean": 0.37400583144291794,
+    "p50": 0.2527,
+    "p95": 0.8434,
+    "p99": 1.0321
+  }
+}
