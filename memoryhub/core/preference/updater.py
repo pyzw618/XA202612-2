@@ -66,7 +66,7 @@ class PreferenceUpdater:
             if "OVERRIDE" in e.content
         )
 
-        # 2. **崩溃回滚触发条件**：一周内交互数据 $\ge 3$ 条且纠错覆写率 $\ge 70\%$
+        # 2. 崩溃回滚触发条件：一周内交互数据 $\ge 3$ 条且纠错覆写率 $\ge 70\%$
         if len(recent_evidences) >= 3 and (overrides_count / len(recent_evidences)) >= 0.7:
             if old_pref.parent_id and old_pref.parent_id in self._mock_db:
                 # 物理 Revert：重新激活上一个干净安全的父 Commit 节点
