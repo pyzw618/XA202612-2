@@ -209,6 +209,9 @@ tempCodeRunnerFile.py
 # PyPI configuration file
 .pypirc
 
+# Large local evaluation source data
+/evaluation/datasets/longmemeval/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/

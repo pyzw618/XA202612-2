@@ -111,7 +111,12 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[index]
 
 
-def evaluate(path: Path, limit_events: int = 0, progress_every: int = 100_000) -> dict[str, Any]:
+def evaluate(
+    path: Path,
+    limit_events: int = 0,
+    progress_every: int = 100_000,
+    events_output: Path | None = None,
+) -> dict[str, Any]:
     pipeline = IngestionPipeline(reference_time="2026-07-20T00:00:00Z")
     status_counts: Counter[str] = Counter()
     source_counts: Counter[str] = Counter()
@@ -123,35 +128,45 @@ def evaluate(path: Path, limit_events: int = 0, progress_every: int = 100_000) -
     questions = sessions = events = empty_text = timestamp_failures = 0
     quality_sum = 0.0
     started = time.perf_counter()
+    output_handle = None
+    if events_output is not None:
+        events_output.parent.mkdir(parents=True, exist_ok=True)
+        output_handle = events_output.open("w", encoding="utf-8", newline="\n")
 
-    stop = False
-    for row in iter_json_array(path):
-        questions += 1
-        question_type_counts[str(row.get("question_type", "unknown"))] += 1
-        sessions += len(row.get("haystack_sessions") or [])
-        for raw, role in iter_raw_events(row):
-            before = time.perf_counter_ns()
-            result = pipeline.process(raw)
-            latencies_ms.append((time.perf_counter_ns() - before) / 1_000_000)
-            events += 1
-            status_counts[result.quality.status] += 1
-            source_counts[result.source_type] += 1
-            role_counts[role] += 1
-            issue_counts.update(result.quality.issues)
-            redaction_counts.update(result.redactions)
-            quality_sum += result.quality.score
-            if not result.text:
-                empty_text += 1
-            if not result.occurred_at:
-                timestamp_failures += 1
-            if progress_every and events % progress_every == 0:
-                elapsed = time.perf_counter() - started
-                print(f"progress events={events} rate={events / elapsed:.1f}/s", flush=True)
-            if limit_events and events >= limit_events:
-                stop = True
+    try:
+        stop = False
+        for row in iter_json_array(path):
+            questions += 1
+            question_type_counts[str(row.get("question_type", "unknown"))] += 1
+            sessions += len(row.get("haystack_sessions") or [])
+            for raw, role in iter_raw_events(row):
+                before = time.perf_counter_ns()
+                result = pipeline.process(raw)
+                latencies_ms.append((time.perf_counter_ns() - before) / 1_000_000)
+                events += 1
+                status_counts[result.quality.status] += 1
+                source_counts[result.source_type] += 1
+                role_counts[role] += 1
+                issue_counts.update(result.quality.issues)
+                redaction_counts.update(result.redactions)
+                quality_sum += result.quality.score
+                if output_handle is not None:
+                    output_handle.write(json.dumps(result.to_dict(), ensure_ascii=False) + "\n")
+                if not result.text:
+                    empty_text += 1
+                if not result.occurred_at:
+                    timestamp_failures += 1
+                if progress_every and events % progress_every == 0:
+                    elapsed = time.perf_counter() - started
+                    print(f"progress events={events} rate={events / elapsed:.1f}/s", flush=True)
+                if limit_events and events >= limit_events:
+                    stop = True
+                    break
+            if stop:
                 break
-        if stop:
-            break
+    finally:
+        if output_handle is not None:
+            output_handle.close()
 
     elapsed = time.perf_counter() - started
     return {
@@ -160,6 +175,7 @@ def evaluate(path: Path, limit_events: int = 0, progress_every: int = 100_000) -
         "questions": questions,
         "sessions": sessions,
         "events": events,
+        "events_output": str(events_output) if events_output is not None else None,
         "elapsed_seconds": elapsed,
         "throughput_events_per_second": events / elapsed if elapsed else 0.0,
         "quality_score_mean": quality_sum / events if events else 0.0,
@@ -186,14 +202,21 @@ def main() -> None:
     parser.add_argument("--limit-events", type=int, default=0)
     parser.add_argument("--progress-every", type=int, default=100_000)
     parser.add_argument("--output", help="Optional JSON report path")
+    parser.add_argument("--events-output", help="Optional JSONL path for normalized per-event output")
     args = parser.parse_args()
-    report = evaluate(Path(args.data), limit_events=args.limit_events, progress_every=args.progress_every)
+    report = evaluate(
+        Path(args.data),
+        limit_events=args.limit_events,
+        progress_every=args.progress_every,
+        events_output=Path(args.events_output) if args.events_output else None,
+    )
     rendered = json.dumps(report, ensure_ascii=False, indent=2)
     print(rendered)
     if args.output:
         output = Path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(rendered + "\n", encoding="utf-8")
+        with output.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(rendered + "\n")
 
 
 if __name__ == "__main__":
