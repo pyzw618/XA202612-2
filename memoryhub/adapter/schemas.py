@@ -33,6 +33,15 @@ class QualityStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class ToolCallStatus(str, Enum):
+    """单次工具调用的执行状态。"""
+    SUCCESS = "success"
+    ERROR = "error"
+    TIMEOUT = "timeout"
+    CANCELLED = "cancelled"
+    PARTIAL = "partial"
+
+
 class PreferenceType(str, Enum):
     """偏好类型"""
     OUTPUT_STYLE = "output_style"           # 输出风格偏好
@@ -107,6 +116,20 @@ class Evidence(BaseModel):
 # 3. 事件模型（接入层输出）
 # ============================================================
 
+class ToolCallResult(BaseModel):
+    """一次工具调用及其结果；同一事件中的 sequence 表示调用顺序。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    call_id: str = Field(min_length=1)
+    tool_name: str = Field(min_length=1)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    result: Any = None
+    status: ToolCallStatus
+    sequence: int = Field(ge=1)
+    error: str = ""
+
+
 class EventQuality(BaseModel):
     """清洗、标准化后随事件输出的质量评分明细。"""
 
@@ -127,7 +150,7 @@ class MemoryEvent(BaseModel):
 
     数据流：原始数据 → Ingestion 清洗/标准化/评分 → MemoryEvent → 存储/抽取
 
-    顶层只放跨来源共享字段；来源特有字段全部放入 payload。
+    顶层放跨来源共享字段和强类型工具轨迹；其余来源特有字段放入 payload。
     旧版 content/timestamp/source/quality_score 等字段不再属于本模型。
     """
 
@@ -138,12 +161,14 @@ class MemoryEvent(BaseModel):
     event_type: str = Field(min_length=1)
     user_id: str = ""
     session_id: str = ""
+    turn_id: str = ""  # 同一轮 Agent 调用链的关联 ID
     scene: str = ""
     task_type: str = ""
     occurred_at: str = ""
-    text: str = ""
+    text: str = ""  # 最终回答或摘要，不替代 tool_calls 中的原始结果
     payload: dict[str, Any] = Field(default_factory=dict)
-    schema_version: Literal["1.0"] = "1.0"
+    tool_calls: list[ToolCallResult] = Field(default_factory=list)
+    schema_version: Literal["1.0", "1.1"] = "1.1"
     source_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     redactions: list[str] = Field(default_factory=list)
     quality: EventQuality
@@ -171,12 +196,36 @@ class MemoryEvent(BaseModel):
                 missing.append("user_id")
             if not self.occurred_at:
                 missing.append("occurred_at")
-            if not self.payload:
-                missing.append("payload")
+            if not self.payload and not self.tool_calls:
+                missing.append("payload or tool_calls")
             if missing:
                 raise ValueError(
                     "accepted event is missing required fields: " + ", ".join(missing)
                 )
+        if self.source_type is not SourceType.TOOL_RESULT and self.tool_calls:
+            raise ValueError("tool_calls are only valid for source_type=tool_result")
+        if (
+            self.schema_version == "1.1"
+            and self.source_type is SourceType.TOOL_RESULT
+            and not self.tool_calls
+        ):
+            raise ValueError("schema 1.1 tool_result event requires at least one tool call result")
+        if self.event_type == "agent_response":
+            if not self.turn_id:
+                raise ValueError("agent_response requires turn_id")
+            if not self.text:
+                raise ValueError("agent_response requires final answer in text")
+            if not self.tool_calls:
+                raise ValueError("agent_response requires at least one tool call result")
+        if self.tool_calls:
+            call_ids = [call.call_id for call in self.tool_calls]
+            sequences = [call.sequence for call in self.tool_calls]
+            if len(call_ids) != len(set(call_ids)):
+                raise ValueError("tool_calls.call_id values must be unique within an event")
+            if len(sequences) != len(set(sequences)):
+                raise ValueError("tool_calls.sequence values must be unique within an event")
+            if sequences != sorted(sequences):
+                raise ValueError("tool_calls must be ordered by ascending sequence")
         return self
 
 

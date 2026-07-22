@@ -37,7 +37,7 @@ class QualityScorer:
         各因子说明:
             - completeness: 事件字段是否完整
             - validity: 来源、事件类型和时间是否合法
-            - consistency: 来源类型与 payload 字段是否一致
+            - consistency: 来源类型与 tool_calls/payload 字段是否一致
             - freshness: 事件相对参考时间的新鲜度
         """
         raise NotImplementedError

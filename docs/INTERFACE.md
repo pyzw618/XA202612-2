@@ -60,12 +60,14 @@ class MemoryEvent(BaseModel):
     event_type: str               # 来源内的具体动作，如 tool_result、user_action
     user_id: str                  # 用户 ID；无法识别时为空并降低质量分
     session_id: str               # 会话或任务链 ID，可为空
+    turn_id: str                  # 同一轮 Agent 调用链的关联 ID，可为空
     scene: str                    # 场景，如 office、coding
     task_type: str                # 任务类型，如 weekly_report
     occurred_at: str              # UTC 时间，格式 YYYY-MM-DDTHH:MM:SSZ
     text: str                     # 供偏好/知识抽取使用的摘要文本
     payload: dict                 # 来源特有结构化内容
-    schema_version: Literal["1.0"]
+    tool_calls: list[ToolCallResult] # 工具调用明细，按 sequence 排序
+    schema_version: Literal["1.0", "1.1"] # 新事件默认 1.1
     source_hash: str              # 清洗后原始事件的 64 位 SHA-256
     redactions: list[str]         # 脱敏类型，如 api_key、token、email、phone
     quality: EventQuality         # 总分、分项分数、状态和问题列表
@@ -75,20 +77,85 @@ class EventQuality(BaseModel):
     status: QualityStatus         # accepted | review | rejected
     completeness: float           # 完整性 [0, 1]
     validity: float               # 合法性 [0, 1]
-    consistency: float            # 来源与 payload 一致性 [0, 1]
+    consistency: float            # 来源与 tool_calls/payload 一致性 [0, 1]
     freshness: float              # 新鲜度 [0, 1]
     issues: list[str]             # 可审计问题代码
+
+class ToolCallResult(BaseModel):
+    call_id: str                  # 单次调用唯一 ID
+    tool_name: str                # 工具名，必须保留
+    arguments: dict               # 本次调用参数
+    result: Any                   # 本次调用的原始结构化结果或文本
+    status: ToolCallStatus         # success | error | timeout | cancelled | partial
+    sequence: int                 # 同一轮调用顺序，从 1 开始
+    error: str                    # 失败原因；成功时为空
 ```
 
-`MemoryEvent` 顶层禁止未声明字段，来源特有扩展只能进入 `payload`。`occurred_at` 为空仅用于携带待复核或拒绝事件；进入记忆抽取链路的 `accepted` 事件必须有合法 UTC 时间。
+`MemoryEvent` 顶层禁止未声明字段。工具轨迹使用强类型 `tool_calls`，其他来源特有扩展只能进入 `payload`。`text` 只表示最终回答或摘要，不能用它替代工具结果。只要 `event_type=agent_response`，就必须提供非空 `turn_id`、`text` 和至少一个 `tool_calls` 项；每个工具调用的工具名、参数、结果、状态和顺序都必须保留。
+
+如果系统采用流式写入，可以把每次调用拆成一条 `tool_result` 事件，并使用同一个 `session_id + turn_id` 关联；如果系统在 Agent 回复完成后一次性写入，则把这一轮的所有调用放在同一个 `agent_response` 事件的 `tool_calls` 列表中。
+
+版本兼容规则：`1.0` 仅用于读取历史事件，允许旧工具结果继续保存在 `payload`；新接入输出必须使用 `1.1`，并且所有 `source_type=tool_result` 事件至少包含一个 `tool_calls` 项。
+
+`call_id` 在一条事件内必须唯一；上游没有调用 ID 时，由接入适配器确定性生成。相同工具可以被重复调用，但每次调用必须分别占一个列表项，并拥有独立的 `call_id`、`arguments`、`result` 和 `sequence`。列表必须按 `sequence` 升序排列，不能只保存最后一次调用结果。
 
 #### payload 字段结构（按 source_type 区分）
 
 | source_type | event_type 示例 | payload 典型结构 |
 |---|---|---|
-| `tool_result` | `tool_result`、`task_trajectory` | `{"tool_name": str, "input": Any, "output": Any, "status": str}` |
+| `tool_result` | `tool_result`、`task_trajectory`、`agent_response` | `tool_calls[]` 保存 `tool_name`、`arguments`、`result`、`status`；`payload` 只放聚合元数据 |
 | `user_behavior` | `user_action`、`user_feedback` | `{"action": str, "target": str, "value": Any}` |
 | `manual_config` | `manual_config` | `{"key": str, "value": Any}` |
+
+#### 多工具调用示例
+
+下面表示同一轮 Agent 先搜索文件、再读取日历，最后基于两个工具结果生成回答。下游不需要从最终回答中反向猜测工具结果。
+
+```json
+{
+  "event_id": "evt_agent_response_001",
+  "source_type": "tool_result",
+  "event_type": "agent_response",
+  "user_id": "u001",
+  "session_id": "session_001",
+  "turn_id": "turn_007",
+  "occurred_at": "2026-07-22T10:30:00Z",
+  "text": "已根据项目文件和本周日程生成周报。",
+  "payload": {"response_status": "success"},
+  "tool_calls": [
+    {
+      "call_id": "call_001",
+      "tool_name": "file_search",
+      "arguments": {"query": "项目周报"},
+      "result": {"files": ["weekly-report.docx"]},
+      "status": "success",
+      "sequence": 1,
+      "error": ""
+    },
+    {
+      "call_id": "call_002",
+      "tool_name": "calendar_read",
+      "arguments": {"range": "2026-07-20/2026-07-26"},
+      "result": {"events": [{"title": "周会"}]},
+      "status": "success",
+      "sequence": 2,
+      "error": ""
+    }
+  ],
+  "schema_version": "1.1",
+  "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "redactions": [],
+  "quality": {
+    "score": 1.0,
+    "status": "accepted",
+    "completeness": 1.0,
+    "validity": 1.0,
+    "consistency": 1.0,
+    "freshness": 1.0,
+    "issues": []
+  }
+}
+```
 
 #### 从旧版字段迁移
 
@@ -101,6 +168,7 @@ class EventQuality(BaseModel):
 | `timestamp` | 转为 UTC 秒精度字符串 `occurred_at` |
 | `quality_score` | 转为包含分项、状态和问题的 `quality` 对象 |
 | `task_id` | 会话链标识放入 `session_id`，任务分类放入 `task_type` |
+| `content.tool_name/output` | 转为 `tool_calls[].tool_name/result`，并补充 `call_id`、`sequence`、`status` |
 | `sensitive_level` / `metadata` | 脱敏结果放入 `redactions` 和 `quality.issues`；来源扩展放入 `payload` |
 
 ---
@@ -231,11 +299,21 @@ class ForgetRecord(BaseModel):
 
 | 值 | 含义 | payload 一致性要求 |
 |---|---|---|
-| `tool_result` | 工具或 Agent 执行结果 | 应包含 `tool_name` |
+| `tool_result` | 工具或 Agent 执行结果 | 新事件应包含 `tool_calls`，每项必须有 `tool_name` 和独立结果 |
 | `user_behavior` | 用户操作、消息或显式反馈 | 应包含 `action`、`target` 或 `value` 之一 |
 | `manual_config` | 用户或管理员手动配置 | 应包含配置键或值 |
 
 `event_type` 是开放字符串，不再使用封闭枚举。它描述来源内的具体事件，例如 `tool_result`、`user_action`、`user_feedback`、`task_trajectory`；`source_type` 才是接入路由和质量一致性校验使用的稳定枚举。
+
+### ToolCallStatus — 工具调用状态
+
+| 值 | 含义 |
+|---|---|
+| `success` | 工具正常返回完整结果 |
+| `error` | 工具执行失败，错误信息写入 `error` |
+| `timeout` | 工具调用超时 |
+| `cancelled` | 工具调用被取消 |
+| `partial` | 只获得部分结果 |
 
 ### QualityStatus — 接入质量状态
 
@@ -845,19 +923,37 @@ POST /api/memory/events
             "event_id": "ev_abc123def456",
             "user_id": "u001",
             "session_id": "sess_001",
+            "turn_id": "turn_007",
             "source_type": "tool_result",
-            "event_type": "tool_result",
+            "event_type": "agent_response",
             "payload": {
-                "tool_name": "file_search",
-                "input": "查找项目周报相关文件",
-                "output": "找到 3 个项目文档",
-                "status": "success"
+                "response_status": "success"
             },
+            "tool_calls": [
+                {
+                    "call_id": "call_001",
+                    "tool_name": "file_search",
+                    "arguments": {"query": "项目周报"},
+                    "result": {"files": ["weekly-report.docx"]},
+                    "status": "success",
+                    "sequence": 1,
+                    "error": ""
+                },
+                {
+                    "call_id": "call_002",
+                    "tool_name": "calendar_read",
+                    "arguments": {"range": "this_week"},
+                    "result": {"events": [{"title": "周会"}]},
+                    "status": "success",
+                    "sequence": 2,
+                    "error": ""
+                }
+            ],
             "scene": "office",
             "task_type": "office.weekly_report",
             "occurred_at": "2026-07-15T10:30:00Z",
-            "text": "找到 3 个项目文档",
-            "schema_version": "1.0",
+            "text": "已根据项目文件和本周日程生成周报。",
+            "schema_version": "1.1",
             "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "redactions": [],
             "quality": {
@@ -973,11 +1069,13 @@ POST /api/memory/forget
 | event_type | VARCHAR(64) INDEX | 来源内具体事件类型 |
 | user_id | VARCHAR(64) INDEX | 用户 ID |
 | session_id | VARCHAR(64) | 会话 ID |
+| turn_id | VARCHAR(64) INDEX | 同一轮 Agent 调用链 ID |
 | scene | VARCHAR(64) INDEX | 场景 |
 | task_type | VARCHAR(128) INDEX | 任务类型 |
 | occurred_at | DATETIME | 规范化后的 UTC 事件时间 |
 | text | TEXT | 抽取摘要文本 |
 | payload | JSON | 来源特有结构化内容 |
+| tool_calls | JSON | 按 `sequence` 排序的 `ToolCallResult` 列表 |
 | schema_version | VARCHAR(16) | canonical schema 版本 |
 | source_hash | VARCHAR(64) INDEX | 清洗后事件哈希，用于审计和去重 |
 | redactions | JSON | 脱敏类型列表 |

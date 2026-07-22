@@ -13,10 +13,11 @@ class DataNormalizer:
     # 各数据源的字段映射表
     FIELD_MAPPINGS: dict[str, dict] = {
         "tool_result": {
-            "tool_name": "payload.tool_name",
-            "input": "payload.input",
-            "output": "payload.output",
-            "status": "payload.status",
+            "call_id": "tool_calls[].call_id",
+            "tool_name": "tool_calls[].tool_name",
+            "input": "tool_calls[].arguments",
+            "output": "tool_calls[].result",
+            "status": "tool_calls[].status",
         },
         "user_behavior": {
             "action": "payload.action",
@@ -45,7 +46,7 @@ class DataNormalizer:
         处理逻辑:
             1. 将来源别名归一为 source_type
             2. 提取或推断 event_type
-            3. 构造标准 payload 和 text
+            3. 构造标准 payload、tool_calls 和 text
             4. 识别 scene 和 task_type
             5. 将 occurred_at 统一为 UTC 并生成 source_hash
         """
