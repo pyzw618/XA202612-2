@@ -4,7 +4,7 @@
 负责将不同来源的原始数据统一转化为 MemoryEvent 格式。
 """
 
-from memoryhub.adapter.schemas import MemoryEvent, EventType
+from memoryhub.adapter.schemas import MemoryEvent, SourceType
 
 
 class DataNormalizer:
@@ -12,28 +12,24 @@ class DataNormalizer:
 
     # 各数据源的字段映射表
     FIELD_MAPPINGS: dict[str, dict] = {
-        "tool_call": {
-            "tool_name": "content.tool_name",
-            "input": "content.input",
-            "output": "content.output",
-            "status": "content.status",
-        },
-        "user_feedback": {
-            "text": "content.text",
-            "feedback_type": "content.feedback_type",
+        "tool_result": {
+            "tool_name": "payload.tool_name",
+            "input": "payload.input",
+            "output": "payload.output",
+            "status": "payload.status",
         },
         "user_behavior": {
-            "action": "content.action",
-            "target": "content.target",
-            "repeated_count": "content.repeated_count",
+            "action": "payload.action",
+            "target": "payload.target",
+            "value": "payload.value",
         },
         "manual_config": {
-            "key": "content.key",
-            "value": "content.value",
+            "key": "payload.key",
+            "value": "payload.value",
         },
     }
 
-    def normalize(self, raw_data: dict, source: str = "os_agent") -> MemoryEvent:
+    def normalize(self, raw_data: dict, source_type: str = "") -> MemoryEvent:
         """
         将原始数据标准化为 MemoryEvent
 
@@ -41,22 +37,26 @@ class DataNormalizer:
 
         参数:
             raw_data: 清洗后的原始数据字典
-            source: 数据来源标识
+            source_type: 来源大类；为空时根据原始字段推断
 
         返回:
             标准化的 MemoryEvent 实例
 
         处理逻辑:
-            1. 根据 source 类型选择字段映射
-            2. 提取 event_type
-            3. 构造标准 content 字典
+            1. 将来源别名归一为 source_type
+            2. 提取或推断 event_type
+            3. 构造标准 payload 和 text
             4. 识别 scene 和 task_type
-            5. 填充 timestamp 等元数据
+            5. 将 occurred_at 统一为 UTC 并生成 source_hash
         """
         raise NotImplementedError
 
-    def _detect_event_type(self, raw_data: dict) -> EventType:
-        """从原始数据中推断事件类型"""
+    def _detect_source_type(self, raw_data: dict) -> SourceType:
+        """从原始数据中推断来源大类。"""
+        raise NotImplementedError
+
+    def _detect_event_type(self, raw_data: dict) -> str:
+        """从原始数据中推断来源内的具体事件类型。"""
         raise NotImplementedError
 
     def _detect_scene(self, raw_data: dict) -> tuple[str, str]:
@@ -68,6 +68,8 @@ class DataNormalizer:
         """
         raise NotImplementedError
 
-    def batch_normalize(self, raw_data_list: list[dict], source: str = "os_agent") -> list[MemoryEvent]:
+    def batch_normalize(
+        self, raw_data_list: list[dict], source_type: str = ""
+    ) -> list[MemoryEvent]:
         """批量标准化"""
         raise NotImplementedError

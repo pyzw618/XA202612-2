@@ -21,7 +21,7 @@ class LifecycleManager:
     PROMOTE_THRESHOLDS = {
         "short_to_mid": {
             "min_occurrences": 2,        # 至少出现 2 次
-            "min_quality_score": 0.4,    # 质量评分 >= 0.4
+            "min_quality_score": 0.4,    # event.quality.score >= 0.4
         },
         "mid_to_long": {
             "min_occurrences": 5,        # 至少出现 5 次

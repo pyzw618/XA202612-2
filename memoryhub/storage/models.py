@@ -6,7 +6,7 @@ SQLAlchemy ORM 模型定义
 
 from datetime import datetime
 
-from sqlalchemy import Column, String, Float, Integer, DateTime, Text, JSON
+from sqlalchemy import JSON, Column, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -19,18 +19,19 @@ class EventRow(Base):
     __tablename__ = "events"
 
     event_id = Column(String(32), primary_key=True)
+    source_type = Column(String(32), index=True)
+    event_type = Column(String(64), index=True)
     user_id = Column(String(64), index=True)
     session_id = Column(String(64))
-    task_id = Column(String(64), index=True)
-    event_type = Column(String(32))
-    source = Column(String(64))
-    content = Column(JSON)
     scene = Column(String(64), index=True)
     task_type = Column(String(128), index=True)
-    timestamp = Column(DateTime, default=datetime.now)
-    quality_score = Column(Float, default=0.0)
-    sensitive_level = Column(String(16), default="none")
-    metadata_ = Column("metadata", JSON)
+    occurred_at = Column(DateTime)
+    text = Column(Text)
+    payload = Column(JSON)
+    schema_version = Column(String(16), default="1.0")
+    source_hash = Column(String(64), index=True)
+    redactions = Column(JSON)
+    quality = Column(JSON)
 
 
 class PreferenceRow(Base):

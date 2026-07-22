@@ -1,5 +1,7 @@
 # Kylin-MemoryHub 架构可视化
 
+> **当前数据契约说明（2026-07-22）**：模块间统一事件以 [`memoryhub/adapter/schemas.py`](../memoryhub/adapter/schemas.py) 的 `MemoryEvent` 和 [`INTERFACE.md`](INTERFACE.md) 为准。本文中早期架构图里的 `task_id`、`content`、`timestamp`、`quality_score` 等字段仅代表历史设计，新增代码不得继续使用；旧数据必须先按迁移表转换为 `payload`、`occurred_at`、`quality` 等 canonical 字段。
+
 ---
 
 ## 1. 系统整体架构（分层视图）
