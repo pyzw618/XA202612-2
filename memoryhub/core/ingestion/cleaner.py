@@ -42,7 +42,7 @@ class DataCleaner:
 
         去重策略:
             - 基于 event_id 去重
-            - 基于 (user_id, task_id, content hash) 去重近似重复
+            - 基于 source_hash 识别清洗后内容相同的重复事件
         """
         raise NotImplementedError
 

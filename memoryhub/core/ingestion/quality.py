@@ -4,7 +4,7 @@
 对标准化后的 MemoryEvent 进行质量评分，低质量事件限制进入长期记忆。
 """
 
-from memoryhub.adapter.schemas import MemoryEvent
+from memoryhub.adapter.schemas import EventQuality, MemoryEvent
 
 
 class QualityScorer:
@@ -12,34 +12,33 @@ class QualityScorer:
 
     # 各因子权重
     WEIGHTS = {
-        "completeness": 0.25,
-        "source_reliability": 0.25,
-        "execution_success": 0.20,
-        "user_feedback_strength": 0.20,
-        "parse_confidence": 0.10,
+        "completeness": 0.40,
+        "validity": 0.30,
+        "consistency": 0.20,
+        "freshness": 0.10,
     }
 
-    def score(self, event: MemoryEvent) -> float:
+    def score(self, event: MemoryEvent) -> EventQuality:
         """
         计算单条事件的质量评分
 
-        数据流: MemoryEvent → score → 更新 event.quality_score
+        数据流: MemoryEvent → score → 生成 event.quality
 
         参数:
             event: 标准化后的 MemoryEvent
 
         返回:
-            质量评分 [0.0, 1.0]
+            包含总分、状态、分项分数和问题列表的 EventQuality
 
         计算公式:
-            QualityScore = Σ(weight_i × factor_i)
+            score = 0.40 * completeness + 0.30 * validity
+                  + 0.20 * consistency + 0.10 * freshness
 
         各因子说明:
             - completeness: 事件字段是否完整
-            - source_reliability: 来源是否可信 (tool_call > user_feedback > behavior)
-            - execution_success: 工具调用是否成功
-            - user_feedback_strength: 是否有明确用户反馈
-            - parse_confidence: 系统解析置信度
+            - validity: 来源、事件类型和时间是否合法
+            - consistency: 来源类型与 tool_calls/payload 字段是否一致
+            - freshness: 事件相对参考时间的新鲜度
         """
         raise NotImplementedError
 
@@ -47,26 +46,23 @@ class QualityScorer:
         """评估字段完整度"""
         raise NotImplementedError
 
-    def _score_source_reliability(self, event: MemoryEvent) -> float:
-        """评估来源可靠度"""
+    def _score_validity(self, event: MemoryEvent) -> float:
+        """评估字段合法性。"""
         raise NotImplementedError
 
-    def _score_execution_success(self, event: MemoryEvent) -> float:
-        """评估执行成功度"""
+    def _score_consistency(self, event: MemoryEvent) -> float:
+        """评估来源与 payload 的一致性。"""
         raise NotImplementedError
 
-    def _score_feedback_strength(self, event: MemoryEvent) -> float:
-        """评估反馈强度"""
-        raise NotImplementedError
-
-    def _score_parse_confidence(self, event: MemoryEvent) -> float:
-        """评估解析置信度"""
+    def _score_freshness(self, event: MemoryEvent) -> float:
+        """评估事件新鲜度。"""
         raise NotImplementedError
 
     def should_enter_long_term(self, event: MemoryEvent) -> bool:
         """
         判断事件是否应进入长期记忆
 
-        规则: quality_score >= 0.6 才允许进入长期记忆
+        规则: 只有 quality.status == "accepted" 才进入下游记忆链路。
+        review 进入复核队列，rejected 仅保留审计记录。
         """
         raise NotImplementedError

@@ -10,22 +10,36 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ============================================================
 # 1. 枚举类型
 # ============================================================
 
-class EventType(str, Enum):
-    """事件类型"""
-    TOOL_CALL = "tool_call"               # 工具调用结果
-    USER_FEEDBACK = "user_feedback"       # 用户显式反馈
-    USER_BEHAVIOR = "user_behavior"       # 用户隐式行为
-    MANUAL_CONFIG = "manual_config"       # 手动配置
-    TASK_TRAJECTORY = "task_trajectory"   # 任务执行轨迹
+class SourceType(str, Enum):
+    """接入来源大类；来源内的具体动作由 event_type 描述。"""
+    TOOL_RESULT = "tool_result"
+    USER_BEHAVIOR = "user_behavior"
+    MANUAL_CONFIG = "manual_config"
+
+
+class QualityStatus(str, Enum):
+    """接入质量状态及其下游处理策略。"""
+    ACCEPTED = "accepted"
+    REVIEW = "review"
+    REJECTED = "rejected"
+
+
+class ToolCallStatus(str, Enum):
+    """单次工具调用的执行状态。"""
+    SUCCESS = "success"
+    ERROR = "error"
+    TIMEOUT = "timeout"
+    CANCELLED = "cancelled"
+    PARTIAL = "partial"
 
 
 class PreferenceType(str, Enum):
@@ -93,44 +107,126 @@ class Evidence(BaseModel):
     evidence_id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
     event_id: str = ""                # 关联的事件 ID
     content: str = ""                 # 证据内容摘要
-    source_type: EventType = EventType.TOOL_CALL
+    source_type: SourceType = SourceType.TOOL_RESULT
     timestamp: datetime = Field(default_factory=datetime.now)
     weight: float = 1.0               # 该证据的权重
 
 
 # ============================================================
-# 3. 事件模型（输入层）
+# 3. 事件模型（接入层输出）
 # ============================================================
+
+class ToolCallResult(BaseModel):
+    """一次工具调用及其结果；同一事件中的 sequence 表示调用顺序。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    call_id: str = Field(min_length=1)
+    tool_name: str = Field(min_length=1)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    result: Any = None
+    status: ToolCallStatus
+    sequence: int = Field(ge=1)
+    error: str = ""
+
+
+class EventQuality(BaseModel):
+    """清洗、标准化后随事件输出的质量评分明细。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    score: float = Field(ge=0.0, le=1.0)
+    status: QualityStatus
+    completeness: float = Field(ge=0.0, le=1.0)
+    validity: float = Field(ge=0.0, le=1.0)
+    consistency: float = Field(ge=0.0, le=1.0)
+    freshness: float = Field(ge=0.0, le=1.0)
+    issues: list[str] = Field(default_factory=list)
+
 
 class MemoryEvent(BaseModel):
     """
     统一事件模型 — 所有多源数据进入系统后的标准格式
 
-    数据流：原始数据 → Ingestion 清洗 → MemoryEvent → 存储/抽取
+    数据流：原始数据 → Ingestion 清洗/标准化/评分 → MemoryEvent → 存储/抽取
+
+    顶层放跨来源共享字段和强类型工具轨迹；其余来源特有字段放入 payload。
+    旧版 content/timestamp/source/quality_score 等字段不再属于本模型。
     """
-    event_id: str = Field(default_factory=lambda: str(uuid.uuid4())[:12])
-    user_id: str = "default"
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str = Field(min_length=1)
+    source_type: SourceType
+    event_type: str = Field(min_length=1)
+    user_id: str = ""
     session_id: str = ""
-    task_id: str = ""
-    event_type: EventType = EventType.TOOL_CALL
-    source: str = "os_agent"          # 数据来源标识
-
-    # --- 事件内容 ---
-    content: dict[str, Any] = Field(default_factory=dict)
-    # content 示例 (tool_call):
-    #   {"tool_name": "file_search", "input": "...", "output": "...", "status": "success"}
-    # content 示例 (user_feedback):
-    #   {"text": "以后都用 Markdown", "feedback_type": "explicit"}
-
-    # --- 上下文 ---
+    turn_id: str = ""  # 同一轮 Agent 调用链的关联 ID
     scene: str = ""
     task_type: str = ""
-    timestamp: datetime = Field(default_factory=datetime.now)
+    occurred_at: str = ""
+    text: str = ""  # 最终回答或摘要，不替代 tool_calls 中的原始结果
+    payload: dict[str, Any] = Field(default_factory=dict)
+    tool_calls: list[ToolCallResult] = Field(default_factory=list)
+    schema_version: Literal["1.0", "1.1"] = "1.1"
+    source_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    redactions: list[str] = Field(default_factory=list)
+    quality: EventQuality
 
-    # --- 质量与安全 ---
-    quality_score: float = 0.0        # [0, 1] 数据质量评分
-    sensitive_level: SensitiveLevel = SensitiveLevel.NONE
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    @field_validator("occurred_at")
+    @classmethod
+    def validate_occurred_at(cls, value: str) -> str:
+        """非空事件时间必须是秒精度的 UTC ISO 8601 字符串。"""
+        if not value:
+            return value
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+        except ValueError as exc:
+            raise ValueError("occurred_at must use YYYY-MM-DDTHH:MM:SSZ or be empty") from exc
+        if parsed.strftime("%Y-%m-%dT%H:%M:%SZ") != value:
+            raise ValueError("occurred_at must use YYYY-MM-DDTHH:MM:SSZ or be empty")
+        return value
+
+    @model_validator(mode="after")
+    def validate_accepted_event(self) -> "MemoryEvent":
+        """accepted 事件必须具备可进入记忆链路的身份、时间和 payload。"""
+        if self.quality.status is QualityStatus.ACCEPTED:
+            missing = []
+            if not self.user_id:
+                missing.append("user_id")
+            if not self.occurred_at:
+                missing.append("occurred_at")
+            if not self.payload and not self.tool_calls:
+                missing.append("payload or tool_calls")
+            if missing:
+                raise ValueError(
+                    "accepted event is missing required fields: " + ", ".join(missing)
+                )
+        if self.source_type is not SourceType.TOOL_RESULT and self.tool_calls:
+            raise ValueError("tool_calls are only valid for source_type=tool_result")
+        if (
+            self.schema_version == "1.1"
+            and self.source_type is SourceType.TOOL_RESULT
+            and not self.tool_calls
+        ):
+            raise ValueError("schema 1.1 tool_result event requires at least one tool call result")
+        if self.event_type == "agent_response":
+            if not self.turn_id:
+                raise ValueError("agent_response requires turn_id")
+            if not self.text:
+                raise ValueError("agent_response requires final answer in text")
+            if not self.tool_calls:
+                raise ValueError("agent_response requires at least one tool call result")
+        if self.tool_calls:
+            call_ids = [call.call_id for call in self.tool_calls]
+            sequences = [call.sequence for call in self.tool_calls]
+            if len(call_ids) != len(set(call_ids)):
+                raise ValueError("tool_calls.call_id values must be unique within an event")
+            if len(sequences) != len(set(sequences)):
+                raise ValueError("tool_calls.sequence values must be unique within an event")
+            if sequences != sorted(sequences):
+                raise ValueError("tool_calls must be ordered by ascending sequence")
+        return self
 
 
 # ============================================================

@@ -81,8 +81,12 @@ class EventRepository:
         """按 ID 查询事件"""
         raise NotImplementedError
 
-    def get_by_task(self, task_id: str) -> list:
-        """按任务 ID 查询事件列表"""
+    def get_by_session(self, session_id: str) -> list:
+        """按会话 ID 查询事件列表。"""
+        raise NotImplementedError
+
+    def get_by_task_type(self, user_id: str, task_type: str) -> list:
+        """按用户和规范化任务类型查询事件列表。"""
         raise NotImplementedError
 
     def get_recent(self, user_id: str, limit: int = 100) -> list:

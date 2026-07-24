@@ -4,7 +4,7 @@ OS Agent 模拟器 — 用于独立演示和测试
 模拟真实 OS Agent 的行为：接收用户任务、调用记忆模块、执行工具调用。
 """
 
-from memoryhub.adapter.schemas import MemoryEvent, SearchResponse
+from memoryhub.adapter.schemas import MemoryEvent, SearchResponse, ToolCallResult
 
 
 class AgentSimulator:
@@ -42,7 +42,7 @@ class AgentSimulator:
             {
                 "task_type": str,
                 "memory_context": SearchResponse,
-                "tool_calls": list[dict],
+                "tool_calls": list[ToolCallResult],
                 "output": str,
                 "events_generated": list[MemoryEvent]
             }
@@ -53,12 +53,14 @@ class AgentSimulator:
         """识别任务类型，返回 scene.task_type 标识"""
         raise NotImplementedError
 
-    def _simulate_tool_calls(self, task_type: str, memory_context: SearchResponse) -> list[dict]:
+    def _simulate_tool_calls(
+        self, task_type: str, memory_context: SearchResponse
+    ) -> list[ToolCallResult]:
         """根据任务类型和记忆上下文，模拟工具调用序列"""
         raise NotImplementedError
 
     def _generate_events(
-        self, task_type: str, tool_calls: list[dict], user_input: str
+        self, task_type: str, tool_calls: list[ToolCallResult], user_input: str
     ) -> list[MemoryEvent]:
         """将本次任务执行转化为 MemoryEvent 列表"""
         raise NotImplementedError

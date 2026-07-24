@@ -42,7 +42,7 @@ class Evidence(BaseModel):
     evidence_id: str        # 唯一 ID，格式: 8 位 UUID 片段
     event_id: str           # 关联的 MemoryEvent.event_id
     content: str            # 证据内容摘要（简洁描述）
-    source_type: EventType  # 来源事件类型
+    source_type: SourceType # 接入来源大类
     timestamp: datetime     # 证据产生时间
     weight: float = 1.0     # 该证据的权重 [0, 1]
 ```
@@ -51,40 +51,125 @@ class Evidence(BaseModel):
 
 ### 1.3 MemoryEvent — 统一事件模型
 
-**所有多源数据进入系统后的标准格式。** 这是整个系统的输入层核心数据结构。
+**所有多源数据完成清洗、标准化和质量评分后的唯一标准格式。** 这是接入模块与存储、偏好抽取、知识沉淀、冲突检测等下游模块之间的共享契约。
 
 ```python
 class MemoryEvent(BaseModel):
-    event_id: str           # 唯一 ID，格式: "ev_" + 12 位 UUID 片段
-    user_id: str            # 用户 ID，默认 "default"
-    session_id: str         # 会话 ID
-    task_id: str            # 任务 ID（同一任务的事件共享 task_id）
-    event_type: EventType   # 事件类型（见枚举）
-    source: str             # 数据来源标识: "os_agent" | "manual" | "import"
+    event_id: str                 # 事件唯一 ID
+    source_type: SourceType       # tool_result | user_behavior | manual_config
+    event_type: str               # 来源内的具体动作，如 tool_result、user_action
+    user_id: str                  # 用户 ID；无法识别时为空并降低质量分
+    session_id: str               # 会话或任务链 ID，可为空
+    turn_id: str                  # 同一轮 Agent 调用链的关联 ID，可为空
+    scene: str                    # 场景，如 office、coding
+    task_type: str                # 任务类型，如 weekly_report
+    occurred_at: str              # UTC 时间，格式 YYYY-MM-DDTHH:MM:SSZ
+    text: str                     # 供偏好/知识抽取使用的摘要文本
+    payload: dict                 # 来源特有结构化内容
+    tool_calls: list[ToolCallResult] # 工具调用明细，按 sequence 排序
+    schema_version: Literal["1.0", "1.1"] # 新事件默认 1.1
+    source_hash: str              # 清洗后原始事件的 64 位 SHA-256
+    redactions: list[str]         # 脱敏类型，如 api_key、token、email、phone
+    quality: EventQuality         # 总分、分项分数、状态和问题列表
 
-    # --- 事件内容 ---
-    content: dict           # 事件内容（结构随 event_type 变化，见下方说明）
+class EventQuality(BaseModel):
+    score: float                  # 综合质量分 [0, 1]
+    status: QualityStatus         # accepted | review | rejected
+    completeness: float           # 完整性 [0, 1]
+    validity: float               # 合法性 [0, 1]
+    consistency: float            # 来源与 tool_calls/payload 一致性 [0, 1]
+    freshness: float              # 新鲜度 [0, 1]
+    issues: list[str]             # 可审计问题代码
 
-    # --- 上下文 ---
-    scene: str              # 场景
-    task_type: str          # 任务类型
-    timestamp: datetime     # 事件时间戳
-
-    # --- 质量与安全 ---
-    quality_score: float    # 数据质量评分 [0, 1]，由 QualityScorer 计算
-    sensitive_level: SensitiveLevel  # 敏感等级
-    metadata: dict          # 扩展元数据
+class ToolCallResult(BaseModel):
+    call_id: str                  # 单次调用唯一 ID
+    tool_name: str                # 工具名，必须保留
+    arguments: dict               # 本次调用参数
+    result: Any                   # 本次调用的原始结构化结果或文本
+    status: ToolCallStatus         # success | error | timeout | cancelled | partial
+    sequence: int                 # 同一轮调用顺序，从 1 开始
+    error: str                    # 失败原因；成功时为空
 ```
 
-#### content 字段结构（按 event_type 区分）
+`MemoryEvent` 顶层禁止未声明字段。工具轨迹使用强类型 `tool_calls`，其他来源特有扩展只能进入 `payload`。`text` 只表示最终回答或摘要，不能用它替代工具结果。只要 `event_type=agent_response`，就必须提供非空 `turn_id`、`text` 和至少一个 `tool_calls` 项；每个工具调用的工具名、参数、结果、状态和顺序都必须保留。
 
-| event_type | content 结构 |
+如果系统采用流式写入，可以把每次调用拆成一条 `tool_result` 事件，并使用同一个 `session_id + turn_id` 关联；如果系统在 Agent 回复完成后一次性写入，则把这一轮的所有调用放在同一个 `agent_response` 事件的 `tool_calls` 列表中。
+
+版本兼容规则：`1.0` 仅用于读取历史事件，允许旧工具结果继续保存在 `payload`；新接入输出必须使用 `1.1`，并且所有 `source_type=tool_result` 事件至少包含一个 `tool_calls` 项。
+
+`call_id` 在一条事件内必须唯一；上游没有调用 ID 时，由接入适配器确定性生成。相同工具可以被重复调用，但每次调用必须分别占一个列表项，并拥有独立的 `call_id`、`arguments`、`result` 和 `sequence`。列表必须按 `sequence` 升序排列，不能只保存最后一次调用结果。
+
+#### payload 字段结构（按 source_type 区分）
+
+| source_type | event_type 示例 | payload 典型结构 |
+|---|---|---|
+| `tool_result` | `tool_result`、`task_trajectory`、`agent_response` | `tool_calls[]` 保存 `tool_name`、`arguments`、`result`、`status`；`payload` 只放聚合元数据 |
+| `user_behavior` | `user_action`、`user_feedback` | `{"action": str, "target": str, "value": Any}` |
+| `manual_config` | `manual_config` | `{"key": str, "value": Any}` |
+
+#### 多工具调用示例
+
+下面表示同一轮 Agent 先搜索文件、再读取日历，最后基于两个工具结果生成回答。下游不需要从最终回答中反向猜测工具结果。
+
+```json
+{
+  "event_id": "evt_agent_response_001",
+  "source_type": "tool_result",
+  "event_type": "agent_response",
+  "user_id": "u001",
+  "session_id": "session_001",
+  "turn_id": "turn_007",
+  "occurred_at": "2026-07-22T10:30:00Z",
+  "text": "已根据项目文件和本周日程生成周报。",
+  "payload": {"response_status": "success"},
+  "tool_calls": [
+    {
+      "call_id": "call_001",
+      "tool_name": "file_search",
+      "arguments": {"query": "项目周报"},
+      "result": {"files": ["weekly-report.docx"]},
+      "status": "success",
+      "sequence": 1,
+      "error": ""
+    },
+    {
+      "call_id": "call_002",
+      "tool_name": "calendar_read",
+      "arguments": {"range": "2026-07-20/2026-07-26"},
+      "result": {"events": [{"title": "周会"}]},
+      "status": "success",
+      "sequence": 2,
+      "error": ""
+    }
+  ],
+  "schema_version": "1.1",
+  "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "redactions": [],
+  "quality": {
+    "score": 1.0,
+    "status": "accepted",
+    "completeness": 1.0,
+    "validity": 1.0,
+    "consistency": 1.0,
+    "freshness": 1.0,
+    "issues": []
+  }
+}
+```
+
+#### 从旧版字段迁移
+
+旧格式不再是模块间契约。接入适配器可以读取旧字段，但必须在交给下游之前完成以下转换；`MemoryEvent` 不会静默接受旧字段。
+
+| 旧字段 | 规范字段/处理方式 |
 |---|---|
-| `tool_call` | `{"tool_name": str, "input": str, "output": str, "status": "success"\|"error"}` |
-| `user_feedback` | `{"text": str, "feedback_type": "explicit"\|"implicit"}` |
-| `user_behavior` | `{"action": str, "target": str, "repeated_count": int}` |
-| `manual_config` | `{"key": str, "value": str}` |
-| `task_trajectory` | `{"task_name": str, "steps": list[str], "tools": list[str], "result": str}` |
+| `source` | 归一为 `source_type`，不能直接传 `os_agent` 等应用名 |
+| `content` | 来源结构化内容放入 `payload`；可抽取文本放入 `text` |
+| `timestamp` | 转为 UTC 秒精度字符串 `occurred_at` |
+| `quality_score` | 转为包含分项、状态和问题的 `quality` 对象 |
+| `task_id` | 会话链标识放入 `session_id`，任务分类放入 `task_type` |
+| `content.tool_name/output` | 转为 `tool_calls[].tool_name/result`，并补充 `call_id`、`sequence`、`status` |
+| `sensitive_level` / `metadata` | 脱敏结果放入 `redactions` 和 `quality.issues`；来源扩展放入 `payload` |
 
 ---
 
@@ -210,15 +295,42 @@ class ForgetRecord(BaseModel):
 
 ## 2. 枚举类型定义
 
-### EventType — 事件类型
+### SourceType — 接入来源大类
 
-| 值 | 含义 | 典型 content |
+| 值 | 含义 | payload 一致性要求 |
 |---|---|---|
-| `tool_call` | 工具调用结果 | `{tool_name, input, output, status}` |
-| `user_feedback` | 用户显式反馈 | `{text, feedback_type}` |
-| `user_behavior` | 用户隐式行为 | `{action, target, repeated_count}` |
-| `manual_config` | 手动配置 | `{key, value}` |
-| `task_trajectory` | 任务执行轨迹 | `{task_name, steps, tools, result}` |
+| `tool_result` | 工具或 Agent 执行结果 | 新事件应包含 `tool_calls`，每项必须有 `tool_name` 和独立结果 |
+| `user_behavior` | 用户操作、消息或显式反馈 | 应包含 `action`、`target` 或 `value` 之一 |
+| `manual_config` | 用户或管理员手动配置 | 应包含配置键或值 |
+
+`event_type` 是开放字符串，不再使用封闭枚举。它描述来源内的具体事件，例如 `tool_result`、`user_action`、`user_feedback`、`task_trajectory`；`source_type` 才是接入路由和质量一致性校验使用的稳定枚举。
+
+### ToolCallStatus — 工具调用状态
+
+| 值 | 含义 |
+|---|---|
+| `success` | 工具正常返回完整结果 |
+| `error` | 工具执行失败，错误信息写入 `error` |
+| `timeout` | 工具调用超时 |
+| `cancelled` | 工具调用被取消 |
+| `partial` | 只获得部分结果 |
+
+### QualityStatus — 接入质量状态
+
+| 值 | 处理策略 |
+|---|---|
+| `accepted` | `score >= 0.80` 且无硬门槛问题，可进入存储与记忆抽取链路 |
+| `review` | `0.60 <= score < 0.80`，或存在缺字段、非法来源/时间等问题，进入复核队列 |
+| `rejected` | `score < 0.60`，或同时缺少用户标识且时间非法，仅保留审计记录 |
+
+质量分统一按以下公式计算，不再使用旧版 `source_reliability`、`execution_success` 等因子：
+
+```text
+score = 0.40 * completeness
+      + 0.30 * validity
+      + 0.20 * consistency
+      + 0.10 * freshness
+```
 
 ### PreferenceType — 偏好类型
 
@@ -298,15 +410,15 @@ class ForgetRecord(BaseModel):
 
 | 方法 | 签名 | 输入 | 输出 | 说明 |
 |---|---|---|---|---|
-| `normalize` | `(raw_data: dict, source: str) -> MemoryEvent` | 清洗后数据、来源标识 | 标准化 MemoryEvent | 核心标准化方法 |
-| `batch_normalize` | `(raw_data_list: list[dict], source: str) -> list[MemoryEvent]` | 批量数据 | 批量事件 | 批量标准化 |
+| `normalize` | `(raw_data: dict, source_type: str = "") -> MemoryEvent` | 清洗后数据、来源类型 | 标准化 MemoryEvent | 核心标准化方法 |
+| `batch_normalize` | `(raw_data_list: list[dict], source_type: str = "") -> list[MemoryEvent]` | 批量数据 | 批量事件 | 批量标准化 |
 
 #### QualityScorer
 
 | 方法 | 签名 | 输入 | 输出 | 说明 |
 |---|---|---|---|---|
-| `score` | `(event: MemoryEvent) -> float` | 标准化事件 | 质量评分 [0, 1] | 更新 event.quality_score |
-| `should_enter_long_term` | `(event: MemoryEvent) -> bool` | 事件 | 是否进入长期记忆 | quality_score >= 0.6 |
+| `score` | `(event: MemoryEvent) -> EventQuality` | 标准化事件 | 质量明细 | 按四项分数生成 `event.quality` |
+| `should_enter_long_term` | `(event: MemoryEvent) -> bool` | 事件 | 是否进入下游记忆链路 | `quality.status == accepted` |
 
 ---
 
@@ -587,24 +699,22 @@ OS Agent 工具调用完成
          │
          ▼
 ┌─────────────────┐
-│ QualityScorer   │   MemoryEvent → score → 更新 quality_score
+│ QualityScorer   │   MemoryEvent → score → 生成 quality
 └────────┬────────┘
          │
-         ├── quality_score < 0.6 ──→ 仅进入短期记忆
+         ├── quality.status == review ──→ 进入复核队列，不直接抽取
          │
          ▼
 ┌─────────────────┐
-│SensitiveDetector│   MemoryEvent → detect → mask
+│ RedactionAudit  │   检查 redactions / quality.issues
 └────────┬────────┘
-         │
-         ├── sensitive_level == HIGH ──→ 拒绝入库
-         │
+         │ accepted
          ▼
 ┌─────────────────┐
 │ EventRepository │   MemoryEvent → 存入 SQLite events 表
 └────────┬────────┘
          │
-         ├── event_type == user_feedback / user_behavior
+          ├── source_type == user_behavior
          │         │
          │         ▼
          │  ┌──────────────────────┐
@@ -760,13 +870,16 @@ OS Agent 发起检索请求
 ### 4.4 生命周期流转
 
 ```
-┌─────────┐    质量评分 < 0.6     ┌─────────┐
+┌─────────┐    status=accepted     ┌─────────┐
 │  事件    │ ──────────────────→  │ 短期记忆 │
 │(写入时)  │                      │ (SHORT)  │
 └─────────┘                      └────┬────┘
+       │
+       ├── status=review → 复核队列
+       └── status=rejected → 审计记录
                                       │
                               出现次数 ≥ 2
-                              quality_score ≥ 0.4
+                              quality.score ≥ 0.4
                                       │
                                       ▼
                                 ┌─────────┐
@@ -810,21 +923,48 @@ POST /api/memory/events
             "event_id": "ev_abc123def456",
             "user_id": "u001",
             "session_id": "sess_001",
-            "task_id": "task_001",
-            "event_type": "tool_call",
-            "source": "os_agent",
-            "content": {
-                "tool_name": "file_search",
-                "input": "查找项目周报相关文件",
-                "output": "找到 3 个项目文档",
-                "status": "success"
+            "turn_id": "turn_007",
+            "source_type": "tool_result",
+            "event_type": "agent_response",
+            "payload": {
+                "response_status": "success"
             },
+            "tool_calls": [
+                {
+                    "call_id": "call_001",
+                    "tool_name": "file_search",
+                    "arguments": {"query": "项目周报"},
+                    "result": {"files": ["weekly-report.docx"]},
+                    "status": "success",
+                    "sequence": 1,
+                    "error": ""
+                },
+                {
+                    "call_id": "call_002",
+                    "tool_name": "calendar_read",
+                    "arguments": {"range": "this_week"},
+                    "result": {"events": [{"title": "周会"}]},
+                    "status": "success",
+                    "sequence": 2,
+                    "error": ""
+                }
+            ],
             "scene": "office",
             "task_type": "office.weekly_report",
-            "timestamp": "2026-07-15T10:30:00",
-            "quality_score": 0.0,
-            "sensitive_level": "none",
-            "metadata": {}
+            "occurred_at": "2026-07-15T10:30:00Z",
+            "text": "已根据项目文件和本周日程生成周报。",
+            "schema_version": "1.1",
+            "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "redactions": [],
+            "quality": {
+                "score": 1.0,
+                "status": "accepted",
+                "completeness": 1.0,
+                "validity": 1.0,
+                "consistency": 1.0,
+                "freshness": 1.0,
+                "issues": []
+            }
         }
     ]
 }
@@ -925,18 +1065,23 @@ POST /api/memory/forget
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | event_id | VARCHAR(32) PK | 事件 ID |
+| source_type | VARCHAR(32) INDEX | 接入来源大类 |
+| event_type | VARCHAR(64) INDEX | 来源内具体事件类型 |
 | user_id | VARCHAR(64) INDEX | 用户 ID |
 | session_id | VARCHAR(64) | 会话 ID |
-| task_id | VARCHAR(64) INDEX | 任务 ID |
-| event_type | VARCHAR(32) | 事件类型 |
-| source | VARCHAR(64) | 数据来源 |
-| content | JSON | 事件内容 |
+| turn_id | VARCHAR(64) INDEX | 同一轮 Agent 调用链 ID |
 | scene | VARCHAR(64) INDEX | 场景 |
 | task_type | VARCHAR(128) INDEX | 任务类型 |
-| timestamp | DATETIME | 时间戳 |
-| quality_score | FLOAT | 质量评分 |
-| sensitive_level | VARCHAR(16) | 敏感等级 |
-| metadata | JSON | 扩展元数据 |
+| occurred_at | DATETIME | 规范化后的 UTC 事件时间 |
+| text | TEXT | 抽取摘要文本 |
+| payload | JSON | 来源特有结构化内容 |
+| tool_calls | JSON | 按 `sequence` 排序的 `ToolCallResult` 列表 |
+| schema_version | VARCHAR(16) | canonical schema 版本 |
+| source_hash | VARCHAR(64) INDEX | 清洗后事件哈希，用于审计和去重 |
+| redactions | JSON | 脱敏类型列表 |
+| quality | JSON | `EventQuality` 完整对象 |
+
+旧版 `task_id/source/content/timestamp/quality_score/sensitive_level/metadata` 列不再用于新事件。已有数据库升级时必须执行显式迁移，不能把旧列和新列并列当作两个可选契约。
 
 #### preferences 表
 
