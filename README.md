@@ -66,9 +66,27 @@ uvicorn memoryhub.app:app --reload
 
 ## 开发规范
 
-1. **数据结构**: 所有模型定义在 `memoryhub/adapter/schemas.py`
+1. **数据结构**: 运行时记忆/安全契约在 `memoryhub/adapter/schemas.py`；
+   声明式规则与溯源模型在 `memoryhub/safety_rules/models.py`
 2. **接口规范**: 参见 `docs/INTERFACE.md`
-3. **实现约定**: 各模块接口已定义，具体功能 `raise NotImplementedError` 待实现
+3. **规则库**: 内置版本、完整性摘要和来源矩阵见
+   `memoryhub/safety_rules/data/` 与 `docs/SAFETY_RULE_LIBRARY.md`
+4. **安全边界**: 规则加载/校验、递归扫描、策略决策、全值脱敏、同快照复检、
+   实例内结果认证、最小化 JSONL 审计链、REVIEW 加密隔离和强制写入 Gate 已实现。
+   普通 SQLite/向量/证据算法仍是脚手架；实现时只能注册为 Gate 的受保护 sink，
+   不得接收原始事件或裸文本
+
+## 安全写入链
+
+生产写入从 `SafetyWriteGate` 进入：先完成 `process → validate_result`，再成功追加
+脱敏审计记录，最后按动作路由。`ALLOW/MASK` 只向 SQLite、Embedding、向量、
+证据链等内容 sink 签发绑定审计记录的 `ApprovedWrite`，普通日志只接收最小化
+`SafeLogRecord`；`REVIEW` 原事件只以 AES-256-GCM 密文进入独立隔离区；`REJECT`
+不保留原文。审计或隔离失败时不会调用任何普通下游。
+
+安全配置与密钥要求见 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)，数据契约、
+轮转/保留和平台权限边界见 [`docs/INTERFACE.md`](docs/INTERFACE.md)，完整验收矩阵
+见 [`docs/SAFETY_ACCEPTANCE.md`](docs/SAFETY_ACCEPTANCE.md)。
 
 ## 技术栈
 

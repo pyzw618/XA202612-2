@@ -38,6 +38,14 @@ SO_CANDIDATES = [
 ]
 
 
+class KylinEmbeddingError(RuntimeError):
+    """不携带输入文本或后端错误消息的稳定 Embedding 错误。"""
+
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
+
+
 class KylinEmbeddingClient(BaseEmbeddingClient):
     """
     麒麟 Embedding 客户端（ctypes → .so → DBus）。
@@ -70,12 +78,12 @@ class KylinEmbeddingClient(BaseEmbeddingClient):
 
     def embed(self, text: str) -> List[float]:
         if not self.is_available():
-            raise RuntimeError("KylinEmbeddingClient 不可用，请检查 .so 和环境")
+            raise KylinEmbeddingError("embedding.unavailable")
         return self._call_embed(text)
 
     def embed_batch(self, texts: List[str]) -> List[List[float]]:
         if not self.is_available():
-            raise RuntimeError("KylinEmbeddingClient 不可用，请检查 .so 和环境")
+            raise KylinEmbeddingError("embedding.unavailable")
         return [self._call_embed(t) for t in texts]
 
     # ---- 内部：.so 加载与会话初始化 ----
@@ -143,59 +151,98 @@ class KylinEmbeddingClient(BaseEmbeddingClient):
 
     def _call_embed(self, text: str) -> List[float]:
         """调用同步 Embedding API，返回 768 维向量。"""
+        lib = self._lib
+        session = self._session
+        if lib is None or session is None:
+            raise KylinEmbeddingError("embedding.unavailable")
+
         # 1. text_embedding(session, text, &result) → bool
-        embed_fn = self._lib.text_embedding
-        embed_fn.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p)]
-        embed_fn.restype = ctypes.c_bool
+        symbol_error = False
+        try:
+            embed_fn = lib.text_embedding
+            embed_fn.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_char_p,
+                ctypes.POINTER(ctypes.c_void_p),
+            ]
+            embed_fn.restype = ctypes.c_bool
+        except Exception:
+            symbol_error = True
+        if symbol_error:
+            raise KylinEmbeddingError("embedding.backend_error") from None
 
         result = ctypes.c_void_p()
-        ok = embed_fn(self._session, text.encode("utf-8"), ctypes.byref(result))
+        encoding_error = False
+        try:
+            encoded_text = text.encode("utf-8")
+        except UnicodeError:
+            encoding_error = True
+            encoded_text = b""
+        if encoding_error:
+            raise KylinEmbeddingError("embedding.invalid_text") from None
+        call_error = False
+        try:
+            ok = embed_fn(session, encoded_text, ctypes.byref(result))
+        except Exception:
+            call_error = True
+            ok = False
+        if call_error:
+            raise KylinEmbeddingError("embedding.call_failed") from None
         if not ok or result.value is None:
-            raise RuntimeError(f"text_embedding 调用失败: text={text[:50]}...")
+            raise KylinEmbeddingError("embedding.call_failed")
 
+        vector: List[float] | None = None
+        backend_error = False
         try:
             # 2. 检查错误码: int embedding_result_get_error_code(result)
-            err_fn = self._lib.embedding_result_get_error_code
+            err_fn = lib.embedding_result_get_error_code
             err_fn.argtypes = [ctypes.c_void_p]
             err_fn.restype = ctypes.c_int
 
             error_code = err_fn(result)
             if error_code != 0:
-                msg_fn = self._lib.embedding_result_get_error_message
-                msg_fn.argtypes = [ctypes.c_void_p]
-                msg_fn.restype = ctypes.c_char_p
-                err_msg = msg_fn(result).decode("utf-8") if msg_fn(result) else "unknown"
-                raise RuntimeError(f"Embedding 返回错误: code={error_code}, msg={err_msg}")
+                raise KylinEmbeddingError("embedding.sdk_error")
 
             # 3. 取向量长度: int embedding_result_get_vector_length(result)
-            len_fn = self._lib.embedding_result_get_vector_length
+            len_fn = lib.embedding_result_get_vector_length
             len_fn.argtypes = [ctypes.c_void_p]
             len_fn.restype = ctypes.c_int
 
             vec_len = len_fn(result)
             if vec_len != self._dim:
-                raise RuntimeError(f"向量维度不匹配: 期望 {self._dim}，实际 {vec_len}")
+                raise KylinEmbeddingError("embedding.dimension_mismatch")
 
             # 4. 取向量数据: float* embedding_result_get_vector_data(result)
-            data_fn = self._lib.embedding_result_get_vector_data
+            data_fn = lib.embedding_result_get_vector_data
             data_fn.argtypes = [ctypes.c_void_p]
             data_fn.restype = ctypes.POINTER(ctypes.c_float)
 
             vec_ptr = data_fn(result)
             vector = [vec_ptr[i] for i in range(vec_len)]
 
-            return vector
-
+        except KylinEmbeddingError:
+            raise
+        except Exception:
+            backend_error = True
         finally:
             # 5. 清理结果: void embedding_result_destroy(void** result)
-            destroy_fn = self._lib.embedding_result_destroy
-            destroy_fn.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
-            destroy_fn.restype = None
-            destroy_fn(ctypes.byref(result))
+            try:
+                destroy_fn = lib.embedding_result_destroy
+                destroy_fn.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
+                destroy_fn.restype = None
+                destroy_fn(ctypes.byref(result))
+            except Exception:
+                pass
+        if backend_error or vector is None:
+            raise KylinEmbeddingError("embedding.backend_error") from None
+        return vector
 
     def __del__(self):
         """销毁会话。"""
-        if getattr(self, "_lib", None) is not None and getattr(self, "_session", None) is not None:
+        if (
+            getattr(self, "_lib", None) is not None
+            and getattr(self, "_session", None) is not None
+        ):
             try:
                 destroy_fn = self._lib.text_embedding_destroy_session
                 destroy_fn.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
