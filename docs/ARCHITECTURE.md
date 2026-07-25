@@ -123,6 +123,11 @@ graph TB
 
 ## 2. 写入数据流（事件 → 记忆）
 
+> 当前 v0.1.0 已完成 Safety 数据/方法契约、版本化规则库、递归扫描、策略执行、
+> 事件脱敏、同快照复检、最小化持久审计、REVIEW 加密隔离和强制写入 Gate。
+> 普通 SQLite/向量/证据实现仍是后续产品模块，但其内容写入口只能注册为 Gate
+> 的受保护 sink，不能再接收原始事件。
+
 ```mermaid
 flowchart TD
     A["OS Agent 工具调用完成<br/>/ 用户反馈 / 手动配置"] --> B["POST /api/memory/events<br/>WriteEventRequest"]
@@ -130,11 +135,29 @@ flowchart TD
     B --> C["DataCleaner.clean()<br/>字段校验 · 去重 · 格式化"]
     C --> D["DataNormalizer.normalize()<br/>统一转化为 MemoryEvent"]
     D --> E["QualityScorer.score()<br/>计算 quality_score [0,1]"]
-    E --> F["SensitiveDetector.detect()<br/>检测敏感信息等级"]
+    E --> F["SensitiveDetector.scan()<br/>扫描正文、工具内容与持久化字符串元数据<br/>生成带实例内完整性标签的 SafetyReport"]
+    F --> G["SensitiveDetector.decide()<br/>验证报告/策略快照 · 聚合规则动作"]
 
-    F -->|HIGH 敏感| G["❌ 拒绝入库<br/>返回 rejected"]
-    F -->|NONE/LOW/MEDIUM| H["SensitiveDetector.mask()<br/>脱敏处理"]
-    H --> I["EventRepository.save()<br/>存入 SQLite events 表"]
+    G -->|REJECT| Rj["❌ 拒绝入库"]
+    G -->|REVIEW| Rev["⏸ 隔离复核<br/>不进入存储/Embedding/普通日志"]
+    G -->|MASK| H["SensitiveDetector.sanitize()<br/>按报告精确脱敏"]
+    H --> V["同一规则快照复检"]
+    V -->|未通过| Rev
+    V -->|通过| Pass["递归只读安全事件"]
+    G -->|ALLOW| Pass
+
+    Rj --> Audit["build_audit(report, final_decision)<br/>内存安全投影"]
+    Rev --> Audit
+    Pass --> Audit
+    Audit --> Trust["validate_result(event, result)<br/>验证结果 HMAC · 重决策 · 重派生"]
+    Trust --> Journal["SafetyAuditLog.append()<br/>最小投影 · 自脱敏 · HMAC 哈希链"]
+    Journal --> Gate{"SafetyWriteGate<br/>审计回执有效？"}
+    Gate -->|ALLOW / MASK 已复检| Cap["签发 ApprovedWrite<br/>绑定审计记录与安全输出"]
+    Cap --> I["受保护内容 sinks<br/>SQLite · Embedding · 向量 · 证据"]
+    Gate -->|ALLOW / MASK 最小日志| SafeLog["SafeLogRecord<br/>不含事件正文或用户 ID"]
+    Gate -->|REVIEW| QStore["ReviewQuarantineStore<br/>AES-256-GCM 独立隔离"]
+    Gate -->|REJECT| Stop["停止普通写入链"]
+    QStore --> Stop
 
     I --> J{"event_type?"}
 

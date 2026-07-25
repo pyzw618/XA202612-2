@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "rule_set_id": "kylin-memoryhub.safety",
+  "default_version": "1.0",
+  "versions": [
+    {
+      "version": "1.0",
+      "resource": "builtin-1.0.json",
+      "snapshot_digest": "339ed6bf3a4aec59d9eca40af326f0b0ba734282552b8b8f2e3b60dcafe3b457"
+    }
+  ]
+}

@@ -4,11 +4,52 @@ FastAPI 应用入口
 组装所有模块，启动本地 Memory Service。
 """
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import re
 
-from memoryhub.config import AppConfig, load_config
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+from memoryhub.adapter import schemas as adapter_schemas
 from memoryhub.adapter.api import router as memory_router
+from memoryhub.config import AppConfig, load_config
+
+
+_SAFE_ERROR_TYPE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
+_SAFE_LOCATION_SEGMENTS = frozenset(
+    {"body", "query", "path", "header", "cookie"}
+    | {
+        field_name
+        for candidate in vars(adapter_schemas).values()
+        if isinstance(candidate, type) and issubclass(candidate, BaseModel)
+        for field_name in candidate.model_fields
+    }
+)
+
+
+def _safe_validation_errors(exc: RequestValidationError) -> list[dict[str, object]]:
+    """只投影由服务端 schema 控制的错误类型和位置。"""
+    projected: list[dict[str, object]] = []
+    for error in exc.errors():
+        error_type = error.get("type")
+        if (
+            not isinstance(error_type, str)
+            or _SAFE_ERROR_TYPE.fullmatch(error_type) is None
+        ):
+            error_type = "validation_error"
+
+        location: list[str | int] = []
+        for segment in error.get("loc", ()):
+            if type(segment) is int and segment >= 0:
+                location.append(segment)
+            elif isinstance(segment, str) and segment in _SAFE_LOCATION_SEGMENTS:
+                location.append(segment)
+            else:
+                location.append("<field>")
+        projected.append({"type": error_type, "loc": location})
+    return projected
 
 
 def create_app(config: AppConfig | None = None) -> FastAPI:
@@ -36,6 +77,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         description="面向麒麟 OS Agent 的可插拔本地记忆中枢",
         version="0.1.0",
     )
+
+    @app.exception_handler(RequestValidationError)
+    async def safe_request_validation_error(
+        _request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        """避免 FastAPI 的默认 422 响应回显待检测输入和验证上下文。"""
+        return JSONResponse(
+            status_code=422,
+            content={"detail": _safe_validation_errors(exc)},
+        )
 
     # CORS（开发时允许前端跨域）
     app.add_middleware(

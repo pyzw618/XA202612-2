@@ -123,7 +123,7 @@ class SceneScope(BaseModel):
 
 **入口**：`POST /api/memory/events`
 
-**完整数据流**：
+**目标数据流（Safety 边界与强制 Gate 已实现，普通存储/抽取算法仍待实现）**：
 
 ```
 原始数据
@@ -138,11 +138,12 @@ DataNormalizer.normalize() ← 统一转为 MemoryEvent
 QualityScorer.score()      ← 计算质量评分 [0, 1]
   │
   ▼
-SensitiveDetector.detect() ← 检测敏感信息
+SafetyWriteGate             ← process/复检 → 持久审计验链 → 强制动作路由
   │
-  ├── HIGH 敏感 → ❌ 拒绝入库
-  │
-  └── NONE/LOW/MEDIUM → mask() 脱敏 → 存入 SQLite
+  ├── REJECT → ❌ 拒绝入库
+  ├── REVIEW → AES-256-GCM 隔离复核，不进入普通存储/Embedding/日志
+  ├── MASK → 仅以 ApprovedWrite 向受保护 sink 传递复检后的脱敏事件
+  └── ALLOW → 仅以 ApprovedWrite 向受保护 sink 传递只读安全事件
         │
         ├── event_type = user_feedback / user_behavior
         │     → PreferenceExtractor.extract()
@@ -170,7 +171,7 @@ SensitiveDetector.detect() ← 检测敏感信息
 - `DataCleaner` (`core/ingestion/cleaner.py`) — 清洗器
 - `DataNormalizer` (`core/ingestion/normalizer.py`) — 标准化器，内含 `FIELD_MAPPINGS` 定义了各数据源的字段映射
 - `QualityScorer` (`core/ingestion/quality.py`) — 质量评分器，5 个因子加权：completeness(0.25) + source_reliability(0.25) + execution_success(0.20) + user_feedback_strength(0.20) + parse_confidence(0.10)
-- `SensitiveDetector` (`core/safety/detector.py`) — 敏感信息检测，用正则匹配 API Key、身份证、手机号、邮箱、IP
+- `SensitiveDetector` (`core/safety/detector.py`) — 结构化安全处理接口；等级表示风险，规则和策略决定动作
 
 ### 功能 2：偏好抽取（核心智能）
 
@@ -403,7 +404,7 @@ OS Agent → POST /events {user_feedback, text="以后周报都用 Markdown"}
   ▼
 DataCleaner.clean() → DataNormalizer.normalize() → MemoryEvent
 QualityScorer.score() → 0.85 (高质量：显式反馈 + 完整内容)
-SensitiveDetector.detect() → NONE (无敏感信息)
+SensitiveDetector.process() → ALLOW (无敏感信息)
   │
   ▼
 PreferenceExtractor.extract()
@@ -541,7 +542,7 @@ AppConfig
 ├── RetrievalConfig    # vector_weight=0.6, keyword_weight=0.3, metadata_weight=0.1
 ├── LLMConfig          # provider="openai"|"ollama", model="qwen2:1.5b"
 ├── EmbeddingConfig    # provider="kylin"|"mock", dimension=1024
-└── SafetyConfig       # sensitive_patterns (正则列表), auto_mask=True
+└── SafetyConfig       # 版本化规则集选择/兼容 SensitiveRule + SafetyPolicy
 ```
 
 ---

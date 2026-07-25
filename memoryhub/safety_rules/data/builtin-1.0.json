@@ -1,0 +1,892 @@
+{
+  "schema_version": "1.0",
+  "rule_set_id": "kylin-memoryhub.safety",
+  "version": "1.0",
+  "released_on": "2026-07-24",
+  "status_as_of": "2026-07-24",
+  "sources": [
+    {
+      "source_id": "gb-11643-1999",
+      "source_kind": "mandatory_gb",
+      "identifier": "GB 11643-1999",
+      "title": "公民身份号码",
+      "edition": "1999",
+      "issuer": "国家质量技术监督局",
+      "normative_force": "强制性国家标准",
+      "published_on": "1999-01-19",
+      "effective_on": "1999-07-01",
+      "status": "现行",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://std.samr.gov.cn/gb/search/gbDetailed?id=71F772D75D5FD3A7E05397BE0A0AB82A",
+      "supersession_candidate": "",
+      "caveat": "用于公民身份号码结构和校验；不定义个人信息分类、处置动作或其他证件格式。"
+    },
+    {
+      "source_id": "gbt-35273-2020",
+      "source_kind": "recommended_gbt",
+      "identifier": "GB/T 35273-2020",
+      "title": "信息安全技术 个人信息安全规范",
+      "edition": "2020",
+      "issuer": "国家市场监督管理总局、国家标准化管理委员会",
+      "normative_force": "推荐性国家标准",
+      "published_on": "2020-03-06",
+      "effective_on": "2020-10-01",
+      "status": "现行；2026-01-28 复审结论为修订",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://std.samr.gov.cn/gb/search/gbDetailed?id=A0280129495AEBB4E05397BE0A0AB6FE",
+      "supersession_candidate": "20260700-T-469",
+      "caveat": "锁定 2020 版，仅作个人信息分类和处理参考，不作为邮箱、电话、IP 或身份证正则来源。"
+    },
+    {
+      "source_id": "gbt-37964-2019",
+      "source_kind": "recommended_gbt",
+      "identifier": "GB/T 37964-2019",
+      "title": "信息安全技术 个人信息去标识化指南",
+      "edition": "2019",
+      "issuer": "国家市场监督管理总局、国家标准化管理委员会",
+      "normative_force": "推荐性国家标准",
+      "published_on": "2019-08-30",
+      "effective_on": "2020-03-01",
+      "status": "现行；2025-12-08 复审结论为继续有效",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://std.samr.gov.cn/gb/search/gbDetailed?id=91890A0DA4AB80C6E05397BE0A0A065D",
+      "supersession_candidate": "",
+      "caveat": "用于去标识化设计参考；掩码或 HMAC 指纹不当然等于匿名化。"
+    },
+    {
+      "source_id": "gbt-41817-2022",
+      "source_kind": "recommended_gbt",
+      "identifier": "GB/T 41817-2022",
+      "title": "信息安全技术 个人信息安全工程指南",
+      "edition": "2022",
+      "issuer": "国家市场监督管理总局、国家标准化管理委员会",
+      "normative_force": "推荐性国家标准",
+      "published_on": "2022-10-12",
+      "effective_on": "2023-05-01",
+      "status": "现行",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://std.samr.gov.cn/gb/search/gbDetailed?id=EB58F4DA9267B2A2E05397BE0A0A7D33",
+      "supersession_candidate": "",
+      "caveat": "用于安全工程和规则生命周期治理，不直接规定单条检测正则。"
+    },
+    {
+      "source_id": "gbt-42460-2023",
+      "source_kind": "recommended_gbt",
+      "identifier": "GB/T 42460-2023",
+      "title": "信息安全技术 个人信息去标识化效果评估指南",
+      "edition": "2023",
+      "issuer": "国家市场监督管理总局、国家标准化管理委员会",
+      "normative_force": "推荐性国家标准",
+      "published_on": "2023-03-17",
+      "effective_on": "2023-10-01",
+      "status": "现行",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://std.samr.gov.cn/gb/search/gbDetailed?id=F789206610ADB223E05397BE0A0AE533",
+      "supersession_candidate": "",
+      "caveat": "用于脱敏效果与重标识风险评估，不定义检测格式。"
+    },
+    {
+      "source_id": "gbt-45574-2025",
+      "source_kind": "recommended_gbt",
+      "identifier": "GB/T 45574-2025",
+      "title": "数据安全技术 敏感个人信息处理安全要求",
+      "edition": "2025",
+      "issuer": "国家市场监督管理总局、国家标准化管理委员会",
+      "normative_force": "推荐性国家标准",
+      "published_on": "2025-04-25",
+      "effective_on": "2025-11-01",
+      "status": "现行",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://std.samr.gov.cn/gb/search/gbDetailed?id=33D40F1161155D92E06397BE0A0A5B93",
+      "supersession_candidate": "",
+      "caveat": "用于敏感个人信息处理安全要求映射，不是检测格式规范。"
+    },
+    {
+      "source_id": "gbt-46903-2025",
+      "source_kind": "recommended_gbt",
+      "identifier": "GB/T 46903-2025",
+      "title": "数据安全技术 个人信息保护合规审计要求",
+      "edition": "2025",
+      "issuer": "国家市场监督管理总局、国家标准化管理委员会",
+      "normative_force": "推荐性国家标准",
+      "published_on": "2025-12-31",
+      "effective_on": "2026-07-01",
+      "status": "现行",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=EC64C138A5B6A52AA5DC5A60188FC07E&refer=outter",
+      "supersession_candidate": "",
+      "caveat": "用于审计流程、证据和报告映射；不声称其规定本项目的具体运行时字段。"
+    },
+    {
+      "source_id": "kmh-policy-1.0",
+      "source_kind": "project_policy",
+      "identifier": "KMH-SAFETY-POLICY-1.0",
+      "title": "Kylin-MemoryHub 端侧记忆安全策略",
+      "edition": "1.0",
+      "issuer": "Kylin-MemoryHub 项目",
+      "normative_force": "项目安全策略",
+      "published_on": "2026-07-24",
+      "effective_on": "2026-07-24",
+      "status": "生效",
+      "status_as_of": "2026-07-24",
+      "official_url": "urn:kylin-memoryhub:safety-policy:1.0",
+      "supersession_candidate": "",
+      "caveat": "默认动作、风险等级、候选正则和中国大陆手机号启发式均为项目决策，不冒充法律或国家标准要求。"
+    },
+    {
+      "source_id": "owasp-secrets",
+      "source_kind": "security_guidance",
+      "identifier": "OWASP Secrets Management Cheat Sheet",
+      "title": "Secrets Management Cheat Sheet",
+      "edition": "continuous",
+      "issuer": "OWASP Foundation",
+      "normative_force": "安全实践指南",
+      "published_on": null,
+      "effective_on": null,
+      "status": "在线维护",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html",
+      "supersession_candidate": "",
+      "caveat": "用于凭据威胁建模，不是国家标准，也不定义所有云厂商 Token 格式。"
+    },
+    {
+      "source_id": "pipl-2021-art28",
+      "source_kind": "law",
+      "identifier": "中华人民共和国个人信息保护法第二十八条",
+      "title": "中华人民共和国个人信息保护法",
+      "edition": "2021",
+      "issuer": "全国人民代表大会常务委员会",
+      "normative_force": "现行法律",
+      "published_on": "2021-08-20",
+      "effective_on": "2021-11-01",
+      "status": "现行",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://www.npc.gov.cn/npc/c2/c30834/202108/t20210820_313088.html",
+      "supersession_candidate": "",
+      "caveat": "第二十八条用于敏感个人信息定义和分类；类别为风险导向且非穷尽，不提供正则或处置动作。"
+    },
+    {
+      "source_id": "rfc-3986",
+      "source_kind": "ietf_rfc",
+      "identifier": "RFC 3986",
+      "title": "Uniform Resource Identifier (URI): Generic Syntax",
+      "edition": "2005",
+      "issuer": "IETF",
+      "normative_force": "互联网标准协议",
+      "published_on": "2005-01-01",
+      "effective_on": "2005-01-01",
+      "status": "现行",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://www.rfc-editor.org/rfc/rfc3986.html#section-3.2.2",
+      "supersession_candidate": "",
+      "caveat": "用于 IP literal 语法参考；运行时仍由 IP 解析器做范围校验。"
+    },
+    {
+      "source_id": "rfc-4291",
+      "source_kind": "ietf_rfc",
+      "identifier": "RFC 4291",
+      "title": "IP Version 6 Addressing Architecture",
+      "edition": "2006",
+      "issuer": "IETF",
+      "normative_force": "互联网标准协议",
+      "published_on": "2006-02-01",
+      "effective_on": "2006-02-01",
+      "status": "现行",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://www.rfc-editor.org/rfc/rfc4291.html#section-2.2",
+      "supersession_candidate": "",
+      "caveat": "用于 IPv6 文本表示参考；本规则版本仅启用 IPv4 候选正则。"
+    },
+    {
+      "source_id": "rfc-5322",
+      "source_kind": "ietf_rfc",
+      "identifier": "RFC 5322 section 3.4.1",
+      "title": "Internet Message Format",
+      "edition": "2008",
+      "issuer": "IETF",
+      "normative_force": "互联网标准协议",
+      "published_on": "2008-10-01",
+      "effective_on": "2008-10-01",
+      "status": "现行",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://www.rfc-editor.org/rfc/rfc5322.html#section-3.4.1",
+      "supersession_candidate": "",
+      "caveat": "本项目只检测常见 ASCII addr-spec 子集，不声称完整实现 quoted local-part 或国际化邮箱。"
+    },
+    {
+      "source_id": "rfc-6750",
+      "source_kind": "ietf_rfc",
+      "identifier": "RFC 6750 section 2.1",
+      "title": "The OAuth 2.0 Authorization Framework: Bearer Token Usage",
+      "edition": "2012",
+      "issuer": "IETF",
+      "normative_force": "互联网标准协议",
+      "published_on": "2012-10-01",
+      "effective_on": "2012-10-01",
+      "status": "现行",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://www.rfc-editor.org/rfc/rfc6750.html#section-2.1",
+      "supersession_candidate": "",
+      "caveat": "用于 Authorization Bearer 上下文和候选语法；风险动作由项目策略决定。"
+    },
+    {
+      "source_id": "rfc-7468",
+      "source_kind": "ietf_rfc",
+      "identifier": "RFC 7468 sections 10-11",
+      "title": "Textual Encodings of PKIX, PKCS, and CMS Structures",
+      "edition": "2015",
+      "issuer": "IETF",
+      "normative_force": "互联网标准协议",
+      "published_on": "2015-04-01",
+      "effective_on": "2015-04-01",
+      "status": "现行",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://www.rfc-editor.org/rfc/rfc7468.html#section-10",
+      "supersession_candidate": "",
+      "caveat": "用于 PEM 私钥封装边界；本规则不尝试证明私钥材料的密码学有效性。"
+    },
+    {
+      "source_id": "rfc-7519",
+      "source_kind": "ietf_rfc",
+      "identifier": "RFC 7519 section 3",
+      "title": "JSON Web Token (JWT)",
+      "edition": "2015",
+      "issuer": "IETF",
+      "normative_force": "互联网标准协议",
+      "published_on": "2015-05-01",
+      "effective_on": "2015-05-01",
+      "status": "现行",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://www.rfc-editor.org/rfc/rfc7519.html#section-3",
+      "supersession_candidate": "",
+      "caveat": "JWT 不必然是秘密；端侧记忆默认按可能承载 bearer 凭据的项目威胁模型处理。"
+    },
+    {
+      "source_id": "tc260-pg-20244a",
+      "source_kind": "tc260_guide",
+      "identifier": "TC260-PG-20244A",
+      "title": "网络安全标准实践指南——敏感个人信息识别指南",
+      "edition": "2024",
+      "issuer": "全国网络安全标准化技术委员会秘书处",
+      "normative_force": "实践指南，非国家标准",
+      "published_on": "2024-09-18",
+      "effective_on": null,
+      "status": "已发布",
+      "status_as_of": "2026-07-24",
+      "official_url": "https://www.tc260.org.cn/portal/article/2/20240918084858",
+      "supersession_candidate": "",
+      "caveat": "用于分类词表和聚合风险识别，不标注为国标符合性，也不直接生成正则。"
+    }
+  ],
+  "governance_ref": [
+    {
+      "source_id": "gbt-41817-2022",
+      "role": "lifecycle",
+      "locator": "个人信息安全工程生命周期",
+      "derivation_note": "用于规则需求、设计、测试、发布、变更和退役治理。",
+      "caveat": "该标准不直接生成任何单条检测正则或默认动作。"
+    },
+    {
+      "source_id": "gbt-42460-2023",
+      "role": "effectiveness",
+      "locator": "去标识化效果评估",
+      "derivation_note": "用于后续脱敏复检和重标识风险评测设计。",
+      "caveat": "本步骤只构建规则库，尚未实现端到端复检与效果评估。"
+    },
+    {
+      "source_id": "gbt-46903-2025",
+      "role": "audit",
+      "locator": "个人信息保护合规审计流程、证据和报告",
+      "derivation_note": "用于后续规则快照、证据和审计报告的映射设计。",
+      "caveat": "不声称该标准规定本项目的具体运行时字段，也不覆盖全部非个人信息凭据。"
+    }
+  ],
+  "rules": [
+    {
+      "rule_id": "credential_field",
+      "category": "credential",
+      "risk_level": "high",
+      "default_action": "reject",
+      "pattern": "(?s)\\A(?!\\[REDACTED(?:_[A-Z0-9_]+)?\\]\\Z).+\\Z",
+      "validator": "builtin.non_placeholder@1.0",
+      "masker": "builtin.full_redact@1.0",
+      "target_paths": [
+        "/**/access_token",
+        "/**/accessKey",
+        "/**/accessToken",
+        "/**/api-key",
+        "/**/apiKey",
+        "/**/api_key",
+        "/**/authorization",
+        "/**/clientSecret",
+        "/**/client_secret",
+        "/**/passwd",
+        "/**/password",
+        "/**/refreshToken",
+        "/**/refresh_token",
+        "/**/secret",
+        "/**/secretAccessKey",
+        "/**/secretKey",
+        "/**/secret_key",
+        "/**/token"
+      ],
+      "target_path_case_sensitive": false,
+      "priority": 1000,
+      "standard_ref": [
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "risk_policy",
+          "locator": "credential fields",
+          "derivation_note": "端侧长期记忆不保存结构化凭据字段的原值。",
+          "caveat": "字段名列表是项目策略，需随接入源和厂商格式版本更新。"
+        },
+        {
+          "source_id": "owasp-secrets",
+          "role": "threat_model",
+          "locator": "secret identification and lifecycle",
+          "derivation_note": "凭据材料独立于个人信息分类建模。",
+          "caveat": "OWASP 是安全指南，不是国标或厂商格式合同。"
+        }
+      ],
+      "rule_version": "1.0",
+      "enabled": true,
+      "reason_code": "secret.credential_field",
+      "reason": "结构化凭据字段的值不得进入端侧长期记忆。",
+      "replacement": "[REDACTED_CREDENTIAL]",
+      "match_group": 0
+    },
+    {
+      "rule_id": "credential.private_key",
+      "category": "credential",
+      "risk_level": "high",
+      "default_action": "reject",
+      "pattern": "(?s)(?P<value>-----BEGIN (?:RSA |EC |ENCRYPTED )?PRIVATE KEY-----.*?-----END (?:RSA |EC |ENCRYPTED )?PRIVATE KEY-----)",
+      "validator": "builtin.pem_private_key@1.0",
+      "masker": "builtin.full_redact@1.0",
+      "target_paths": ["/**"],
+      "priority": 980,
+      "standard_ref": [
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "risk_policy",
+          "locator": "private key handling",
+          "derivation_note": "检测到私钥封装时默认拒绝写入。",
+          "caveat": "拒绝动作是项目策略，不是 RFC 7468 的规范要求。"
+        },
+        {
+          "source_id": "rfc-7468",
+          "role": "syntax",
+          "locator": "sections 10-11",
+          "derivation_note": "PEM 文本边界用于产生私钥候选。",
+          "caveat": "候选检测不验证密钥材料的密码学正确性。"
+        }
+      ],
+      "rule_version": "1.0",
+      "enabled": true,
+      "reason_code": "secret.private_key",
+      "reason": "私钥材料不得进入端侧长期记忆。",
+      "replacement": "[REDACTED_PRIVATE_KEY]",
+      "match_group": "value"
+    },
+    {
+      "rule_id": "credential.bearer_token",
+      "category": "credential",
+      "risk_level": "high",
+      "default_action": "reject",
+      "pattern": "(?i)\\bBearer\\s+(?P<value>[A-Za-z0-9\\-._~+/]+=*)",
+      "validator": "builtin.non_placeholder@1.0",
+      "masker": "builtin.full_redact@1.0",
+      "target_paths": ["/**"],
+      "priority": 960,
+      "standard_ref": [
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "risk_policy",
+          "locator": "bearer credentials",
+          "derivation_note": "Bearer 凭据在端侧记忆中默认拒绝。",
+          "caveat": "风险动作由项目威胁模型决定。"
+        },
+        {
+          "source_id": "rfc-6750",
+          "role": "syntax",
+          "locator": "section 2.1",
+          "derivation_note": "Authorization Bearer 上下文用于降低通用 Token 误报。",
+          "caveat": "正则只产生候选，不是完整 OAuth 协议验证。"
+        }
+      ],
+      "rule_version": "1.0",
+      "enabled": true,
+      "reason_code": "secret.bearer_token",
+      "reason": "Bearer Token 不得进入端侧长期记忆。",
+      "replacement": "[REDACTED_BEARER_TOKEN]",
+      "match_group": "value"
+    },
+    {
+      "rule_id": "credential.jwt",
+      "category": "credential",
+      "risk_level": "high",
+      "default_action": "reject",
+      "pattern": "(?<![A-Za-z0-9_-])(?P<value>eyJ[A-Za-z0-9_-]*\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)(?![A-Za-z0-9_-])",
+      "validator": "builtin.jwt@1.0",
+      "masker": "builtin.full_redact@1.0",
+      "target_paths": ["/**"],
+      "priority": 940,
+      "standard_ref": [
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "threat_model",
+          "locator": "JWT in local memory",
+          "derivation_note": "JWT 候选按可能承载 bearer 凭据处理。",
+          "caveat": "JWT 不必然是秘密，后续策略层可按可信上下文覆盖。"
+        },
+        {
+          "source_id": "rfc-7519",
+          "role": "syntax",
+          "locator": "section 3",
+          "derivation_note": "三段 compact serialization 与 JSON 头/载荷用于语义校验。",
+          "caveat": "校验器不验证签名，也不判定 Token 当前是否有效。"
+        }
+      ],
+      "rule_version": "1.0",
+      "enabled": true,
+      "reason_code": "secret.jwt",
+      "reason": "JWT 候选需要阻止进入端侧长期记忆。",
+      "replacement": "[REDACTED_JWT]",
+      "match_group": "value"
+    },
+    {
+      "rule_id": "api_key",
+      "category": "credential",
+      "risk_level": "high",
+      "default_action": "reject",
+      "pattern": "(?i)(?:api[_-]?key|secret|password|token)\\s*[:=]\\s*(?P<value>(?!\\[REDACTED_[A-Z0-9_]+\\](?:\\s|$))\\S+)",
+      "validator": "builtin.non_placeholder@1.0",
+      "masker": "builtin.full_redact@1.0",
+      "target_paths": ["/**"],
+      "priority": 920,
+      "standard_ref": [
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "syntax",
+          "locator": "generic credential assignment heuristic",
+          "derivation_note": "标签加赋值符形式仅作为通用凭据候选。",
+          "caveat": "不存在统一国标或跨厂商 API Key 正则。"
+        },
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "risk_policy",
+          "locator": "credential rejection",
+          "derivation_note": "通用凭据候选默认拒绝入库。",
+          "caveat": "厂商专用规则必须另行引用厂商文档并提升规则版本。"
+        },
+        {
+          "source_id": "owasp-secrets",
+          "role": "threat_model",
+          "locator": "secrets management",
+          "derivation_note": "采用独立的秘密凭据威胁类别。",
+          "caveat": "OWASP 不定义此项目正则。"
+        }
+      ],
+      "rule_version": "1.0",
+      "enabled": true,
+      "reason_code": "secret.credential",
+      "reason": "疑似 API Key、密码或 Token 的材料不得进入端侧长期记忆。",
+      "replacement": "[REDACTED_API_KEY]",
+      "match_group": "value"
+    },
+    {
+      "rule_id": "id_card",
+      "category": "sensitive_personal",
+      "risk_level": "high",
+      "default_action": "redact_allow",
+      "pattern": "(?<!\\d)(?P<value>[1-9]\\d{16}[\\dXx])(?!\\d)",
+      "validator": "builtin.cn_resident_id@1.0",
+      "masker": "builtin.full_redact@1.0",
+      "target_paths": ["/**"],
+      "priority": 900,
+      "standard_ref": [
+        {
+          "source_id": "gb-11643-1999",
+          "role": "syntax",
+          "locator": "18 位公民身份号码结构",
+          "derivation_note": "正则只生成 18 位号码候选。",
+          "caveat": "形状匹配后仍须执行日期、顺序码和 MOD 11-2 校验。"
+        },
+        {
+          "source_id": "gb-11643-1999",
+          "role": "semantic_validation",
+          "locator": "出生日期码、顺序码、校验码",
+          "derivation_note": "版本化 validator 负责日期与校验位验证。",
+          "caveat": "当前未接入行政区划历史码表；未来日期判断留给绑定 scanned_at 的策略层，以保持 validator 可复现。"
+        },
+        {
+          "source_id": "gbt-37964-2019",
+          "role": "deidentification",
+          "locator": "去标识化设计",
+          "derivation_note": "使用不可逆的全值替换标记进入后续复检。",
+          "caveat": "单次掩码不等于匿名化。"
+        },
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "risk_policy",
+          "locator": "identity number default action",
+          "derivation_note": "通过脱敏并复检后才允许继续。",
+          "caveat": "redact_allow 是项目策略，不是 GB 11643 的处置要求。"
+        },
+        {
+          "source_id": "pipl-2021-art28",
+          "role": "classification",
+          "locator": "第二十八条",
+          "derivation_note": "特定身份相关信息按敏感个人信息管理。",
+          "caveat": "法律提供分类依据，不提供号码正则。"
+        }
+      ],
+      "rule_version": "1.0",
+      "enabled": true,
+      "reason_code": "personal.id_card",
+      "reason": "有效公民身份号码需要脱敏并复检后方可继续。",
+      "replacement": "[REDACTED_ID_CARD]",
+      "match_group": "value"
+    },
+    {
+      "rule_id": "sensitive_personal.bank_card",
+      "category": "sensitive_personal",
+      "risk_level": "high",
+      "default_action": "redact_allow",
+      "pattern": "(?<!\\d)(?P<value>[\\d -]{13,37})(?!\\d)",
+      "validator": "builtin.luhn_account@1.0",
+      "masker": "builtin.full_redact@1.0",
+      "target_paths": ["/**"],
+      "priority": 880,
+      "standard_ref": [
+        {
+          "source_id": "gbt-37964-2019",
+          "role": "deidentification",
+          "locator": "去标识化设计",
+          "derivation_note": "通过全值替换降低直接识别风险。",
+          "caveat": "Luhn 通过不证明号码真实存在，脱敏也不等于匿名化。"
+        },
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "semantic_validation",
+          "locator": "Luhn candidate validation",
+          "derivation_note": "长度、分隔符与 Luhn 仅是项目候选校验器。",
+          "caveat": "不存在由本规则声称覆盖的统一银行账户格式。"
+        },
+        {
+          "source_id": "pipl-2021-art28",
+          "role": "classification",
+          "locator": "第二十八条",
+          "derivation_note": "金融账户属于敏感个人信息列举类别。",
+          "caveat": "法律不提供卡号正则或默认动作。"
+        }
+      ],
+      "rule_version": "1.0",
+      "enabled": true,
+      "reason_code": "personal.financial_account",
+      "reason": "金融账户候选需要脱敏并复检后方可继续。",
+      "replacement": "[REDACTED_FINANCIAL_ACCOUNT]",
+      "match_group": "value"
+    },
+    {
+      "rule_id": "sensitive_personal.biometric_field",
+      "category": "sensitive_personal",
+      "risk_level": "high",
+      "default_action": "reject",
+      "pattern": "(?s)\\A(?!\\[REDACTED(?:_[A-Z0-9_]+)?\\]\\Z).+\\Z",
+      "validator": "builtin.non_placeholder@1.0",
+      "masker": "builtin.full_redact@1.0",
+      "target_paths": [
+        "/**/biometric",
+        "/**/face_template",
+        "/**/fingerprint",
+        "/**/voiceprint"
+      ],
+      "priority": 860,
+      "standard_ref": [
+        {
+          "source_id": "gbt-45574-2025",
+          "role": "handling",
+          "locator": "敏感个人信息处理安全要求",
+          "derivation_note": "生物识别字段进入高风险处理分支。",
+          "caveat": "标准不定义字段名列表或拒绝动作。"
+        },
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "risk_policy",
+          "locator": "biometric field rejection",
+          "derivation_note": "无法可靠通用脱敏的生物识别模板默认拒绝。",
+          "caveat": "字段路径是项目约定。"
+        },
+        {
+          "source_id": "pipl-2021-art28",
+          "role": "classification",
+          "locator": "第二十八条",
+          "derivation_note": "生物识别信息属于敏感个人信息列举类别。",
+          "caveat": "法律不提供字段正则。"
+        }
+      ],
+      "rule_version": "1.0",
+      "enabled": true,
+      "reason_code": "personal.biometric",
+      "reason": "生物识别模板不得进入端侧长期记忆。",
+      "replacement": "[REDACTED_BIOMETRIC]",
+      "match_group": 0
+    },
+    {
+      "rule_id": "sensitive_personal.health_field",
+      "category": "sensitive_personal",
+      "risk_level": "high",
+      "default_action": "review",
+      "pattern": "(?s)\\A(?!\\[REDACTED(?:_[A-Z0-9_]+)?\\]\\Z).+\\Z",
+      "validator": "builtin.non_placeholder@1.0",
+      "masker": "builtin.none@1.0",
+      "target_paths": [
+        "/**/diagnosis",
+        "/**/health_data",
+        "/**/medical_record"
+      ],
+      "priority": 840,
+      "standard_ref": [
+        {
+          "source_id": "gbt-45574-2025",
+          "role": "handling",
+          "locator": "敏感个人信息处理安全要求",
+          "derivation_note": "医疗健康字段进入人工复核分支。",
+          "caveat": "标准不定义项目字段名或复核动作。"
+        },
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "risk_policy",
+          "locator": "health information review",
+          "derivation_note": "通用规则不能安全判断保留范围，因此默认复核。",
+          "caveat": "字段路径需要按接入系统版本维护。"
+        },
+        {
+          "source_id": "pipl-2021-art28",
+          "role": "classification",
+          "locator": "第二十八条",
+          "derivation_note": "医疗健康信息属于敏感个人信息列举类别。",
+          "caveat": "法律不提供内容正则。"
+        }
+      ],
+      "rule_version": "1.0",
+      "enabled": true,
+      "reason_code": "personal.health",
+      "reason": "医疗健康信息需要隔离复核。",
+      "replacement": "[REDACTED_HEALTH]",
+      "match_group": 0
+    },
+    {
+      "rule_id": "sensitive_personal.location_trace_field",
+      "category": "sensitive_personal",
+      "risk_level": "high",
+      "default_action": "review",
+      "pattern": "(?s)\\A(?!\\[REDACTED(?:_[A-Z0-9_]+)?\\]\\Z).+\\Z",
+      "validator": "builtin.non_placeholder@1.0",
+      "masker": "builtin.none@1.0",
+      "target_paths": [
+        "/**/location_trace",
+        "/**/precise_location",
+        "/**/trajectory"
+      ],
+      "priority": 820,
+      "standard_ref": [
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "risk_policy",
+          "locator": "location trace review",
+          "derivation_note": "无法用单一正则判断必要范围，默认隔离复核。",
+          "caveat": "字段路径是项目约定。"
+        },
+        {
+          "source_id": "pipl-2021-art28",
+          "role": "classification",
+          "locator": "第二十八条",
+          "derivation_note": "行踪轨迹属于敏感个人信息列举类别。",
+          "caveat": "法律不提供坐标或轨迹格式规则。"
+        },
+        {
+          "source_id": "tc260-pg-20244a",
+          "role": "classification",
+          "locator": "敏感个人信息识别",
+          "derivation_note": "结合内容与聚合风险识别行踪轨迹。",
+          "caveat": "实践指南不是国家标准，且路径命中不能替代上下文判断。"
+        }
+      ],
+      "rule_version": "1.0",
+      "enabled": true,
+      "reason_code": "personal.location_trace",
+      "reason": "行踪轨迹信息需要隔离复核。",
+      "replacement": "[REDACTED_LOCATION_TRACE]",
+      "match_group": 0
+    },
+    {
+      "rule_id": "sensitive_personal.minor_age",
+      "category": "sensitive_personal",
+      "risk_level": "high",
+      "default_action": "review",
+      "pattern": "\\A(?P<value>\\d{1,2})\\Z",
+      "validator": "builtin.under_fourteen@1.0",
+      "masker": "builtin.none@1.0",
+      "target_paths": ["/**/age"],
+      "priority": 800,
+      "standard_ref": [
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "semantic_validation",
+          "locator": "age under fourteen",
+          "derivation_note": "仅在明确 age 字段中解析 0 至 13 的整数候选。",
+          "caveat": "单个年龄字段不能证明主体身份或监护关系。"
+        },
+        {
+          "source_id": "pipl-2021-art28",
+          "role": "classification",
+          "locator": "第二十八条",
+          "derivation_note": "不满十四周岁未成年人的个人信息属于敏感个人信息。",
+          "caveat": "法律不提供字段名或正则。"
+        },
+        {
+          "source_id": "tc260-pg-20244a",
+          "role": "classification",
+          "locator": "聚合风险识别",
+          "derivation_note": "后续扫描策略需结合主体与上下文判断。",
+          "caveat": "本规则仅提供候选，必须进入复核。"
+        }
+      ],
+      "rule_version": "1.0",
+      "enabled": true,
+      "reason_code": "personal.minor_under_14",
+      "reason": "疑似不满十四周岁未成年人信息需要隔离复核。",
+      "replacement": "[REDACTED_MINOR_AGE]",
+      "match_group": "value"
+    },
+    {
+      "rule_id": "email",
+      "category": "personal",
+      "risk_level": "medium",
+      "default_action": "redact_allow",
+      "pattern": "(?P<value>[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Za-z0-9.-]{3,253})",
+      "validator": "builtin.email_ascii@1.0",
+      "masker": "builtin.full_redact@1.0",
+      "target_paths": ["/**"],
+      "priority": 700,
+      "standard_ref": [
+        {
+          "source_id": "gbt-35273-2020",
+          "role": "classification",
+          "locator": "个人信息类型",
+          "derivation_note": "电子邮箱地址按个人信息候选管理。",
+          "caveat": "GB/T 35273 不定义邮箱正则。"
+        },
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "risk_policy",
+          "locator": "email redaction",
+          "derivation_note": "命中后使用全值替换并进入复检。",
+          "caveat": "默认动作属于项目策略。"
+        },
+        {
+          "source_id": "rfc-5322",
+          "role": "syntax",
+          "locator": "section 3.4.1",
+          "derivation_note": "项目支持常见 ASCII addr-spec 子集。",
+          "caveat": "会漏掉 quoted local-part、国际化地址和部分合法边界形式。"
+        }
+      ],
+      "rule_version": "1.0",
+      "enabled": true,
+      "reason_code": "personal.email",
+      "reason": "电子邮箱地址需要脱敏并复检后方可继续。",
+      "replacement": "[REDACTED_EMAIL]",
+      "match_group": "value"
+    },
+    {
+      "rule_id": "phone",
+      "category": "personal",
+      "risk_level": "medium",
+      "default_action": "redact_allow",
+      "pattern": "(?<!\\d)(?P<value>1[3-9]\\d{9})(?!\\d)",
+      "validator": "builtin.cn_mobile@1.0",
+      "masker": "builtin.full_redact@1.0",
+      "target_paths": ["/**"],
+      "priority": 680,
+      "standard_ref": [
+        {
+          "source_id": "gbt-35273-2020",
+          "role": "classification",
+          "locator": "个人信息类型",
+          "derivation_note": "电话号码按个人信息候选管理。",
+          "caveat": "GB/T 35273 不定义手机号号段正则。"
+        },
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "syntax",
+          "locator": "mainland mobile heuristic",
+          "derivation_note": "1[3-9] 加十位数字是项目候选格式。",
+          "caveat": "号段会变化，也不覆盖固定电话和境外号码。"
+        },
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "risk_policy",
+          "locator": "phone redaction",
+          "derivation_note": "命中后使用全值替换并进入复检。",
+          "caveat": "默认动作属于项目策略。"
+        }
+      ],
+      "rule_version": "1.0",
+      "enabled": true,
+      "reason_code": "personal.phone",
+      "reason": "电话号码需要脱敏并复检后方可继续。",
+      "replacement": "[REDACTED_PHONE]",
+      "match_group": "value"
+    },
+    {
+      "rule_id": "ip_address",
+      "category": "personal",
+      "risk_level": "low",
+      "default_action": "redact_allow",
+      "pattern": "(?<![\\d.])(?P<value>[\\d.]{7,15})(?![\\d.])",
+      "validator": "builtin.ip_address@1.0",
+      "masker": "builtin.full_redact@1.0",
+      "target_paths": ["/**"],
+      "priority": 660,
+      "standard_ref": [
+        {
+          "source_id": "gbt-35273-2020",
+          "role": "classification",
+          "locator": "个人信息类型",
+          "derivation_note": "可关联自然人的网络地址按个人信息候选管理。",
+          "caveat": "并非所有 IP 在所有上下文中都是个人信息，且标准不定义 IP 正则。"
+        },
+        {
+          "source_id": "kmh-policy-1.0",
+          "role": "risk_policy",
+          "locator": "network identifier redaction",
+          "derivation_note": "当前版本对有效 IPv4 候选执行全值替换。",
+          "caveat": "动作需在场景策略中允许覆盖。"
+        },
+        {
+          "source_id": "rfc-3986",
+          "role": "syntax",
+          "locator": "section 3.2.2",
+          "derivation_note": "候选正则之后由标准库 IP 解析器校验地址范围。",
+          "caveat": "正则本身会接受越界八位组，validator 必须执行。"
+        },
+        {
+          "source_id": "rfc-4291",
+          "role": "syntax",
+          "locator": "section 2.2",
+          "derivation_note": "记录 IPv6 的协议来源边界。",
+          "caveat": "本规则版本尚未启用 IPv6 候选正则。"
+        }
+      ],
+      "rule_version": "1.0",
+      "enabled": true,
+      "reason_code": "personal.ip_address",
+      "reason": "有效 IPv4 候选需要脱敏并复检后方可继续。",
+      "replacement": "[REDACTED_IP_ADDRESS]",
+      "match_group": "value"
+    }
+  ]
+}

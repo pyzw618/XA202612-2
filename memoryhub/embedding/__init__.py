@@ -10,7 +10,15 @@ Embedding 子包 — 统一入口。
 
 from .base import BaseEmbeddingClient
 from .mock_client import MockEmbeddingClient
-from .kylin_client import KylinEmbeddingClient
+from .kylin_client import KylinEmbeddingClient, KylinEmbeddingError
+
+__all__ = [
+    "BaseEmbeddingClient",
+    "KylinEmbeddingClient",
+    "KylinEmbeddingError",
+    "MockEmbeddingClient",
+    "create_embedding_client",
+]
 
 
 def create_embedding_client(**kwargs) -> BaseEmbeddingClient:
@@ -30,7 +38,9 @@ def create_embedding_client(**kwargs) -> BaseEmbeddingClient:
         BaseEmbeddingClient 实例
     """
     # Kylin 专有参数
-    kylin_kwargs = {k: v for k, v in kwargs.items() if k in ("dim", "model_name", "so_path")}
+    kylin_kwargs = {
+        k: v for k, v in kwargs.items() if k in ("dim", "model_name", "so_path")
+    }
     kylin = KylinEmbeddingClient(**kylin_kwargs)
     if kylin.is_available():
         return kylin

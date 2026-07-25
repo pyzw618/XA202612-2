@@ -517,13 +517,257 @@ score = 0.40 * completeness
 负责: 敏感信息检测、精准遗忘
 ```
 
+> 当前阶段已落地安全接口契约、版本化规则库、递归扫描、策略执行、事件脱敏、
+> 同快照复检、内存审计投影、持久审计链、REVIEW 加密隔离和强制写入 Gate。
+> 共享安全处理模型定义在 `memoryhub.adapter.schemas`，规则资产模型定义在
+> `memoryhub.safety_rules`，并由 `memoryhub.core.safety` 稳定导出。普通 SQLite、
+> 向量和证据业务实现仍是脚手架；后续只能作为 Gate 的受保护 sink 接入。
+
+#### 版本化规则库
+
+| 类型/入口 | 关键字段或行为 | 约束 |
+|---|---|---|
+| `RuleDefinition` | `rule_id`, `category`, `risk_level`, `default_action`, `pattern`, `validator`, `masker`, `target_paths`, `target_path_case_sensitive`, `priority`, `standard_ref`, `rule_version`, `enabled` | extra 禁止；规则、路径、捕获组和组件引用在加载时整体校验 |
+| `RuleSource` / `RuleSourceLink` | 来源类型、效力、版次、状态日期、官方定位；来源到规则的用途与 caveat | 分类、语法、验证、处理、去标识化、评估、生命周期、审计和项目策略不得混写 |
+| `RuleSetSnapshot` | 规则集 ID/版本、来源、治理引用、声明式规则、兼容规则、组件注册表摘要、canonical digest | 深度不可变；摘要覆盖声明文档、编译 schema/结果和当前规则引用的组件；规则按 `(-priority, rule_id, rule_version)` 规范排序 |
+| `load_builtin_rule_set(version=...)` | 读取 catalog 默认版本或精确版本 | 使用包资源；不存在或摘要不符即失败，不回退、不部分加载 |
+| `ComponentRegistry` | 解析版本化组件 ID、绑定实现指纹和 masker capability | 只接受可检查源码、无 closure/可变全局的 Python 函数；禁止任意模块路径、import 或 eval；`redact_allow` 要求 `full_redaction` capability |
+
+内置规则集把 `redact_allow` 编译为 `SafetyAction.MASK`，保持第一步动作聚合和
+复检约束不变；替换值只能是固定的 `[REDACTED...]` 标记，加载时会做契约探针，
+每次完整替换调用还必须返回 replacement（输入已经是安全标记时允许幂等返回）。
+候选正则只负责缩小范围；例如公民身份号码随后由版本化 validator
+校验出生日期、顺序码和 MOD 11-2 校验位，IPv4 候选由 IP 解析器校验八位组。
+规则的法律、标准、RFC、安全指南和项目策略来源见
+[`SAFETY_RULE_LIBRARY.md`](SAFETY_RULE_LIBRARY.md)。
+
+#### 安全数据契约
+
+| 类型 | 关键字段 | 约束 |
+|---|---|---|
+| `SensitiveRule` | `name`, `version`, `pattern`, `level`, `action`, `reason_code`, `reason`, `standard_source`, `replacement`, `match_group`, `path_pattern`, `enabled` | 规则名在规则集内唯一；正则不得匹配空字符串；`MASK` 必须有替换文本；启用规则不得直接 `ALLOW` |
+| `SafetyFinding` | `finding_id`, `rule_name`, `rule_version`, `level`, `suggested_action`, `field_path`, `target`, `start`, `end`, `maskable`, 原因与标准来源 | `field_path` 是 RFC 6901 JSON Pointer；`text_span` 的 `[start, end)` 是原始叶子字符串区间，`whole_value` 表示非字符串整值并固定为 `[0, 0)`；禁止保存命中原文 |
+| `SafetyReport` | 事件/规则集摘要、`context`, `context_digest`, `attestation`, `findings`, `highest_level`, `scanned_field_count`, `scan_complete`, `issues` | 报告绑定事件摘要、一次规则快照和策略上下文；完整报告必须扫描至少一个字段且没有 issue；同一 detector 用进程内 HMAC attestation 阻断报告篡改 |
+| `SafetyExceptionScope` / `SafetyPolicyException` | 规则与上下文作用域、原因、负责人、版本、有效期、可选规则集摘要 | 空上下文作用域、无时区有效期和重复例外 ID 均拒绝；普通 override 不得直接 `ALLOW` |
+| `SafetyPolicy` | 不可变规则/等级覆盖、有限期例外、失败动作、`auto_sanitize`, `fail_closed` | 规则级覆盖优先于等级覆盖；覆盖只能提高动作严格度，不能削弱规则建议；仅低风险上下文标识允许作用域化 `ALLOW` |
+| `SafetyDecision` | `report_id`, 最终 `action`, 策略版本/摘要、逐 Finding 动作、原因码、例外 ID、`decided_at` | 聚合优先级固定为 `REJECT > REVIEW > MASK > ALLOW`；等级本身不决定动作 |
+| `SafetyAuditRecord` | 报告/事件/规则集/策略标识、最终动作、例外 ID、Finding 摘要、`processing_time_ms` | 仅内存安全投影；不得包含原事件正文、payload、工具结果或命中原文 |
+| `SafetyAuditLogRecord` | 组件/规则/策略版本、动作、最高风险、分类计数、字段路径、脱敏数、HMAC 输入指纹、输出摘要、处理耗时、前驱/记录哈希 | 磁盘最小投影；不直接序列化 `SafetyAuditRecord`；记录由持久设备密钥认证并跨轮转分段成链 |
+| `ApprovedWrite` | 递归只读安全事件、动作、审计 ID/记录哈希/序号、输出摘要、进程内 MAC | 只有 `SafetyWriteGate` 能签发；SQLite、Embedding、向量、证据链内容写入只能消费该能力对象 |
+| `SafetyResult` | `report`, `decision`, `audit`, `sanitized_event`, `verification_report`, `attestation` | 各对象必须属于同一报告、规则和策略快照；`ALLOW/MASK` 才能携带递归只读的安全事件；`MASK` 必须有无残留的完整复检；同实例结果 HMAC 覆盖全部字段 |
+
+`SensitiveLevel = none | low | medium | high` 只表示风险。处理动作独立为
+`SafetyAction = allow | mask | review | reject`。因此 `HIGH + MASK` 与
+`HIGH + REVIEW` 都是合法策略，禁止恢复为 “HIGH 一律拒绝”。
+`SafetyFindingTarget = text_span | whole_value` 独立表示定位语义，不参与风险
+等级或策略动作聚合。
+
+所有 `*_digest` 统一使用 canonical JSON：Pydantic 模型先
+`model_dump(mode="json")`，再以 `ensure_ascii=False`、键排序和紧凑分隔符
+序列化为 UTF-8，最后计算小写 SHA-256。声明式 `RuleSetSnapshot.digest`
+覆盖规范化后的完整规则和溯源、编译 schema、完整兼容规则及作用域化组件摘要；
+组件摘要覆盖实际引用组件的实现指纹和 masker capability，内置 catalog 固定最终
+快照摘要。兼容
+`SensitiveDetector` 的摘要仍包含 `rule_set_version` 和调用方传入顺序的完整
+编译规则，因此同一请求的报告、复检和审计必须复用同一个 detector 快照。
+策略摘要包含完整 `SafetyPolicy` 以及兼容开关 `auto_mask`、
+`reject_on_detect`。扫描器先以显式栈在结构预算内建立 JSON-like 事件快照，
+事件摘要和规则遍历再共同消费该快照；事件摘要覆盖完整 `MemoryEvent`，避免
+预检后再次读取可变 payload/tool result 产生摘要与命中不一致。
+输入 `MemoryEvent` 仍是可变的 v0.1 模型；扫描器先建立独立快照且不修改输入。
+`SafetyResult.sanitized_event` 会在结果边界重新校验并递归冻结顶层模型、payload、
+工具参数/结果、redactions 与质量 issue；运行时映射不继承 `dict`，序列使用
+tuple/frozenset，不能通过基类 mutator 绕过。`model_dump()` 仍投影为普通
+JSON dict/list，保持持久化格式兼容。结果契约同时核对
+事件摘要、上下文和复检摘要；`canonical_sha256()` 由 Safety 包公开供两端一致计算。
+`SafetyReport.attestation` 是同一 detector 实例内的临时 HMAC 完整性标签，不是
+跨事件关联令牌；随机实例密钥对除 `attestation` 外的整份报告做 HMAC-SHA256。
+`SafetyResult.attestation` 使用同一临时密钥和独立域标签，覆盖报告、决策、审计、
+安全事件与复检报告，阻断结果字段注入和跨候选拼接。独立调用
+`scan/decide/sanitize` 或验证结果时必须使用同一存活实例，不支持跨实例或跨进程
+移交；未来若需要跨进程验证，应引入带 key ID、版本和轮换策略的持久签名器。
+把只读安全事件复制为可变对象后，该副本应重新视为不可信输入并再次调用 `process()`。
+
+声明式 `target_paths` 会确定性编译为兼容规则的锚定 `path_pattern`；
+后者使用 `re.search` 匹配 `field_path`，内容 `pattern` 使用 `finditer`
+匹配字符串叶子；两者同时存在时必须同时满足。默认 `credential_field` 规则借此覆盖
+`{"arguments": {"api_key": "sk-..."}}` 这类键值分离的结构化凭据。
+目标模板是 RFC 6901 的受控扩展：整段 `*`/`**` 是 glob，`~2` 表示字面星号；
+实际 `SafetyFinding.field_path` 仍只允许 RFC 6901 的 `~0`/`~1`。
+
+扫描器和脱敏器都不会修改原事件。字符串内容先按 normalization unit 做 NFKC，并移除零宽/
+格式控制字符；正则和 validator 使用该安全视图，Finding span 则反投影到原始
+Unicode 字符位置。映射键本身不作为普通内容写入 Finding，而是经相同规范化后参与
+临时路径匹配：原始键构成报告路径，规范化键只用于阻断全角、零宽敏感键名绕过。
+若键名内容本身命中邮箱、电话等非路径规则，现有契约无法在不泄漏键名的情况下表达
+可脱敏 span，扫描器会返回 `scan.sensitive_member_name` 并将报告标为不完整，
+由失败关闭策略隔离；该键对应的整条分支不再生成可能泄漏键名的后代 Finding，
+且不会把该键写入 Finding/issue。
+路径规则命中的数字、布尔、null、对象或数组使用 `target=whole_value`，让后续
+sanitize 能按路径整体替换而无需猜测虚构字符串 span。
+
+运行时计划在 detector 构造时统一编译内容/路径正则，并从同一个
+`RuleSetSnapshot` 绑定 priority 和 validator。每次扫描开始只校验一次组件注册表；
+身份证、银行卡和 IP 等宽松候选必须通过日期/校验码、Luhn 或解析器验证。重叠候选
+按“priority 降序、原始跨度降序、动作严格度、稳定规则标识”确定性选择。同一路径
+的 `whole_value` 候选按该顺序保留一个；祖先整值与后代局部命中属于不同风险事实，
+报告同时保留，避免低优先级祖先命中吞掉更严格的后代，`sanitize()` 再按
+路径深度消除实际替换操作的冗余。没有
+声明式 priority/validator 的旧 inline 规则只做 regex-only 检测，并以调用方顺序
+作为合成 priority；只有与可信快照逐字段一致的规则才能绑定其 priority/validator，
+同名同版本的外部规则不能冒充内置规则。
+
+`scanned_field_count` 统计尝试扫描的映射键、标量叶子及持久化字符串元数据
+（包括空字符串）；数组索引和容器本身不计入。扫描受最大深度、单字段字符数、
+总 UTF-8 字节数、字段/节点数、
+候选数、Finding 数及路径长度约束；可配置深度的安全硬上限是 64。无法在结构预算
+内建立可信快照（包括循环引用）
+时抛出 `SafetyScanError`，异常只含稳定代码且不含原文。快照后的候选/Finding
+超限或 validator 异常会保留已确认结果，但 `scan_complete=false`，且 `issues`
+只含稳定代码。`scan_text()` 没有不完整报告通道，因此遇到同类限制时直接抛出
+`SafetyScanError`。
+
 #### SensitiveDetector
 
 | 方法 | 签名 | 输入 | 输出 | 说明 |
 |---|---|---|---|---|
-| `detect` | `(event: MemoryEvent) -> SensitiveLevel` | 事件 | 敏感等级 | 检测敏感信息 |
-| `mask` | `(event: MemoryEvent) -> MemoryEvent` | 原始事件 | 脱敏后事件 | 敏感信息脱敏 |
-| `should_reject` | `(event: MemoryEvent) -> tuple[bool, str]` | 事件 | `(是否拒绝, 原因)` | 判断是否拒绝入库 |
+| `scan` | `(event: MemoryEvent) -> SafetyReport` | 原始事件 | 单次扫描报告 | 递归覆盖 `text`、`payload`、工具内容/标识及所有会持久化的自由字符串元数据；捕获一次规则快照；结构预检失败抛 `SafetyScanError` |
+| `decide` | `(report: SafetyReport, policy: SafetyPolicy \| None = None) -> SafetyDecision` | 报告、策略 | 最终决策 | 只消费报告，不重新扫描；重验策略/报告并验证同实例 attestation |
+| `sanitize` | `(event: MemoryEvent, report: SafetyReport) -> MemoryEvent` | 原事件、报告 | 脱敏副本 | 校验事件摘要和报告 attestation；按路径和 span 精确替换；不重新扫描 |
+| `build_audit` | `(report: SafetyReport, decision: SafetyDecision) -> SafetyAuditRecord` | 报告、决策 | 内存安全审计投影 | 不读取或复制敏感原文；本阶段不负责持久化 |
+| `process` | `(event: MemoryEvent) -> SafetyResult` | 原始事件 | 原子处理结果 | 唯一生产主入口；同一规则/策略快照完成扫描、决策、必要脱敏、复检和审计 |
+| `validate_result` | `(event: MemoryEvent, result: SafetyResult) -> SafetyResult` | 原事件、外部或反序列化结果 | 已重新验证结果 | 写入信任边界入口；重验报告 attestation、事件/规则/策略绑定并重新决策；MASK 还会重新派生安全副本，拒绝被削弱或跨候选重放的结果 |
+| `scan_text` | `(text: str, field_path: str = "/text") -> tuple[SafetyFinding, ...]` | 文本、字段路径 | 结构化命中 | 给出规则、路径、字符区间和原因 |
+| `detect` | `(event: MemoryEvent, *, result: SafetyResult \| None = None) -> SensitiveLevel` | 事件、可选共享结果 | 最高敏感等级 | v0.1 兼容包装 |
+| `detect_text` | `(text: str) -> tuple[SensitiveLevel, list[str]]` | 文本 | 等级和规则名 | v0.1 兼容包装；详细结果使用 `scan_text` |
+| `mask` | `(event: MemoryEvent, *, result: SafetyResult \| None = None) -> MemoryEvent` | 原始事件、可选共享结果 | 已验证安全副本 | v0.1 兼容包装；仅接受未被削弱的同实例 `ALLOW/MASK` 结果，`REVIEW/REJECT` 失败关闭 |
+| `mask_text` | `(text: str) -> str` | 文本 | 脱敏文本 | v0.1 兼容入口；规则/策略为 REVIEW/REJECT 或关闭自动脱敏时失败关闭 |
+| `should_reject` | `(event: MemoryEvent, *, result: SafetyResult \| None = None) -> tuple[bool, str]` | 事件、可选共享结果 | `(是否阻止普通入库, 原因)` | v0.1 有损包装；`REVIEW/REJECT` 都返回 `True` |
+
+事件扫描的自由字符串范围是
+`event_id/event_type/user_id/session_id/turn_id/scene/task_type/text`、
+递归 `payload` 键和值、`tool_calls[*].call_id/tool_name/arguments/result/error`、
+`redactions[*]` 和 `quality.issues[*]`。`source_type/status/schema_version` 是枚举，
+`occurred_at/source_hash` 有严格格式约束，不作为自由文本内容扫描。`event_id`
+虽然会扫描，但为保持报告与审计身份绑定不允许原地脱敏；若其命中需要 MASK，
+`process()` 会失败关闭到至少 `REVIEW`。
+工具调用的正整数 `sequence` 也按整值扫描；它是顺序标识而不是内容字段，因此
+命中后不可替换为字符串标记，同样至少进入 `REVIEW`。
+`event_id/event_type/scene/task_type` 还会进入报告或策略上下文；一旦这些字段有
+敏感候选，或扫描器无法确认其完整性，报告使用固定类型标记而不复制原值，审计沿用
+安全事件引用。这样即使最终动作是 REVIEW/REJECT，报告、异常和审计也不携带该原文。
+
+生产写入链不得独立调用 `detect() → mask() → should_reject()`。必须只调用
+一次 `result = process(event)`。同一调用栈内可消费这个递归只读结果；结果一旦
+经过反序列化、缓存或其他组件边界，写入门禁必须先调用
+`result = validate_result(event, result)`，不能直接信任可手工构造的数据模型。
+确需多个旧返回视图时，三个
+包装都必须显式传入同一个 `result=result`。脱敏后复检是允许的第二次内容
+扫描，但必须复用初始报告记录的同一规则集快照。
+
+默认规则已经证明等级与动作解耦：API 凭据是 `HIGH + REJECT`，身份证号是
+`HIGH + MASK`。兼容开关只做单向收紧：`reject_on_detect=True` 强制所有
+命中进入 `REJECT`，`False` 不会降级结构化规则的显式 `REJECT`；
+`auto_mask=False` 或 `policy.auto_sanitize=False` 会把原本的 `MASK` 提升为
+`REVIEW`，绝不放行未脱敏原文。其余决策以 `SafetyPolicy` 为准。
+
+完整且无命中的报告固定为 `ALLOW`；`fallback_action` 只处理与当前规则快照
+元数据不一致的 Finding，不用于 clean report。不完整扫描至少进入 `REVIEW`。
+逐 Finding 先按“规则覆盖 > 等级覆盖 > 规则建议”选择覆盖来源，再把覆盖动作
+与规则建议按严格度取高者；普通覆盖因此只能收紧、不能降级。随后应用不可脱敏、
+自动脱敏开关和全局拒绝门禁，最后按固定优先级聚合。
+
+作用域化 `ALLOW` 不能通过普通 rule/level override 配置，必须使用
+`SafetyPolicyException`，并同时提供规则名、至少一个来源/事件/场景/任务用途/
+字段路径选择器、原因、负责人、版本和带时区的过期时间；有效窗口
+`[valid_from, expires_at)` 按实际决策时刻判断并写入 `decided_at`，扫描时尚未
+过期不能锁定放行资格。当前安全下限仅允许
+低风险上下文标识（内置规则中的 IPv4）使用此例外；凭据、身份证、银行卡、
+手机号、邮箱及敏感个人信息不能被例外降为 `ALLOW`。`REVIEW` 就是“阻止普通
+写入并交给后续隔离复核”的决策信号，不新增独立 `QUARANTINE` 动作。
+
+`sanitize()` 使用 Finding 自带的固定全值类型标记（如
+`[REDACTED_PHONE]`、`[REDACTED_ID_CARD]`），不会保留手机号或证件尾号；
+这些标记不用于跨事件稳定关联。若未来确需稳定关联，应在独立版本中使用设备密钥
+生成 HMAC 令牌，本阶段不实现。`process()` 对 `MASK` 分支强制使用同一个
+规则快照复检，并且只有复检完整、无残留 Finding 且二次脱敏幂等时才暴露
+`sanitized_event`；其余情况至少升级为 `REVIEW`。
+
+#### 持久审计、隔离与强制写入 Gate
+
+`SafetyAuditLog.append(event, result, detector)` 不信任单独的
+`SafetyAuditRecord`。它先用同一 detector 调用 `validate_result()`，再从已认证结果
+生成第二层最小投影。持久记录包含：
+
+- `audit_id`、安全事件引用、UTC 时间、单调 `sequence`；
+- `policy_version/digest`、`rule_set_version/digest`、
+  `component_version` 和组件注册表摘要；
+- `decision`、稳定 `reason_codes`、最高风险、按规则类别统计的命中数；
+- 去重字段路径、`redaction_count`；
+- 基于可信 `report.event_digest` 和设备密钥计算的 HMAC
+  `input_fingerprint`，以及仅在 `ALLOW/MASK` 时存在的安全输出摘要；
+- `processing_time_ms`、`previous_record_hash` 和 `record_hash`。
+
+记录不会保存 user ID、原始事件 ID、事件正文、payload、工具参数/结果、命中值、
+规则说明或 `decision.reason`。每个事件 ID 都改为稳定的域分离 HMAC 引用，在保留
+关联能力的同时避免事件 ID 与用户标识重合时泄漏；JSON Pointer 只保留 schema 控制的
+字段名和明确的列表下标，所有动态段均改为 `seg_<HMAC>`，并由同一规则快照再次扫描。
+因此“审计记录本身也脱敏”。输入指纹不使用调用方给出的 `source_hash`，两个伪造
+相同 `source_hash` 的不同事件仍产生不同指纹。
+
+JSONL 使用 canonical UTF-8 单行、严格 JSON 解析、进程内锁与系统文件锁、
+`O_APPEND/O_NOFOLLOW`、文件 `0600`、目录 `0700` 和 `fsync`。记录 HMAC 覆盖
+前驱哈希，认证 head sidecar 固定当前序号与链头，可检测完整尾记录截断；若记录已
+fsync 而 head 更新前断电，只接受从旧 head 出发的有效 HMAC 扩展并自动前移。
+按大小或期限轮转均不重置链；保留清理只删除已关闭的连续旧分段，并先原子写入认证
+anchor。anchor 已发布而旧段尚未删完的中断可恢复。中段损坏、尾部回滚、重复键、
+NaN、非 canonical 行、软链接、链断裂或错误密钥一律失败关闭。保留后的 `verify()`
+只证明从认证 anchor 开始的后缀完整性，不代表被合法清理的历史仍然可验证。
+同目录 head 不能抵抗具有写权限的攻击者同时回放一组旧日志与旧 head；该威胁需要把
+链头周期性提交到独立 WORM/签名服务。
+
+`SafetyWriteGate` 是普通写入的唯一生产边界，固定顺序为：
+
+1. `SensitiveDetector.process(event)`；
+2. `validate_result(event, result)`；
+3. 真实 `SafetyAuditLog` 成功追加，并从磁盘严格验链、逐字段确认该记录已持久化；
+4. 按最终动作路由。
+
+| 最终动作 | 普通 SQLite / Embedding / 向量 / 证据 / 日志 | REVIEW 隔离区 | 持久安全审计 |
+|---|---|---|---|
+| `ALLOW` | 内容 sink 仅接收 `ApprovedWrite`；日志仅接收 `SafeLogRecord` | 否 | 是 |
+| `MASK` | 内容 sink 仅接收脱敏后的 `ApprovedWrite`；日志仅接收 `SafeLogRecord` | 否 | 是 |
+| `REVIEW` | 全部禁止 | AES-256-GCM 密文 | 是 |
+| `REJECT` | 全部禁止 | 否 | 是 |
+
+审计追加失败、回执无效、隔离写入失败、能力 MAC/签发者不匹配或任一下游调用失败
+都只抛稳定错误码，异常文本不包含待检测输入。`ApprovedWrite` 的 MAC 绑定安全事件、
+输出摘要及实际审计记录身份；各内容 sink 由 `GuardedCallbacks` 接收能力对象，不能
+接收原始字符串或原始 `MemoryEvent`。普通日志只允许 `SafeLogRecord`，其中不含
+事件正文、用户 ID 或命中原文。
+
+`ReviewQuarantineStore` 使用独立的 32 字节设备密钥和 AES-256-GCM。明文只存在于
+受控加解密调用内；磁盘元数据仅保存 HMAC 事件引用/输入指纹、安全审计关联、版本、
+动作和期限，完整事件位于认证密文中。临时文件 fsync 后才原子发布最终记录，Gate
+随后重新读取、认证并核对完整回执。`put()` 会再次调用
+`detector.validate_result()`，手工构造的 REVIEW 结果不能直接入隔离区；到期记录即使
+尚未由清理任务删除也拒绝解密返回。`cleanup_expired()` 会继续处理其他有效过期记录，
+同时以稳定错误报告损坏记录。特权复核读取后不能直接把动作改成 ALLOW；必须把事件
+重新送入当前规则/策略的 Gate。
+
+审计和隔离的期限清理应由系统定时任务调用 `enforce_retention()` 与
+`cleanup_expired()`；新审计流量也会按期限触发旧分段轮转。没有进程运行时无法自行
+删除磁盘文件，因此期限配置不能替代操作系统调度。持久目录必须位于服务账户控制的
+可信父目录中；实现会拒绝路径层级中的软链接/Windows junction，但仅靠路径检查不能
+替代服务账户权限和目录 fd 隔离。
+
+银河麒麟部署用 POSIX mode 和 `O_NOFOLLOW` 强制本地权限。Windows 开发环境中的
+`chmod` 不能替代 NTFS ACL；若在 Windows 生产部署，必须另行配置服务账户专用 ACL、
+拒绝重解析点并完成等效验收。
+
+FastAPI 的请求验证错误只返回白名单化的错误类型和字段位置，不返回 `input`、
+`msg`、`ctx` 或请求正文；麒麟 Embedding 封装同样只抛稳定错误码，不拼接输入片段
+或 SDK 后端消息。
 
 #### MemoryForgetter
 
