@@ -11,8 +11,9 @@ import time
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from itertools import islice
+from types import MappingProxyType
 from typing import Any, Callable, NoReturn
 
 from memoryhub.adapter.schemas import (
@@ -43,7 +44,6 @@ from memoryhub.safety_rules import (
 from memoryhub.safety_rules.paths import validate_json_path
 from memoryhub.safety_rules.regex_safety import validate_regex_safety
 
-
 _BUILTIN_RULE_SNAPSHOT = load_builtin_rule_set()
 _LEVEL_RANK = {
     SensitiveLevel.NONE: 0,
@@ -63,6 +63,14 @@ _REPORT_METADATA_MARKERS = {
     "/scene": "[REDACTED_SCENE]",
     "/task_type": "[REDACTED_TASK_TYPE]",
 }
+_REDACTION_MARKER_RE = re.compile(r"^\[REDACTED(?:_[A-Z0-9_]+)?\]$")
+_REDACTION_MARKER_SPAN_RE = re.compile(r"\[REDACTED(?:_[A-Z0-9_]+)?\]")
+_OVERLAY_REVISION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_OVERLAY_CATEGORY_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+_MIN_OVERLAY_PRIORITY = -1_000_000
+_MAX_OVERLAY_PRIORITY = 1_000_000
+_DEFAULT_OVERLAY_MASK_PRIORITY = _MIN_OVERLAY_PRIORITY
+_DEFAULT_OVERLAY_REJECT_PRIORITY = _MAX_OVERLAY_PRIORITY
 
 
 class SafetyScanError(ValueError):
@@ -90,6 +98,119 @@ class SafetyDecisionError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class SafetyRuleOverlay:
+    """
+    由受信任的用户规则存储编译出的不可变附加规则快照。
+
+    ``keyed_digest`` 必须由边界外的持久化服务使用独立密钥计算。Detector
+    只校验摘要形状，并以 ``base digest + keyed digest`` 派生有效规则摘要；
+    因而持久审计不会包含低熵 matcher 的普通 SHA-256 字典指纹。
+
+    Overlay 只允许收紧为 MASK 或 REJECT。分类固定为 ``user_defined``；
+    显式映射用于保证每条运行时规则都有可审计分类和确定性优先级。
+    """
+
+    rules: tuple[SensitiveRule, ...]
+    keyed_digest: str
+    revision: str
+    categories: Mapping[str, str] = field(default_factory=dict)
+    priorities: Mapping[str, int] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        try:
+            normalized_rules = tuple(
+                SensitiveRule.model_validate(
+                    rule.model_dump(mode="python")
+                    if isinstance(rule, SensitiveRule)
+                    else rule
+                )
+                for rule in self.rules
+            )
+        except Exception:
+            raise ValueError("overlay rules are invalid") from None
+        if not normalized_rules:
+            raise ValueError("overlay must contain at least one rule")
+        names = tuple(rule.name for rule in normalized_rules)
+        if len(names) != len(set(names)):
+            raise ValueError("overlay rule names must be unique")
+        if re.fullmatch(r"[0-9a-f]{64}", self.keyed_digest) is None:
+            raise ValueError("overlay keyed_digest must be a lowercase keyed SHA-256")
+        if (
+            not isinstance(self.revision, str)
+            or _OVERLAY_REVISION_RE.fullmatch(self.revision) is None
+        ):
+            raise ValueError("overlay revision must be a stable identifier")
+        if not isinstance(self.categories, Mapping):
+            raise ValueError("overlay categories must be a mapping")
+        if not isinstance(self.priorities, Mapping):
+            raise ValueError("overlay priorities must be a mapping")
+
+        unknown_categories = set(self.categories) - set(names)
+        unknown_priorities = set(self.priorities) - set(names)
+        if unknown_categories:
+            raise ValueError("overlay categories reference unknown rules")
+        if unknown_priorities:
+            raise ValueError("overlay priorities reference unknown rules")
+
+        normalized_categories: dict[str, str] = {}
+        normalized_priorities: dict[str, int] = {}
+        for rule in normalized_rules:
+            if not rule.enabled:
+                raise ValueError("overlay rules must be enabled")
+            if rule.action not in (SafetyAction.MASK, SafetyAction.REJECT):
+                raise ValueError("overlay rules may only MASK or REJECT")
+            if _REDACTION_MARKER_RE.fullmatch(rule.replacement) is None:
+                raise ValueError("overlay rules require a fixed redaction marker")
+
+            category = self.categories.get(rule.name, "user_defined")
+            if (
+                not isinstance(category, str)
+                or _OVERLAY_CATEGORY_RE.fullmatch(category) is None
+                or category != "user_defined"
+            ):
+                raise ValueError("overlay rule category must be user_defined")
+            normalized_categories[rule.name] = category
+
+            default_priority = (
+                _DEFAULT_OVERLAY_REJECT_PRIORITY
+                if rule.action is SafetyAction.REJECT
+                else _DEFAULT_OVERLAY_MASK_PRIORITY
+            )
+            priority = self.priorities.get(rule.name, default_priority)
+            if (
+                type(priority) is not int
+                or priority < _MIN_OVERLAY_PRIORITY
+                or priority > _MAX_OVERLAY_PRIORITY
+            ):
+                raise ValueError("overlay priorities must be bounded integers")
+            normalized_priorities[rule.name] = priority
+
+        object.__setattr__(self, "rules", normalized_rules)
+        object.__setattr__(
+            self,
+            "categories",
+            MappingProxyType(normalized_categories),
+        )
+        object.__setattr__(
+            self,
+            "priorities",
+            MappingProxyType(normalized_priorities),
+        )
+
+    @property
+    def digest(self) -> str:
+        """兼容把 overlay 视为快照的调用方；值仍是外部提供的 keyed digest。"""
+
+        return self.keyed_digest
+
+    @property
+    def version(self) -> str:
+        """将存储 revision 暴露为只读版本标识。"""
+
+        return self.revision
+
+
+@dataclass(frozen=True, slots=True)
 class _NormalizedText:
     """不修改原文的安全扫描视图，以及每个输出字符对应的原文区间。"""
 
@@ -111,6 +232,8 @@ class _RuntimeRule:
     priority: int
     ordinal: int
     maskable: bool
+    is_overlay: bool = False
+    is_snapshot_rule: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +280,7 @@ class _ScanPlan:
     component_registries: tuple[ComponentRegistry, ...]
     rule_set_version: str
     rule_set_digest: str
+    base_rule_set_digest: str
     max_depth: int
     max_field_chars: int
     max_scan_bytes: int
@@ -225,6 +349,14 @@ def _normalized_text(value: str) -> _NormalizedText:
             normalized.append(character)
             origins.append((unit_start, index))
     return _NormalizedText("".join(normalized), tuple(origins))
+
+
+def normalize_sensitive_text(value: str) -> str:
+    """Return the exact Unicode safety view used by content scanning."""
+
+    if not isinstance(value, str):
+        raise TypeError("sensitive text must be a string")
+    return _normalized_text(value).text
 
 
 def _escape_pointer_segment(value: str) -> str:
@@ -298,6 +430,7 @@ class SensitiveDetector:
         *,
         rules: Sequence[SensitiveRule] | None = None,
         rule_snapshot: RuleSetSnapshot | None = None,
+        rule_overlay: SafetyRuleOverlay | None = None,
         rule_set_id: str | None = None,
         rule_set_version: str | None = None,
         rule_set_digest: str | None = None,
@@ -317,6 +450,7 @@ class SensitiveDetector:
             custom_patterns: 旧版 ``名称 -> 正则`` 配置；仅作迁移兼容。
             rules: 完整的结构化规则；未传入时使用 DEFAULT_RULES。
             rule_snapshot: 保留声明式规则、溯源和组件注册表的不可变快照。
+            rule_overlay: 在基础快照之上追加的不可变用户规则快照。
             rule_set_id: 当前规则集的稳定 ID。
             rule_set_version: 当前规则集的稳定版本。
             policy: 默认决策策略。
@@ -354,6 +488,13 @@ class SensitiveDetector:
         self._report_attestation_key = secrets.token_bytes(32)
 
         selected_snapshot = rule_snapshot
+        if rule_overlay is not None and not isinstance(
+            rule_overlay,
+            SafetyRuleOverlay,
+        ):
+            raise ValueError("rule_overlay must be a SafetyRuleOverlay")
+        if rule_overlay is not None and custom_patterns:
+            raise ValueError("rule_overlay cannot be combined with custom_patterns")
         if (
             selected_snapshot is None
             and rules is None
@@ -405,7 +546,16 @@ class SensitiveDetector:
                         standard_source="Legacy SensitiveDetector.custom_patterns",
                     )
 
-        self.rules = tuple(rule_by_name.values())
+        base_rules = tuple(rule_by_name.values())
+        if rule_overlay is not None:
+            overlay_names = {rule.name for rule in rule_overlay.rules}
+            name_collisions = overlay_names & set(rule_by_name)
+            if name_collisions:
+                raise ValueError("overlay rule names must not shadow base rules")
+            rule_by_name.update({rule.name: rule for rule in rule_overlay.rules})
+        self.base_rules = base_rules
+        self.rule_overlay = rule_overlay
+        self.rules = (*base_rules, *(rule_overlay.rules if rule_overlay else ()))
         self.patterns = {
             rule.name: rule.pattern for rule in self.rules if not rule.path_pattern
         }
@@ -475,24 +625,45 @@ class SensitiveDetector:
                 and rule_set_digest != selected_snapshot.digest
             ):
                 raise ValueError("rule_set_digest does not match the supplied snapshot")
-            self.rule_set_digest = selected_snapshot.digest
+            base_rule_set_digest = selected_snapshot.digest
         elif rule_set_digest is not None:
             if re.fullmatch(r"[0-9a-f]{64}", rule_set_digest) is None:
                 raise ValueError("rule_set_digest must be a lowercase SHA-256")
-            self.rule_set_digest = rule_set_digest
+            base_rule_set_digest = rule_set_digest
         else:
-            self.rule_set_digest = canonical_sha256(
+            base_rule_set_digest = canonical_sha256(
                 {
                     "rule_set_id": self.rule_set_id,
                     "rule_set_version": self.rule_set_version,
-                    "rules": [rule.model_dump(mode="json") for rule in self.rules],
+                    "rules": [rule.model_dump(mode="json") for rule in self.base_rules],
                 }
             )
+        self.base_rule_set_digest = base_rule_set_digest
+        if rule_overlay is None:
+            self.rule_set_digest = base_rule_set_digest
+        else:
+            self.rule_set_digest = canonical_sha256(
+                {
+                    "domain": "memoryhub.safety_rule_overlay.v1",
+                    "base_rule_set_digest": base_rule_set_digest,
+                    "overlay_keyed_digest": rule_overlay.keyed_digest,
+                }
+            )
+        overlay_scope_names = (
+            frozenset(rule.name for rule in rule_overlay.rules)
+            if rule_overlay is not None
+            else frozenset()
+        )
         mismatched_exception_digests = {
             exception.exception_id
             for exception in self.policy.exceptions
             if exception.rule_set_digest
             and exception.rule_set_digest != self.rule_set_digest
+            and not (
+                rule_overlay is not None
+                and exception.rule_set_digest == self.base_rule_set_digest
+                and overlay_scope_names.isdisjoint(exception.scope.rule_names)
+            )
         }
         if mismatched_exception_digests:
             mismatched = ", ".join(sorted(mismatched_exception_digests))
@@ -507,14 +678,23 @@ class SensitiveDetector:
                 "reject_on_detect": self.reject_on_detect,
             }
         )
-        self._runtime_rules, self._component_registries = self._build_runtime_rules(
-            selected_snapshot
-        )
+        (
+            self._runtime_rules,
+            self._component_registries,
+            self._effective_rule_categories,
+            self._effective_component_registry_digest,
+        ) = self._build_runtime_rules(selected_snapshot, rule_overlay)
 
     def _build_runtime_rules(
         self,
         selected_snapshot: RuleSetSnapshot | None,
-    ) -> tuple[tuple[_RuntimeRule, ...], tuple[ComponentRegistry, ...]]:
+        rule_overlay: SafetyRuleOverlay | None,
+    ) -> tuple[
+        tuple[_RuntimeRule, ...],
+        tuple[ComponentRegistry, ...],
+        Mapping[tuple[str, str], str],
+        str,
+    ]:
         """统一完成正则编译，并把声明式 priority/validator 绑定到运行时计划。"""
 
         builtin_compiled = {
@@ -547,6 +727,12 @@ class SensitiveDetector:
 
         registries: list[ComponentRegistry] = []
         runtime_rules: list[_RuntimeRule] = []
+        category_by_rule: dict[tuple[str, str], str] = {}
+        overlay_rule_names = (
+            frozenset(rule.name for rule in rule_overlay.rules)
+            if rule_overlay is not None
+            else frozenset()
+        )
         for ordinal, rule in enumerate(self.rules):
             if not rule.enabled:
                 continue
@@ -554,19 +740,25 @@ class SensitiveDetector:
                 raise ValueError(
                     f"sensitive rule pattern exceeds 4096 characters: {rule.name}"
                 )
-            is_legacy_default = legacy_defaults.get((rule.name, rule.version)) == rule
-            if not is_legacy_default:
+            is_overlay = rule.name in overlay_rule_names
+            is_legacy_default = (
+                not is_overlay
+                and legacy_defaults.get((rule.name, rule.version)) == rule
+            )
+            if is_overlay or not is_legacy_default:
                 validate_regex_safety(rule.pattern)
 
             metadata_snapshot: RuleSetSnapshot | None = None
-            definition = selected_definitions.get((rule.name, rule.version))
-            if definition is not None:
-                metadata_snapshot = selected_snapshot
-            else:
-                builtin_rule = builtin_compiled.get((rule.name, rule.version))
-                if builtin_rule == rule:
-                    definition = builtin_definitions[(rule.name, rule.version)]
-                    metadata_snapshot = _BUILTIN_RULE_SNAPSHOT
+            definition = None
+            if not is_overlay:
+                definition = selected_definitions.get((rule.name, rule.version))
+                if definition is not None:
+                    metadata_snapshot = selected_snapshot
+                else:
+                    builtin_rule = builtin_compiled.get((rule.name, rule.version))
+                    if builtin_rule == rule:
+                        definition = builtin_definitions[(rule.name, rule.version)]
+                        metadata_snapshot = _BUILTIN_RULE_SNAPSHOT
 
             if rule.path_pattern:
                 if len(rule.path_pattern) > 4_096:
@@ -575,7 +767,7 @@ class SensitiveDetector:
                     )
                 # 受信快照的路径来自受控 JSON Pointer glob 编译器；外部直接传入的
                 # path_pattern 则必须通过和内容正则相同的回溯门禁。
-                if (
+                if is_overlay or (
                     metadata_snapshot is None
                     and not is_legacy_default
                     and rule.path_pattern not in trusted_path_patterns
@@ -586,18 +778,26 @@ class SensitiveDetector:
                 path_pattern = None
 
             validator: Callable[[str], bool] | None = None
-            if definition is not None and metadata_snapshot is not None:
+            if is_overlay:
+                if rule_overlay is None:  # pragma: no cover - guarded above
+                    raise AssertionError("overlay runtime rule is missing its snapshot")
+                priority = rule_overlay.priorities[rule.name]
+                maskable = bool(rule.replacement)
+                category = rule_overlay.categories[rule.name]
+            elif definition is not None and metadata_snapshot is not None:
                 validator = metadata_snapshot.resolve_validator(definition)
                 registry = metadata_snapshot.component_registry
                 if all(existing is not registry for existing in registries):
                     registries.append(registry)
                 priority = definition.priority
                 maskable = definition.masker != "builtin.none@1.0"
+                category = definition.category.value
             else:
                 # 没有与可信快照逐字段一致的直接规则不能仅凭名称/版本继承
                 # 内置优先级，否则可通过冒用 rule_id 压制真实高风险命中。
                 priority = -ordinal
                 maskable = bool(rule.replacement)
+                category = "custom"
 
             runtime_rules.append(
                 _RuntimeRule(
@@ -608,9 +808,58 @@ class SensitiveDetector:
                     priority=priority,
                     ordinal=ordinal,
                     maskable=maskable,
+                    is_overlay=is_overlay,
+                    is_snapshot_rule=metadata_snapshot is not None,
                 )
             )
-        return tuple(runtime_rules), tuple(registries)
+            category_by_rule[(rule.name, rule.version)] = category
+
+        base_priorities = [
+            runtime_rule.priority
+            for runtime_rule in runtime_rules
+            if not runtime_rule.is_overlay
+        ]
+        if base_priorities:
+            lowest_base_priority = min(base_priorities)
+            if any(
+                runtime_rule.is_overlay
+                and runtime_rule.rule.action is SafetyAction.MASK
+                and runtime_rule.priority >= lowest_base_priority
+                for runtime_rule in runtime_rules
+            ):
+                raise ValueError(
+                    "overlay MASK priorities must be lower than all base rules"
+                )
+
+        if selected_snapshot is not None:
+            component_digest = selected_snapshot.component_registry_digest
+        else:
+            component_digest = canonical_sha256(
+                {
+                    "domain": "memoryhub.safety_audit.custom_components.v1",
+                    "registry_digests": sorted(
+                        {registry.digest for registry in registries}
+                    ),
+                }
+            )
+        return (
+            tuple(runtime_rules),
+            tuple(registries),
+            MappingProxyType(category_by_rule),
+            component_digest,
+        )
+
+    @property
+    def effective_rule_categories(self) -> Mapping[tuple[str, str], str]:
+        """Return immutable audit categories for the detector's effective plan."""
+
+        return self._effective_rule_categories
+
+    @property
+    def effective_component_registry_digest(self) -> str:
+        """Return the component digest bound to the detector's effective plan."""
+
+        return self._effective_component_registry_digest
 
     @classmethod
     def from_config(cls, config: SafetyConfig) -> "SensitiveDetector":
@@ -645,6 +894,7 @@ class SensitiveDetector:
             component_registries=self._component_registries,
             rule_set_version=self.rule_set_version,
             rule_set_digest=self.rule_set_digest,
+            base_rule_set_digest=self.base_rule_set_digest,
             max_depth=self.max_depth,
             max_field_chars=self.max_field_chars,
             max_scan_bytes=self.max_scan_bytes,
@@ -1077,8 +1327,17 @@ class SensitiveDetector:
         state: _ScanState,
         path_rules_only: bool = False,
         unscoped_rules_only: bool = False,
+        ignore_overlay_mask_in_markers: bool = False,
     ) -> list[_Candidate]:
         candidates: list[_Candidate] = []
+        redaction_marker_spans = (
+            tuple(
+                (match.start(), match.end())
+                for match in _REDACTION_MARKER_SPAN_RE.finditer(view.text)
+            )
+            if ignore_overlay_mask_in_markers
+            else ()
+        )
         for runtime_rule in runtime_rules:
             if state.stop and state.candidate_count >= state.max_candidates:
                 break
@@ -1107,6 +1366,16 @@ class SensitiveDetector:
                     state.add_issue("scan.rule.invalid_match_group")
                     continue
                 if normalized_start < 0 or normalized_end <= normalized_start:
+                    continue
+                if (
+                    runtime_rule.is_overlay
+                    and runtime_rule.rule.action is SafetyAction.MASK
+                    and any(
+                        marker_start <= normalized_start
+                        and normalized_end <= marker_end
+                        for marker_start, marker_end in redaction_marker_spans
+                    )
+                ):
                     continue
                 candidate_value = match.group(runtime_rule.rule.match_group)
                 if not isinstance(candidate_value, str):
@@ -1285,6 +1554,7 @@ class SensitiveDetector:
         runtime_rules: tuple[_RuntimeRule, ...],
         state: _ScanState,
         candidates: list[_Candidate],
+        ignore_overlay_mask_in_markers: bool,
     ) -> None:
         """以显式栈递归遍历 JSON-like 值，避免 Python 调用栈被深输入耗尽。"""
 
@@ -1323,6 +1593,7 @@ class SensitiveDetector:
                         target=SafetyFindingTarget.TEXT_SPAN,
                         runtime_rules=runtime_rules,
                         state=state,
+                        ignore_overlay_mask_in_markers=(ignore_overlay_mask_in_markers),
                     )
                 )
                 continue
@@ -1341,6 +1612,7 @@ class SensitiveDetector:
                         target=SafetyFindingTarget.WHOLE_VALUE,
                         runtime_rules=runtime_rules,
                         state=state,
+                        ignore_overlay_mask_in_markers=(ignore_overlay_mask_in_markers),
                     )
                 )
                 continue
@@ -1372,6 +1644,7 @@ class SensitiveDetector:
                     runtime_rules=runtime_rules,
                     state=state,
                     path_rules_only=True,
+                    ignore_overlay_mask_in_markers=ignore_overlay_mask_in_markers,
                 )
             )
             if state.stop:
@@ -1436,6 +1709,7 @@ class SensitiveDetector:
                         runtime_rules=runtime_rules,
                         state=state,
                         unscoped_rules_only=True,
+                        ignore_overlay_mask_in_markers=(ignore_overlay_mask_in_markers),
                     )
                     if key_candidates:
                         # 现有 JSON Pointer 定位成员值，无法安全表达“键名片段”
@@ -1491,6 +1765,8 @@ class SensitiveDetector:
         self,
         event: MemoryEvent,
         plan: _ScanPlan,
+        *,
+        verification: bool = False,
     ) -> tuple[MemoryEvent, SafetyReport]:
         """在显式计划下建立有界事件快照并扫描，供初扫和复检复用。"""
 
@@ -1533,6 +1809,7 @@ class SensitiveDetector:
                 runtime_rules=plan.runtime_rules,
                 state=state,
                 candidates=candidates,
+                ignore_overlay_mask_in_markers=verification,
             )
 
         report_metadata = (
@@ -1566,6 +1843,7 @@ class SensitiveDetector:
                 runtime_rules=plan.runtime_rules,
                 state=state,
                 candidates=candidates,
+                ignore_overlay_mask_in_markers=verification,
             )
         if not state.stop:
             self._traverse_value(
@@ -1576,6 +1854,7 @@ class SensitiveDetector:
                 runtime_rules=plan.runtime_rules,
                 state=state,
                 candidates=candidates,
+                ignore_overlay_mask_in_markers=verification,
             )
         for index, tool_call in enumerate(event_snapshot.tool_calls):
             if state.stop:
@@ -1589,6 +1868,7 @@ class SensitiveDetector:
                 runtime_rules=plan.runtime_rules,
                 state=state,
                 candidates=candidates,
+                ignore_overlay_mask_in_markers=verification,
             )
             if state.stop:
                 break
@@ -1600,6 +1880,7 @@ class SensitiveDetector:
                 runtime_rules=plan.runtime_rules,
                 state=state,
                 candidates=candidates,
+                ignore_overlay_mask_in_markers=verification,
             )
             if state.stop:
                 break
@@ -1611,6 +1892,7 @@ class SensitiveDetector:
                 runtime_rules=plan.runtime_rules,
                 state=state,
                 candidates=candidates,
+                ignore_overlay_mask_in_markers=verification,
             )
             if state.stop:
                 break
@@ -1628,6 +1910,7 @@ class SensitiveDetector:
                 runtime_rules=plan.runtime_rules,
                 state=state,
                 candidates=candidates,
+                ignore_overlay_mask_in_markers=verification,
             )
 
         remaining_root_metadata = (
@@ -1885,11 +2168,18 @@ class SensitiveDetector:
                 "ALLOW policy exceptions are limited to low-risk contextual "
                 "identifiers: " + ", ".join(sorted(ineligible))
             )
+        overlay_names = {
+            runtime.rule.name for runtime in plan.runtime_rules if runtime.is_overlay
+        }
         mismatched = {
             exception.exception_id
             for exception in policy.exceptions
             if exception.rule_set_digest
             and exception.rule_set_digest != plan.rule_set_digest
+            and not (
+                exception.rule_set_digest == plan.base_rule_set_digest
+                and overlay_names.isdisjoint(exception.scope.rule_names)
+            )
         }
         if mismatched:
             raise ValueError(
@@ -1904,13 +2194,20 @@ class SensitiveDetector:
         report: SafetyReport,
         *,
         at: datetime,
+        plan: _ScanPlan,
+        runtime_rule: _RuntimeRule | None,
     ) -> bool:
         if not exception.enabled:
             return False
-        if exception.rule_set_digest and (
-            exception.rule_set_digest != report.rule_set_digest
-        ):
-            return False
+        if exception.rule_set_digest:
+            binds_effective_plan = exception.rule_set_digest == report.rule_set_digest
+            binds_base_rule = (
+                exception.rule_set_digest == plan.base_rule_set_digest
+                and runtime_rule is not None
+                and not runtime_rule.is_overlay
+            )
+            if not binds_effective_plan and not binds_base_rule:
+                return False
         if at >= exception.expires_at:
             return False
         if exception.valid_from is not None and at < exception.valid_from:
@@ -1973,7 +2270,14 @@ class SensitiveDetector:
         ):
             raise SafetyDecisionError("decide.invalid_scan_state")
         self._validate_policy_for_plan(policy, plan)
-        decision_time = datetime.now(timezone.utc)
+        # Some target platforms expose a wall-clock resolution coarser than one
+        # microsecond. Preserve causal ordering so an exception that expires just
+        # after the scan cannot remain valid because both reads returned the same
+        # timestamp.
+        decision_time = max(
+            datetime.now(timezone.utc),
+            report.scanned_at + timedelta(microseconds=1),
+        )
 
         runtime_by_name = {runtime.rule.name: runtime for runtime in plan.runtime_rules}
         rule_overrides = {
@@ -2025,6 +2329,8 @@ class SensitiveDetector:
                     finding,
                     report,
                     at=decision_time,
+                    plan=plan,
+                    runtime_rule=runtime_rule,
                 )
             )
             if matching_exceptions:
@@ -2498,6 +2804,7 @@ class SensitiveDetector:
                     verified_event, verification = self._scan_with_snapshot(
                         candidate,
                         plan,
+                        verification=True,
                     )
                 except SafetyScanError:
                     decision = self._promote_decision(

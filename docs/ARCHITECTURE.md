@@ -124,9 +124,11 @@ graph TB
 ## 2. 写入数据流（事件 → 记忆）
 
 > 当前 v0.1.0 已完成 Safety 数据/方法契约、版本化规则库、递归扫描、策略执行、
-> 事件脱敏、同快照复检、最小化持久审计、REVIEW 加密隔离和强制写入 Gate。
+> 用户自定义敏感规则 Overlay、事件脱敏、同快照复检、最小化持久审计、REVIEW
+> 加密隔离和强制写入 Gate。
 > 普通 SQLite/向量/证据实现仍是后续产品模块，但其内容写入口只能注册为 Gate
-> 的受保护 sink，不能再接收原始事件。
+> 的受保护 sink，不能再接收原始事件。下图是目标装配流；当前 `/events` 仍是
+> `NotImplementedError`，本次提供的动态 provider 尚待该业务端点接线。
 
 ```mermaid
 flowchart TD
@@ -135,7 +137,8 @@ flowchart TD
     B --> C["DataCleaner.clean()<br/>字段校验 · 去重 · 格式化"]
     C --> D["DataNormalizer.normalize()<br/>统一转化为 MemoryEvent"]
     D --> E["QualityScorer.score()<br/>计算 quality_score [0,1]"]
-    E --> F["SensitiveDetector.scan()<br/>扫描正文、工具内容与持久化字符串元数据<br/>生成带实例内完整性标签的 SafetyReport"]
+    E --> Overlay["按 event.user_id 获取不可变用户规则 Overlay<br/>失败关闭 · 每事件固定 detector"]
+    Overlay --> F["SensitiveDetector.scan()<br/>组合内置规则与用户内容规则<br/>生成带实例内完整性标签的 SafetyReport"]
     F --> G["SensitiveDetector.decide()<br/>验证报告/策略快照 · 聚合规则动作"]
 
     G -->|REJECT| Rj["❌ 拒绝入库"]
@@ -550,6 +553,7 @@ graph LR
         P4["⚡ Conflicts<br/>冲突处理"]
         P5["🔍 Retrieval<br/>检索测试"]
         P6["📈 Evaluation<br/>评测报告"]
+        P7["🛡️ Sensitive Rules<br/>用户敏感规则"]
     end
 
     subgraph REST API
@@ -560,6 +564,7 @@ graph LR
         A5["POST /evaluate"]
         A6["POST /forget"]
         A7["POST /feedback"]
+        A8["CRUD /safety/user-rules"]
     end
 
     P1 --> A1
@@ -574,4 +579,9 @@ graph LR
     P5 --> A4
     P5 --> A6
     P6 --> A5
+    P7 --> A8
 ```
+
+敏感规则页面调用 `A8` 时必须携带由认证网关注入的 `X-MemoryHub-User`。matcher
+仅在创建或替换时发送；读取响应不包含 matcher。规则管理 API 已实现，图中的其他
+普通记忆业务 API 仍按各模块当前实现状态为准。

@@ -172,6 +172,45 @@ class ReviewQuarantineConfig:
             )
 
 
+@dataclass(frozen=True)
+class UserRuleConfig:
+    """用户自定义敏感规则配置；matcher 主密钥只允许从凭据边界注入。"""
+
+    enabled: bool = True
+    encryption_key_env: str = "MEMORYHUB_USER_RULE_KEY"
+    key_id: str = "device-local-v1"
+    max_rules_per_user: int = 100
+    max_matcher_chars: int = 2_048
+    allow_advanced_regex: bool = False
+    detector_cache_size: int = 256
+
+    def __post_init__(self) -> None:
+        if type(self.enabled) is not bool:
+            raise ValueError("user_rules enabled must be a boolean")
+        if (
+            not isinstance(self.encryption_key_env, str)
+            or _ENV_NAME_RE.fullmatch(self.encryption_key_env) is None
+        ):
+            raise ValueError(
+                "user_rules encryption_key_env must be an environment variable name"
+            )
+        if (
+            not isinstance(self.key_id, str)
+            or _KEY_ID_RE.fullmatch(self.key_id) is None
+        ):
+            raise ValueError("user_rules key_id must be a stable identifier")
+        for field_name in (
+            "max_rules_per_user",
+            "max_matcher_chars",
+            "detector_cache_size",
+        ):
+            value = getattr(self, field_name)
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"user_rules {field_name} must be a positive integer")
+        if type(self.allow_advanced_regex) is not bool:
+            raise ValueError("user_rules allow_advanced_regex must be a boolean")
+
+
 @dataclass
 class SafetyConfig:
     """安全过滤配置；sensitive_patterns 保留旧字段名，但元素已结构化。"""
@@ -189,6 +228,7 @@ class SafetyConfig:
     reject_on_detect: bool = False
     audit: SafetyAuditConfig = field(default_factory=SafetyAuditConfig)
     quarantine: ReviewQuarantineConfig = field(default_factory=ReviewQuarantineConfig)
+    user_rules: UserRuleConfig = field(default_factory=UserRuleConfig)
     max_depth: int = 32
     max_field_chars: int = 65_536
     max_scan_bytes: int = 2 * 1024 * 1024
@@ -207,6 +247,10 @@ class SafetyConfig:
             self.quarantine = ReviewQuarantineConfig(**dict(self.quarantine))
         elif not isinstance(self.quarantine, ReviewQuarantineConfig):
             raise ValueError("quarantine must be a ReviewQuarantineConfig or mapping")
+        if isinstance(self.user_rules, Mapping):
+            self.user_rules = UserRuleConfig(**dict(self.user_rules))
+        elif not isinstance(self.user_rules, UserRuleConfig):
+            raise ValueError("user_rules must be a UserRuleConfig or mapping")
         for field_name in (
             "max_depth",
             "max_field_chars",

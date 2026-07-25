@@ -130,6 +130,18 @@ safety:
     fsync: true
     fail_closed: true
 
+  # 前端管理的用户自定义敏感规则。matcher 以 AES-256-GCM 密文保存在
+  # storage.db_path 的独立表中，主密钥只从环境变量/设备凭据服务读取。
+  # 此密钥不得与 audit 或 quarantine 密钥复用。
+  user_rules:
+    enabled: true
+    encryption_key_env: "MEMORYHUB_USER_RULE_KEY"
+    key_id: "device-local-v1"
+    max_rules_per_user: 100
+    max_matcher_chars: 2048
+    allow_advanced_regex: false
+    detector_cache_size: 256
+
   # 递归扫描资源预算；快照前的结构超限抛 SafetyScanError，
   # 快照后的候选/Finding 超限返回 scan_complete=false。
   # process() 对不完整扫描失败关闭为 REVIEW/REJECT。

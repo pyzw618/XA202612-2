@@ -11,6 +11,7 @@ memoryhub/                  # 核心 Python 包
 ├── adapter/                # OS Agent 接入适配层
 │   ├── api.py              # REST 路由定义
 │   ├── schemas.py          # 核心数据结构 (Pydantic)
+│   ├── user_rule_schemas.py # 用户敏感规则 REST DTO
 │   └── simulator.py        # OS Agent 模拟器
 ├── core/                   # 记忆核心逻辑
 │   ├── ingestion/          # 多源数据接入 (清洗/标准化/质量评分)
@@ -72,7 +73,8 @@ uvicorn memoryhub.app:app --reload
 3. **规则库**: 内置版本、完整性摘要和来源矩阵见
    `memoryhub/safety_rules/data/` 与 `docs/SAFETY_RULE_LIBRARY.md`
 4. **安全边界**: 规则加载/校验、递归扫描、策略决策、全值脱敏、同快照复检、
-   实例内结果认证、最小化 JSONL 审计链、REVIEW 加密隔离和强制写入 Gate 已实现。
+   用户自定义规则 Overlay、实例内结果认证、最小化 JSONL 审计链、REVIEW 加密隔离
+   和强制写入 Gate 已实现。
    普通 SQLite/向量/证据算法仍是脚手架；实现时只能注册为 Gate 的受保护 sink，
    不得接收原始事件或裸文本
 
@@ -83,6 +85,17 @@ uvicorn memoryhub.app:app --reload
 证据链等内容 sink 签发绑定审计记录的 `ApprovedWrite`，普通日志只接收最小化
 `SafeLogRecord`；`REVIEW` 原事件只以 AES-256-GCM 密文进入独立隔离区；`REJECT`
 不保留原文。审计或隔离失败时不会调用任何普通下游。
+
+前端可通过 `/api/memory/safety/user-rules` CRUD 管理当前用户的敏感规则。
+`mask_match` 遮盖命中片段，`drop_event` 跳过整条待记忆事件；matcher 只写不读并以
+AES-256-GCM 加密。启用前需把独立的 32 字节随机密钥以 Base64 写入
+`MEMORYHUB_USER_RULE_KEY`，由认证网关注入可信 `X-MemoryHub-User` 请求头，并向
+`create_app()` 注入基于认证会话的 `user_rule_identity_resolver`；缺少 resolver
+时管理接口默认失败关闭。
+
+当前仓库的 `/api/memory/events` 和普通存储业务仍是脚手架。本次已提供
+`UserRuleService.detector_provider()` 与 `SafetyWriteGate.from_user_rule_config()`
+接线点；实现真实写入端点时必须通过该 Gate，规则才会在每次实际记忆写入中生效。
 
 安全配置与密钥要求见 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)，数据契约、
 轮转/保留和平台权限边界见 [`docs/INTERFACE.md`](docs/INTERFACE.md)，完整验收矩阵

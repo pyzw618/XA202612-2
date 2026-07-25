@@ -184,6 +184,16 @@ def _validate_subpattern(subpattern: Any, *, inside_repeat: bool = False) -> Non
             continue
         for child in _nested_tokens([(operation, argument)]):
             _validate_subpattern(child, inside_repeat=inside_repeat)
+        # Anchors, lookarounds, and an empty capture group consume no input.
+        # They must not break adjacency tracking: otherwise patterns such as
+        # ``a*()a*`` evade the overlapping-repeat check and can become high-order
+        # backtracking chains when repeated.
+        if operation in (
+            sre_constants.AT,
+            sre_constants.ASSERT,
+            sre_constants.ASSERT_NOT,
+        ) or (operation is sre_constants.SUBPATTERN and len(argument[-1]) == 0):
+            continue
         previous_was_repeat = False
         previous_repeat_chars = None
 

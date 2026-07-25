@@ -557,47 +557,23 @@ class SafetyAuditLog:
         result: SafetyResult,
         detector: "SensitiveDetector",
     ) -> dict[str, Any]:
-        if result.report.rule_set_digest != detector.rule_set_digest:
+        if (
+            result.report.rule_set_digest != detector.rule_set_digest
+            or result.report.rule_set_version != detector.rule_set_version
+        ):
             raise SafetyAuditLogError("audit.snapshot_mismatch")
 
-        snapshot = detector.rule_snapshot
-        category_by_rule: dict[tuple[str, str], str] = {}
-        if snapshot is not None:
-            if (
-                snapshot.digest != result.report.rule_set_digest
-                or snapshot.version != result.report.rule_set_version
-            ):
-                raise SafetyAuditLogError("audit.snapshot_mismatch")
-            category_by_rule = {
-                (rule.rule_id, rule.rule_version): rule.category.value
-                for rule in snapshot.rules
-            }
-            component_digest = snapshot.component_registry_digest
-        else:
-            registry_digests = sorted(
-                {
-                    registry.digest
-                    for registry in getattr(detector, "_component_registries", ())
-                }
-            )
-            component_digest = canonical_sha256(
-                {
-                    "domain": "memoryhub.safety_audit.custom_components.v1",
-                    "registry_digests": registry_digests,
-                }
-            )
+        category_by_rule = detector.effective_rule_categories
+        component_digest = detector.effective_component_registry_digest
 
         category_counter: Counter[str] = Counter()
         for finding in result.audit.findings:
-            if snapshot is None:
-                category = "custom"
-            else:
-                matched_category = category_by_rule.get(
-                    (finding.rule_name, finding.rule_version)
-                )
-                if matched_category is None:
-                    raise SafetyAuditLogError("audit.category_snapshot_mismatch")
-                category = matched_category
+            matched_category = category_by_rule.get(
+                (finding.rule_name, finding.rule_version)
+            )
+            if matched_category is None:
+                raise SafetyAuditLogError("audit.category_snapshot_mismatch")
+            category = matched_category
             category_counter[category] += 1
 
         output_hash: str | None = None
@@ -1123,7 +1099,10 @@ class SafetyAuditLog:
             if not stat.S_ISREG(info.st_mode):
                 raise SafetyAuditLogError("audit.path_unavailable")
             if os.name != "nt":
-                os.fchmod(fd, 0o600)
+                fchmod = getattr(os, "fchmod", None)
+                if fchmod is None:
+                    raise SafetyAuditLogError("audit.permission_failed")
+                fchmod(fd, 0o600)
         except Exception:
             os.close(fd)
             raise

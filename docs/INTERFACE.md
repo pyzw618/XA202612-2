@@ -627,6 +627,30 @@ sanitize 能按路径整体替换而无需猜测虚构字符串 span。
 只含稳定代码。`scan_text()` 没有不完整报告通道，因此遇到同类限制时直接抛出
 `SafetyScanError`。
 
+#### 用户自定义敏感规则
+
+`memoryhub.core.safety.user_rules` 提供按用户隔离的规则管理服务。前端只操作安全
+DTO，不直接构造 `SensitiveRule`：
+
+| 类型 | 关键字段 | 约束 |
+|---|---|---|
+| `CreateUserRuleRequest` | `label`, `kind`, `effect`, `matcher`, `case_sensitive`, `enabled` | `matcher` 是 write-only `SecretStr`；`kind = literal \| advanced_regex`；`effect = mask_match \| drop_event` |
+| `UpdateUserRuleRequest` | `expected_revision` 加任一可更新字段 | 使用乐观并发；空更新无效，替换 matcher 时仍不回显原值 |
+| `UserRuleResponse` | `rule_id`, `label`, `kind`, `effect`, `case_sensitive`, `replacement`, `revision`, `enabled`, `deleted`、时间戳 | 不含 matcher、matcher 指纹、密文、nonce 或原始用户 ID，避免通过创建候选规则形成在线字典 oracle |
+| `SafetyRuleOverlay` | 不可变规则、带密钥摘要、revision、审计分类 | 与内置规则快照组合；不允许覆盖同名内置规则 |
+
+`mask_match` 将命中片段替换为固定 `[REDACTED_USER_DEFINED]`，并在同一 detector
+快照内复检；`drop_event` 映射为 `REJECT`，整条事件不进入普通内容 sink。规则仅作用于
+`/text`、`/payload/**`、`/tool_calls/*/{arguments,result,error}/**`，不扫描身份字段、
+工具名或安全诊断元数据。用户 MASK 的优先级低于全部内置规则，不能削弱内置
+`REVIEW/REJECT`；用户 `drop_event` 可以进一步收紧。
+
+`SafetyWriteGate.from_user_rule_config()` 会装配
+`UserRuleService.detector_provider()`，并在创建磁盘目录前校验三类安全密钥互不复用。
+Gate 为每条事件按 `MemoryEvent.user_id` 选择一次 detector，并在初扫、脱敏、复检、
+验证、审计和隔离全过程复用该实例；规则并发更新只影响后续事件。provider 缺失、
+解密失败或规则损坏均失败关闭，不会退化为仅使用内置规则。
+
 #### SensitiveDetector
 
 | 方法 | 签名 | 输入 | 输出 | 说明 |
@@ -1298,6 +1322,50 @@ POST /api/memory/forget
 | POST | `/api/memory/evaluate/{task_name}` | 运行评测 |
 | GET | `/api/memory/evaluate/reports` | 列出评测报告 |
 
+### 5.5 用户自定义敏感规则
+
+所有接口要求 `X-MemoryHub-User` 请求头。该头必须由本地认证网关根据已认证主体写入并
+覆盖客户端同名输入；同时 `create_app(user_rule_identity_resolver=...)` 必须从认证
+会话解析主体，并确认它与请求头一致。未安装 resolver 时接口默认返回
+`503 user_rule.identity_unavailable`，身份不一致返回 `403 user_rule.identity_mismatch`。
+应用的通配 CORS 是开发配置，生产部署还必须改为明确 origin 白名单。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/memory/safety/user-rules` | 创建规则，返回 `201` |
+| GET | `/api/memory/safety/user-rules?include_deleted=false` | 列出当前用户规则 |
+| GET | `/api/memory/safety/user-rules/{rule_id}` | 获取单条安全元数据 |
+| PATCH | `/api/memory/safety/user-rules/{rule_id}` | 携带 `expected_revision` 更新 |
+| DELETE | `/api/memory/safety/user-rules/{rule_id}?expected_revision=1` | 乐观并发软删除，返回 `204` |
+
+例如，遮盖 `C++20`、`C++23` 这类版本串：
+
+```http
+POST /api/memory/safety/user-rules
+X-MemoryHub-User: user-001
+Content-Type: application/json
+
+{
+  "label": "C++ 版本信息",
+  "kind": "advanced_regex",
+  "effect": "mask_match",
+  "matcher": "C\\+\\+[0-9]{2}",
+  "case_sensitive": false,
+  "enabled": true
+}
+```
+
+该示例要求受信任部署显式设置 `allow_advanced_regex: true`；默认配置会拒绝高级正则。
+响应只返回规则 ID、版本、状态等安全元数据，不返回 matcher 或其确定性指纹。若希望只要
+出现字面量 `C++` 就跳过整条记忆事件，可使用 `kind: "literal"`、
+`effect: "drop_event"`、`matcher: "C++"`。当前没有自然语言分类器，“C++ 的版本
+信息”不会自动推导全部表达形式。`label` 会正常回显，前端不得把 matcher 或其他秘密
+复制到 label。
+
+规则只影响创建或启用后的新写入，不追溯处理既有记忆。错误响应仅包含稳定
+`detail.code`；身份不一致为 `403`，未找到为 `404`，revision 冲突为 `409`，无效
+规则为 `422`，认证 resolver、密钥或存储不可用为 `503`。
+
 ---
 
 ## 6. 存储层映射
@@ -1389,6 +1457,13 @@ POST /api/memory/forget
 | target_memory_ids | JSON | 目标记忆 ID |
 | deleted_count | INT | 删除数量 |
 | created_at | DATETIME | 创建时间 |
+
+#### user_sensitive_rules / user_sensitive_rule_versions 表
+
+`user_sensitive_rules` 保存当前状态，`user_sensitive_rule_versions` 按
+`(user_ref, rule_id, revision)` 追加历史版本。两表都只保存 HMAC 用户引用、规则安全
+元数据、AES-256-GCM nonce/密文、带密钥 matcher 指纹和 key ID；不保存原始用户 ID
+或明文 matcher。删除是带新 revision 的软删除，历史表不覆盖旧版本。
 
 ### 6.2 FAISS 索引
 
