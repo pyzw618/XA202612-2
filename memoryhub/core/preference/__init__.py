@@ -1,10 +1,8 @@
 """
-Preference 模块 — 偏好记忆管理
-
-对外暴露高度集成的偏好生命周期控制器，实现软硬双轨控制与物理回退防御。
+偏好生命周期管理器入口
 """
 
-from memoryhub.adapter.schemas import MemoryEvent, PreferenceMemory, MemoryStatus
+from memoryhub.adapter.schemas import MemoryEvent
 from memoryhub.core.preference.confidence import ConfidenceCalculator
 from memoryhub.core.preference.extractor import PreferenceExtractor
 from memoryhub.core.preference.updater import PreferenceUpdater
@@ -18,36 +16,25 @@ __all__ = [
 
 
 class PreferenceManager:
+    """偏好记忆集成管理器"""
 
     def __init__(self, llm_client=None):
-        """
-        初始化偏好计算、抽取与版本更新组件
-        """
         self.extractor = PreferenceExtractor(llm_client=llm_client)
         self.calculator = ConfidenceCalculator()
-        self.updater = PreferenceUpdater()
+        self.updater = PreferenceUpdater(llm_client=llm_client)
 
     def evolve_preference(self, event: MemoryEvent) -> list[str]:
         """
-        偏好自适应演化总线
-
-        参数:
-            event: 经过 Ingestion 校验后的高质量 MemoryEvent
-
-        返回:
-            受影响或全新生成的偏好 memory_id 列表
+        偏好演化入口：
+        1. 抽取候选偏好与 tags
+        2. 更新置信度
+        3. 经过 ConflictDetector 与 ConflictResolver 校验并提交 updater 版本控制
         """
         processed_ids = []
-        
-        # 1. 触发抽取器生成候选软/硬偏好
         candidates = self.extractor.extract(event)
         
-        # 2. 演化并更新每一条候选偏好
         for candidate in candidates:
-            # 更新/平滑置信度
             self.calculator.update_confidence(candidate, event)
-            
-            # 增量提交至版本管理器（内含崩溃回滚检测）
             res_id = self.updater.add(candidate)
             if res_id:
                 processed_ids.append(res_id)
