@@ -1,15 +1,20 @@
 """
 偏好抽取模块
 
-从 MemoryEvent 中提取用户偏好，支持规则抽取和 LLM 辅助抽取，并提取标签 tags。
+从 MemoryEvent 中提取用户偏好，支持规则抽取和 LLM 辅助抽取，并结合 ConflictDecision 补全 Evidence 链。
 """
 
-import re
 import json
+import re
 from datetime import datetime, timezone
 from memoryhub.adapter.schemas import (
-    MemoryEvent, PreferenceMemory, PreferenceType, 
-    SceneScope, Evidence, SourceType, MemoryLevel
+    Evidence,
+    MemoryEvent,
+    MemoryLevel,
+    PreferenceMemory,
+    PreferenceType,
+    SceneScope,
+    SourceType,
 )
 
 
@@ -62,7 +67,7 @@ class PreferenceExtractor:
                 quality_score=event.quality.score,
                 extract_source="explicit_feedback",
                 level=MemoryLevel.LONG,
-                tags=[target_format.lower(), "format", "output"]
+                tags=[target_format.lower(), "format", "output"],
             )
             candidates.append(pref)
 
@@ -79,7 +84,7 @@ class PreferenceExtractor:
                 quality_score=event.quality.score,
                 extract_source="explicit_feedback",
                 level=MemoryLevel.LONG,
-                tags=["privacy", "safety", "restriction"]
+                tags=["privacy", "safety", "restriction"],
             )
             candidates.append(pref)
 
@@ -137,18 +142,20 @@ Output JSON format:
                 extracted_tags = parsed.get("tags", [])
 
                 if len(h_pref) >= 8 and not any(slot in h_pref.lower() for slot in ["price_range", "flight_class", "="]):
-                    return [PreferenceMemory(
-                        user_id=event.user_id,
-                        preference_type=self._classify_type(pref_type_str),
-                        text=h_pref,
-                        payload=action_payload,
-                        scope=SceneScope(scene=event.scene, task_type=event.task_type),
-                        confidence=0.75,
-                        quality_score=event.quality.score,
-                        extract_source="implicit_inference",
-                        level=MemoryLevel.MID,
-                        tags=extracted_tags if extracted_tags else self._extract_tags_from_text(h_pref)
-                    )]
+                    return [
+                        PreferenceMemory(
+                            user_id=event.user_id,
+                            preference_type=self._classify_type(pref_type_str),
+                            text=h_pref,
+                            payload=action_payload,
+                            scope=SceneScope(scene=event.scene, task_type=event.task_type),
+                            confidence=0.75,
+                            quality_score=event.quality.score,
+                            extract_source="implicit_inference",
+                            level=MemoryLevel.MID,
+                            tags=extracted_tags if extracted_tags else self._extract_tags_from_text(h_pref),
+                        )
+                    ]
                 else:
                     draft_content = h_pref
                     verifier_feedback = "over-specificity or lack of abstraction"
@@ -164,7 +171,6 @@ Output JSON format:
             return PreferenceType.OUTPUT_STYLE
 
     def _extract_tags_from_text(self, text: str) -> list[str]:
-        """从自然语言文本中兜底抽取关键词作为 tags"""
         words = re.findall(r"\b\w{3,}\b", text.lower())
         stopwords = {"using", "with", "from", "that", "this", "have", "preference", "default", "should"}
         return list(set([w for w in words if w not in stopwords]))[:5]
@@ -179,9 +185,10 @@ Output JSON format:
             dt = datetime.now(timezone.utc)
 
         return Evidence(
-            event_id=event.event_id,
+            event_id=getattr(event, "event_id", "") or "",
             content=f"[{event.event_type.upper()}] Source:{event.source_type.value} Quality:{event.quality.score:.2f}",
             source_type=event.source_type,
             timestamp=dt,
-            weight=event.quality.score
+            weight=event.quality.score,
+            decision=None,  # 初始提取的单条事件默认为 None，后续在 ConflictResolver 中标记冲突决策
         )

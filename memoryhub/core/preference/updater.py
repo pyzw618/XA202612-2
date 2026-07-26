@@ -1,14 +1,18 @@
 """
-偏好更新与版本管理模块
+偏好更新与持久化/中长期版本管理器
 
 包含冲突检测 (ConflictDetector)、冲突解决策略 (ConflictResolver) 及版本管理链。
+针对 Evidence 中的 ConflictDecision 进行了精确联动与版本回滚控制。
 """
 
 import json
 from datetime import datetime, timezone
 from memoryhub.adapter.schemas import (
-    PreferenceMemory, MemoryStatus, MemoryLevel, 
-    ConflictDecision, ConflictRecord
+    ConflictDecision,
+    ConflictRecord,
+    MemoryLevel,
+    MemoryStatus,
+    PreferenceMemory,
 )
 
 
@@ -27,9 +31,12 @@ class ConflictDetector:
         """
         # 1. 检查 Scope 重叠
         scope_overlap = (
-            old_pref.is_global or new_pref.is_global or
-            (old_pref.scope.scene in ["*", new_pref.scope.scene] or new_pref.scope.scene in ["*", old_pref.scope.scene]) and
-            (old_pref.scope.task_type in ["*", new_pref.scope.task_type] or new_pref.scope.task_type in ["*", old_pref.scope.task_type])
+            old_pref.is_global
+            or new_pref.is_global
+            or (
+                (old_pref.scope.scene in ["*", new_pref.scope.scene] or new_pref.scope.scene in ["*", old_pref.scope.scene])
+                and (old_pref.scope.task_type in ["*", new_pref.scope.task_type] or new_pref.scope.task_type in ["*", old_pref.scope.task_type])
+            )
         )
         if not scope_overlap:
             return False
@@ -72,18 +79,20 @@ class ConflictDetector:
 class ConflictResolver:
     """冲突解决策略执行器"""
 
-    def auto_resolve(self, old_pref: PreferenceMemory, new_pref: PreferenceMemory, detector: ConflictDetector) -> tuple[ConflictDecision, str]:
+    def auto_resolve(
+        self, old_pref: PreferenceMemory, new_pref: PreferenceMemory, detector: ConflictDetector
+    ) -> tuple[ConflictDecision, str]:
         """
         执行决策矩阵：
-        1. 新记忆来源 = explicit_feedback -> OVERRIDE
-        2. 新旧内容互补 -> MERGE
-        3. scope 不同 -> COEXIST
-        4. 无法自动判断 -> PENDING
+        1. scope 不同 -> COEXIST
+        2. 新记忆来源 = explicit_feedback -> OVERRIDE
+        3. 新旧内容互补/不冲突 -> MERGE
+        4. 隐式推理冲突且置信度较低 -> PENDING
         """
         # 检查 Scope 是否存在完全不重叠的情况
         same_scope = (
-            old_pref.scope.scene == new_pref.scope.scene and 
-            old_pref.scope.task_type == new_pref.scope.task_type
+            old_pref.scope.scene == new_pref.scope.scene
+            and old_pref.scope.task_type == new_pref.scope.task_type
         )
         if not same_scope and not old_pref.is_global and not new_pref.is_global:
             return ConflictDecision.COEXIST, "Scopes differ; both preferences can coexist."
@@ -95,10 +104,9 @@ class ConflictResolver:
         # 冲突判断
         is_conflict = detector.check_preference(old_pref, new_pref)
         if not is_conflict:
-            # 不冲突则判定为互补
             return ConflictDecision.MERGE, "Preferences complement each other."
 
-        # 如果来自隐式推断且置信度差异小，标记待用户确认
+        # 如果来自隐式推断且置信度较低，标记待用户确认
         if new_pref.extract_source == "implicit_inference" and new_pref.confidence < 0.8:
             return ConflictDecision.PENDING, "Implicit preference contradiction requires user confirmation."
 
@@ -110,9 +118,10 @@ class PreferenceUpdater:
 
     _mock_db: dict[str, PreferenceMemory] = {}
 
-    def __init__(self, llm_client=None):
+    def __init__(self, llm_client=None, db_client=None):
         self.detector = ConflictDetector(llm_client=llm_client)
         self.resolver = ConflictResolver()
+        self.db_client = db_client  # 可选注入真实的数据库客户端
 
     def add(self, preference: PreferenceMemory) -> str:
         """新增或更新偏好"""
@@ -134,64 +143,123 @@ class PreferenceUpdater:
             preference.created_at = datetime.now(timezone.utc)
             preference.updated_at = datetime.now(timezone.utc)
             self._mock_db[preference.memory_id] = preference
+
+            # TODO: [DB 落盘] 写入全新的偏好记忆记录
+            # if self.db_client:
+            #     self.db_client.save_preference(preference)
+
             return preference.memory_id
 
         # 触发冲突检测与解决决策矩阵
         decision, reason = self.resolver.auto_resolve(existing_pref, preference, self.detector)
-        
-        # 记录冲突日志
-        ConflictRecord(
+
+        # 标记新偏好内部证据链中的 decision 属性
+        for e in preference.evidences:
+            if e.decision is None:
+                e.decision = decision
+
+        # 构造冲突记录对象
+        conflict_rec = ConflictRecord(
             old_memory_id=existing_pref.memory_id,
             new_memory_id=preference.memory_id,
             memory_type="preference",
             old_content=existing_pref.text,
             new_content=preference.text,
             decision=decision,
-            reason=reason
+            reason=reason,
         )
 
         if decision == ConflictDecision.OVERRIDE:
-            return self.update(existing_pref.memory_id, preference)
+            # update 方法内部已实现包含冲突日志在内的事务级落盘
+            return self.update(existing_pref.memory_id, preference, conflict_rec)
+
         elif decision == ConflictDecision.MERGE:
             merged = self.merge(existing_pref, preference)
             self._mock_db[merged.memory_id] = merged
             existing_pref.status = MemoryStatus.ARCHIVED
+
+            # TODO: [DB 事务落盘] 原子化写入合并偏好、归档旧偏好并保存冲突审计日志
+            # if self.db_client:
+            #     with self.db_client.transaction():
+            #         self.db_client.save_preference(merged)
+            #         self.db_client.update_status(existing_pref.memory_id, MemoryStatus.ARCHIVED)
+            #         self.db_client.save_conflict_record(conflict_rec)
+
             return merged.memory_id
+
         elif decision == ConflictDecision.COEXIST:
             preference.status = MemoryStatus.ACTIVE
             preference.root_id = preference.memory_id
             self._mock_db[preference.memory_id] = preference
-            return preference.memory_id
-        else: # PENDING
-            preference.status = MemoryStatus.PENDING
-            self._mock_db[preference.memory_id] = preference
+
+            # TODO: [DB 落盘] 保存共存的新偏好并记录冲突评估日志
+            # if self.db_client:
+            #     with self.db_client.transaction():
+            #         self.db_client.save_preference(preference)
+            #         self.db_client.save_conflict_record(conflict_rec)
+
             return preference.memory_id
 
-    def update(self, old_id: str, new_preference: PreferenceMemory) -> str:
+        else:  # PENDING
+            preference.status = MemoryStatus.PENDING
+            self._mock_db[preference.memory_id] = preference
+
+            # TODO: [DB 落盘] 保存待人工确认的偏好记录及冲突日志
+            # if self.db_client:
+            #     with self.db_client.transaction():
+            #         self.db_client.save_preference(preference)
+            #         self.db_client.save_conflict_record(conflict_rec)
+
+            return preference.memory_id
+
+    def update(
+        self,
+        old_id: str,
+        new_preference: PreferenceMemory,
+        conflict_rec: ConflictRecord | None = None,
+    ) -> str:
         """更新版本链条并维护中长期记忆状态"""
         old_pref = self._mock_db.get(old_id)
         if not old_pref:
             new_preference.status = MemoryStatus.ACTIVE
             new_preference.root_id = new_preference.memory_id
             self._mock_db[new_preference.memory_id] = new_preference
+
+            # TODO: [DB 落盘] 找不到旧偏好时作为新记录落盘
+            # if self.db_client:
+            #     self.db_client.save_preference(new_preference)
+
             return new_preference.memory_id
 
-        # 检查崩溃回滚
+        # 检查异常回滚：统计近 7 天内处于 OVERRIDE 状态的冲突证据占比
         now = datetime.now(timezone.utc)
         recent_evidences = [
-            e for e in old_pref.evidences 
+            e
+            for e in old_pref.evidences
             if (now - (e.timestamp.replace(tzinfo=timezone.utc) if not e.timestamp.tzinfo else e.timestamp)).days <= 7
         ]
-        overrides_count = sum(1 for e in recent_evidences if "OVERRIDE" in e.content)
+        override_count = sum(1 for e in recent_evidences if e.decision == ConflictDecision.OVERRIDE)
 
-        if len(recent_evidences) >= 3 and (overrides_count / len(recent_evidences)) >= 0.7:
+        if len(recent_evidences) >= 3 and (override_count / len(recent_evidences)) >= 0.7:
             if old_pref.parent_id and old_pref.parent_id in self._mock_db:
                 self._mock_db[old_pref.parent_id].status = MemoryStatus.ACTIVE
                 self._mock_db[old_pref.parent_id].updated_at = datetime.now(timezone.utc)
                 old_pref.status = MemoryStatus.ARCHIVED
+
+                # TODO: [DB 事务落盘] 执行版本回滚落盘：激活父节点，归档当前节点
+                # if self.db_client:
+                #     with self.db_client.transaction():
+                #         self.db_client.update_status(old_pref.parent_id, MemoryStatus.ACTIVE)
+                #         self.db_client.update_status(old_id, MemoryStatus.ARCHIVED)
+
                 return old_pref.parent_id
             else:
                 old_pref.status = MemoryStatus.DELETED
+
+                # TODO: [DB 落盘] 无可回滚父节点，软删除当前记录
+                # if self.db_client:
+                #     self.db_client.update_status(old_id, MemoryStatus.DELETED)
+
                 return ""
 
         # 正常递增版本
@@ -210,6 +278,15 @@ class PreferenceUpdater:
 
         old_pref.status = MemoryStatus.ARCHIVED
         self._mock_db[new_preference.memory_id] = new_preference
+
+        # TODO: [DB 事务落盘] 原子化更新：1. 写入新版本偏好；2. 更新旧偏好状态为 ARCHIVED；3. 保存冲突审计日志
+        # if self.db_client:
+        #     with self.db_client.transaction():
+        #         self.db_client.save_preference(new_preference)
+        #         self.db_client.update_status(old_id, MemoryStatus.ARCHIVED)
+        #         if conflict_rec:
+        #             self.db_client.save_conflict_record(conflict_rec)
+
         return new_preference.memory_id
 
     def merge(self, pref_a: PreferenceMemory, pref_b: PreferenceMemory) -> PreferenceMemory:
@@ -235,5 +312,44 @@ class PreferenceUpdater:
             root_id=pref_a.root_id or pref_a.memory_id,
             evidences=merged_evidences[-15:],
             created_at=min(pref_a.created_at, pref_b.created_at),
-            updated_at=datetime.now(timezone.utc)
+            updated_at=datetime.now(timezone.utc),
         )
+
+    def get_version_chain(self, memory_id: str) -> list[PreferenceMemory]:
+        """获取偏好的完整版本演进链条（按时间升序排列）"""
+        chain = []
+        curr_id = memory_id
+        visited = set()  # 防止版本圈回环异常
+
+        while curr_id and curr_id not in visited:
+            pref = self._mock_db.get(curr_id)
+            if not pref:
+                # TODO: [DB 查询] 如果 Mock DB 查不到，可向数据库追溯历史版本
+                # if self.db_client:
+                #     pref = self.db_client.get_preference_by_id(curr_id)
+                #     if not pref: break
+                break
+
+            chain.insert(0, pref)
+            visited.add(curr_id)
+            curr_id = pref.parent_id
+
+        return chain
+
+    def archive(self, memory_id: str) -> bool:
+        """显式归档某条偏好"""
+        pref = self._mock_db.get(memory_id)
+        if pref:
+            pref.status = MemoryStatus.ARCHIVED
+            pref.updated_at = datetime.now(timezone.utc)
+
+            # TODO: [DB 落盘] 更新数据库中该偏好的状态与更新时间
+            # if self.db_client:
+            #     self.db_client.update_status(
+            #         memory_id=memory_id,
+            #         status=MemoryStatus.ARCHIVED,
+            #         updated_at=pref.updated_at
+            #     )
+
+            return True
+        return False

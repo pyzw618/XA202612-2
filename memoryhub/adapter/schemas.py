@@ -163,6 +163,7 @@ class Evidence(BaseModel):
     source_type: SourceType = SourceType.TOOL_RESULT
     timestamp: datetime = Field(default_factory=datetime.now)
     weight: float = 1.0  # 该证据的权重
+    decision: ConflictDecision | None = None  # 如 OVERRIDE, MERGE, COEXIST, PENDING 或 None
 
 
 # ============================================================
