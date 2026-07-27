@@ -107,33 +107,10 @@ class ConfidenceCalculator:
 
         return 1.2 if consistency_ratio >= 0.8 else (0.5 + 0.5 * consistency_ratio)
 
-    def update_confidence(self, preference: PreferenceMemory, new_event: MemoryEvent) -> float:
-        """增量更新置信度"""
-        epsilon_t = 0.0
-        status = str(new_event.payload.get("status", "")).upper()
-        user_action = str(new_event.payload.get("user_action", "")).upper()
-
-        # 解析冲突决策 ConflictDecision
-        conflict_decision = None
-        if user_action == "OVERRIDE" or status in ["USER_REJECT", "REJECT"]:
-            conflict_decision = ConflictDecision.OVERRIDE
-            epsilon_t += 0.8
-        elif user_action == "MERGE":
-            conflict_decision = ConflictDecision.MERGE
-
-        dt = parse_occurred_at(new_event.occurred_at)
-        event_id = getattr(new_event, "event_id", "") or ""
-
-        # 构造搭载 ConflictDecision 的 Evidence
-        new_evidence = Evidence(
-            event_id=event_id,
-            content=f"[{new_event.event_type.upper()}] Status:{status} Action:{user_action}",
-            source_type=new_event.source_type,
-            timestamp=dt,
-            weight=max(0.1, 1.0 - epsilon_t),
-            decision=conflict_decision,
-        )
-
-        preference.evidences.append(new_evidence)
-
+    def update_confidence(self, preference: PreferenceMemory, new_event: MemoryEvent | None = None) -> float:
+        """
+        更新偏好置信度接口：
+        证据链及 ConflictDecision 决策已由 Extractor 和 Updater 完成注入，
+        此处直接基于最新的 preference.evidences 执行综合评估。
+        """
         return self.calculate(preference)

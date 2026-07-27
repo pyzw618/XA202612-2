@@ -1348,7 +1348,7 @@ class PreferenceMemory(BaseModel):
     quality_score: float = 1.0             # [0, 1] 来源 MemoryEvent 的质量评分
     extract_source: str = "implicit_inference" # 提取来源: explicit_feedback / implicit_inference
     status: MemoryStatus = MemoryStatus.ACTIVE
-    level: MemoryLevel = MemoryLevel.LONG
+    level: MemoryLevel = MemoryLevel.MID
 
     # --- 版本管理链条 ---
     version: int = 1
