@@ -216,3 +216,21 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# 比赛资料（不上传，太大/非代码）
+*.pptx
+*.pdf
+
+# 运行时数据
+data/
+
+# 操作系统杂项
+Thumbs.db
+.DS_Store
+*.swp
+*.swo
+
+# PyQt6 打包产物
+*.spec
+dist/
+build/
+*.exe
