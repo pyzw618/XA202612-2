@@ -44,7 +44,7 @@ def run_tests():
     # 创建一个通用的高质量 EventQuality 测试对象
     default_quality = EventQuality(
     score=0.9,
-    status=QualityStatus.VALID,  # 或者如果 QualityStatus 是 StrEnum，也可以用 "valid"
+    status=QualityStatus.ACCEPTED,  # 或者如果 QualityStatus 是 StrEnum，也可以用 "valid"
     completeness=0.9,
     validity=0.9,
     consistency=0.9,
