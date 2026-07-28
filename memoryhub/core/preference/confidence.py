@@ -32,7 +32,6 @@ class ConfidenceCalculator:
         SourceType.USER_BEHAVIOR: 1.0,     # 用户显式行为/直接反馈
         SourceType.MANUAL_CONFIG: 0.95,    # 手动配置
         SourceType.TOOL_RESULT: 0.6,       # 工具执行产生的隐式偏好
-        SourceType.ASSISTANT_LOG: 0.4,     # 单次模型推论/日志
     }
 
     def calculate(self, preference: PreferenceMemory) -> float:
