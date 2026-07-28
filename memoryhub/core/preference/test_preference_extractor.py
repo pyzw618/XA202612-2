@@ -1,117 +1,74 @@
+import json
 import os
 import sys
 
 # -------------------------------------------------------------------------
-# 自动寻找并添加根目录到 sys.path
-# 当前文件在: memoryhub/core/preference/test_preference_extractor.py
-# 向上退三层目录即可定位到项目根目录 (包含 memoryhub 文件夹的那个目录)
+# 1. 自动定位根目录
 # -------------------------------------------------------------------------
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "../../../"))
-
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-# -------------------------------------------------------------------------
-# 接下来再进行项目的模块导入，就不会报错了
-# -------------------------------------------------------------------------
-from memoryhub.core.preference.llm_client import OpenAIClientAdapter
+from memoryhub.adapter.schemas import MemoryEvent
 from memoryhub.core.preference.extractor import PreferenceExtractor
-from memoryhub.adapter.schemas import (
-    MemoryEvent,
-    SourceType,
-    EventQuality,
-    MemoryLevel,
-    PreferenceType,
-    QualityStatus,
-)
+from memoryhub.core.preference.llm_client import OpenAIClientAdapter
 
-def run_tests():
-    # 1. 初始化 API 客户端
-    print("正在初始化 Windows 环境 API 客户端...")
-    
-    # ⚠️ 请将 model_name 修改为你当前使用的模型名称
+# 数据清洗团队提供的测试集原始 JSON 文本
+RAW_TEST_DATA = """
+{"event_id": "lme:gpt4_2655b836:answer_4be1b6b4_2:0", "source_type": "user_behavior", "event_type": "user_action", "user_id": "longmemeval:gpt4_2655b836", "session_id": "answer_4be1b6b4_2", "scene": "long_term_memory", "task_type": "temporal-reasoning", "occurred_at": "2023-04-10T17:50:00Z", "text": "I'm thinking of getting my car detailed soon. Do you know any good detailers in the area or have any recommendations? By the way, I just got my car serviced for the first time on March 15th, and it was a great experience.", "payload": {"action": "message", "role": "user", "has_answer": true}, "schema_version": "1.0", "source_hash": "3e3cb8653158cc19873f60644484bc3e33b5b2706d6bcaeee29a18a3aa4c3101", "redactions": [], "quality": {"score": 0.94, "status": "accepted", "completeness": 1.0, "validity": 1.0, "consistency": 1.0, "freshness": 0.4, "issues": ["freshness:stale_event"]}}
+{"event_id": "lme:gpt4_2655b836:answer_4be1b6b4_2:2", "source_type": "user_behavior", "event_type": "user_action", "user_id": "longmemeval:gpt4_2655b836", "session_id": "answer_4be1b6b4_2", "scene": "long_term_memory", "task_type": "temporal-reasoning", "occurred_at": "2023-04-10T17:50:00Z", "text": "I'll definitely check out those review websites and ask around for referrals. Do you think it's a good idea to get a wax and detailing done every 3-4 months to maintain the car's appearance and protect the paint?", "payload": {"action": "message", "role": "user", "has_answer": false}, "schema_version": "1.0", "source_hash": "8b0f150f4ea4ead9c7cdedbadfdb9f206b91c43e3fa622c3a2b748b44080a71f", "redactions": [], "quality": {"score": 0.94, "status": "accepted", "completeness": 1.0, "validity": 1.0, "consistency": 1.0, "freshness": 0.4, "issues": ["freshness:stale_event"]}}
+{"event_id": "lme:gpt4_2655b836:answer_4be1b6b4_2:4", "source_type": "user_behavior", "event_type": "user_action", "user_id": "longmemeval:gpt4_2655b836", "session_id": "answer_4be1b6b4_2", "scene": "long_term_memory", "task_type": "temporal-reasoning", "occurred_at": "2023-04-10T17:50:00Z", "text": "Yup, that makes sense. I've been keeping track of my gas mileage too, and I've been getting around 32 miles per gallon, which is better than my old car.", "payload": {"action": "message", "role": "user", "has_answer": false}, "schema_version": "1.0", "source_hash": "04404dd9df5fde5e83bf03c9c8ec0e23f99a459a6662b4e7b7a3f460ec384905", "redactions": [], "quality": {"score": 0.94, "status": "accepted", "completeness": 1.0, "validity": 1.0, "consistency": 1.0, "freshness": 0.4, "issues": ["freshness:stale_event"]}}
+{"event_id": "lme:gpt4_2655b836:answer_4be1b6b4_2:6", "source_type": "user_behavior", "event_type": "user_action", "user_id": "longmemeval:gpt4_2655b836", "session_id": "answer_4be1b6b4_2", "scene": "long_term_memory", "task_type": "temporal-reasoning", "occurred_at": "2023-04-10T17:50:00Z", "text": "I've also been using the rewards program at the Shell gas station near my office to earn points. Do you think it's worth it to focus on earning points at one gas station or to try to earn points across multiple stations?", "payload": {"action": "message", "role": "user", "has_answer": false}, "schema_version": "1.0", "source_hash": "268afea4d4f9872dce8694405318e8603036a4ddef291421a004fc1bc2b66681", "redactions": [], "quality": {"score": 0.94, "status": "accepted", "completeness": 1.0, "validity": 1.0, "consistency": 1.0, "freshness": 0.4, "issues": ["freshness:stale_event"]}}
+{"event_id": "lme:gpt4_2655b836:answer_4be1b6b4_2:8", "source_type": "user_behavior", "event_type": "user_action", "user_id": "longmemeval:gpt4_2655b836", "session_id": "answer_4be1b6b4_2", "scene": "long_term_memory", "task_type": "temporal-reasoning", "occurred_at": "2023-04-10T17:50:00Z", "text": "I've also been redeeming points from my credit card to get rewards. I recently redeemed 50,000 points to get a $500 gift card to a car accessories store. I used it to purchase a new car cover, floor mats, and a steering wheel cover, which I'm really happy with.", "payload": {"action": "message", "role": "user", "has_answer": false}, "schema_version": "1.0", "source_hash": "68cabe9fd23445bcaff7b9dd72c959c14174bf8da5040618d585d29aec67a31b", "redactions": [], "quality": {"score": 0.94, "status": "accepted", "completeness": 1.0, "validity": 1.0, "consistency": 1.0, "freshness": 0.4, "issues": ["freshness:stale_event"]}}
+""".strip()
+
+
+def run_dataset_tests():
+    print("🚀 正在加载 API 客户端并分析清洗后的测试集...\n")
     llm_client = OpenAIClientAdapter(model_name="gpt-5.6-sol")
-
-    # 2. 实例化偏好抽取器
     extractor = PreferenceExtractor(llm_client=llm_client)
-    print("✅ 偏好抽取器初始化完成！\n")
 
-    # =========================================================================
-    # 测试场景 1：规则 A 测试（格式偏好 / 局部作用域）
-    # =========================================================================
-    print("--- [测试 1/3] 规则 A 匹配（格式偏好）---")
-    # 创建一个通用的高质量 EventQuality 测试对象
-    default_quality = EventQuality(
-    score=0.9,
-    status=QualityStatus.ACCEPTED,  # 或者如果 QualityStatus 是 StrEnum，也可以用 "valid"
-    completeness=0.9,
-    validity=0.9,
-    consistency=0.9,
-    freshness=0.9,
-    issues=[],  # 有默认值，可传可不传
+    # 逐行解析 JSONL 测试集数据
+    lines = RAW_TEST_DATA.strip().split("\n")
+    print(f"📊 成功读取 {len(lines)} 条用户行为事件，开始提取隐式偏好...\n")
+
+    total_extracted = 0
+
+    for idx, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+
+        data = json.loads(line)
+
+        # 反序列化为标准的 MemoryEvent（验证字段匹配度）
+        event = MemoryEvent(**data)
+
+        print(
+            f"------------------- [事件 {idx}/{len(lines)}] -------------------"
+        )
+        print(f"📌 事件 ID: {event.event_id}")
+        print(f"💬 用户输入: \"{event.text}\"")
+
+        # 执行抽取
+        extracted_preferences = extractor.extract(event)
+
+        if extracted_preferences:
+            total_extracted += len(extracted_preferences)
+            for p_idx, pref in enumerate(extracted_preferences, 1):
+                print(f"  ✅ 提取到偏好 [{p_idx}]:")
+                print(f"     • 描述: {pref.text}")
+                print(f"     • 类型: {pref.preference_type}")
+                print(f"     • 全局: {pref.is_global}")
+                print(f"     • 作用域: scene={pref.scope.scene}")
+        else:
+            print("  ℹ️ 未从该单条文本中提取出硬偏好/有效偏好")
+        print()
+
+    print(
+        f"🎉 测试集测试完毕！共处理 {len(lines)} 条事件，成功抽取出 {total_extracted} 条持久化偏好对象。"
     )
-    event_rule_a = MemoryEvent(
-        user_id="user_win_001",
-        source_type=SourceType.USER_BEHAVIOR,
-        text="以后写 Python 代码时，默认用 json 格式返回数据",
-        scene="coding",
-        task_type="python",
-        quality=default_quality,
-    )
-    res_a = extractor.extract(event_rule_a)
-    _print_results("规则 A", res_a)
-
-    # =========================================================================
-    # 测试场景 2：规则 B 测试（隐私与安全约束 / 全局域）
-    # =========================================================================
-    print("\n--- [测试 2/3] 规则 B 匹配（隐私安全约束）---")
-    event_rule_b = MemoryEvent(
-        user_id="user_win_001",
-        source_type=SourceType.USER_BEHAVIOR,
-        text="Please don't save my passwords, tokens, or live location anywhere.",
-        scene="chat",
-        quality=default_quality,
-    )
-    res_b = extractor.extract(event_rule_b)
-    _print_results("规则 B", res_b)
-
-    # =========================================================================
-    # 测试场景 3：LLM 辅助抽取（调用在线 API / 隐式偏好 + 双重 global 验证）
-    # =========================================================================
-    print("\n--- [测试 3/3] LLM 辅助抽取（触发真实 API 调用中...）---")
-    event_llm = MemoryEvent(
-        user_id="user_win_001",
-        source_type=SourceType.USER_BEHAVIOR,
-        text="In all scenarios, please keep your technical code explanations super concise and brief.",
-        scene="coding",
-        task_type="code_review",
-        payload={
-            "status": "SUCCESS",
-            "date": "2026-07-28",  # 会被 clean_payload 自动过滤
-            "user_rating": 5
-        },
-        quality=EventQuality(score=0.85),  # 分数 >= 0.6 触发 LLM 抽取
-    )
-    res_llm = extractor.extract(event_llm)
-    _print_results("LLM 抽取", res_llm)
-
-
-def _print_results(test_name: str, results: list):
-    if not results:
-        print(f"⚠️ {test_name}: 未匹配到任何偏好！")
-        return
-
-    for idx, pref in enumerate(results, 1):
-        print(f"✅ {test_name} [{idx}] 抽取成功：")
-        print(f"  • 偏好描述 (text):       {pref.text}")
-        print(f"  • 偏好类型 (type):       {pref.preference_type}")
-        print(f"  • 是否全局 (is_global):  {pref.is_global}")
-        print(f"  • 作用域 (scope):        scene='{pref.scope.scene}', task_type='{pref.scope.task_type}'")
-        print(f"  • 记忆层级 (level):      {pref.level}")
-        print(f"  • 抽取来源 (source):     {pref.extract_source}")
-        print(f"  • 标签 (tags):           {pref.tags}")
 
 
 if __name__ == "__main__":
-    run_tests()
+    run_dataset_tests()
