@@ -15,7 +15,7 @@ if PROJECT_ROOT not in sys.path:
 # -------------------------------------------------------------------------
 # 接下来再进行项目的模块导入，就不会报错了
 # -------------------------------------------------------------------------
-from llm_client import OpenAIClientAdapter
+from memoryhub.core.preference.llm_client import OpenAIClientAdapter
 from memoryhub.core.preference.extractor import PreferenceExtractor
 from memoryhub.adapter.schemas import (
     MemoryEvent,
