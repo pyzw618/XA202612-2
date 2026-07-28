@@ -222,18 +222,18 @@ Output JSON format:
 
         return []
 
-    def _classify_type(self, text: str) -> PreferenceType:
+def _classify_type(self, text: str) -> PreferenceType:
         try:
             return PreferenceType(text)
         except ValueError:
             return PreferenceType.OUTPUT_STYLE
 
-    def _extract_tags_from_text(self, text: str) -> list[str]:
+def _extract_tags_from_text(self, text: str) -> list[str]:
         words = re.findall(r"\b\w{3,}\b", text.lower())
         stopwords = {"using", "with", "from", "that", "this", "have", "preference", "default", "should"}
         return list(set([w for w in words if w not in stopwords]))[:5]
 
-    def _build_evidence(self, event: MemoryEvent) -> Evidence:
+def _build_evidence(self, event: MemoryEvent) -> Evidence:
         if event.occurred_at:
             try:
                 dt = datetime.strptime(event.occurred_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
