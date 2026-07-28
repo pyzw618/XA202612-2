@@ -41,7 +41,7 @@ class PreferenceExtractor:
 
         return candidates
 
-def _rule_extract(self, event: MemoryEvent) -> list[PreferenceMemory]:
+    def _rule_extract(self, event: MemoryEvent) -> list[PreferenceMemory]:
         """规则模板抽取（显式偏好 / 硬约束）"""
         if event.source_type not in [SourceType.USER_BEHAVIOR, SourceType.MANUAL_CONFIG]:
             return []
@@ -60,16 +60,15 @@ def _rule_extract(self, event: MemoryEvent) -> list[PreferenceMemory]:
         )
         match = re.search(pattern_format, text, re.IGNORECASE)
         if match:
-            prefix = match.group(1)
             target_format = match.group(3).upper()
 
-            # 扩展后的全局判断
+            # 扩展后的全局判断（直接在全文 text 中检索全局关键词，解决捕获组未完全包含全局修饰词的 Bug）
             global_keywords = [
                 "全局", "所有场景", "任何场景", "任何地方", "在任何地方", "跨场景", "始终", "一律", "总是",
                 "globally", "everywhere", "always", "all scenarios", "all contexts"
             ]
             is_global_pref = (
-                any(kw in prefix.lower() for kw in global_keywords)
+                any(kw in text.lower() for kw in global_keywords)
                 or event.scene == "*"
             )
 
@@ -119,7 +118,7 @@ def _rule_extract(self, event: MemoryEvent) -> list[PreferenceMemory]:
 
         return candidates
 
-def _llm_extract(self, event: MemoryEvent) -> list[PreferenceMemory]:
+    def _llm_extract(self, event: MemoryEvent) -> list[PreferenceMemory]:
         """LLM 辅助抽取（隐式偏好）：三代 GVR 循环"""
         if not self.llm_client:
             return []
@@ -222,18 +221,18 @@ Output JSON format:
 
         return []
 
-def _classify_type(self, text: str) -> PreferenceType:
+    def _classify_type(self, text: str) -> PreferenceType:
         try:
             return PreferenceType(text)
         except ValueError:
             return PreferenceType.OUTPUT_STYLE
 
-def _extract_tags_from_text(self, text: str) -> list[str]:
+    def _extract_tags_from_text(self, text: str) -> list[str]:
         words = re.findall(r"\b\w{3,}\b", text.lower())
         stopwords = {"using", "with", "from", "that", "this", "have", "preference", "default", "should"}
         return list(set([w for w in words if w not in stopwords]))[:5]
 
-def _build_evidence(self, event: MemoryEvent) -> Evidence:
+    def _build_evidence(self, event: MemoryEvent) -> Evidence:
         if event.occurred_at:
             try:
                 dt = datetime.strptime(event.occurred_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)

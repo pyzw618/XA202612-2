@@ -4,23 +4,33 @@ from openai import OpenAI
 
 
 class OpenAIClientAdapter:
-    """Windows 兼容的 API 客户端适配器"""
+    """OpenAI API 客户端适配器"""
 
-    def __init__(self, model_name: str = "gpt-5.6-sol"):
-        """
-        :param model_name: 调用的模型名称 (例如: gpt-4o-mini, deepseek-chat, Qwen/Qwen2.5-7B-Instruct)
-        """
-        api_key = os.getenv("OPENAI_API_KEY") or "sk-xen2GeBn0BleDqJOYTqiGWdbfGtTJClr024pV3Lbs3da1jnx"
-        base_url = os.getenv("OPENAI_BASE_URL", "https://cortexlane.cloud/")
-
-        if not api_key:
-            raise ValueError("❌ 环境变量 OPENAI_API_KEY 未设置！请检查环境变量配置。")
-
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
+    def __init__(
+        self,
+        api_key: str = None,
+        base_url: str = None,
+        model_name: str = "gpt-5.6-sol",
+    ):
+        # 1. 优先使用传入参数，其次读取环境变量
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
         self.model_name = model_name
 
+        if not self.api_key:
+            raise ValueError(
+                "❌ 未检测到 API Key！请在构造函数中传入 api_key 或设置 OPENAI_API_KEY 环境变量。"
+            )
+
+        # 2. 组装客户端初始化参数
+        client_kwargs = {"api_key": self.api_key}
+        if self.base_url:
+            client_kwargs["base_url"] = self.base_url
+
+        self.client = OpenAI(**client_kwargs)
+
     def generate(self, system_prompt: str, user_prompt: str) -> str:
-        """提供给 PreferenceExtractor 调用的生成函数"""
+        """调用 LLM 并返回文本响应 (str)"""
         try:
             response = self.client.chat.completions.create(
                 model=self.model_name,
@@ -29,18 +39,12 @@ class OpenAIClientAdapter:
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.1,
-                response_format={"type": "json_object"},  # 强约束 JSON 输出
             )
 
-            content = response.choices[0].message.content or ""
-
-            # 容错：去除 Markdown 代码块包裹
-            if "```" in content:
-                match = re.search(r"```(?:json)?\s*(.*?)\s*```", content, re.DOTALL)
-                if match:
-                    content = match.group(1)
-
-            return content.strip()
+            # 3. 解析并安全返回文本内容
+            if hasattr(response, "choices") and response.choices:
+                return response.choices[0].message.content or ""
+            return str(response)
 
         except Exception as e:
             print(f"❌ API 请求失败: {e}")
