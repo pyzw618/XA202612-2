@@ -10,7 +10,7 @@ class OpenAIClientAdapter:
         """
         :param model_name: 调用的模型名称 (例如: gpt-4o-mini, deepseek-chat, Qwen/Qwen2.5-7B-Instruct)
         """
-        api_key = os.getenv("sk-xen2GeBn0BleDqJOYTqiGWdbfGtTJClr024pV3Lbs3da1jnx")
+        api_key = os.getenv("OPENAI_API_KEY") or "sk-xen2GeBn0BleDqJOYTqiGWdbfGtTJClr024pV3Lbs3da1jnx"
         base_url = os.getenv("OPENAI_BASE_URL", "https://cortexlane.cloud/")
 
         if not api_key:
