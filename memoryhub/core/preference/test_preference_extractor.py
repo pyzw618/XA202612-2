@@ -23,6 +23,7 @@ from memoryhub.adapter.schemas import (
     EventQuality,
     MemoryLevel,
     PreferenceType,
+    QualityStatus,
 )
 
 def run_tests():
@@ -40,13 +41,23 @@ def run_tests():
     # 测试场景 1：规则 A 测试（格式偏好 / 局部作用域）
     # =========================================================================
     print("--- [测试 1/3] 规则 A 匹配（格式偏好）---")
+    # 创建一个通用的高质量 EventQuality 测试对象
+    default_quality = EventQuality(
+    score=0.9,
+    status=QualityStatus.VALID,  # 或者如果 QualityStatus 是 StrEnum，也可以用 "valid"
+    completeness=0.9,
+    validity=0.9,
+    consistency=0.9,
+    freshness=0.9,
+    issues=[],  # 有默认值，可传可不传
+    )
     event_rule_a = MemoryEvent(
         user_id="user_win_001",
         source_type=SourceType.USER_BEHAVIOR,
         text="以后写 Python 代码时，默认用 json 格式返回数据",
         scene="coding",
         task_type="python",
-        quality=EventQuality(score=0.9),
+        quality=default_quality,
     )
     res_a = extractor.extract(event_rule_a)
     _print_results("规则 A", res_a)
@@ -60,7 +71,7 @@ def run_tests():
         source_type=SourceType.USER_BEHAVIOR,
         text="Please don't save my passwords, tokens, or live location anywhere.",
         scene="chat",
-        quality=EventQuality(score=0.95),
+        quality=default_quality,
     )
     res_b = extractor.extract(event_rule_b)
     _print_results("规则 B", res_b)
