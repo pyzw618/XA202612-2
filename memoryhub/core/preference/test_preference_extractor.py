@@ -1,16 +1,29 @@
 import os
 import sys
 
-# Windows 下防止模块导入找不到路径，将当前目录加入 sys.path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# -------------------------------------------------------------------------
+# 自动寻找并添加根目录到 sys.path
+# 当前文件在: memoryhub/core/preference/test_preference_extractor.py
+# 向上退三层目录即可定位到项目根目录 (包含 memoryhub 文件夹的那个目录)
+# -------------------------------------------------------------------------
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "../../../"))
 
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+# -------------------------------------------------------------------------
+# 接下来再进行项目的模块导入，就不会报错了
+# -------------------------------------------------------------------------
 from llm_client import OpenAIClientAdapter
-
-# ⚠️ 请根据你的文件名修改这里的导入语句！
-# 假设你的抽取器定义在 extractor.py 中， schemas 定义在 schemas.py 中：
-from extractor import PreferenceExtractor
-from memoryhub.adapter.schemas import MemoryEvent, SourceType, EventQuality, MemoryLevel, PreferenceType
-
+from memoryhub.core.preference.extractor import PreferenceExtractor
+from memoryhub.adapter.schemas import (
+    MemoryEvent,
+    SourceType,
+    EventQuality,
+    MemoryLevel,
+    PreferenceType,
+)
 
 def run_tests():
     # 1. 初始化 API 客户端
