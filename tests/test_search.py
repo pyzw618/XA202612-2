@@ -49,7 +49,7 @@ def main():
 
     # ---- 3. 生成 Embedding 并存入 MemoryStore ----
     print(f"\n[3] 生成 Embedding（模拟每次 100ms 延迟）...")
-    store = MemoryStore()
+    store = MemoryStore(":memory:")  # 内存模式，避免旧数据累积
     for i, text in enumerate(fake_data, 1):
         vec = embed_client.embed(text)
         store.add(content=text, embedding=vec)
@@ -94,7 +94,7 @@ def main():
 
         # --- FAISS ---
         print("\n  ▶ FAISS 向量检索结果:")
-        faiss_results = engine.search_faiss(query, query_vec, top_k=3)
+        faiss_results = engine.search_faiss(query_vec, top_k=3)
         for r in faiss_results:
             print(f"    score={r['score']:.4f}  →  {r['content']}")
 
@@ -117,7 +117,7 @@ def main():
 
     # 验证2: FAISS 返回 3 条结果
     qv = embed_client.embed("密码")
-    faiss_test = engine.search_faiss("密码", qv, top_k=3)
+    faiss_test = engine.search_faiss(qv, top_k=3)
     assert len(faiss_test) == 3, f"❌ FAISS: 期望 3 条结果，实际 {len(faiss_test)}"
     print(f"  ✓ FAISS: 返回了 {len(faiss_test)} 条结果（top_k=3）")
 
