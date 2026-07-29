@@ -15,22 +15,28 @@ from typing import Optional
 # 枚举
 # ============================================================
 
-class EventType(str, Enum):
-    TOOL_CALL = "tool_call"
-    USER_FEEDBACK = "user_feedback"
+class SourceType(str, Enum):
+    TOOL_RESULT = "tool_result"
     USER_BEHAVIOR = "user_behavior"
     MANUAL_CONFIG = "manual_config"
-    TASK_TRAJECTORY = "task_trajectory"
+
+
+class ToolCallStatus(str, Enum):
+    SUCCESS = "success"
+    ERROR = "error"
+    TIMEOUT = "timeout"
+    CANCELLED = "cancelled"
+    PARTIAL = "partial"
 
 
 class PreferenceType(str, Enum):
     OUTPUT_STYLE = "output_style"
     TOOL_PREFERENCE = "tool_preference"
-    WORKFLOW_PREFERENCE = "workflow_preference"
-    SAFETY_PREFERENCE = "safety_preference"
-    SCENE_PREFERENCE = "scene_preference"
-    FORMAT_PREFERENCE = "format_preference"
-    LANGUAGE_PREFERENCE = "language_preference"
+    WORKFLOW_PREF = "workflow_preference"
+    SAFETY_PREF = "safety_preference"
+    SCENE_PREF = "scene_preference"
+    FORMAT_PREF = "format_preference"
+    LANGUAGE_PREF = "language_preference"
 
 
 class KnowledgeType(str, Enum):
