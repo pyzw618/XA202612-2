@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 .vscode/
+.venv/
+
+# Runtime generated data
+data/
