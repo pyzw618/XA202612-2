@@ -1,0 +1,155 @@
+﻿# Kylin-MemoryHub 配置文件示例
+# 复制此文件为 config.yaml 并根据实际环境修改
+
+# ==================== 存储配置 ====================
+storage:
+  # SQLite 数据库路径
+  db_path: "data/memoryhub.db"
+  
+  # FAISS 向量索引路径
+  vector_index_path: "data/vector_index"
+  
+  # 证据链存储路径 (JSONL格式)
+  evidence_path: "data/evidence"
+  
+  # 检索缓存最大条目数
+  cache_max_size: 1000
+
+# ==================== 检索配置 ====================
+retrieval:
+  # 默认返回 Top-K 结果数
+  default_top_k: 5
+  
+  # 混合检索权重 (总和建议为 1.0)
+  vector_weight: 0.6      # 向量检索权重
+  keyword_weight: 0.3     # BM25 关键词检索权重
+  metadata_weight: 0.1    # 元数据过滤权重
+  
+  # 是否启用 Reranker 重排序
+  rerank_enabled: true
+  
+  # 检索缓存 TTL (秒)
+  cache_ttl_seconds: 300
+
+# ==================== LLM 配置 ====================
+llm:
+  # 提供商: "openai" (兼容 OpenAI API) | "ollama" (本地推理)
+  provider: "ollama"
+  
+  # API 基础地址
+  # OpenAI 兼容: https://api.openai.com/v1 或其他兼容端点
+  # Ollama: http://localhost:11434/v1
+  api_base: "http://localhost:11434/v1"
+  
+  # API 密钥 (OpenAI 兼容模式需要)
+  api_key: ""
+  
+  # 模型名称
+  # OpenAI: "gpt-4o-mini", "gpt-4o"
+  # Ollama: "qwen2:1.5b", "qwen2:7b", "llama3:8b"
+  model: "qwen2:7b"
+  
+  # 生成温度 (0.0 - 2.0)
+  temperature: 0.1
+  
+  # 最大生成 token 数
+  max_tokens: 2048
+
+# ==================== Embedding 配置 ====================
+embedding:
+  # 提供商: "kylin" (麒麟 SDK) | "mock" (开发测试)
+  provider: "kylin"
+  
+  # 向量维度
+  dimension: 1024
+  
+  # 模型名称 (kylin 模式下填写)
+  model_name: "kylin-embedding-v1"
+
+# ==================== 安全配置 ====================
+safety:
+  # 内置声明式规则资产：
+  # memoryhub/safety_rules/data/catalog.json
+  # version 必须在 catalog 中精确存在；缺失时不会静默回退。
+  rule_set_id: "kylin-memoryhub.safety"
+  rule_set_version: "1.0"
+
+  # 不设置 sensitive_patterns 时，SafetyConfig 从上述版本化规则集取得不可变
+  # 快照并编译为兼容 SensitiveRule。旧 inline 规则仅作为迁移入口，不建议复制
+  # 内置规则；新规则应发布为新的规则集版本并补齐结构化溯源。
+
+  # risk_level 只表示风险；最终动作由规则 default_action 和 policy 覆盖共同决定。
+  # 声明式 redact_allow 会编译为现有 SafetyAction.MASK，且仍须脱敏后复检。
+  policy:
+    policy_id: "default"
+    version: "1.0"
+    rule_overrides: []
+    level_overrides: []
+    # ALLOW 不能通过普通 override 配置。低风险上下文标识如需例外，必须在
+    # exceptions 中提供规则作用域、至少一个场景/用途/路径选择器、原因、
+    # 负责人、版本和带时区的 expires_at；有效期按实际决策时刻判断。
+    # 凭据和敏感个人信息不可降为 ALLOW。
+    exceptions: []
+    fallback_action: "review"
+    on_scan_error: "review"
+    on_unmaskable: "review"
+    auto_sanitize: true
+    fail_closed: true
+  
+  # 旧版兼容开关，只能收紧策略：
+  # reject_on_detect=true 强制拒绝；auto_mask=false 将 MASK 提升为 REVIEW
+  auto_mask: true
+  reject_on_detect: false
+
+  # 安全处置审计：只写最小化投影，跨轮转文件保持 HMAC 哈希链。
+  # 密钥不得写入 YAML；由 hmac_key_env 指向的环境变量或设备密钥服务提供。
+  # 审计与隔离密钥材料必须不同；retention_days 需配合系统定时清理任务。
+  audit:
+    enabled: true
+    directory: "data/safety-audit"
+    hmac_key_env: "MEMORYHUB_AUDIT_HMAC_KEY"
+    key_id: "device-local-v1"
+    rotate_max_bytes: 16777216
+    retention_days: 180
+    max_record_bytes: 65536
+    lock_timeout_seconds: 5.0
+    strict_permissions: true
+    fsync: true
+    fail_closed: true
+
+  # REVIEW 隔离区：原事件仅以 AES-256-GCM 密文保存；普通存储、检索、
+  # Embedding 和日志都不能读取隔离区。密钥同样不得写入配置文件。
+  quarantine:
+    enabled: true
+    directory: "data/review-quarantine"
+    encryption_key_env: "MEMORYHUB_QUARANTINE_KEY"
+    key_id: "device-local-v1"
+    retention_days: 30
+    max_record_bytes: 4194304
+    strict_permissions: true
+    fsync: true
+    fail_closed: true
+
+  # 递归扫描资源预算；快照前的结构超限抛 SafetyScanError，
+  # 快照后的候选/Finding 超限返回 scan_complete=false。
+  # process() 对不完整扫描失败关闭为 REVIEW/REJECT。
+  max_depth: 32  # 支持范围 1..64
+  max_field_chars: 65536
+  max_scan_bytes: 2097152
+  max_scanned_fields: 10000
+  max_candidates: 2048
+  max_findings: 1024
+  max_path_chars: 4096
+
+# ==================== 应用配置 ====================
+# 调试模式 (生产环境请设为 false)
+debug: false
+
+# 日志级别: DEBUG | INFO | WARNING | ERROR
+log_level: "INFO"
+
+# 服务监听地址
+host: "0.0.0.0"
+
+# 服务监听端口
+port: 8000
