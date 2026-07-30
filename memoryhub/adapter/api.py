@@ -4,7 +4,7 @@ REST API 路由定义 — Memory Adapter 标准接口
 所有接口均通过 FastAPI 路由暴露，供 OS Agent 或前端调用。
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 
 from memoryhub.adapter.schemas import (
     ForgetRequest,
@@ -52,11 +52,11 @@ async def write_events(req: WriteEventRequest):
 # ============================================================
 
 @router.post("/search", response_model=SearchResponse)
-async def search_memory(req: SearchRequest):
+async def search_memory(req: SearchRequest, request: Request):
     """
     混合检索偏好与知识记忆
 
-    数据流: OS Agent → search_memory → Retrieval.hybrid_search
+    数据流: OS Agent → search_memory → HybridRetriever.search
             → (vector_recall + keyword_recall + metadata_filter)
             → rerank → 返回 Top-K
 
@@ -72,7 +72,18 @@ async def search_memory(req: SearchRequest):
         knowledge: 匹配的知识记忆列表
         latency_ms: 检索耗时
     """
-    raise NotImplementedError
+    retriever = getattr(request.app.state, "retriever", None)
+    if retriever is None:
+        raise HTTPException(status_code=503, detail="retrieval service not initialized")
+    try:
+        return retriever.search(req)
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid search request") from None
+    except Exception:
+        # 不回显内部异常细节，避免泄露输入内容或实现信息
+        raise HTTPException(status_code=500, detail="internal retrieval error") from None
 
 
 @router.post("/context")

@@ -104,8 +104,41 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @app.on_event("startup")
     async def startup():
         """应用启动时初始化各组件"""
-        # TODO: 初始化数据库、向量索引、LLM 客户端等
-        pass
+        import os
+
+        from memoryhub.embedding import create_embedding_client
+        from memoryhub.retrieval.cache import SearchCache
+        from memoryhub.retrieval.hybrid import HybridRetriever
+        from memoryhub.retrieval.keyword_search import KeywordSearcher
+        from memoryhub.retrieval.reranker import Reranker
+        from memoryhub.retrieval.vector_search import VectorSearcher
+
+        # TODO: 初始化数据库（storage 层实现后接入 Repository 与 memory_lookup）
+
+        embedding_client = create_embedding_client(dim=config.embedding.dimension)
+
+        vector_search = VectorSearcher(
+            index_path=config.storage.vector_index_path,
+            dimension=embedding_client.get_dimension(),
+        )
+        if os.path.exists(config.storage.vector_index_path):
+            vector_search.load_index()
+
+        keyword_search = KeywordSearcher()
+
+        cache = SearchCache(
+            max_size=config.storage.cache_max_size,
+            ttl_seconds=config.retrieval.cache_ttl_seconds,
+        )
+
+        app.state.retriever = HybridRetriever(
+            vector_search=vector_search,
+            keyword_search=keyword_search,
+            reranker=Reranker(),
+            cache=cache,
+            config=config.retrieval,
+            embedding_fn=embedding_client.embed,
+        )
 
     @app.on_event("shutdown")
     async def shutdown():
