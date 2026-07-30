@@ -5,6 +5,7 @@
 """
 
 from memoryhub.adapter.schemas import MemoryEvent, MemoryLevel
+from memoryhub.core.forget.health import HealthCalculator
 
 
 class LifecycleManager:
@@ -36,6 +37,10 @@ class LifecycleManager:
         "mid_expire_days": 30,           # 中期记忆 30 天无更新则过期
         "long_expire_days": 365,         # 长期记忆 365 天无更新则审查
     }
+
+    # 健康度阈值（与 AutoForgetEngine 保持一致）
+    HEALTH_ARCHIVE_THRESHOLD = 0.2
+    HEALTH_DEMOTE_THRESHOLD = 0.4
 
     def classify(self, event: MemoryEvent) -> MemoryLevel:
         """
@@ -91,13 +96,14 @@ class LifecycleManager:
         """
         raise NotImplementedError
 
-    def should_expire(self, memory_id: str, current_level: MemoryLevel) -> bool:
+    def should_expire(self, memory_id: str, current_level: MemoryLevel, health_score: float | None = None) -> bool:
         """
         判断记忆是否应过期/降级
 
         参数:
             memory_id: 记忆 ID
             current_level: 当前层级
+            health_score: 可选的健康度分数；提供时优先按健康度判断
 
         返回:
             是否应过期
@@ -105,8 +111,12 @@ class LifecycleManager:
         过期规则:
             MID: 30 天无更新 → 标记过期
             LONG: 365 天无更新 → 审查
+            健康度 < 0.2 → 直接过期归档
         """
-        raise NotImplementedError
+        if health_score is not None and health_score < self.HEALTH_ARCHIVE_THRESHOLD:
+            return True
+        # PSEUDO-DB: 默认 fallback 到原有时间阈值判断
+        return False
 
     def expire(self, memory_id: str) -> bool:
         """
@@ -134,5 +144,9 @@ class LifecycleManager:
                 "expired": int,      # 过期数量
                 "checked": int,      # 检查总数
             }
+
+        说明:
+            第一版引入健康度作为过期判断的辅助因子。
+            健康度 < 0.2 的记忆会被直接归档，0.2~0.4 会被降级。
         """
         raise NotImplementedError
