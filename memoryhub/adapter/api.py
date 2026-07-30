@@ -4,7 +4,7 @@ REST API 路由定义 — Memory Adapter 标准接口
 所有接口均通过 FastAPI 路由暴露，供 OS Agent 或前端调用。
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from memoryhub.adapter.schemas import (
     ForgetRequest,
@@ -20,6 +20,7 @@ from memoryhub.adapter.schemas import (
     ForgetRecord,
     EvalReport,
 )
+from memoryhub.core.forget import MemoryForgetter
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
@@ -179,8 +180,21 @@ async def submit_feedback(req: FeedbackRequest):
 # 精准遗忘
 # ============================================================
 
+def _get_forgetter() -> MemoryForgetter:
+    """
+    获取 MemoryForgetter 实例
+
+    注意：PSEUDO-INIT，待存储层完成后注入真实的 db / vector_store / cache。
+    """
+    # PSEUDO-INIT: 从应用全局状态或依赖注入容器获取实例
+    return MemoryForgetter(llm_client=None, storage=None, vector_store=None, cache=None)
+
+
 @router.post("/forget", response_model=ForgetResponse)
-async def forget_memory(req: ForgetRequest):
+async def forget_memory(
+    req: ForgetRequest,
+    forgetter: MemoryForgetter = Depends(_get_forgetter),
+) -> ForgetResponse:
     """
     自然语言驱动的精准遗忘
 
@@ -190,15 +204,30 @@ async def forget_memory(req: ForgetRequest):
 
     参数:
         req.instruction: 自然语言指令，如 "忘掉我关于周报格式的偏好"
+        req.target_memory_ids: 精确记忆 ID 列表（与自然语言互斥或组合使用）
         req.target_scope: 可选的场景范围限制
+        req.cascade: 是否级联删除关联数据
+
+    返回:
+        ForgetResponse: 遗忘结果，包含删除数量和审计记录 ID
     """
-    raise NotImplementedError
+    return forgetter.execute(req)
 
 
 @router.get("/forget/history", response_model=list[ForgetRecord])
-async def list_forget_history(user_id: str = "default"):
-    """列出遗忘操作历史"""
-    raise NotImplementedError
+async def list_forget_history(user_id: str = "default") -> list[ForgetRecord]:
+    """
+    列出指定用户的遗忘操作历史
+
+    参数:
+        user_id: 用户 ID
+
+    返回:
+        遗忘记录列表
+    """
+    # PSEUDO-DB: rows = db.query(ForgetRow).filter(ForgetRow.user_id == user_id).order_by(...).all()
+    # return [ForgetRecord.model_validate(row) for row in rows]
+    return []
 
 
 # ============================================================

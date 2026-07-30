@@ -1360,6 +1360,12 @@ class PreferenceMemory(BaseModel):
     tags: list[str] = Field(default_factory=list) # 偏好标签/关键词，用于辅助检索
     extra_payload: dict[str, Any] = Field(default_factory=dict) # 偏好提取/交互过程中的元数据扩展
 
+    # --- 健康度（遗忘模块使用）---
+    health_score: float = 1.0  # [0, 1]，越低越容易被遗忘
+    stability: float = 1.0  # 记忆稳定性，影响时间衰减半衰期
+    last_accessed_at: datetime | None = Field(default=None)
+    access_count_30d: int = 0  # 近 30 天被检索/使用次数
+
     # --- 时间戳 ---
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
@@ -1403,6 +1409,12 @@ class KnowledgeMemory(BaseModel):
 
     # --- 证据链 ---
     evidences: list[Evidence] = Field(default_factory=list)
+
+    # --- 健康度（遗忘模块使用）---
+    health_score: float = 1.0  # [0, 1]，越低越容易被遗忘
+    stability: float = 1.0  # 记忆稳定性，影响时间衰减半衰期
+    last_accessed_at: datetime | None = Field(default=None)
+    access_count_30d: int = 0  # 近 30 天被检索/使用次数
 
     # --- 时间戳 ---
     created_at: datetime = Field(default_factory=datetime.now)
@@ -1531,7 +1543,9 @@ class ForgetRequest(BaseModel):
 
     user_id: str = "default"
     instruction: str = ""  # 自然语言遗忘指令
+    target_memory_ids: list[str] = Field(default_factory=list)  # 精确 ID 模式
     target_scope: SceneScope | None = None
+    cascade: bool = True  # 是否级联删除关联数据
 
 
 class ForgetResponse(BaseModel):
