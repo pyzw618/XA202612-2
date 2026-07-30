@@ -1,0 +1,332 @@
+{
+  "raw_events": [
+    {
+      "event_id": "mock-evt-001",
+      "source_type": "tool_result",
+      "event_type": "task_trajectory",
+      "user_id": "demo-user",
+      "session_id": "demo-session",
+      "turn_id": "turn-001",
+      "scene": "office",
+      "task_type": "office.weekly_report",
+      "occurred_at": "2026-07-30T08:00:00Z",
+      "text": "  生成周报  ",
+      "payload": {
+        "task_name": "生成周报",
+        "steps": [
+          " 收集数据 ",
+          "整理结论",
+          "生成周报",
+          ""
+        ],
+        "tools": [
+          "file_search",
+          "note_tool",
+          "file_search"
+        ],
+        "result": "周报已完成"
+      },
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "call_id": "call-001",
+          "tool_name": "file_search",
+          "arguments": {
+            "query": "weekly data"
+          },
+          "result": "data found",
+          "status": "success"
+        }
+      ],
+      "schema_version": "1.1",
+      "source_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "redactions": []
+    }
+  ],
+  "cleaned_events": [
+    {
+      "event_id": "mock-evt-001",
+      "source_type": "tool_result",
+      "event_type": "task_trajectory",
+      "user_id": "demo-user",
+      "session_id": "demo-session",
+      "turn_id": "turn-001",
+      "scene": "office",
+      "task_type": "office.weekly_report",
+      "occurred_at": "2026-07-30T08:00:00Z",
+      "text": "生成周报",
+      "payload": {
+        "task_name": "生成周报",
+        "steps": [
+          "收集数据",
+          "整理结论",
+          "生成周报"
+        ],
+        "tools": [
+          "file_search",
+          "note_tool"
+        ],
+        "result": "周报已完成"
+      },
+      "tool_calls": [
+        {
+          "sequence": 1,
+          "call_id": "call-001",
+          "tool_name": "file_search",
+          "arguments": {
+            "query": "weekly data"
+          },
+          "result": "data found",
+          "status": "success"
+        }
+      ],
+      "schema_version": "1.1",
+      "source_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "redactions": [],
+      "quality": {
+        "score": 0.0,
+        "status": "accepted",
+        "completeness": 0.0,
+        "validity": 0.0,
+        "consistency": 0.0,
+        "freshness": 0.0,
+        "issues": []
+      }
+    }
+  ],
+  "normalized_events": [
+    {
+      "event_id": "mock-evt-001",
+      "source_type": "tool_result",
+      "event_type": "task_trajectory",
+      "user_id": "demo-user",
+      "session_id": "demo-session",
+      "turn_id": "turn-001",
+      "scene": "office",
+      "task_type": "office.weekly_report",
+      "occurred_at": "2026-07-30T08:00:00Z",
+      "text": "生成周报",
+      "payload": {
+        "task_name": "生成周报",
+        "steps": [
+          "收集数据",
+          "整理结论",
+          "生成周报"
+        ],
+        "tools": [
+          "file_search",
+          "note_tool"
+        ],
+        "result": "周报已完成"
+      },
+      "tool_calls": [
+        {
+          "call_id": "call-001",
+          "tool_name": "file_search",
+          "arguments": {
+            "query": "weekly data"
+          },
+          "result": "data found",
+          "status": "success",
+          "sequence": 1,
+          "error": ""
+        }
+      ],
+      "schema_version": "1.1",
+      "source_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "redactions": [],
+      "quality": {
+        "score": 0.0,
+        "status": "accepted",
+        "completeness": 0.0,
+        "validity": 0.0,
+        "consistency": 0.0,
+        "freshness": 0.0,
+        "issues": []
+      }
+    }
+  ],
+  "scored_events": [
+    {
+      "event_id": "mock-evt-001",
+      "source_type": "tool_result",
+      "event_type": "task_trajectory",
+      "user_id": "demo-user",
+      "session_id": "demo-session",
+      "turn_id": "turn-001",
+      "scene": "office",
+      "task_type": "office.weekly_report",
+      "occurred_at": "2026-07-30T08:00:00Z",
+      "text": "生成周报",
+      "payload": {
+        "task_name": "生成周报",
+        "steps": [
+          "收集数据",
+          "整理结论",
+          "生成周报"
+        ],
+        "tools": [
+          "file_search",
+          "note_tool"
+        ],
+        "result": "周报已完成"
+      },
+      "tool_calls": [
+        {
+          "call_id": "call-001",
+          "tool_name": "file_search",
+          "arguments": {
+            "query": "weekly data"
+          },
+          "result": "data found",
+          "status": "success",
+          "sequence": 1,
+          "error": ""
+        }
+      ],
+      "schema_version": "1.1",
+      "source_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "redactions": [],
+      "quality": {
+        "score": 0.95,
+        "status": "accepted",
+        "completeness": 1.0,
+        "validity": 1.0,
+        "consistency": 0.95,
+        "freshness": 0.9,
+        "issues": []
+      }
+    }
+  ],
+  "knowledge": [
+    {
+      "memory_id": "know_30d4a6c0",
+      "user_id": "demo-user",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "生成周报工作流",
+      "content": "围绕 '生成周报' 的标准执行流程",
+      "steps": [
+        "收集数据",
+        "整理结论",
+        "生成周报"
+      ],
+      "tools": [
+        "file_search",
+        "note_tool"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.weekly_report",
+        "app": "SourceType.TOOL_RESULT"
+      },
+      "confidence": 0.6589,
+      "success_count": 1,
+      "total_count": 1,
+      "status": "active",
+      "level": "mid",
+      "version": 1,
+      "parent_id": "",
+      "evidences": [
+        {
+          "evidence_id": "3d26f86c",
+          "event_id": "mock-evt-001",
+          "content": "任务「生成周报」执行结果：周报已完成",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T08:00:00Z",
+          "weight": 0.95,
+          "decision": null
+        }
+      ],
+      "created_at": "2026-07-30T10:13:55.038778",
+      "updated_at": "2026-07-30T10:13:55.038778"
+    },
+    {
+      "memory_id": "know_41263d9c",
+      "user_id": "demo-user",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "生成周报案例",
+      "content": "任务目标：「生成周报」；执行步骤：收集数据, 整理结论, 生成周报；最终结果：周报已完成。",
+      "steps": [
+        "收集数据",
+        "整理结论",
+        "生成周报"
+      ],
+      "tools": [
+        "file_search",
+        "note_tool"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.weekly_report",
+        "app": "SourceType.TOOL_RESULT"
+      },
+      "confidence": 0.6358,
+      "success_count": 1,
+      "total_count": 1,
+      "status": "active",
+      "level": "mid",
+      "version": 1,
+      "parent_id": "",
+      "evidences": [
+        {
+          "evidence_id": "7620c4c5",
+          "event_id": "mock-evt-001",
+          "content": "任务「生成周报」执行结果：周报已完成",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T08:00:00Z",
+          "weight": 0.95,
+          "decision": null
+        }
+      ],
+      "created_at": "2026-07-30T10:13:55.038778",
+      "updated_at": "2026-07-30T10:13:55.038778"
+    },
+    {
+      "memory_id": "know_b6e9821a",
+      "user_id": "demo-user",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "生成周报案例模板",
+      "content": "基于案例 '生成周报案例' 抽象出的可复用模板",
+      "steps": [
+        "收集数据",
+        "整理结论",
+        "生成周报"
+      ],
+      "tools": [
+        "file_search",
+        "note_tool"
+      ],
+      "template_body": "请根据 {task_name} 的需求，参考以下结构执行：任务目标：「生成周报」；执行步骤：收集数据, 整理结论, 生成周报；最终结果：周报已完成。",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.weekly_report",
+        "app": "SourceType.TOOL_RESULT"
+      },
+      "confidence": 0.5722200000000001,
+      "success_count": 1,
+      "total_count": 1,
+      "status": "active",
+      "level": "mid",
+      "version": 1,
+      "parent_id": "",
+      "evidences": [
+        {
+          "evidence_id": "9a46e069",
+          "event_id": "mock-evt-001",
+          "content": "任务「生成周报」执行结果：周报已完成",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T08:00:00Z",
+          "weight": 0.95,
+          "decision": null
+        }
+      ],
+      "created_at": "2026-07-30T10:13:55.038778",
+      "updated_at": "2026-07-30T10:13:55.038778"
+    }
+  ]
+}

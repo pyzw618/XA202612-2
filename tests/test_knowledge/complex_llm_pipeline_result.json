@@ -1,0 +1,492 @@
+{
+  "input_events": [
+    {
+      "event_id": "a",
+      "source_type": "tool_result",
+      "event_type": "task_trajectory",
+      "user_id": "demo-user",
+      "session_id": "complex-session",
+      "turn_id": "turn-17",
+      "scene": "finance_ops",
+      "task_type": "finance.monthly_close",
+      "occurred_at": "2026-07-30T01:00:00Z",
+      "text": "月末关账已完成，但中间有一笔跨境费用需要复核",
+      "payload": {
+        "task_name": "月末关账与异常费用复核",
+        "result": "账套已提交，异常费用待确认"
+      },
+      "tool_calls": [],
+      "schema_version": "1.1",
+      "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "redactions": [],
+      "quality": {
+        "score": 0.94,
+        "status": "accepted",
+        "completeness": 0.95,
+        "validity": 1.0,
+        "consistency": 0.9,
+        "freshness": 0.9,
+        "issues": []
+      }
+    },
+    {
+      "event_id": "b",
+      "source_type": "tool_result",
+      "event_type": "tool_call",
+      "user_id": "demo-user",
+      "session_id": "complex-session",
+      "turn_id": "turn-17",
+      "scene": "finance_ops",
+      "task_type": "finance.monthly_close",
+      "occurred_at": "2026-07-30T01:02:00Z",
+      "text": "从报销系统导出本月费用，发现一笔金额和币种不一致",
+      "payload": {
+        "tool_name": "expense_export",
+        "input": "本月跨境费用",
+        "output": "EUR 12,480；发票记录为 USD 13,420",
+        "status": "success"
+      },
+      "tool_calls": [],
+      "schema_version": "1.1",
+      "source_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "redactions": [],
+      "quality": {
+        "score": 0.94,
+        "status": "accepted",
+        "completeness": 0.95,
+        "validity": 1.0,
+        "consistency": 0.9,
+        "freshness": 0.9,
+        "issues": []
+      }
+    },
+    {
+      "event_id": "c",
+      "source_type": "tool_result",
+      "event_type": "tool_call",
+      "user_id": "demo-user",
+      "session_id": "complex-session",
+      "turn_id": "turn-17",
+      "scene": "finance_ops",
+      "task_type": "finance.monthly_close",
+      "occurred_at": "2026-07-30T01:04:00Z",
+      "text": "先查汇率快照，再对照发票附件和采购合同，不直接改账",
+      "payload": {
+        "tool_name": "fx_snapshot",
+        "input": "2026-07-29 EUR/USD",
+        "output": "1.084",
+        "status": "success"
+      },
+      "tool_calls": [],
+      "schema_version": "1.1",
+      "source_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "redactions": [],
+      "quality": {
+        "score": 0.94,
+        "status": "accepted",
+        "completeness": 0.95,
+        "validity": 1.0,
+        "consistency": 0.9,
+        "freshness": 0.9,
+        "issues": []
+      }
+    },
+    {
+      "event_id": "d",
+      "source_type": "tool_result",
+      "event_type": "tool_call",
+      "user_id": "demo-user",
+      "session_id": "complex-session",
+      "turn_id": "turn-17",
+      "scene": "finance_ops",
+      "task_type": "finance.monthly_close",
+      "occurred_at": "2026-07-30T01:06:00Z",
+      "text": "系统提示供应商名称有两个近似匹配，人工打开原始附件确认税号",
+      "payload": {
+        "tool_name": "invoice_match",
+        "input": "供应商+税号+合同号",
+        "output": "候选 2 条，需人工确认",
+        "status": "success"
+      },
+      "tool_calls": [],
+      "schema_version": "1.1",
+      "source_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "redactions": [],
+      "quality": {
+        "score": 0.94,
+        "status": "accepted",
+        "completeness": 0.95,
+        "validity": 1.0,
+        "consistency": 0.9,
+        "freshness": 0.9,
+        "issues": []
+      }
+    },
+    {
+      "event_id": "e",
+      "source_type": "tool_result",
+      "event_type": "tool_call",
+      "user_id": "demo-user",
+      "session_id": "complex-session",
+      "turn_id": "turn-17",
+      "scene": "finance_ops",
+      "task_type": "finance.monthly_close",
+      "occurred_at": "2026-07-30T01:09:00Z",
+      "text": "确认后把差异放入待摊费用，不覆盖原始记录，并在备注中记录依据",
+      "payload": {
+        "tool_name": "ledger_post",
+        "input": "差异调整分录",
+        "output": "草稿已生成，等待复核",
+        "status": "success"
+      },
+      "tool_calls": [],
+      "schema_version": "1.1",
+      "source_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "redactions": [],
+      "quality": {
+        "score": 0.94,
+        "status": "accepted",
+        "completeness": 0.95,
+        "validity": 1.0,
+        "consistency": 0.9,
+        "freshness": 0.9,
+        "issues": []
+      }
+    },
+    {
+      "event_id": "f",
+      "source_type": "tool_result",
+      "event_type": "user_feedback",
+      "user_id": "demo-user",
+      "session_id": "complex-session",
+      "turn_id": "turn-17",
+      "scene": "finance_ops",
+      "task_type": "finance.monthly_close",
+      "occurred_at": "2026-07-30T01:12:00Z",
+      "text": "财务主管要求：遇到币种或供应商不一致时必须保留原始值并升级人工复核",
+      "payload": {
+        "text": "保留原值、记录依据、异常升级",
+        "feedback_type": "policy"
+      },
+      "tool_calls": [],
+      "schema_version": "1.1",
+      "source_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "redactions": [],
+      "quality": {
+        "score": 0.94,
+        "status": "accepted",
+        "completeness": 0.95,
+        "validity": 1.0,
+        "consistency": 0.9,
+        "freshness": 0.9,
+        "issues": []
+      }
+    }
+  ],
+  "api_response": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+          "content": "基于您提供的任务轨迹数据，我已为您结构化提取出可复用的**工作流知识**、**典型案例**与**标准化模板**。内容已按财务运营（Finance Ops）与智能体（Agent）编排的最佳实践进行抽象，可直接用于SOP文档、AI Agent Prompt库或系统规则配置。\n\n---\n### 📊 一、可复用工作流知识 (Workflow Knowledge)\n\n| 维度 | 提取内容 | 复用价值 |\n|:---|:---|:---|\n| **核心链路** | `异常发现 → 多维验证 → 身份确认 → 差异挂账 → 审计固化 → 人工复核` | 适用于所有涉及资金/账务变更的“防错型”业务流程 |\n| **工具协同模式** | `expense_export`（数据拉取）→ `fx_snapshot`（基准值校准）→ `invoice_match`（实体对齐）→ `ledger_post`（账务落盘） | 明确工具调用顺序与依赖关系，避免并发或逆序调用导致的数据冲突 |\n| **人机协作边界** | 系统负责“初筛+计算+草稿生成”，人工负责“模糊匹配确认+依据审核+异常升级” | 定义清晰的 Human-in-the-Loop 触发条件，降低自动化误操作风险 |\n| **核心风控原则** | 🔒 **保原值**：严禁直接覆写原始凭证<br>📝 **留依据**：所有调整必须附带来源说明与计算逻辑<br>⚠️ **必升级**：币种/主体不一致自动触发主管复核 | 可抽象为全局策略层（Policy Layer），跨任务复用 |\n\n---\n### 📖 二、典型案例 (Case Study)\n\n**🔹 案例名称**：月末关账跨境费用币种/金额双异常处理  \n**🔹 触发场景**：`finance.monthly_close` 任务执行中，报销系统导出明细发现 `EUR 12,480` 与发票记录 `USD 13,420` 不一致，且供应商名称存在近似匹配。  \n**🔹 处置路径**：\n1. **拦截直调**：拒绝直接修改账目，优先调用 `fx_snapshot` 获取 `2026-07-29 EUR/USD = 1.084` 作为校验基准。\n2. **交叉验真**：人工调取发票附件与采购合同进行三方比对；针对 `invoice_match` 返回的2条候选记录，人工核验税号锁定唯一供应商。\n3. **安全入账**：调用 `ledger_post` 生成差异调整分录，计入“待摊费用”过渡科目，原始记录保持只读。\n4. **策略固化**：财务主管反馈确立“保留原值、记录依据、异常升级”铁律，纳入后续同类任务默认策略。  \n**🔹 经验沉淀**：跨境/多币种场景下，**“数据一致性校验”应前置到“账务变更动作”之前**；模糊匹配结果必须设置人工熔断点，避免自动化流程放大审计风险。\n\n---\n### 📝 三、标准化执行模板 (Reusable Template)\n\n以下模板可直接嵌入知识库或作为 Agent 的 System Prompt 基础结构：\n\n```markdown\n# 📘 财务异常费用复核标准作业模板 (SOP-TPL-FIN-001)\n\n## 1. 任务元数据\n- **适用场景**：月末/季末关账、跨境结算稽核、费用报销异常处理\n- **触发条件**：系统校验发现金额/币种/供应商/税率等关键字段不一致，或匹配置信度 < 阈值\n- **目标状态**：完成差异隔离、生成可审计调整草稿、触发指定权限人员复核\n\n## 2. 标准执行步骤 (SOP)\n| 步骤 | 动作描述 | 推荐工具/系统 | 输出物 | 人工介入点 |\n|:---|:---|:---|:---|:---|\n| S1 | 异常批次提取与初筛 | `expense_export` / 报表引擎 | 异常明细清单 | 无 |\n| S2 | 基准值校准与交叉验证 | `fx_snapshot` / 合同管理系统 | 汇率/税率快照、比对报告 | 附件与合同人工核对 |\n| S3 | 业务主体身份确认 | `invoice_match` / 主数据管理 | 候选列表、税号核验结果 | ✅ 模糊匹配时强制人工确认 |\n| S4 | 差异暂存与挂账 | `ledger_post` / 总账系统 | 调整分录草稿、过渡科目余额 | 无 |\n| S5 | 审计轨迹固化 | 笔记/工单系统 | 备注字段(依据链)、审批流 | 主管终审 |\n\n## 3. 核心风控规则 (Policy Layer)\n- `[RULE-01] 原始数据不可变`：任何调整仅允许追加新分录或写入独立差异表，禁止 UPDATE/DELETE 原始凭证。\n- `[RULE-02] 依据强绑定`：`ledger_post` 输入参数必须包含 `source_doc_ids`、`calculation_logic`、`operator_id`。\n- `[RULE-03] 异常熔断升级`：当 `currency_mismatch == true` 或 `supplier_match_confidence < 0.85` 时，自动路由至 `supervisor_review_queue`。\n\n## 4. 交付验收标准\n- [ ] 原始凭证未被修改或覆盖\n- [ ] 差异分录已生成且状态为 `DRAFT`\n- [ ] 备注字段完整记录数据来源、换算过程及人工确认痕迹\n- [ ] 复核工单已创建并分配至对应权限角色\n```\n\n---\n💡 **使用建议**：\n1. **Agent 编排**：可将 `SOP-TPL-FIN-001` 转化为 State Machine 或 LangGraph 节点图，将 `RULE-01~03` 设为 Guardrail 拦截器。\n2. **知识库检索**：建议为该类轨迹打上标签 `#finance_ops #anomaly_handling #human_in_the_loop #audit_trail`，便于后续相似场景快速召回。\n3. **策略迭代**：事件 `f` 中的 `user_feedback` 是极佳的策略进化信号，建议在系统中设计 `Policy Feedback Loop` 模块，自动将此类文本转化为规则配置。\n\n如需将此工作流转换为特定框架（如 LangChain、AutoGen、Dify）的流程图或代码骨架，可提供目标技术栈，我将为您进一步生成。",
+          "reasoning_content": "Here's a thinking process:\n\n1.  **Understand User Goal:** The user wants me to act as a \"Knowledge Extraction Assistant\". I need to extract reusable workflow knowledge, cases, and templates from the provided task trajectory data.\n\n2.  **Analyze Input Data:**\n    The input is a JSON array containing 6 events (`a` through `f`). Each event represents a step in a financial operations task (`finance.monthly_close`). Let's break down each event:\n    *   `event_id`: \"a\", `text`: \"月末关账已完成，但中间有一笔跨境费用需要复核\", `payload`: `{\"task_name\": \"月末关账与异常费用复核\", \"result\": \"账套已提交，异常费用待确认\"}` -> Initial state/task trigger.\n    *   `event_id`: \"b\", `text`: \"从报销系统导出本月费用，发现一笔金额和币种不一致\", `payload`: `{\"tool_name\": \"expense_export\", \"input\": \"本月跨境费用\", \"output\": \"EUR 12,480；发票记录为 USD 13,420\", \"status\": \"success\"}` -> Tool call: Export expenses, found discrepancy (currency/amount).\n    *   `event_id`: \"c\", `text`: \"先查汇率快照，再对照发票附件和采购合同，不直接改账\", `payload`: `{\"tool_name\": \"fx_snapshot\", \"input\": \"2026-07-29 EUR/USD\", \"output\": \"1.084\", \"status\": \"success\"}` -> Tool call: Check FX rate snapshot, compare with invoice/contract, rule: don't modify directly.\n    *   `event_id`: \"d\", `text`: \"系统提示供应商名称有两个近似匹配，人工打开原始附件确认税号\", `payload`: `{\"tool_name\": \"invoice_match\", \"input\": \"供应商+税号+合同号\", \"output\": \"候选 2 条，需人工确认\", \"status\": \"success\"}` -> Tool call: Match invoice/supplier, requires human confirmation due to ambiguity.\n    *   `event_id`: \"e\", `text*: \"确认后把差异放入待摊费用，不覆盖原始记录，并在备注中记录依据\", `payload`: `{\"tool_name\": \"ledger_post\", \"input\": \"差异调整分录\", \"output\": \"草稿已生成，等待复核\", \"status\": \"success\"}` -> Tool call: Post adjustment to deferred expense, preserve original, add notes.\n    *   `event_id`: \"f\", `text`: \"财务主管要求：遇到币种或供应商不一致时必须保留原始值并升级人工复核\", `payload`: `{\"text\": \"保留原值、记录依据、异常升级\", \"feedback_type\": \"policy\"}` -> Policy/Rule feedback from supervisor.\n\n3.  **Identify Key Components for Extraction:**\n    *   **Workflow Knowledge:** Step-by-step process, decision points, tool usage, rules/policies.\n    *   **Case Study:** A concrete example of handling a cross-border expense discrepancy during monthly close.\n    *   **Template:** A reusable structure for similar tasks (e.g., anomaly handling in finance ops).\n\n4.  **Draft - Workflow Knowledge (工作流知识):**\n    *   *Task:* 月末关账与异常费用复核 (Monthly Close & Anomaly Expense Review)\n    *   *Trigger:* 发现跨境费用金额/币种不一致。\n    *   *Steps:*\n        1. 数据导出与比对 (`expense_export`)：导出费用明细，识别异常（如币种/金额不符）。\n        2. 汇率与凭证核查 (`fx_snapshot`, 人工核对)：查询历史汇率快照，交叉验证发票附件与采购合同。**核心原则**：不直接修改账务。\n        3. 供应商匹配与确认 (`invoice_match`)：系统模糊匹配时，强制人工介入核对关键信息（如税号）。\n        4. 差异处理与入账 (`ledger_post`)：确认后，将差异计入“待摊费用”等过渡科目，严禁覆盖原始记录，必须添加详细备注/依据。\n        5. 政策反馈与升级：遵循“保留原值、记录依据、异常升级”原则，触发人工复核流程。\n    *   *Key Rules/Policies:* 异常处理三原则（保原值、留依据、必升级）；禁止自动覆写原始凭证；多源数据交叉验证。\n\n5.  **Draft - Case Study (案例):**\n    *   *场景:* 财务月度结账期间的跨境费用异常处理。\n    *   *问题:* 报销系统导出的费用显示为 EUR 12,480，但发票记录为 USD 13,420，存在币种与金额双重不一致。同时供应商名称出现近似匹配。\n    *   *处理过程:* 未直接调账，而是调用汇率工具获取当日快照(1.084)，人工比对发票与合同；针对供应商匹配歧义，人工查验原始附件确认税号；最终生成差异调整分录至待摊费用，附注完整依据链，并提交主管复核。\n    *   *结果/价值:* 成功隔离风险，确保审计轨迹完整，符合内控合规要求。\n\n6.  **Draft - Template (模板):**\n    Need a structured template that can be reused for similar financial anomaly handling or general task trajectories.\n    Structure:\n    *   任务名称/场景\n    *   触发条件\n    *   标准操作步骤 (SOP)\n    *   工具/系统调用清单\n    *   风控/合规原则\n    *   异常升级机制\n    *   输出物/交付标准\n\n    Let's flesh it out based on the extracted info:\n    **【财务异常费用复核标准作业模板】**\n    *   **适用场景**: 月末/季末关账、跨境结算、费用报销稽核\n    *   **触发条件**: 系统校验发现金额/币种/供应商/税率等关键字段不一致或匹配度低于阈值\n    *   **标准流程(SOP)**:\n        1. `数据提取与初筛` -> 调用[费用导出工具]，锁定异常批次\n        2. `多维交叉验证` -> 调用[汇率/税率快照工具] + 人工核对[发票附件]与[采购合同]\n        3. `主体身份确认` -> 调用[供应商/客户匹配工具]，遇模糊匹配立即转人工核验(税号/统一社会信用代码)\n        4. `差异暂存与挂账` -> 调用[总账/分录工具]，差异项转入[待摊费用/其他应收应付]过渡科目\n        5. `审计轨迹固化` -> 强制填写备注字段(含依据来源、计算过程、操作人)\n    *   **核心风控原则**:\n        *   🔒 原始数据不可变原则 (Never overwrite raw records)\n        *   📝 依据可追溯原则 (All adjustments require documented rationale)\n        *   ⚠️ 异常必升级原则 (Currency/Supplier mismatches auto-trigger supervisor review)\n    *   **交付物**: 差异调整草稿、完整证据链附件包、复核审批单\n\n7.  **Review & Refine (Self-Correction/Verification):**\n    *   *Check against input:* Does it accurately reflect events a-f? Yes. Covers export, fx check, invoice match, ledger post, policy feedback.\n    *   *Structure:* Clearly separated into Workflow Knowledge, Case, and Template as requested.\n    *   *Tone/Format:* Professional, structured, ready for reuse in AI agent design or SOP documentation.\n    *   *Enhancement:* Add metadata/tags for better retrieval. Ensure terminology matches financial operations standards. Make sure the extraction explicitly highlights *reusable* aspects (like the 3 principles, the tool chain, the fallback-to-human pattern).\n    *   *Format Output:* Use markdown effectively. Provide clear sections.\n\n    Draft looks solid. I will generate the response now. I'll structure it logically:\n    - 一、可复用工作流知识 (Workflow Knowledge)\n    - 二、典型业务案例 (Case Study)\n    - 三、标准化执行模板 (Reusable Template)\n    - 四、Agent/系统配置建议 (Optional but valuable for AI context)\n    I'll stick strictly to the prompt's request: 工作流知识、案例和模板. I'll make it concise and highly structured.✅\n    Self-Correction/Refinement during thought:\n    - Make sure the template is explicitly marked as reusable.\n    - Extract the exact tool names and their roles.\n    - Highlight the \"human-in-the-loop\" pattern which is crucial for this trajectory.\n    - Format clearly.\n\n    All steps verified. Proceeding. \n    Output Generation matches the refined draft. \n    Structure:\n    ### 📊 一、可复用工作流知识 (Workflow Knowledge)\n    - 核心链路...\n    - 关键决策点...\n    - 规则/策略...\n    ### 📖 二、典型案例 (Case Study)\n    - 背景...\n    - 处置过程...\n    - 经验沉淀...\n    ### 📝 三、标准化执行模板 (Reusable Template)\n    - 模板结构...\n    - 填充说明...\n    Ready.✅\n    Output Generation. \n    *(Self-Correction/Verification during drafting)*: I should ensure the output directly maps to the JSON fields where possible, showing traceability. I'll add a brief mapping note if needed, but keep it clean. The prompt asks to extract from the trajectory. I will present it professionally.✅\n    Final Output Generation. \n    [Output Generation] -> *Proceeds*",
+          "role": "assistant"
+        }
+      }
+    ],
+    "created": 1785378728,
+    "id": "chatcmpl-3275466b-aaa1-9a0c-93bf-27f54391a796",
+    "model": "qwen3.7-flash",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 3549,
+      "completion_tokens_details": {
+        "reasoning_tokens": 2117,
+        "text_tokens": 3549
+      },
+      "prompt_tokens": 1561,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "text_tokens": 1561
+      },
+      "total_tokens": 5110
+    }
+  },
+  "knowledge": [
+    {
+      "memory_id": "know_97c59df5",
+      "user_id": "demo-user",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "月末关账与异常费用复核工作流",
+      "content": "围绕 '月末关账与异常费用复核' 的标准执行流程",
+      "steps": [
+        "导出跨境费用",
+        "获取汇率快照",
+        "匹配发票信息",
+        "生成调整分录"
+      ],
+      "tools": [
+        "expense_export",
+        "fx_snapshot",
+        "invoice_match",
+        "ledger_post"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "finance_ops",
+        "task_type": "finance.monthly_close",
+        "app": "tool_result"
+      },
+      "confidence": 0.6864,
+      "success_count": 6,
+      "total_count": 6,
+      "status": "active",
+      "level": "mid",
+      "version": 1,
+      "parent_id": "",
+      "evidences": [
+        {
+          "evidence_id": "78a57b58",
+          "event_id": "a",
+          "content": "任务「月末关账与异常费用复核」执行结果：账套已提交，异常费用待确认",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:00:00Z",
+          "weight": 0.95,
+          "decision": null
+        },
+        {
+          "evidence_id": "9d334354",
+          "event_id": "b",
+          "content": "工具调用：expense_export，状态：success",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:02:00Z",
+          "weight": 0.8,
+          "decision": null
+        },
+        {
+          "evidence_id": "c31cad18",
+          "event_id": "c",
+          "content": "工具调用：fx_snapshot，状态：success",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:04:00Z",
+          "weight": 0.8,
+          "decision": null
+        },
+        {
+          "evidence_id": "805855d8",
+          "event_id": "d",
+          "content": "工具调用：invoice_match，状态：success",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:06:00Z",
+          "weight": 0.8,
+          "decision": null
+        },
+        {
+          "evidence_id": "68fcfa80",
+          "event_id": "e",
+          "content": "工具调用：ledger_post，状态：success",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:09:00Z",
+          "weight": 0.8,
+          "decision": null
+        },
+        {
+          "evidence_id": "3523ddfc",
+          "event_id": "f",
+          "content": "用户反馈：保留原值、记录依据、异常升级",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:12:00Z",
+          "weight": 0.9,
+          "decision": null
+        }
+      ],
+      "created_at": "2026-07-30T10:32:53.388419",
+      "updated_at": "2026-07-30T10:32:53.388419"
+    },
+    {
+      "memory_id": "know_32095391",
+      "user_id": "demo-user",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "月末关账与异常费用复核案例",
+      "content": "任务目标：「月末关账与异常费用复核」；执行步骤：导出本月跨境费用, 获取汇率快照数据, 匹配发票合同信息, 过账差异调整分录；最终结果：账套已提交，异常费用待确认。",
+      "steps": [
+        "导出本月跨境费用",
+        "获取汇率快照数据",
+        "匹配发票合同信息",
+        "过账差异调整分录"
+      ],
+      "tools": [
+        "expense_export",
+        "fx_snapshot",
+        "invoice_match",
+        "ledger_post"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "finance_ops",
+        "task_type": "finance.monthly_close",
+        "app": "tool_result"
+      },
+      "confidence": 0.6396,
+      "success_count": 6,
+      "total_count": 6,
+      "status": "active",
+      "level": "mid",
+      "version": 1,
+      "parent_id": "",
+      "evidences": [
+        {
+          "evidence_id": "b8a37476",
+          "event_id": "a",
+          "content": "任务「月末关账与异常费用复核」执行结果：账套已提交，异常费用待确认",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:00:00Z",
+          "weight": 0.95,
+          "decision": null
+        },
+        {
+          "evidence_id": "be7f9119",
+          "event_id": "b",
+          "content": "工具调用：expense_export，状态：success",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:02:00Z",
+          "weight": 0.8,
+          "decision": null
+        },
+        {
+          "evidence_id": "c778bcc6",
+          "event_id": "c",
+          "content": "工具调用：fx_snapshot，状态：success",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:04:00Z",
+          "weight": 0.8,
+          "decision": null
+        },
+        {
+          "evidence_id": "a9017d56",
+          "event_id": "d",
+          "content": "工具调用：invoice_match，状态：success",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:06:00Z",
+          "weight": 0.8,
+          "decision": null
+        },
+        {
+          "evidence_id": "929cc1c2",
+          "event_id": "e",
+          "content": "工具调用：ledger_post，状态：success",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:09:00Z",
+          "weight": 0.8,
+          "decision": null
+        },
+        {
+          "evidence_id": "87967d30",
+          "event_id": "f",
+          "content": "用户反馈：保留原值、记录依据、异常升级",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:12:00Z",
+          "weight": 0.9,
+          "decision": null
+        }
+      ],
+      "created_at": "2026-07-30T10:33:07.382714",
+      "updated_at": "2026-07-30T10:33:07.382714"
+    },
+    {
+      "memory_id": "know_0ac584d5",
+      "user_id": "demo-user",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "月末关账与异常费用复核案例模板",
+      "content": "基于案例 '月末关账与异常费用复核案例' 抽象出的可复用模板",
+      "steps": [
+        "导出跨境费用",
+        "获取汇率快照",
+        "匹配发票信息",
+        "录入调整分录",
+        "执行异常升级"
+      ],
+      "tools": [
+        "expense_export",
+        "fx_snapshot",
+        "invoice_match",
+        "ledger_post"
+      ],
+      "template_body": "请根据 {task_name} 的需求，参考以下结构执行：任务目标：「月末关账与异常费用复核」；执行步骤：导出跨境费用, 获取汇率快照, 匹配发票信息, 录入调整分录, 执行异常升级；最终结果：账套已提交，异常费用待确认。",
+      "scope": {
+        "scene": "finance_ops",
+        "task_type": "finance.monthly_close",
+        "app": "tool_result"
+      },
+      "confidence": 0.58338,
+      "success_count": 6,
+      "total_count": 6,
+      "status": "active",
+      "level": "mid",
+      "version": 1,
+      "parent_id": "",
+      "evidences": [
+        {
+          "evidence_id": "5feb873b",
+          "event_id": "a",
+          "content": "任务「月末关账与异常费用复核」执行结果：账套已提交，异常费用待确认",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:00:00Z",
+          "weight": 0.95,
+          "decision": null
+        },
+        {
+          "evidence_id": "45c0339b",
+          "event_id": "b",
+          "content": "工具调用：expense_export，状态：success",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:02:00Z",
+          "weight": 0.8,
+          "decision": null
+        },
+        {
+          "evidence_id": "aa743635",
+          "event_id": "c",
+          "content": "工具调用：fx_snapshot，状态：success",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:04:00Z",
+          "weight": 0.8,
+          "decision": null
+        },
+        {
+          "evidence_id": "5b01bdf9",
+          "event_id": "d",
+          "content": "工具调用：invoice_match，状态：success",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:06:00Z",
+          "weight": 0.8,
+          "decision": null
+        },
+        {
+          "evidence_id": "63be63b2",
+          "event_id": "e",
+          "content": "工具调用：ledger_post，状态：success",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:09:00Z",
+          "weight": 0.8,
+          "decision": null
+        },
+        {
+          "evidence_id": "be91224b",
+          "event_id": "f",
+          "content": "用户反馈：保留原值、记录依据、异常升级",
+          "source_type": "tool_result",
+          "timestamp": "2026-07-30T01:12:00Z",
+          "weight": 0.9,
+          "decision": null
+        }
+      ],
+      "created_at": "2026-07-30T10:33:22.061887",
+      "updated_at": "2026-07-30T10:33:22.061887"
+    }
+  ]
+}
