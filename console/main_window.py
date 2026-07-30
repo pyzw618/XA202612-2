@@ -5,24 +5,18 @@
 - 无边框 + 圆角（通过 QPainterPath 裁剪）
 - 半透明背景模拟毛玻璃效果
 - 自定义标题栏，支持拖拽移动
+- 窗口边缘拖拽缩放（8 个方向）
 - 阴影效果
 """
 
-from PyQt6.QtCore import Qt, QPoint, QRectF
-from PyQt6.QtGui import (
-    QColor,
-    QFont,
-    QPainter,
-    QPainterPath,
-    QPen,
-)
+from PyQt6.QtCore import Qt, QPoint, QRect, QSize
+from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QPushButton,
-    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -45,10 +39,22 @@ WINDOW_HEIGHT = 780
 CORNER_RADIUS = 12
 TITLE_BAR_HEIGHT = 44
 SHADOW_OFFSET = 8
+RESIZE_MARGIN = 8  # 边缘缩放检测区域
+
+# 边缘方向常量
+_EDGE_NONE = 0
+_EDGE_LEFT = 1
+_EDGE_RIGHT = 2
+_EDGE_TOP = 3
+_EDGE_BOTTOM = 4
+_EDGE_TOP_LEFT = 5
+_EDGE_TOP_RIGHT = 6
+_EDGE_BOTTOM_LEFT = 7
+_EDGE_BOTTOM_RIGHT = 8
 
 
 class MainWindow(QMainWindow):
-    """UKUI 风格主窗口"""
+    """UKUI 风格主窗口 — 无边框，支持拖拽移动和边缘缩放"""
 
     def __init__(self):
         super().__init__()
@@ -69,11 +75,13 @@ class MainWindow(QMainWindow):
         # 窗口阴影
         self._setup_shadow()
 
-        # 拖拽相关
+        # 拖拽 / 缩放状态
         self._drag_pos: QPoint | None = None
+        self._resize_edge: int = _EDGE_NONE
+        self._resize_start_geom: QRect | None = None
 
     def _setup_central_container(self):
-        """构建中心容器：标题栏 + 侧边栏 + 内容区，所有内容在圆角矩形内"""
+        """构建中心容器：标题栏 + 侧边栏 + 内容区"""
         # 外层容器留出阴影 margin
         outer = QWidget()
         outer.setObjectName("outer_container")
@@ -106,19 +114,16 @@ class MainWindow(QMainWindow):
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
-        # 侧边栏
         self.sidebar = Sidebar()
         self.sidebar.nav_changed.connect(self._on_nav_changed)
         body.addWidget(self.sidebar)
 
-        # 内容区
         self.stack = QStackedWidget()
         self.stack.setStyleSheet("background: transparent;")
         body.addWidget(self.stack, 1)
 
         inner_layout.addLayout(body, 1)
 
-        # 注册页面
         self._register_pages()
         self.sidebar.select(0)
 
@@ -131,19 +136,16 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(16, 0, 8, 0)
 
-        # Logo 图标（用 Unicode 占位）
-        logo = QLabel("🖥")
+        logo = QLabel("\U0001f5a5")
         logo.setFont(QFont("Segoe UI Emoji", 14))
         layout.addWidget(logo)
 
-        # 标题
         title = QLabel("Kylin-MemoryHub Console")
         title.setFont(QFont("Microsoft YaHei", 11, QFont.Weight.DemiBold))
         title.setStyleSheet("color: #1e1e2e;")
         layout.addWidget(title)
         layout.addStretch()
 
-        # 窗口控制按钮
         for symbol, slot in [("─", self.showMinimized), ("□", self._toggle_maximize), ("✕", self.close)]:
             btn = QPushButton(symbol)
             btn.setFixedSize(36, 28)
@@ -176,13 +178,13 @@ class MainWindow(QMainWindow):
     def _register_pages(self):
         """注册所有页面到 QStackedWidget"""
         pages = [
-            ("📊", "Dashboard", DashboardPage),
+            ("\U0001f4ca", "Dashboard", DashboardPage),
             ("❤️", "偏好管理", PreferencesPage),
-            ("📚", "知识管理", KnowledgePage),
+            ("\U0001f4da", "知识管理", KnowledgePage),
             ("⚡", "冲突处理", ConflictsPage),
-            ("🔍", "检索测试", SearchTestPage),
-            ("🗑", "遗忘管理", ForgetPage),
-            ("📈", "评测报告", EvaluationPage),
+            ("\U0001f50d", "检索测试", SearchTestPage),
+            ("\U0001f5d1", "遗忘管理", ForgetPage),
+            ("\U0001f4c8", "评测报告", EvaluationPage),
         ]
         for icon, label, page_cls in pages:
             page = page_cls(self.client, self.mock)
@@ -190,41 +192,134 @@ class MainWindow(QMainWindow):
             self.sidebar.add_item(icon, label)
 
     def _on_nav_changed(self, index: int):
-        """侧边栏导航切换"""
         if 0 <= index < self.stack.count():
             self.stack.setCurrentIndex(index)
 
     def _toggle_maximize(self):
-        """切换最大化/还原"""
         if self.isMaximized():
             self.showNormal()
         else:
             self.showMaximized()
 
     # ============================================================
-    # 无边框窗口拖拽
+    # 边缘检测
+    # ============================================================
+
+    def _detect_edge(self, pos: QPoint) -> int:
+        """判断鼠标位置在窗口的哪个边缘，返回边缘常量"""
+        # 使用窗口外层的坐标来判断（包含阴影 margin）
+        w = self.width()
+        h = self.height()
+        x, y = pos.x(), pos.y()
+
+        left = x <= RESIZE_MARGIN
+        right = x >= w - RESIZE_MARGIN
+        top = y <= RESIZE_MARGIN
+        bottom = y >= h - RESIZE_MARGIN
+
+        if top and left:
+            return _EDGE_TOP_LEFT
+        if top and right:
+            return _EDGE_TOP_RIGHT
+        if bottom and left:
+            return _EDGE_BOTTOM_LEFT
+        if bottom and right:
+            return _EDGE_BOTTOM_RIGHT
+        if left:
+            return _EDGE_LEFT
+        if right:
+            return _EDGE_RIGHT
+        if top:
+            return _EDGE_TOP
+        if bottom:
+            return _EDGE_BOTTOM
+        return _EDGE_NONE
+
+    def _edge_cursor(self, edge: int) -> Qt.CursorShape:
+        """根据边缘方向返回对应的鼠标指针形状"""
+        _cursors = {
+            _EDGE_LEFT: Qt.CursorShape.SizeHorCursor,
+            _EDGE_RIGHT: Qt.CursorShape.SizeHorCursor,
+            _EDGE_TOP: Qt.CursorShape.SizeVerCursor,
+            _EDGE_BOTTOM: Qt.CursorShape.SizeVerCursor,
+            _EDGE_TOP_LEFT: Qt.CursorShape.SizeFDiagCursor,
+            _EDGE_BOTTOM_RIGHT: Qt.CursorShape.SizeFDiagCursor,
+            _EDGE_TOP_RIGHT: Qt.CursorShape.SizeBDiagCursor,
+            _EDGE_BOTTOM_LEFT: Qt.CursorShape.SizeBDiagCursor,
+        }
+        return _cursors.get(edge, Qt.CursorShape.ArrowCursor)
+
+    # ============================================================
+    # 鼠标事件 — 拖拽移动 + 边缘缩放
     # ============================================================
 
     def mousePressEvent(self, event):
-        """记录拖拽起点"""
-        if event.button() == Qt.MouseButton.LeftButton:
-            # 只在标题栏区域响应拖拽
-            if event.position().y() <= TITLE_BAR_HEIGHT + SHADOW_OFFSET:
-                self._drag_pos = event.globalPosition().toPoint()
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+
+        pos = event.position().toPoint()
+        edge = self._detect_edge(pos)
+
+        if edge != _EDGE_NONE:
+            # 边缘缩放
+            self._resize_edge = edge
+            self._resize_start_geom = self.geometry()
+            self._drag_pos = event.globalPosition().toPoint()
+        elif pos.y() <= TITLE_BAR_HEIGHT + SHADOW_OFFSET:
+            # 标题栏拖拽
+            self._drag_pos = event.globalPosition().toPoint()
+            self._resize_edge = _EDGE_NONE
+        else:
+            self._resize_edge = _EDGE_NONE
+            self._drag_pos = None
+
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        """拖拽移动窗口"""
+        pos = event.position().toPoint()
+
         if self._drag_pos is not None:
             delta = event.globalPosition().toPoint() - self._drag_pos
-            self.move(self.pos() + delta)
-            self._drag_pos = event.globalPosition().toPoint()
+
+            if self._resize_edge != _EDGE_NONE:
+                # 缩放窗口
+                self._apply_resize(delta)
+            else:
+                # 移动窗口
+                self.move(self.pos() + delta)
+                self._drag_pos = event.globalPosition().toPoint()
+        else:
+            # 未按下鼠标时，根据位置切换指针形状
+            edge = self._detect_edge(pos)
+            self.setCursor(self._edge_cursor(edge))
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        """结束拖拽"""
         self._drag_pos = None
+        self._resize_edge = _EDGE_NONE
+        self._resize_start_geom = None
         super().mouseReleaseEvent(event)
+
+    def _apply_resize(self, delta: QPoint):
+        """根据当前缩放边缘和鼠标位移计算新窗口几何"""
+        if self._resize_start_geom is None:
+            return
+        g = QRect(self._resize_start_geom)
+        dx, dy = delta.x(), delta.y()
+
+        edge = self._resize_edge
+        if edge in (_EDGE_LEFT, _EDGE_TOP_LEFT, _EDGE_BOTTOM_LEFT):
+            g.setLeft(min(g.left() + dx, g.right() - self.minimumWidth()))
+        if edge in (_EDGE_RIGHT, _EDGE_TOP_RIGHT, _EDGE_BOTTOM_RIGHT):
+            g.setRight(max(g.right() + dx, g.left() + self.minimumWidth()))
+        if edge in (_EDGE_TOP, _EDGE_TOP_LEFT, _EDGE_TOP_RIGHT):
+            g.setTop(min(g.top() + dy, g.bottom() - self.minimumHeight()))
+        if edge in (_EDGE_BOTTOM, _EDGE_BOTTOM_LEFT, _EDGE_BOTTOM_RIGHT):
+            g.setBottom(max(g.bottom() + dy, g.top() + self.minimumHeight()))
+
+        self.setGeometry(g)
 
     def closeEvent(self, event):
         self.client.close()
