@@ -13,6 +13,7 @@ dependencies = [
     "rank-bm25>=0.2",
     "jieba>=0.42",
     "httpx>=0.27",
+    "openai>=1.0",
     "python-dotenv>=1.0",
     "cryptography>=42",
 ]
@@ -44,6 +45,7 @@ asyncio_mode = "auto"
 
 [tool.setuptools.package-data]
 "memoryhub.safety_rules.data" = ["*.json"]
+"memoryhub.core.fact" = ["predicate_ontology.json"]
 
 [tool.setuptools.packages.find]
 include = ["memoryhub*", "evaluation*"]
