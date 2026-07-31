@@ -1,4 +1,4 @@
-﻿# Kylin-MemoryHub 生产依赖
+# Kylin-MemoryHub 生产依赖
 # 安装: pip install -r requirements.txt
 
 # Web 框架
@@ -22,6 +22,9 @@ faiss-cpu>=1.7.0
 # 关键词检索
 rank-bm25>=0.2.0
 jieba>=0.42.0
+
+# 基础依赖
+numpy>=1.24.0
 
 # HTTP 客户端
 httpx>=0.27.0

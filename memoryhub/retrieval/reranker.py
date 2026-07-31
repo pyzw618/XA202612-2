@@ -4,15 +4,20 @@
 对融合后的检索结果进行二次排序。
 """
 
-from memoryhub.adapter.schemas import SearchResult, SearchRequest
+from datetime import datetime
+
+from memoryhub.adapter.schemas import SearchRequest, SearchResult
 
 
 class Reranker:
     """
     检索结果重排序器
 
+    第一阶段实现：按融合分数降序排列，保证链路跑通。
+    第二阶段可叠加时间新鲜度、scope 匹配度等因子（见各 _compute_* 方法）。
+
     使用方式:
-        reranker = Reranker(llm_client=llm)
+        reranker = Reranker()
         reranked = reranker.rerank(results, request)
     """
 
@@ -34,8 +39,8 @@ class Reranker:
             重排序后的 SearchResult 列表
 
         排序因子:
-            1. 原始检索分数
-            2. 与查询的语义相关性（LLM 打分或交叉编码器）
+            1. 原始检索分数（第一阶段唯一因子）
+            2. 与查询的语义相关性（LLM 打分或交叉编码器，后续接入）
             3. 场景 scope 匹配度
             4. 置信度
             5. 时间新鲜度
@@ -130,25 +135,13 @@ class Reranker:
         return 1.0 if total == 0 else matches / total
 
     def _compute_freshness_score(self, result: SearchResult) -> float:
-        """
-        计算时间新鲜度分数
-
-        基于 result.metadata["updated_at"] 计算距今天数，
-        越近越新鲜。无时间戳时默认返回 1.0。
-        """
-        from datetime import datetime
-
-        updated_at = result.metadata.get("updated_at")
-        if updated_at is None:
-            return 1.0
-
+        """计算时间新鲜度分数：按天数指数衰减，30 天半衰期"""
+        raw = result.metadata.get("updated_at") or result.metadata.get("created_at")
+        if not raw:
+            return 0.5  # 无时间信息时给中性分
         try:
-            if isinstance(updated_at, str):
-                updated_at = datetime.fromisoformat(updated_at)
-            now = datetime.now()
-            days = (now - updated_at).total_seconds() / 86400.0
-        except (ValueError, TypeError):
-            return 1.0
-
-        # 30 天内线性衰减，超过 30 天视为 0.0
-        return max(0.0, 1.0 - days / 30.0)
+            ts = datetime.fromisoformat(str(raw))
+        except ValueError:
+            return 0.5
+        age_days = max((datetime.now() - ts.replace(tzinfo=None)).days, 0)
+        return 0.5 ** (age_days / 30.0)

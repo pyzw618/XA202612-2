@@ -14,7 +14,55 @@ from pydantic import BaseModel
 
 from memoryhub.adapter import schemas as adapter_schemas
 from memoryhub.adapter.api import router as memory_router
+from memoryhub.adapter.schemas import KnowledgeMemory, PreferenceMemory, SearchResult
 from memoryhub.config import AppConfig, load_config
+
+
+def _memory_text(memory: PreferenceMemory | KnowledgeMemory) -> str:
+    """用于建索引的记忆文本：知识记忆拼上名称，偏好记忆用正文"""
+    if memory.memory_type == "knowledge":
+        return f"{memory.name} {memory.content}".strip()
+    return memory.content
+
+
+def _memory_metadata(memory: PreferenceMemory | KnowledgeMemory) -> dict:
+    """检索结果随行的元数据（融合过滤依赖 memory_type/confidence/scope）"""
+    return {
+        "memory_type": memory.memory_type,
+        "content": _memory_text(memory),
+        "confidence": memory.confidence,
+        "scope": memory.scope.model_dump(),
+    }
+
+
+class _VectorStoreSearchAdapter:
+    """把 storage 层 VectorStore 适配成检索层的向量检索接口。
+
+    VectorStore 是向量索引的事实来源；memory_type/scope 等元数据以
+    SQLite（memory_lookup）为准，检索时现场补齐。
+    """
+
+    def __init__(self, store, memory_lookup: dict):
+        self._store = store
+        self._lookup = memory_lookup
+
+    def search(self, query_vector: list[float], top_k: int = 5) -> list[SearchResult]:
+        hits = self._store.search(query_vector, top_k)
+        results: list[SearchResult] = []
+        for memory_id, score in hits:
+            memory = self._lookup.get(memory_id)
+            metadata = _memory_metadata(memory) if memory is not None else {}
+            results.append(
+                SearchResult(
+                    memory_id=memory_id,
+                    memory_type=metadata.get("memory_type", ""),
+                    content=metadata.get("content", ""),
+                    score=float(score),
+                    source="vector",
+                    metadata=metadata,
+                )
+            )
+        return results
 
 
 _SAFE_ERROR_TYPE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
@@ -104,14 +152,85 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @app.on_event("startup")
     async def startup():
         """应用启动时初始化各组件"""
-        # TODO: 初始化数据库、向量索引、LLM 客户端等
-        pass
+        import json
+
+        from memoryhub.embedding import create_embedding_client
+        from memoryhub.retrieval.cache import SearchCache
+        from memoryhub.retrieval.hybrid import HybridRetriever
+        from memoryhub.retrieval.keyword_search import KeywordSearcher
+        from memoryhub.retrieval.reranker import Reranker
+        from memoryhub.storage.database import (
+            Database,
+            KnowledgeRepository,
+            PreferenceRepository,
+        )
+        from memoryhub.storage.vector_store import VectorStore
+
+        # 存储层：SQLite 是记忆记录的事实来源，VectorStore 是向量索引的事实来源
+        db = Database(db_path=config.storage.db_path)
+        db.init_schema()
+        pref_repo = PreferenceRepository(db)
+        know_repo = KnowledgeRepository(db)
+
+        # 全量加载活跃记忆，构建 memory_id → 记忆对象 的映射
+        memories = [*pref_repo.list_all(), *know_repo.list_all()]
+        memory_lookup = {m.memory_id: m for m in memories}
+
+        embedding_client = create_embedding_client(dim=config.embedding.dimension)
+
+        # 向量索引：优先从磁盘加载；为空时按记忆文本重新 embedding 全量重建
+        vector_store = VectorStore(
+            index_path=config.storage.vector_index_path,
+            dimension=embedding_client.get_dimension(),
+        )
+        vector_store.init_index()
+        if vector_store.index.ntotal == 0 and memories:
+            for memory in memories:
+                vector_store.add(
+                    memory.memory_id, embedding_client.embed(_memory_text(memory))
+                )
+            vector_store.save()
+
+        # 关键词索引：BM25 索引可重建，启动时从 SQLite 全量构建
+        keyword_search = KeywordSearcher()
+        if memories:
+            keyword_search.build_index(
+                [
+                    (
+                        m.memory_id,
+                        _memory_text(m),
+                        json.dumps(_memory_metadata(m), ensure_ascii=False),
+                    )
+                    for m in memories
+                ]
+            )
+
+        cache = SearchCache(
+            max_size=config.storage.cache_max_size,
+            ttl_seconds=config.retrieval.cache_ttl_seconds,
+        )
+
+        app.state.db = db
+        app.state.vector_store = vector_store
+        app.state.retriever = HybridRetriever(
+            vector_search=_VectorStoreSearchAdapter(vector_store, memory_lookup),
+            keyword_search=keyword_search,
+            reranker=Reranker(),
+            cache=cache,
+            config=config.retrieval,
+            embedding_fn=embedding_client.embed,
+            memory_lookup=memory_lookup,
+        )
 
     @app.on_event("shutdown")
     async def shutdown():
-        """应用关闭时释放资源"""
-        # TODO: 关闭数据库连接、保存向量索引等
-        pass
+        """应用关闭时保存向量索引并释放数据库连接"""
+        vector_store = getattr(app.state, "vector_store", None)
+        if vector_store is not None:
+            vector_store.save()
+        db = getattr(app.state, "db", None)
+        if db is not None:
+            db.close()
 
     return app
 

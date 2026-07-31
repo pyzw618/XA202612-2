@@ -4,6 +4,9 @@
 LRU 缓存，减少重复检索的延迟。
 """
 
+import time
+from collections import OrderedDict
+
 from memoryhub.adapter.schemas import SearchRequest, SearchResponse
 
 
@@ -27,7 +30,7 @@ class SearchCache:
         """
         self.max_size = max_size
         self.ttl_seconds = ttl_seconds
-        self._cache = {}
+        self._cache: OrderedDict[str, tuple[float, SearchResponse]] = OrderedDict()
 
     def get(self, request: SearchRequest) -> SearchResponse | None:
         """
@@ -39,7 +42,19 @@ class SearchCache:
         返回:
             缓存的 SearchResponse 或 None（未命中/已过期）
         """
-        raise NotImplementedError
+        key = self._make_key(request)
+        entry = self._cache.get(key)
+        if entry is None:
+            return None
+
+        created_at, response = entry
+        if time.time() - created_at > self.ttl_seconds:
+            del self._cache[key]
+            return None
+
+        # 命中：移动到末尾，维持 LRU 顺序
+        self._cache.move_to_end(key)
+        return response
 
     def set(self, request: SearchRequest, response: SearchResponse) -> None:
         """
@@ -49,7 +64,11 @@ class SearchCache:
             request: 检索请求（作为 key）
             response: 检索结果（作为 value）
         """
-        raise NotImplementedError
+        key = self._make_key(request)
+        self._cache[key] = (time.time(), response)
+        self._cache.move_to_end(key)
+        while len(self._cache) > self.max_size:
+            self._cache.popitem(last=False)
 
     def invalidate(self, memory_id: str) -> None:
         """
@@ -60,16 +79,31 @@ class SearchCache:
         参数:
             memory_id: 被更新/删除的记忆 ID
         """
-        raise NotImplementedError
+        stale_keys = [
+            key
+            for key, (_, response) in self._cache.items()
+            if self._contains_memory(response, memory_id)
+        ]
+        for key in stale_keys:
+            del self._cache[key]
 
     def clear(self) -> None:
         """清空所有缓存"""
-        raise NotImplementedError
+        self._cache.clear()
 
     def size(self) -> int:
         """返回当前缓存条目数"""
-        raise NotImplementedError
+        return len(self._cache)
 
     def _make_key(self, request: SearchRequest) -> str:
-        """生成缓存 key"""
-        raise NotImplementedError
+        """生成缓存 key（请求的 canonical JSON 表示）"""
+        return request.model_dump_json()
+
+    @staticmethod
+    def _contains_memory(response: SearchResponse, memory_id: str) -> bool:
+        """判断响应中是否包含指定记忆 ID"""
+        if any(r.memory_id == memory_id for r in response.results):
+            return True
+        if any(p.memory_id == memory_id for p in response.preferences):
+            return True
+        return any(k.memory_id == memory_id for k in response.knowledge)
