@@ -218,3 +218,6 @@ __marimo__/
 .streamlit/secrets.toml
 
 docs_group2
+
+# 本地生成的数据（向量索引、数据库等）
+data/
