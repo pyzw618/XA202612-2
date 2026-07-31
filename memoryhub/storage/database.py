@@ -347,6 +347,17 @@ class PreferenceRepository:
             )
             return [_pref_row_to_pydantic(r) for r in rows]
 
+    def list_all(self, status: str = "active") -> list[PreferenceMemory]:
+        """列出指定状态的全部偏好记忆（应用启动时全量加载用）"""
+        with self.db.session() as s:
+            rows = (
+                s.query(PreferenceRow)
+                .filter(PreferenceRow.status == status)
+                .order_by(PreferenceRow.confidence.desc())
+                .all()
+            )
+            return [_pref_row_to_pydantic(r) for r in rows]
+
     def update_status(self, memory_id: str, status: str) -> None:
         """更新状态"""
         from datetime import datetime
@@ -456,6 +467,17 @@ class KnowledgeRepository:
                     KnowledgeRow.scope_task_type == task_type,
                     KnowledgeRow.status == "active",
                 )
+                .order_by(KnowledgeRow.confidence.desc())
+                .all()
+            )
+            return [_know_row_to_pydantic(r) for r in rows]
+
+    def list_all(self, status: str = "active") -> list[KnowledgeMemory]:
+        """列出指定状态的全部知识记忆（应用启动时全量加载用）"""
+        with self.db.session() as s:
+            rows = (
+                s.query(KnowledgeRow)
+                .filter(KnowledgeRow.status == status)
                 .order_by(KnowledgeRow.confidence.desc())
                 .all()
             )
