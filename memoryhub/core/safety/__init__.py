@@ -30,13 +30,16 @@ from memoryhub.core.safety.audit_log import (
 )
 from memoryhub.core.safety.detector import (
     SafetyDecisionError,
+    SafetyRuleOverlay,
     SafetySanitizationError,
     SafetyScanError,
     SensitiveDetector,
+    normalize_sensitive_text,
 )
 from memoryhub.core.safety.forget import MemoryForgetter
 from memoryhub.core.safety.gate import (
     ApprovedWrite,
+    DetectorProvider,
     GateOutcome,
     GuardedCallbacks,
     SafeLogRecord,
@@ -47,6 +50,17 @@ from memoryhub.core.safety.quarantine import (
     QuarantineError,
     QuarantineReceipt,
     ReviewQuarantineStore,
+)
+from memoryhub.core.safety.user_rules import (
+    InMemoryUserRuleRepository,
+    SQLiteUserRuleRepository,
+    UserRuleEffect,
+    UserRuleError,
+    UserRuleKind,
+    UserRuleRepository,
+    UserRuleService,
+    UserRuleView,
+    build_user_rule_service,
 )
 from memoryhub.safety_rules import (
     BUILTIN_COMPONENTS,
@@ -77,8 +91,10 @@ __all__ = [
     "BUILTIN_COMPONENTS",
     "ComponentRegistry",
     "DEFAULT_SENSITIVE_RULES",
+    "DetectorProvider",
     "GateOutcome",
     "GuardedCallbacks",
+    "InMemoryUserRuleRepository",
     "MemoryForgetter",
     "MaskerCapability",
     "QuarantineError",
@@ -114,6 +130,7 @@ __all__ = [
     "SafetyReport",
     "SafetyResult",
     "SafetyRuleOverride",
+    "SafetyRuleOverlay",
     "SafetySanitizationError",
     "SafetyScanError",
     "SafetyGateError",
@@ -125,10 +142,19 @@ __all__ = [
     "SensitiveRule",
     "SourceKind",
     "SourceRole",
+    "SQLiteUserRuleRepository",
+    "UserRuleEffect",
+    "UserRuleError",
+    "UserRuleKind",
+    "UserRuleRepository",
+    "UserRuleService",
+    "UserRuleView",
+    "build_user_rule_service",
     "canonical_sha256",
     "list_builtin_rule_versions",
     "load_builtin_rule_set",
     "load_rule_set_file",
+    "normalize_sensitive_text",
     "path_matches",
     "resolve_masker",
     "resolve_validator",

@@ -25,6 +25,7 @@ from memoryhub.core.safety.quarantine import (
 
 if TYPE_CHECKING:
     from memoryhub.config import SafetyConfig
+    from memoryhub.core.safety.user_rules import UserRuleService
 
 _APPROVED_WRITE_TOKEN = object()
 
@@ -140,6 +141,7 @@ class ApprovedWrite:
 
 ApprovedCallback = Callable[[ApprovedWrite], object]
 LogCallback = Callable[[SafeLogRecord], object]
+DetectorProvider = Callable[[MemoryEvent], SensitiveDetector]
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,18 +183,24 @@ class SafetyWriteGate:
 
     def __init__(
         self,
-        detector: SensitiveDetector,
+        detector: SensitiveDetector | None,
         audit_log: SafetyAuditLog,
         *,
         quarantine: ReviewQuarantineStore | None = None,
+        detector_provider: DetectorProvider | None = None,
     ):
-        if not isinstance(detector, SensitiveDetector):
+        if (detector is None) == (detector_provider is None):
+            raise SafetyGateError("gate.invalid_detector")
+        if detector is not None and not isinstance(detector, SensitiveDetector):
+            raise SafetyGateError("gate.invalid_detector")
+        if detector_provider is not None and not callable(detector_provider):
             raise SafetyGateError("gate.invalid_detector")
         if type(audit_log) is not SafetyAuditLog:
             raise SafetyGateError("gate.invalid_audit_log")
         if quarantine is not None and type(quarantine) is not ReviewQuarantineStore:
             raise SafetyGateError("gate.invalid_quarantine")
         self._detector = detector
+        self._detector_provider = detector_provider
         self._audit_log = audit_log
         self._quarantine = quarantine
         self._capability_key = secrets.token_bytes(32)
@@ -223,6 +231,89 @@ class SafetyWriteGate:
             encryption_key=quarantine_key,
         )
         return cls(detector, audit_log, quarantine=quarantine)
+
+    @classmethod
+    def from_provider_config(
+        cls,
+        detector_provider: DetectorProvider,
+        config: "SafetyConfig",
+        *,
+        audit_hmac_key: bytes,
+        quarantine_key: bytes,
+    ) -> "SafetyWriteGate":
+        """装配按事件选择不可变检测快照的 Gate，供用户级规则使用。"""
+        if not callable(detector_provider):
+            raise SafetyGateError("gate.invalid_detector")
+        if (
+            isinstance(audit_hmac_key, bytes)
+            and isinstance(quarantine_key, bytes)
+            and hmac.compare_digest(audit_hmac_key, quarantine_key)
+        ):
+            raise SafetyGateError("gate.key_reuse")
+        audit_log = SafetyAuditLog.from_config(
+            config.audit,
+            fingerprint_key=audit_hmac_key,
+        )
+        quarantine = ReviewQuarantineStore.from_config(
+            config.quarantine,
+            encryption_key=quarantine_key,
+        )
+        return cls(
+            None,
+            audit_log,
+            quarantine=quarantine,
+            detector_provider=detector_provider,
+        )
+
+    @classmethod
+    def from_user_rule_config(
+        cls,
+        user_rule_service: "UserRuleService",
+        config: "SafetyConfig",
+        *,
+        audit_hmac_key: bytes,
+        quarantine_key: bytes,
+    ) -> "SafetyWriteGate":
+        """Compose user overlays while enforcing three-way safety-key separation."""
+        from memoryhub.core.safety.user_rules import UserRuleError, UserRuleService
+
+        if not isinstance(user_rule_service, UserRuleService):
+            raise SafetyGateError("gate.invalid_detector")
+        try:
+            user_rule_service.assert_key_separation(
+                audit_hmac_key,
+                quarantine_key,
+            )
+            provider = user_rule_service.detector_provider(config)
+        except UserRuleError as exc:
+            code = (
+                "gate.key_reuse"
+                if exc.code == "user_rule.key_reuse"
+                else ("gate.invalid_detector")
+            )
+            raise SafetyGateError(code) from None
+        except Exception:
+            raise SafetyGateError("gate.invalid_detector") from None
+        return cls.from_provider_config(
+            provider,
+            config,
+            audit_hmac_key=audit_hmac_key,
+            quarantine_key=quarantine_key,
+        )
+
+    def _detector_for(self, event: MemoryEvent) -> SensitiveDetector:
+        """为一条事件固定检测器；provider 异常和非法结果均失败关闭。"""
+        detector = self._detector
+        provider_failed = False
+        if self._detector_provider is not None:
+            try:
+                detector = self._detector_provider(event)
+            except Exception:
+                provider_failed = True
+                detector = None
+        if provider_failed or not isinstance(detector, SensitiveDetector):
+            raise SafetyGateError("gate.detector_unavailable")
+        return detector
 
     @staticmethod
     def _canonical_capability_payload(
@@ -381,16 +472,17 @@ class SafetyWriteGate:
 
         if not isinstance(event, MemoryEvent):
             raise SafetyGateError("gate.memory_event_required")
+        detector = self._detector_for(event)
         try:
-            result = self._detector.process(event)
+            result = detector.process(event)
         except Exception:
             raise SafetyGateError("gate.processing_failed") from None
         try:
-            validated = self._detector.validate_result(event, result)
+            validated = detector.validate_result(event, result)
         except Exception:
             raise SafetyGateError("gate.validation_failed") from None
         try:
-            audit_record = self._audit_log.append(event, validated, self._detector)
+            audit_record = self._audit_log.append(event, validated, detector)
         except Exception:
             raise SafetyGateError("gate.audit_failed") from None
         audit_id, audit_record_hash, audit_sequence = self._audit_identity(
@@ -419,7 +511,7 @@ class SafetyWriteGate:
                 review = self._quarantine.put(
                     event,
                     validated,
-                    self._detector,
+                    detector,
                     audit_id=audit_id,
                 )
                 self._quarantine.assert_persisted(review)

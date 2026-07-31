@@ -33,25 +33,61 @@ pip install -r requirements.txt
 ## 项目结构
 
 ```
-OS_Agent_Memory_Engine/
-├── requirements.txt
-├── data/                          # 持久化文件（自动生成）
-│   ├── memories.db                #   SQLite 数据库
-│   ├── faiss.index                #   FAISS 向量索引
-│   └── faiss.index.meta           #   id 映射表
-├── src/
-│   ├── embedding/                 # Embedding 抽象层
-│   │   ├── base.py                #   BaseEmbeddingClient 抽象基类
-│   │   ├── mock_client.py         #   Mock 实现（开发用，确定性随机向量）
-│   │   ├── kylin_client.py        #   麒麟 SDK 实现（ctypes → .so → DBus）
-│   │   └── __init__.py            #   create_embedding_client() 自动选择
-│   ├── mock_embedding.py          # 向后兼容 re-export
-│   ├── memory_store.py            # SQLite 持久化存储层
-│   └── search_engine.py           # BM25 + FAISS + Hybrid 检索引擎
-├── tests/
-│   └── test_search.py             # 集成测试（10 条假数据）
-└── .vscode/
-    └── launch.json                # VS Code 调试配置
+memoryhub/                  # 核心 Python 包
+├── app.py                  # FastAPI 应用入口
+├── config.py               # 配置管理
+├── adapter/                # OS Agent 接入适配层
+│   ├── api.py              # REST 路由定义
+│   ├── schemas.py          # 核心数据结构 (Pydantic)
+│   ├── user_rule_schemas.py # 用户敏感规则 REST DTO
+│   └── simulator.py        # OS Agent 模拟器
+├── core/                   # 记忆核心逻辑
+│   ├── ingestion/          # 多源数据接入 (清洗/标准化/质量评分)
+│   ├── preference/         # 偏好记忆 (抽取/置信度/版本管理)
+│   ├── knowledge/          # 知识记忆 (抽取/模板/工作流挖掘)
+│   ├── fact/               # 事实记忆 (提取/冲突/标准化)
+│   ├── forget/             # 精准遗忘模块
+│   ├── conflict/           # 冲突处理 (检测/解决)
+│   ├── safety/             # 安全过滤与精准遗忘
+│   └── lifecycle/          # 记忆生命周期管理
+├── retrieval/              # 混合检索引擎
+│   ├── hybrid.py           # 混合检索入口
+│   ├── vector_search.py    # FAISS 向量检索
+│   ├── keyword_search.py   # BM25 关键词检索
+│   ├── reranker.py         # 重排序
+│   └── cache.py            # LRU 缓存
+├── storage/                # 持久化存储层
+│   ├── database.py         # SQLite + SQLAlchemy
+│   ├── models.py           # ORM 模型
+│   ├── vector_store.py     # FAISS 索引管理
+│   └── evidence_store.py   # 证据链存储
+├── llm/                    # LLM 抽象层
+│   ├── base.py             # 抽象接口
+│   ├── openai_client.py    # OpenAI 兼容 API
+│   └── ollama_client.py    # Ollama 本地推理
+└── embedding/              # Embedding 抽象层
+    ├── base.py             # 抽象接口
+    ├── kylin_client.py     # 麒麟 SDK 封装
+    └── mock_client.py      # 开发用 Mock
+
+console/                    # 管理控制台前端 (PyQt6)
+├── main.py                 # 应用入口
+├── api_client.py           # MemoryHub API 客户端
+├── main_window.py          # 主窗口框架
+├── pages/                  # 各功能页面
+└── widgets/                # 可复用组件
+
+evaluation/                 # 评测模块
+├── metrics/
+│   ├── preference_eval.py  # 偏好提取评测
+│   ├── retrieval_eval.py   # 检索评测
+│   ├── conflict_eval.py    # 冲突处理评测
+│   └── latency_benchmark.py # 性能基准测试
+
+docs/
+├── ARCHITECTURE.md         # 项目整体架构可视化
+├── INTERFACE.md            # 数据结构与接口规范文档
+└── SAFETY_MODULE_TECHNICAL.md  # 安全模块技术文档
 ```
 
 ## 模块说明
@@ -173,6 +209,16 @@ for r in results:
 # 集成测试（10 条假数据，5 个断言）
 PYTHONIOENCODING=utf-8 python tests/test_search.py
 
+# 安全模块测试
+PYTHONIOENCODING=utf-8 python -m pytest tests/test_safety_gate.py tests/test_user_sensitive_rules.py -v
+```
+
+**安全边界**: 规则加载/校验、递归扫描、策略决策、全值脱敏、同快照复检、
+用户自定义规则 Overlay、实例内结果认证、最小化 JSONL 审计链、REVIEW 加密隔离
+和强制写入 Gate 已实现。
+普通 SQLite/向量/证据算法仍是脚手架；实现时只能注册为 Gate 的受保护 sink，
+不得接收原始事件或裸文本
+
 # 验证持久化（模拟重启）
 PYTHONIOENCODING=utf-8 python -c "
 from src.memory_store import MemoryStore
@@ -184,6 +230,21 @@ print(f'从磁盘恢复: {len(store)} 条记录')
 VS Code 调试：打开 `tests/test_search.py`，`F5` → 选"调试: test_search.py"。
 
 ## 与 MemoryHub 主线的对接计划
+
+前端可通过 `/api/memory/safety/user-rules` CRUD 管理当前用户的敏感规则。
+`mask_match` 遮盖命中片段，`drop_event` 跳过整条待记忆事件；matcher 只写不读并以
+AES-256-GCM 加密。启用前需把独立的 32 字节随机密钥以 Base64 写入
+`MEMORYHUB_USER_RULE_KEY`，由认证网关注入可信 `X-MemoryHub-User` 请求头，并向
+`create_app()` 注入基于认证会话的 `user_rule_identity_resolver`；缺少 resolver
+时管理接口默认失败关闭。
+
+当前仓库的 `/api/memory/events` 和普通存储业务仍是脚手架。本次已提供
+`UserRuleService.detector_provider()` 与 `SafetyWriteGate.from_user_rule_config()`
+接线点；实现真实写入端点时必须通过该 Gate，规则才会在每次实际记忆写入中生效。
+
+安全配置与密钥要求见 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)，数据契约、
+轮转/保留和平台权限边界见 [`docs/INTERFACE.md`](docs/INTERFACE.md)，完整验收矩阵
+见 [`docs/SAFETY_ACCEPTANCE.md`](docs/SAFETY_ACCEPTANCE.md)。
 
 | 层 | 当前状态 | 下一步 |
 |----|---------|--------|

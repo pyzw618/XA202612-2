@@ -232,6 +232,60 @@ RuleDefinition
 - 来源变化不会自动改变动作；需重新评估适用范围、误报/漏报、脱敏效果和策略影响。
 - 发布前使用不含真实个人信息和有效凭据的合成样本测试边界。
 
+### 2.6 用户自定义敏感规则 Overlay
+
+前端管理的用户规则与内置合规规则分开存储，不修改或重新发布
+`RuleSetSnapshot`。每次处理事件时，系统按 `MemoryEvent.user_id` 读取该用户当前
+启用规则，编译为不可变 `SafetyRuleOverlay`，再与内置快照组合成一次有效扫描计划。
+初扫、决策、脱敏、复检、结果认证和审计始终复用同一个 detector 实例和组合摘要；
+并发更新只影响下一条事件。
+
+对外动作刻意使用无歧义名称：
+
+| 前端 effect | 内部动作 | 语义 |
+|---|---|---|
+| `mask_match` | `MASK` | 用固定 `[REDACTED_USER_DEFINED]` 替换命中片段；复检通过后其余内容可继续 |
+| `drop_event` | `REJECT` | 跳过整条 `MemoryEvent`，不进入普通记忆、Embedding、向量或证据 sink |
+
+不新增第五种 `SKIP` 动作。若产品需要“只跳过一个已抽取的偏好/知识候选，同时保留同
+事件的其他候选”，必须在候选拆分后增加候选级 Gate，不能把事件级 `REJECT` 偷换成
+该语义。
+
+用户规则只允许扫描 `/text`、`/payload/**` 和
+`/tool_calls/*/{arguments,result,error}/**` 内容路径，排除事件/用户身份、
+工具名、`redactions` 和质量诊断元数据。`mask_match` 的优先级低于全部内置规则，
+因此不能盖过内置 `REVIEW/REJECT`；`drop_event` 可以收紧内置 `MASK`。固定脱敏
+标记内的 Overlay 命中在复检时忽略，但跨出标记范围的候选仍须处理，避免用伪造标记
+绕过扫描。
+
+管理接口接受 `literal` 和 `advanced_regex`：
+
+- `literal` 在服务端按扫描器相同的 Unicode 规范化语义转义为正则；
+- `advanced_regex` 默认关闭；显式启用后经过长度、空匹配和保守回溯风险校验，只适合
+  受信任本地管理端；
+- 当前没有自然语言分类器。“C++ 的版本信息”这一描述不会自动推导出所有版本写法；
+  可用 `C++` 的 `drop_event` 规则覆盖相关事件，或显式配置匹配完整版本串的受限正则。
+
+matcher 本身可能是秘密，SQLite 只保存 AES-256-GCM 密文。主密钥经 HKDF 分离为
+加密与 HMAC 指纹子密钥；用户引用、matcher 指纹和 Overlay 摘要均为域分离 HMAC。
+组合 `rule_set_digest` 只包含内置摘要和带密钥 Overlay 摘要，不持久化低熵 matcher
+的普通 SHA-256，避免审计摘要成为离线字典猜测 oracle。规则更新生成新 revision，
+删除采用禁用/软删除；GET/list 不返回 matcher 或其确定性指纹，避免管理接口自身成为
+在线字典 oracle。每用户累计规则（含 tombstone）最多 `max_rules_per_user` 条，每条
+规则最多 100 个 revision，最后一个 revision 为软删除预留，限制历史表增长。
+
+读取时先认证每个当前行的 AES-GCM AAD，再依据 `enabled/deleted` 过滤，防止翻转状态位
+静默关闭规则。该逐记录认证不能检测有数据库写权限的攻击者删除整行或回放旧的合法
+密文；此类回滚/删除威胁仍需依赖受控 SQLite 文件权限、备份/恢复审计，或未来增加外部
+认证 head。
+
+REST 管理接口以 `X-MemoryHub-User` 选择规则作用域。该值不是本模块提供的认证机制；
+生产部署必须由可信本地网关从已认证主体生成并覆盖客户端输入，并向
+`create_app()` 注入从认证会话解析主体的 `user_rule_identity_resolver`；默认无
+resolver 时接口失败关闭。规则只影响未来写入，不自动重写或删除既有记忆。密钥、
+存储、解密或 provider 异常均失败关闭，不得回退到“只加载内置规则”。
+`memoryhub.app` 当前的通配 CORS 仅用于开发；生产还必须配置明确 origin 白名单。
+
 ## 3. 递归扫描 MemoryEvent：范围与遍历机制
 
 > 用户需求中的第三、第四部分标题均为“递归扫描 MemoryEvent”。本文将其拆分为：
@@ -590,6 +644,13 @@ HMAC-SHA256 覆盖全部字段。`validate_result()` 会：
 后续实现不得重新增加接收原事件的旁路，必须注册为 `GuardedCallbacks` 的受保护 sink。
 麒麟 Embedding 异常只能暴露稳定错误码，不能把输入文本或 SDK 原始消息写入异常和日志。
 
+本次已实现规则 CRUD、`detector_provider()` 和 Gate 动态 detector 路由，但仓库现有
+`POST /api/memory/events` 仍是 `NotImplementedError` 脚手架，因此默认应用尚没有真实
+业务写入可供自动拦截。实现该端点时必须用
+`SafetyWriteGate.from_user_rule_config(service, config.safety, ...)` 装配；该入口会在创建
+审计/隔离目录前验证用户规则、审计和隔离三类密钥互不复用。所有普通 sink 只能接收
+`ApprovedWrite`；在此之前不能宣称已完成端到端入库。
+
 ## 7. 参考论文、国标与其他规范来源
 
 ### 7.1 国家标准与国内规范
@@ -656,5 +717,6 @@ validator、动作和版本仍必须分别关联官方标准、协议、厂商�
 | 决策、例外、脱敏、复检、结果认证 | `detector.py`、`schemas.py` | `tests/test_safety_pipeline.py`、`test_safety_contract.py` |
 | 审计最小投影、哈希链、轮转、保留 | `memoryhub/core/safety/audit_log.py` | `tests/test_safety_audit_log.py` |
 | REVIEW 加密隔离、强制写入 Gate | `quarantine.py`、`gate.py` | `tests/test_safety_gate.py` |
+| 用户规则 CRUD、加密版本库、动态 Overlay | `user_rules.py`、`adapter/user_rule_schemas.py`、`adapter/api.py` | `tests/test_user_sensitive_rules.py`、`tests/test_user_rule_api.py` |
 | 配置与兼容开关 | `memoryhub/config.py`、`config.example.yaml` | `tests/test_safety_runtime_config.py` |
 | 异常和日志原文泄漏防护 | `memoryhub/app.py`、`memoryhub/embedding/kylin_client.py` | `tests/test_safe_errors.py` |
