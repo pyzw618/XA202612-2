@@ -216,8 +216,22 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-
 docs_group2
 
 # 本地生成的数据（向量索引、数据库等）
 data/
+
+# 比赛资料（不上传，太大/非代码）
+*.pptx
+*.pdf
+
+# 操作系统杂项
+Thumbs.db
+.DS_Store
+*.swp
+*.swo
+
+# PyQt6 打包产物
+dist/
+build/
+*.exe
