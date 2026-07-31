@@ -3,10 +3,12 @@
 支持三种模式：
 1. 精确 ID 模式：直接删除指定 memory_id
 2. 范围删除模式：按 scope 批量删除
-3. 自然语言模式：LLM 解析意图后定位并删除（第一版仅提供占位实现）
+3. 自然语言模式：关键词匹配定位并删除
 """
 
 import re
+import uuid
+from datetime import datetime
 
 from memoryhub.adapter.schemas import (
     ForgetRequest,
@@ -21,22 +23,43 @@ class MemoryForgetter:
     显式遗忘执行器
 
     使用方式:
-        forgetter = MemoryForgetter(llm_client=llm, storage=db, vector_store=vs, cache=cache)
+        forgetter = MemoryForgetter(
+            llm_client=llm,
+            pref_repo=pref_repo,
+            know_repo=know_repo,
+            vector_store=vs,
+            cache=cache,
+            db=db,
+        )
         result = forgetter.execute(request)
     """
 
-    def __init__(self, llm_client=None, storage=None, vector_store=None, cache=None):
+    def __init__(
+        self,
+        llm_client=None,
+        storage=None,
+        vector_store=None,
+        cache=None,
+        pref_repo=None,
+        know_repo=None,
+        db=None,
+    ):
         """
         参数:
             llm_client: LLM 客户端，用于自然语言意图解析
-            storage: SQLite/SQLAlchemy 存储层
+            storage: SQLite/SQLAlchemy 存储层（Database 实例，向后兼容）
             vector_store: FAISS 向量存储
             cache: 检索缓存
+            pref_repo: PreferenceRepository 实例
+            know_repo: KnowledgeRepository 实例
+            db: Database 实例（向后兼容 storage 参数）
         """
         self.llm_client = llm_client
-        self.storage = storage
+        self.storage = storage or db
         self.vector_store = vector_store
         self.cache = cache
+        self.pref_repo = pref_repo
+        self.know_repo = know_repo
 
     def execute(self, request: ForgetRequest) -> ForgetResponse:
         """
@@ -80,13 +103,15 @@ class MemoryForgetter:
                 "match_strategy": "semantic" | "keyword" | "exact",
             }
 
-        第一版：基于规则的关键词/类型提取，不调用 LLM。
+        目前基于规则的关键词/类型提取，不调用 LLM。
         """
         instruction = (request.instruction or "").strip()
 
         if request.target_memory_ids:
             strategy = "exact"
-        elif request.target_scope and (request.target_scope.scene or request.target_scope.task_type or request.target_scope.app):
+        elif request.target_scope and (
+            request.target_scope.scene or request.target_scope.task_type or request.target_scope.app
+        ):
             strategy = "scope"
         else:
             strategy = "semantic"
@@ -145,37 +170,53 @@ class MemoryForgetter:
             return request.target_memory_ids
 
         if strategy == "scope" and request.target_scope:
-            return self._locate_by_scope(request.target_scope, intent.get("memory_type", "all"), request.user_id)
+            return self._locate_by_scope(
+                request.target_scope, intent.get("memory_type", "all"), request.user_id
+            )
 
-        # 自然语言/语义模式：先做关键词匹配，后续可接入 LLM + 向量检索
+        # 自然语言/关键词模式
         return self._locate_by_keywords(intent, request.user_id)
 
     def _locate_by_scope(self, scope, memory_type: str, user_id: str) -> list[str]:
         """按 scope 批量定位记忆"""
-        # PSEUDO-DB: 根据 memory_type 选择 preferences / knowledge / UNION
-        #            SELECT memory_id FROM preferences
-        #            WHERE user_id=? AND scope_scene=? AND scope_task_type=? AND scope_app=? AND status='active'
-        #            UNION
-        #            SELECT memory_id FROM knowledge
-        #            WHERE user_id=? AND scope_scene=? AND scope_task_type=? AND scope_app=? AND status='active'
-        return []
+        ids: list[str] = []
+
+        if memory_type in ("preference", "all") and self.pref_repo is not None:
+            prefs = self.pref_repo.get_by_scope(
+                user_id, scope.scene or "", scope.task_type or ""
+            )
+            ids.extend(p.memory_id for p in prefs)
+
+        if memory_type in ("knowledge", "all") and self.know_repo is not None:
+            knows = self.know_repo.get_by_scope(
+                user_id, scope.scene or "", scope.task_type or ""
+            )
+            ids.extend(k.memory_id for k in knows)
+
+        return ids
 
     def _locate_by_keywords(self, intent: dict, user_id: str) -> list[str]:
         """基于关键词匹配定位记忆"""
         keywords = intent.get("target_keywords", [])
         memory_type = intent.get("memory_type", "all")
+        matched: list[str] = []
 
-        # PSEUDO-DB: 查询用户的 active 记忆，按 memory_type 过滤
-        # candidates = db.query(...).filter(user_id=user_id, status='active').all()
-        candidates = []
+        if not keywords:
+            return matched
 
-        matched = []
-        for candidate in candidates:
-            content = getattr(candidate, "content", "") or ""
-            name = getattr(candidate, "name", "") or ""
-            text = f"{name} {content}".lower()
-            if any(kw.lower() in text for kw in keywords):
-                matched.append(getattr(candidate, "memory_id", ""))
+        if memory_type in ("preference", "all") and self.pref_repo is not None:
+            prefs = self.pref_repo.get_active(user_id)
+            for p in prefs:
+                text = (p.text or "").lower()
+                if any(kw.lower() in text for kw in keywords):
+                    matched.append(p.memory_id)
+
+        if memory_type in ("knowledge", "all") and self.know_repo is not None:
+            knows = self.know_repo.list_all(status="active")
+            for k in knows:
+                text = f"{k.name or ''} {k.content or ''}".lower()
+                if any(kw.lower() in text for kw in keywords):
+                    matched.append(k.memory_id)
 
         return matched
 
@@ -183,39 +224,76 @@ class MemoryForgetter:
         """
         删除记忆（结构化数据 + 向量索引 + 缓存）。
 
-        第一版采用软删除：status = 'deleted'，后续再物理清理。
+        采用软删除：status = 'deleted'。
         """
         deleted = 0
         for memory_id in memory_ids:
-            # PSEUDO-DB: UPDATE preferences SET status='deleted' WHERE memory_id=?
-            # PSEUDO-DB: UPDATE knowledge SET status='deleted' WHERE memory_id=?
-            deleted += 1
-
-            if cascade:
-                # 清理向量索引
-                if self.vector_store is not None:
-                    # PSEUDO-FAISS: self.vector_store.delete(memory_id)
+            deleted_this = False
+            if self.pref_repo is not None:
+                try:
+                    self.pref_repo.update_status(memory_id, "deleted")
+                    deleted_this = True
+                except Exception:
+                    pass
+            if self.know_repo is not None:
+                try:
+                    self.know_repo.update_status(memory_id, "deleted")
+                    deleted_this = True
+                except Exception:
                     pass
 
-                # 清理检索缓存
-                if self.cache is not None:
-                    # PSEUDO-CACHE: self.cache.invalidate(memory_id)
-                    pass
+            if deleted_this:
+                deleted += 1
 
-                # 标记关联冲突记录
-                # PSEUDO-DB: UPDATE conflicts SET decision='cleaned' WHERE old_memory_id=? OR new_memory_id=?
-                pass
+                if cascade:
+                    # 清理向量索引
+                    if self.vector_store is not None:
+                        try:
+                            self.vector_store.remove(memory_id)
+                        except Exception:
+                            pass
+
+                    # 清理检索缓存
+                    if self.cache is not None:
+                        try:
+                            if hasattr(self.cache, 'cache'):
+                                self.cache.cache.invalidate(memory_id)
+                        except Exception:
+                            pass
 
         return deleted
 
     def create_audit_log(self, request: ForgetRequest, deleted_ids: list[str]) -> ForgetRecord:
         """
-        生成遗忘审计日志。
+        生成遗忘审计日志并持久化到数据库。
         """
-        # PSEUDO-DB: INSERT INTO forget_history (...) VALUES (...)
-        return ForgetRecord(
+        record = ForgetRecord(
+            record_id=f"forget_{uuid.uuid4().hex[:16]}",
             user_id=request.user_id,
             instruction=request.instruction,
             target_memory_ids=deleted_ids,
             deleted_count=len(deleted_ids),
+            target_scope=request.target_scope or SceneScope(),
+            created_at=datetime.now(),
         )
+
+        # 持久化到 forget_history 表
+        if self.storage is not None:
+            try:
+                from memoryhub.storage.models import ForgetRow
+
+                with self.storage.session() as s:
+                    row = ForgetRow(
+                        record_id=record.record_id,
+                        user_id=record.user_id,
+                        instruction=record.instruction,
+                        target_memory_ids=record.target_memory_ids,
+                        deleted_count=record.deleted_count,
+                        created_at=record.created_at,
+                    )
+                    s.add(row)
+                    s.commit()
+            except Exception:
+                pass
+
+        return record

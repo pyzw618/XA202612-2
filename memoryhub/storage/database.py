@@ -107,7 +107,7 @@ def _pref_row_to_pydantic(row: PreferenceRow) -> PreferenceMemory:
         memory_id=row.memory_id,
         user_id=row.user_id,
         preference_type=row.preference_type,
-        content=row.content,
+        text=row.content,
         scope=SceneScope(
             scene=row.scope_scene or "",
             task_type=row.scope_task_type or "",
@@ -212,14 +212,16 @@ class EventRepository:
                 return None
             return MemoryEvent(
                 event_id=row.event_id,
-                event_type=row.event_type,
-                user_id=row.user_id,
-                session_id=row.session_id,
+                source_type=SourceType(row.source_type) if row.source_type else SourceType.TOOL_RESULT,
+                event_type=row.event_type or "",
+                user_id=row.user_id or "",
+                session_id=row.session_id or "",
                 scene=row.scene or "",
                 task_type=row.task_type or "",
-                content=row.payload or {},
-                source=row.source_type or "",
-                occurred_at=row.occurred_at,
+                text=row.text or "",
+                payload=row.payload or {},
+                occurred_at=row.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ") if row.occurred_at else "",
+                source_hash=row.source_hash or "0" * 64,
             )
 
     def get_by_session(self, session_id: str) -> list[MemoryEvent]:
@@ -272,7 +274,7 @@ def _event_row_to_pydantic(row: EventRow) -> MemoryEvent:
         session_id=row.session_id or "",
         scene=row.scene or "",
         task_type=row.task_type or "",
-        occurred_at=str(row.occurred_at) if row.occurred_at else "",
+        occurred_at=row.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ") if row.occurred_at else "",
         text=row.text or "",
         payload=row.payload or {},
         source_hash=row.source_hash or "0" * 64,

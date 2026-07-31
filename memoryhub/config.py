@@ -351,6 +351,56 @@ class AppConfig:
     debug: bool = False
 
 
-def load_config() -> AppConfig:
-    """加载配置，优先从环境变量/配置文件读取"""
-    return AppConfig()
+def load_config(config_path: str | None = None) -> AppConfig:
+    """加载配置，优先从 YAML 配置文件读取，其次从环境变量覆盖"""
+    import os
+    from pathlib import Path
+
+    config = AppConfig()
+
+    # 尝试从 YAML 配置文件加载
+    search_paths = [
+        config_path,
+        os.environ.get("MEMORYHUB_CONFIG", ""),
+        "config.yaml",
+        "config.example.yaml",
+        str(Path(__file__).parent.parent / "config.example.yaml"),
+    ]
+    yaml_path = None
+    for p in search_paths:
+        if p and Path(p).exists():
+            yaml_path = str(p)
+            break
+
+    if yaml_path:
+        try:
+            import yaml
+            with open(yaml_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            if data:
+                if "storage" in data:
+                    config.storage = StorageConfig(**{**config.storage.__dict__, **data["storage"]})
+                if "retrieval" in data:
+                    config.retrieval = RetrievalConfig(**{**config.retrieval.__dict__, **data["retrieval"]})
+                if "llm" in data:
+                    config.llm = LLMConfig(**{**config.llm.__dict__, **data["llm"]})
+                if "embedding" in data:
+                    config.embedding = EmbeddingConfig(**{**config.embedding.__dict__, **data["embedding"]})
+                if "debug" in data:
+                    config.debug = bool(data["debug"])
+        except Exception:
+            pass  # YAML 加载失败时使用默认配置
+
+    # 环境变量覆盖
+    if os.environ.get("MEMORYHUB_DB_PATH"):
+        config.storage.db_path = os.environ["MEMORYHUB_DB_PATH"]
+    if os.environ.get("MEMORYHUB_DEBUG"):
+        config.debug = os.environ["MEMORYHUB_DEBUG"].lower() in ("1", "true", "yes")
+    if os.environ.get("MEMORYHUB_LLM_PROVIDER"):
+        config.llm.provider = os.environ["MEMORYHUB_LLM_PROVIDER"]
+    if os.environ.get("MEMORYHUB_LLM_API_KEY"):
+        config.llm.api_key = os.environ["MEMORYHUB_LLM_API_KEY"]
+    if os.environ.get("MEMORYHUB_LLM_MODEL"):
+        config.llm.model = os.environ["MEMORYHUB_LLM_MODEL"]
+
+    return config

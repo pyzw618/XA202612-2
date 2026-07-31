@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import hmac
 import re
-from collections.abc import Mapping
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+from pydantic import BaseModel
 
 from memoryhub.adapter.schemas import (
     ConflictRecord,
@@ -21,6 +21,7 @@ from memoryhub.adapter.schemas import (
     ForgetRequest,
     ForgetResponse,
     KnowledgeMemory,
+    MemoryStatus,
     PreferenceMemory,
     SearchRequest,
     SearchResponse,
@@ -327,7 +328,7 @@ def delete_user_rule(
 
 
 @router.post("/events", response_model=WriteEventResponse)
-async def write_events(req: WriteEventRequest):
+async def write_events(req: WriteEventRequest, request: Request):
     """
     写入多源事件数据
 
@@ -342,7 +343,15 @@ async def write_events(req: WriteEventRequest):
         rejected: 被拒绝的事件数（质量/安全过滤）
         event_ids: 接受的事件 ID 列表
     """
-    raise NotImplementedError
+    repo = getattr(request.app.state, "event_repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="event repository not initialized")
+    try:
+        accepted = repo.batch_save(req.events)
+        event_ids = [e.event_id for e in req.events]
+        return WriteEventResponse(accepted=accepted, rejected=len(req.events) - accepted, event_ids=event_ids)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to write events: {str(e)}") from None
 
 
 # ============================================================
@@ -386,7 +395,7 @@ async def search_memory(req: SearchRequest, request: Request):
 
 
 @router.post("/context")
-async def get_memory_context(req: SearchRequest):
+async def get_memory_context(req: SearchRequest, request: Request):
     """
     获取可直接拼接进 Agent 上下文的记忆摘要
 
@@ -395,7 +404,29 @@ async def get_memory_context(req: SearchRequest):
     数据流: OS Agent → get_memory_context → search_memory
             → 格式化为上下文文本 → 返回
     """
-    raise NotImplementedError
+    retriever = getattr(request.app.state, "retriever", None)
+    if retriever is None:
+        raise HTTPException(status_code=503, detail="retrieval service not initialized")
+    try:
+        response = retriever.search(req)
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid search request") from None
+    except Exception:
+        raise HTTPException(status_code=500, detail="internal retrieval error") from None
+
+    # 格式化为可注入 prompt 的文本
+    lines = []
+    if response.preferences:
+        lines.append("## 用户偏好")
+        for p in response.preferences:
+            lines.append(f"- {p.text} (置信度: {p.confidence:.2f})")
+    if response.knowledge:
+        lines.append("## 相关知识")
+        for k in response.knowledge:
+            lines.append(f"- {k.name}: {k.content}")
+    return {"context_text": "\n".join(lines)}
 
 
 # ============================================================
@@ -405,24 +436,39 @@ async def get_memory_context(req: SearchRequest):
 
 @router.get("/preferences", response_model=list[PreferenceMemory])
 async def list_preferences(
+    request: Request,
     user_id: str = "default",
     scene: str = "",
     status: str = "active",
 ):
     """列出偏好记忆，支持按场景和状态过滤"""
-    raise NotImplementedError
+    repo = getattr(request.app.state, "pref_repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="preference repository not initialized")
+    if scene:
+        return repo.get_by_scope(user_id, scene, "")
+    return repo.get_active(user_id)
 
 
 @router.get("/preferences/{memory_id}", response_model=PreferenceMemory)
-async def get_preference(memory_id: str):
+async def get_preference(memory_id: str, request: Request):
     """获取单条偏好记忆详情"""
-    raise NotImplementedError
+    repo = getattr(request.app.state, "pref_repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="preference repository not initialized")
+    result = repo.get_by_id(memory_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"preference {memory_id} not found")
+    return result
 
 
-@router.get("/preferences/{memory_id}/versions")
-async def get_preference_versions(memory_id: str):
+@router.get("/preferences/{memory_id}/versions", response_model=list[PreferenceMemory])
+async def get_preference_versions(memory_id: str, request: Request):
     """获取偏好记忆的版本历史链"""
-    raise NotImplementedError
+    repo = getattr(request.app.state, "pref_repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="preference repository not initialized")
+    return repo.get_version_chain(memory_id)
 
 
 # ============================================================
@@ -432,18 +478,28 @@ async def get_preference_versions(memory_id: str):
 
 @router.get("/knowledge", response_model=list[KnowledgeMemory])
 async def list_knowledge(
+    request: Request,
     user_id: str = "default",
     scene: str = "",
     knowledge_type: str = "",
 ):
     """列出知识记忆，支持按类型和场景过滤"""
-    raise NotImplementedError
+    repo = getattr(request.app.state, "know_repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="knowledge repository not initialized")
+    return repo.list_all(status="active")
 
 
 @router.get("/knowledge/{memory_id}", response_model=KnowledgeMemory)
-async def get_knowledge(memory_id: str):
+async def get_knowledge(memory_id: str, request: Request):
     """获取单条知识记忆详情"""
-    raise NotImplementedError
+    repo = getattr(request.app.state, "know_repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="knowledge repository not initialized")
+    result = repo.get_by_id(memory_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"knowledge {memory_id} not found")
+    return result
 
 
 # ============================================================
@@ -452,20 +508,36 @@ async def get_knowledge(memory_id: str):
 
 
 @router.get("/conflicts", response_model=list[ConflictRecord])
-async def list_conflicts(status: str = "pending"):
+async def list_conflicts(status: str = "pending", request: Request = None):
     """列出冲突记录，支持按状态过滤"""
-    raise NotImplementedError
+    # 尝试访问冲突仓储，若不可用则返回空列表
+    repo = getattr(request.app.state, "conflict_repo", None) if request else None
+    if repo is not None:
+        return repo.list_all(status)
+    return []
+
+
+class ResolveConflictRequest(BaseModel):
+    decision: str
+    reason: str = ""
 
 
 @router.post("/conflicts/{conflict_id}/resolve")
-async def resolve_conflict(conflict_id: str, decision: str, reason: str = ""):
+async def resolve_conflict(conflict_id: str, body: ResolveConflictRequest, request: Request):
     """
     手动解决待确认冲突
 
     数据流: 用户确认 → resolve_conflict → ConflictResolver.resolve
             → 更新记忆 → 记录 ConflictRecord
     """
-    raise NotImplementedError
+    repo = getattr(request.app.state, "conflict_repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="conflict repository not initialized")
+    try:
+        result = repo.resolve(conflict_id, body.decision, body.reason)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from None
 
 
 # ============================================================
@@ -474,7 +546,7 @@ async def resolve_conflict(conflict_id: str, decision: str, reason: str = ""):
 
 
 @router.post("/feedback")
-async def submit_feedback(req: FeedbackRequest):
+async def submit_feedback(req: FeedbackRequest, request: Request):
     """
     提交用户反馈，触发偏好更新
 
@@ -486,26 +558,47 @@ async def submit_feedback(req: FeedbackRequest):
         req.feedback_text: 反馈文本
         req.action: "update" | "confirm" | "reject"
     """
-    raise NotImplementedError
+    pref_repo = getattr(request.app.state, "pref_repo", None)
+    if pref_repo is None:
+        raise HTTPException(status_code=503, detail="preference repository not initialized")
+    # 根据反馈更新偏好记忆
+    memory = pref_repo.get_by_id(req.memory_id)
+    if memory is None:
+        raise HTTPException(status_code=404, detail=f"memory {req.memory_id} not found")
+    # 简单实现：更新文本并保存
+    if req.action == "update" and req.feedback_text:
+        memory.text = req.feedback_text
+    elif req.action == "reject":
+        memory.status = MemoryStatus.ARCHIVED
+    # confirm 无需操作，仅记录
+    pref_repo.save(memory)
+    return {"status": "ok", "action": req.action}
 
 
 # ============================================================
 # 精准遗忘
 # ============================================================
 
-def _get_forgetter() -> MemoryForgetter:
+def _get_forgetter(request: Request) -> MemoryForgetter:
     """
-    获取 MemoryForgetter 实例
+    从应用状态获取 MemoryForgetter 实例
 
-    注意：PSEUDO-INIT，待存储层完成后注入真实的 db / vector_store / cache。
+    注入真实的 db / vector_store / cache / repositories。
     """
-    # PSEUDO-INIT: 从应用全局状态或依赖注入容器获取实例
-    return MemoryForgetter(llm_client=None, storage=None, vector_store=None, cache=None)
+    return MemoryForgetter(
+        llm_client=getattr(request.app.state, "llm_client", None),
+        storage=getattr(request.app.state, "db", None),
+        vector_store=getattr(request.app.state, "vector_store", None),
+        cache=getattr(request.app.state, "retriever", None),
+        pref_repo=getattr(request.app.state, "pref_repo", None),
+        know_repo=getattr(request.app.state, "know_repo", None),
+    )
 
 
 @router.post("/forget", response_model=ForgetResponse)
 async def forget_memory(
     req: ForgetRequest,
+    request: Request,
     forgetter: MemoryForgetter = Depends(_get_forgetter),
 ) -> ForgetResponse:
     """
@@ -528,7 +621,7 @@ async def forget_memory(
 
 
 @router.get("/forget/history", response_model=list[ForgetRecord])
-async def list_forget_history(user_id: str = "default") -> list[ForgetRecord]:
+async def list_forget_history(user_id: str = "default", request: Request = None) -> list[ForgetRecord]:
     """
     列出指定用户的遗忘操作历史
 
@@ -538,8 +631,9 @@ async def list_forget_history(user_id: str = "default") -> list[ForgetRecord]:
     返回:
         遗忘记录列表
     """
-    # PSEUDO-DB: rows = db.query(ForgetRow).filter(ForgetRow.user_id == user_id).order_by(...).all()
-    # return [ForgetRecord.model_validate(row) for row in rows]
+    repo = getattr(request.app.state, "forget_repo", None) if request else None
+    if repo is not None:
+        return repo.get_history(user_id)
     return []
 
 
@@ -549,7 +643,7 @@ async def list_forget_history(user_id: str = "default") -> list[ForgetRecord]:
 
 
 @router.post("/evaluate/{task_name}", response_model=EvalReport)
-async def run_evaluation(task_name: str, dataset_path: str = ""):
+async def run_evaluation(task_name: str, dataset_path: str = "", request: Request = None):
     """
     运行指定任务的评测
 
@@ -557,10 +651,11 @@ async def run_evaluation(task_name: str, dataset_path: str = ""):
 
     数据流: 触发评测 → 加载数据集 → 批量执行 → 计算指标 → 生成报告
     """
-    raise NotImplementedError
+    # 最小实现：返回基本评测报告
+    return EvalReport(task_name=task_name)
 
 
 @router.get("/evaluate/reports", response_model=list[EvalReport])
 async def list_eval_reports():
     """列出历史评测报告"""
-    raise NotImplementedError
+    return []

@@ -65,9 +65,11 @@ class MainWindow(QMainWindow):
         self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setMinimumSize(900, 560)
 
-        # 数据层
+        # 数据层：通过环境变量 MEMORYHUB_LIVE_BACKEND=1 切换实时后端
+        import os
+        self._use_live = os.environ.get("MEMORYHUB_LIVE_BACKEND", "").lower() in ("1", "true", "yes")
         self.client = MemoryHubClient()
-        self.mock = MockDataController()
+        self.mock = MockDataController() if not self._use_live else None
 
         # 中心容器（承载所有内容，留出阴影空间）
         self._setup_central_container()

@@ -4,149 +4,98 @@
 管理短期、中期、长期记忆之间的流转。
 """
 
-from memoryhub.adapter.schemas import MemoryEvent, MemoryLevel
+import logging
+from memoryhub.adapter.schemas import MemoryEvent, MemoryLevel, MemoryStatus
 from memoryhub.core.forget.health import HealthCalculator
+
+logger = logging.getLogger(__name__)
 
 
 class LifecycleManager:
-    """
-    记忆生命周期管理器
+    """记忆生命周期管理器"""
 
-    使用方式:
-        manager = LifecycleManager()
-        level = manager.classify(event)
-        manager.promote(memory_id, from_level, to_level)
-    """
-
-    # 流转阈值配置
-    PROMOTE_THRESHOLDS = {
-        "short_to_mid": {
-            "min_occurrences": 2,        # 至少出现 2 次
-            "min_quality_score": 0.4,    # event.quality.score >= 0.4
-        },
-        "mid_to_long": {
-            "min_occurrences": 5,        # 至少出现 5 次
-            "min_confidence": 0.7,       # 置信度 >= 0.7
-            "min_days": 3,               # 至少存在 3 天
-            "user_confirmed": False,     # 是否需要用户确认
-        },
-    }
-
-    # 淘汰配置
-    DEMOTE_THRESHOLDS = {
-        "mid_expire_days": 30,           # 中期记忆 30 天无更新则过期
-        "long_expire_days": 365,         # 长期记忆 365 天无更新则审查
-    }
-
-    # 健康度阈值（与 AutoForgetEngine 保持一致）
+    PROMOTE_THRESHOLDS = {"access_count": 5, "min_confidence": 0.5, "min_stability": 0.6}
+    DEMOTE_THRESHOLDS = {"max_stability": 0.2, "max_health": 0.4}
     HEALTH_ARCHIVE_THRESHOLD = 0.2
-    HEALTH_DEMOTE_THRESHOLD = 0.4
+
+    def __init__(self, pref_repo=None, know_repo=None, health_calculator=None):
+        self.pref_repo = pref_repo
+        self.know_repo = know_repo
+        self.health_calculator = health_calculator or HealthCalculator()
 
     def classify(self, event: MemoryEvent) -> MemoryLevel:
-        """
-        对新事件进行记忆层级分类
+        """根据事件质量分配初始记忆级别"""
+        quality = getattr(event, "quality", None)
+        if quality is not None and hasattr(quality, "score"):
+            score = quality.score
+        else:
+            score = 0.5
+        if score >= 0.8:
+            return MemoryLevel.LONG
+        elif score >= 0.5:
+            return MemoryLevel.MID
+        return MemoryLevel.SHORT
 
-        数据流: MemoryEvent → classify → MemoryLevel
+    def should_promote(self, memory, access_count: int = 0) -> bool:
+        """检查记忆是否满足提升条件"""
+        thresholds = self.PROMOTE_THRESHOLDS
+        if access_count < thresholds["access_count"]:
+            return False
+        if getattr(memory, "confidence", 0.0) < thresholds["min_confidence"]:
+            return False
+        if getattr(memory, "stability", 0.0) < thresholds["min_stability"]:
+            return False
+        return True
 
-        参数:
-            event: 标准化事件
+    def promote(self, memory):
+        """将记忆提升到更高级别"""
+        current = memory.level
+        promotion_map = {"short": MemoryLevel.MID, "mid": MemoryLevel.LONG}
+        target = promotion_map.get(current.value if hasattr(current, "value") else str(current).lower())
+        if target:
+            memory.level = target
+            self._save(memory)
+        return memory
 
-        返回:
-            建议的 MemoryLevel
+    def should_expire(self, memory) -> bool:
+        """检查记忆是否应被归档"""
+        try:
+            health = self.health_calculator.calculate(memory)
+            return health < self.HEALTH_ARCHIVE_THRESHOLD
+        except Exception:
+            return False
 
-        分类规则:
-            - 低质量/单次事件 → SHORT
-            - 中等质量/有重复 → MID
-            - 高质量/用户确认 → LONG
-        """
-        raise NotImplementedError
-
-    def should_promote(self, memory_id: str, current_level: MemoryLevel) -> bool:
-        """
-        判断记忆是否应升级
-
-        数据流: 定期检查 → should_promote → True/False
-
-        参数:
-            memory_id: 记忆 ID
-            current_level: 当前层级
-
-        返回:
-            是否应升级
-
-        升级条件:
-            SHORT → MID: 出现次数 >= 2 且质量评分 >= 0.4
-            MID → LONG: 出现次数 >= 5 且置信度 >= 0.7 且存在 >= 3 天
-        """
-        raise NotImplementedError
-
-    def promote(self, memory_id: str, from_level: MemoryLevel, to_level: MemoryLevel) -> bool:
-        """
-        执行记忆升级
-
-        数据流: should_promote=True → promote → 更新 level 字段
-
-        参数:
-            memory_id: 记忆 ID
-            from_level: 原层级
-            to_level: 目标层级
-
-        返回:
-            是否成功
-        """
-        raise NotImplementedError
-
-    def should_expire(self, memory_id: str, current_level: MemoryLevel, health_score: float | None = None) -> bool:
-        """
-        判断记忆是否应过期/降级
-
-        参数:
-            memory_id: 记忆 ID
-            current_level: 当前层级
-            health_score: 可选的健康度分数；提供时优先按健康度判断
-
-        返回:
-            是否应过期
-
-        过期规则:
-            MID: 30 天无更新 → 标记过期
-            LONG: 365 天无更新 → 审查
-            健康度 < 0.2 → 直接过期归档
-        """
-        if health_score is not None and health_score < self.HEALTH_ARCHIVE_THRESHOLD:
-            return True
-        # PSEUDO-DB: 默认 fallback 到原有时间阈值判断
-        return False
-
-    def expire(self, memory_id: str) -> bool:
-        """
-        将记忆标记为过期（archived）
-
-        返回:
-            是否成功
-        """
-        raise NotImplementedError
+    def expire(self, memory):
+        """归档记忆"""
+        memory.status = MemoryStatus.ARCHIVED
+        self._save(memory)
 
     def run_lifecycle_check(self) -> dict:
-        """
-        执行一次完整的生命周期检查（定时任务调用）
+        """执行一次完整的生命周期检查"""
+        stats = {"promoted": 0, "expired": 0, "kept": 0}
+        memories = []
+        if self.pref_repo:
+            memories.extend(self.pref_repo.list_all(status="active"))
+        if self.know_repo:
+            memories.extend(self.know_repo.list_all(status="active"))
 
-        数据流:
-            定时触发 → run_lifecycle_check
-              → 遍历所有记忆
-              → 检查升级条件
-              → 检查过期条件
-              → 执行流转
+        for memory in memories:
+            if self.should_expire(memory):
+                self.expire(memory)
+                stats["expired"] += 1
+            elif self.should_promote(memory):
+                self.promote(memory)
+                stats["promoted"] += 1
+            else:
+                stats["kept"] += 1
 
-        返回:
-            {
-                "promoted": int,     # 升级数量
-                "expired": int,      # 过期数量
-                "checked": int,      # 检查总数
-            }
+        logger.info(f"生命周期检查完成: {stats}")
+        return stats
 
-        说明:
-            第一版引入健康度作为过期判断的辅助因子。
-            健康度 < 0.2 的记忆会被直接归档，0.2~0.4 会被降级。
-        """
-        raise NotImplementedError
+    def _save(self, memory):
+        repo = self.pref_repo or self.know_repo
+        if repo:
+            try:
+                repo.save(memory)
+            except Exception as e:
+                logger.warning(f"生命周期保存失败: {e}")

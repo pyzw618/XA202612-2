@@ -92,7 +92,7 @@ class HealthCalculator:
         数据库相关字段：health_score, stability, last_accessed_at, updated_at,
                        created_at, access_count_30d, confidence
         """
-        # PSEUDO-DB: 这里假设 row 已包含所需字段；若 row 为 dict，可直接取值。
+        # 从数据库行对象计算健康度，支持 ORM Row 和 Pydantic 模型两种输入。
         now = datetime.now()
         last_accessed = getattr(row, "last_accessed_at", None) or getattr(row, "updated_at", None) or getattr(row, "created_at", None)
         days = 0.0

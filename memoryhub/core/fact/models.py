@@ -60,10 +60,11 @@ class Entity:
 
     @staticmethod
     def make_id(entity_type: str, name: str) -> str:
-        """生成稳定的实体 ID"""
+        """生成稳定的实体 ID（确定性 hash，同一实体总是相同 ID）"""
+        import hashlib
         slug = name.lower().replace(" ", "_").replace("/", "_")
-        short_uuid = uuid.uuid4().hex[:8]
-        return f"entity:{entity_type.lower()}:{slug}_{short_uuid}"
+        digest = hashlib.sha256(f"{entity_type}:{name}".encode()).hexdigest()[:8]
+        return f"entity:{entity_type.lower()}:{slug}_{digest}"
 
 
 # ─── 谓词定义 ──────────────────────────────────────────────────────────
@@ -80,9 +81,10 @@ class PredicateDef:
 
     @staticmethod
     def make_id(name: str) -> str:
+        import hashlib
         slug = name.lower().replace(" ", "_")
-        short_uuid = uuid.uuid4().hex[:6]
-        return f"pred:{slug}_{short_uuid}"
+        digest = hashlib.sha256(name.encode()).hexdigest()[:6]
+        return f"pred:{slug}_{digest}"
 
 
 # ─── 原始三元组（LLM 提取，未归一化）──────────────────────────────────

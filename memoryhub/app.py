@@ -30,7 +30,7 @@ def _memory_text(memory: PreferenceMemory | KnowledgeMemory) -> str:
     """用于建索引的记忆文本：知识记忆拼上名称，偏好记忆用正文"""
     if memory.memory_type == "knowledge":
         return f"{memory.name} {memory.content}".strip()
-    return memory.content
+    return memory.text
 
 
 def _memory_metadata(memory: PreferenceMemory | KnowledgeMemory) -> dict:
@@ -296,6 +296,8 @@ def create_app(
         )
 
         app.state.db = db
+        app.state.pref_repo = pref_repo
+        app.state.know_repo = know_repo
         app.state.vector_store = vector_store
         app.state.retriever = HybridRetriever(
             vector_search=_VectorStoreSearchAdapter(vector_store, memory_lookup),

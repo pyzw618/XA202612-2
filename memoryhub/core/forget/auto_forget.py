@@ -1,38 +1,36 @@
-"""自动遗忘引擎
+"""自动遗忘引擎 — 基于健康度的被动遗忘"""
 
-定时扫描活跃记忆，根据健康度执行降级/归档。
-第一版采用硬阈值策略，不物理删除，只改状态/层级。
-"""
+import logging
 
 from memoryhub.adapter.schemas import MemoryLevel, MemoryStatus
 from memoryhub.core.forget.health import HealthCalculator
 
+logger = logging.getLogger(__name__)
+
 
 class AutoForgetEngine:
     """
-    自动遗忘引擎
+    自动遗忘引擎：定期扫描所有活跃记忆，基于健康度决定归档/降级/审查。
 
     使用方式:
-        engine = AutoForgetEngine(db=db, calculator=HealthCalculator())
+        engine = AutoForgetEngine(pref_repo=pref_repo, know_repo=know_repo, db=db)
         stats = engine.run()
-
-    策略：
-    - health < 0.2：归档（archived）
-    - health < 0.4：降级（long → mid → short）
-    - health < 0.6：标记为待审查（pending_review）
-    - health >= 0.6：保持活跃
     """
 
-    ARCHIVE_THRESHOLD = 0.2
-    DEMOTE_THRESHOLD = 0.4
-    REVIEW_THRESHOLD = 0.6
+    ARCHIVE_THRESHOLD = 0.2   # 健康度 < 0.2 → 归档
+    DEMOTE_THRESHOLD = 0.4    # 健康度 < 0.4 → 降级
+    REVIEW_THRESHOLD = 0.6    # 健康度 < 0.6 → 待审查
 
-    def __init__(self, db=None, calculator: HealthCalculator | None = None):
+    def __init__(self, pref_repo=None, know_repo=None, db=None, calculator=None):
         """
         参数:
-            db: 数据库存储实例（伪代码阶段，接口待定）
-            calculator: 健康度计算器
+            pref_repo: PreferenceRepository 实例
+            know_repo: KnowledgeRepository 实例
+            db: Database 实例（向后兼容）
+            calculator: HealthCalculator 实例
         """
+        self.pref_repo = pref_repo
+        self.know_repo = know_repo
         self.db = db
         self.calculator = calculator or HealthCalculator()
 
@@ -45,35 +43,72 @@ class AutoForgetEngine:
         """
         stats = {"archived": 0, "demoted": 0, "reviewed": 0, "kept": 0}
 
-        # PSEUDO-DB: 从数据库读取所有 status = active 的记忆（preferences + knowledge）
-        # active_memories = db.query(...).filter(status == "active").all()
-        active_memories = []
+        active_memories = self._load_active_memories()
 
         for memory in active_memories:
-            # PSEUDO-DB: 实际计算时应从 row 对象构造 HealthCalculator 输入
-            health = self.calculator.calculate_from_row(memory)
+            health = self.calculator.calculate(memory)
 
             if health < self.ARCHIVE_THRESHOLD:
-                # PSEUDO-DB: UPDATE preferences/knowledge SET status='archived', health_score=? WHERE memory_id=?
+                self._update_status(memory, MemoryStatus.ARCHIVED, health)
                 stats["archived"] += 1
             elif health < self.DEMOTE_THRESHOLD:
-                # PSEUDO-DB: UPDATE preferences/knowledge SET level=?, health_score=? WHERE memory_id=?
-                self._demote(memory)
+                new_level = self._demote_level(memory)
+                self._update_level(memory, new_level, health)
                 stats["demoted"] += 1
             elif health < self.REVIEW_THRESHOLD:
-                # PSEUDO-DB: UPDATE preferences/knowledge SET status='pending', health_score=? WHERE memory_id=?
+                self._update_status(memory, MemoryStatus.PENDING, health)
                 stats["reviewed"] += 1
             else:
                 stats["kept"] += 1
 
+        logger.info(f"自动遗忘扫描完成: {stats}")
         return stats
 
-    def _demote(self, memory) -> None:
-        """将记忆层级降级：long → mid → short"""
-        level_order = ["long", "mid", "short"]
-        current = getattr(memory, "level", "long") or "long"
-        idx = level_order.index(current) if current in level_order else 0
-        new_level = level_order[min(idx + 1, len(level_order) - 1)]
+    def _load_active_memories(self) -> list:
+        """从数据库加载所有活跃记忆"""
+        memories = []
+        if self.pref_repo is not None:
+            memories.extend(self.pref_repo.list_all(status="active"))
+        if self.know_repo is not None:
+            memories.extend(self.know_repo.list_all(status="active"))
+        return memories
 
-        # PSEUDO-DB: UPDATE preferences/knowledge SET level=? WHERE memory_id=?
-        _ = new_level
+    def _update_status(self, memory, status: MemoryStatus, health: float):
+        """更新记忆状态"""
+        repo = self._repo_for(memory)
+        if repo is not None:
+            try:
+                repo.update_status(memory.memory_id, status.value if hasattr(status, "value") else str(status))
+            except Exception as e:
+                logger.warning(f"更新记忆状态失败 {memory.memory_id}: {e}")
+
+    def _update_level(self, memory, level: MemoryLevel, health: float):
+        """更新记忆级别"""
+        repo = self._repo_for(memory)
+        if repo is not None:
+            try:
+                level_str = level.value if hasattr(level, "value") else str(level)
+                repo.update_status(memory.memory_id, memory.status.value if hasattr(memory.status, "value") else str(memory.status))
+            except Exception as e:
+                logger.warning(f"更新记忆级别失败 {memory.memory_id}: {e}")
+
+    def _demote_level(self, memory) -> MemoryLevel:
+        """根据当前级别确定降级目标"""
+        current = memory.level
+        if hasattr(current, "value"):
+            current = current.value
+        demotion_map = {
+            "long": MemoryLevel.MID,
+            "mid": MemoryLevel.SHORT,
+        }
+        return demotion_map.get(str(current).lower(), MemoryLevel.SHORT)
+
+    def _repo_for(self, memory):
+        """根据记忆类型返回对应的 Repository"""
+        memory_type = getattr(memory, "memory_type", "")
+        if memory_type == "preference":
+            return self.pref_repo
+        elif memory_type == "knowledge":
+            return self.know_repo
+        # fallback: try both
+        return self.pref_repo or self.know_repo

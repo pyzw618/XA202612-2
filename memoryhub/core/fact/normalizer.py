@@ -335,8 +335,12 @@ class PredicateNormalizer:
 
     def _load_ontology(self, path: Optional[str] = None):
         path = Path(path or _DEFAULT_ONTOLOGY)
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.warning(f"无法加载谓词本体文件 {path}: {e}，使用空本体")
+            data = {"predicates": []}
         for entry in data.get("predicates", []):
             pred = PredicateDef(**entry)
             self.store.upsert_predicate(pred)

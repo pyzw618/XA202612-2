@@ -1535,7 +1535,7 @@ class FeedbackRequest(BaseModel):
     user_id: str = "default"
     memory_id: str = ""  # 要更新的记忆 ID
     feedback_text: str = ""  # 反馈内容
-    action: str = "update"  # "update" | "confirm" | "reject"
+    action: Literal["update", "confirm", "reject"] = "update"
 
 
 class ForgetRequest(BaseModel):

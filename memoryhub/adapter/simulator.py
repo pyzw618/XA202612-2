@@ -4,75 +4,93 @@ OS Agent 模拟器 — 用于独立演示和测试
 模拟真实 OS Agent 的行为：接收用户任务、调用记忆模块、执行工具调用。
 """
 
-from memoryhub.adapter.schemas import MemoryEvent, SearchResponse, ToolCallResult
+import uuid
+from datetime import datetime, timezone
+
+from memoryhub.adapter.schemas import MemoryEvent, SearchResponse, SourceType, ToolCallResult
 
 
-class AgentSimulator:
+class OSAgentSimulator:
     """
-    OS Agent 模拟器
+    OS Agent 模拟器，用于无后端集成测试。
 
     使用方式:
-        simulator = AgentSimulator(memory_adapter)
-        result = simulator.run_task("帮我按上次的方式生成项目周报")
+        sim = OSAgentSimulator()
+        events = sim.simulate_task("整理上周周报", scene="document", task_type="report")
     """
 
-    def __init__(self, memory_adapter=None):
-        """
-        初始化模拟器
+    def simulate_task(self, task: str, scene: str = "general", task_type: str = "general",
+                      user_id: str = "test_user") -> list[MemoryEvent]:
+        """模拟一次完整的任务交互，返回生成的事件列表"""
+        events = []
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        参数:
-            memory_adapter: MemoryAdapter 实例，用于调用记忆接口
-        """
-        self.memory_adapter = memory_adapter
-        self.session_id = ""
-        self.task_history: list[dict] = []
+        # 用户输入事件
+        events.append(MemoryEvent(
+            event_id=f"sim_input_{uuid.uuid4().hex[:8]}",
+            source_type=SourceType.USER_BEHAVIOR,
+            event_type="user_input",
+            user_id=user_id,
+            scene=scene,
+            task_type=task_type,
+            text=task,
+            occurred_at=ts,
+        ))
 
-    def run_task(self, user_input: str) -> dict:
-        """
-        执行一次完整的模拟任务
+        # 模拟工具调用
+        tool_call = ToolCallResult(
+            call_id=f"sim_tool_{uuid.uuid4().hex[:8]}",
+            tool_name="file_search",
+            arguments={"query": task},
+            result={"files_found": ["report_week_27.md", "report_week_28.md"]},
+            status="success",
+            sequence=1,
+        )
+        events.append(MemoryEvent(
+            event_id=f"sim_tool_{uuid.uuid4().hex[:8]}",
+            source_type=SourceType.TOOL_RESULT,
+            event_type="file_search",
+            user_id=user_id,
+            scene=scene,
+            task_type=task_type,
+            text=f"Found files for task: {task}",
+            tool_calls=[tool_call],
+            occurred_at=ts,
+        ))
 
-        数据流:
-            用户输入 → 识别任务类型 → 检索记忆 → 模拟工具调用
-            → 写入事件 → 返回结果
+        return events
 
-        参数:
-            user_input: 用户自然语言输入
+    def simulate_conversation(self, turns: list[str], scene: str = "chat",
+                              task_type: str = "conversation") -> list[MemoryEvent]:
+        """模拟多轮对话"""
+        events = []
+        for turn_text in turns:
+            events.extend(self.simulate_task(turn_text, scene=scene, task_type=task_type))
+        return events
 
-        返回:
-            {
-                "task_type": str,
-                "memory_context": SearchResponse,
-                "tool_calls": list[ToolCallResult],
-                "output": str,
-                "events_generated": list[MemoryEvent]
-            }
-        """
-        raise NotImplementedError
+    def simulate_search(self, query: str, scene: str = "general") -> SearchResponse:
+        """模拟检索请求（返回空结果）"""
+        return SearchResponse(
+            preferences=[],
+            knowledge=[],
+            latency_ms=0.0,
+        )
 
-    def _identify_task_type(self, user_input: str) -> str:
-        """识别任务类型，返回 scene.task_type 标识"""
-        raise NotImplementedError
+    def simulate_error(self, error_message: str = "Simulated error") -> MemoryEvent:
+        """模拟错误事件"""
+        return MemoryEvent(
+            event_id=f"sim_error_{uuid.uuid4().hex[:8]}",
+            source_type=SourceType.TOOL_RESULT,
+            event_type="error",
+            text=error_message,
+            occurred_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
 
-    def _simulate_tool_calls(
-        self, task_type: str, memory_context: SearchResponse
-    ) -> list[ToolCallResult]:
-        """根据任务类型和记忆上下文，模拟工具调用序列"""
-        raise NotImplementedError
-
-    def _generate_events(
-        self, task_type: str, tool_calls: list[ToolCallResult], user_input: str
-    ) -> list[MemoryEvent]:
-        """将本次任务执行转化为 MemoryEvent 列表"""
-        raise NotImplementedError
-
-    def simulate_user_feedback(self, feedback_text: str) -> MemoryEvent:
-        """
-        模拟用户反馈
-
-        参数:
-            feedback_text: 如 "以后都用 Markdown"
-
-        返回:
-            生成的 user_feedback 类型 MemoryEvent
-        """
-        raise NotImplementedError
+    def simulate_feedback(self, memory_id: str, feedback_text: str, action: str = "update") -> dict:
+        """模拟用户反馈"""
+        return {
+            "user_id": "test_user",
+            "memory_id": memory_id,
+            "feedback_text": feedback_text,
+            "action": action,
+        }

@@ -40,6 +40,8 @@ def _embed(texts: list[str]) -> list[list[float]]:
 
 def _char_ngram_vector(text: str, n: int = 3) -> list[float]:
     """字符 n-gram 出现频次 → 固定维度向量（256 维）"""
+    import hashlib
+
     text = text.lower()
     grams: dict[str, int] = {}
     for i in range(len(text) - n + 1):
@@ -47,7 +49,7 @@ def _char_ngram_vector(text: str, n: int = 3) -> list[float]:
         grams[g] = grams.get(g, 0) + 1
     vec = [0.0] * 256
     for g, cnt in grams.items():
-        idx = hash(g) % 256
+        idx = hashlib.md5(g.encode()).digest()[0]
         vec[idx] += cnt
     # L2 normalize
     norm = math.sqrt(sum(v * v for v in vec))
