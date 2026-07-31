@@ -103,6 +103,11 @@ class MockDataController(QObject):
                         {"content": "用户反馈：以后周报都用 Markdown", "timestamp": "2026-07-15"},
                         {"content": "重复选择 Markdown 模板 ×3", "timestamp": "2026-07-12"},
                     ],
+                    "versions": [
+                        {"version": 3, "content": "项目周报默认使用 Markdown 格式，分三部分结构", "change": "细化结构为三部分", "created_at": "2026-07-28"},
+                        {"version": 2, "content": "项目周报默认使用 Markdown 格式", "change": "增加默认格式", "created_at": "2026-07-15"},
+                        {"version": 1, "content": "周报偏好 Markdown", "change": "初始创建", "created_at": "2026-07-01"},
+                    ],
                     "created_at": "2026-07-01T10:00:00",
                     "updated_at": "2026-07-28T14:30:00",
                 },
@@ -117,6 +122,10 @@ class MockDataController(QObject):
                     "version": 2,
                     "evidences": [
                         {"content": "连续 5 次选择本地检索", "timestamp": "2026-07-20"},
+                    ],
+                    "versions": [
+                        {"version": 2, "content": "文件搜索优先本地检索工具", "change": "提高置信度至 0.85", "created_at": "2026-07-25"},
+                        {"version": 1, "content": "文件搜索偏好本地工具", "change": "初始创建", "created_at": "2026-07-10"},
                     ],
                     "created_at": "2026-07-10T08:00:00",
                     "updated_at": "2026-07-25T16:00:00",
@@ -133,6 +142,9 @@ class MockDataController(QObject):
                     "evidences": [
                         {"content": "手动配置：禁止保存 API Key", "timestamp": "2026-07-05"},
                     ],
+                    "versions": [
+                        {"version": 1, "content": "不保存 API Key、密码等敏感凭证信息", "change": "初始创建", "created_at": "2026-07-05"},
+                    ],
                     "created_at": "2026-07-05T09:00:00",
                     "updated_at": "2026-07-05T09:00:00",
                 },
@@ -147,6 +159,9 @@ class MockDataController(QObject):
                     "version": 1,
                     "evidences": [
                         {"content": "用户行为：代码注释始终使用中文", "timestamp": "2026-07-18"},
+                    ],
+                    "versions": [
+                        {"version": 1, "content": "代码注释使用中文，函数文档用英文", "change": "初始创建", "created_at": "2026-07-18"},
                     ],
                     "created_at": "2026-07-18T11:00:00",
                     "updated_at": "2026-07-18T11:00:00",
