@@ -288,6 +288,30 @@ class MockDataController(QObject):
                     "reason": "不同场景，可并存",
                     "created_at": "2026-07-20T10:00:00",
                 },
+                {
+                    "conflict_id": "conf_003",
+                    "new_memory_id": "pref_004",
+                    "old_memory_id": "pref_005",
+                    "memory_type": "preference",
+                    "old_content": "搜索文件优先使用本地工具",
+                    "new_content": "搜索文件优先使用网络搜索",
+                    "conflict_field": "content",
+                    "decision": "override",
+                    "reason": "用户明确要求更换搜索方式",
+                    "created_at": "2026-07-18T09:30:00",
+                },
+                {
+                    "conflict_id": "conf_004",
+                    "new_memory_id": "pref_006",
+                    "old_memory_id": "pref_007",
+                    "memory_type": "preference",
+                    "old_content": "代码注释使用中文",
+                    "new_content": "代码注释使用英文",
+                    "conflict_field": "content",
+                    "decision": "pending",
+                    "reason": "注释语言偏好冲突",
+                    "created_at": "2026-07-30T11:00:00",
+                },
             ])
         Thread(target=_run, daemon=True).start()
 
