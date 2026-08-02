@@ -131,6 +131,7 @@ MemoryHub SearchResponse
 2. **Windows 无法运行真实链路**：`kylin-coreai-embedding` 依赖 DBus + GObject，`libkysdk-vector-engine-client` 是 C++ 库，两者都需要 Linux/Kylin 环境。
 3. **本地缺少 SDK 源码**：`kylin-coreai-embedding` 仓库未在本地克隆，需要先在目标环境编译或安装 `.so`。
 4. **当前 Python 环境为 Windows**：性能测试最终需要在麒麟设备或 Linux 容器内执行。
+5. **当前 `memoryhub/embedding/kylin_client.py` 引用不存在的 API**：代码中调用 `text_embedding_init_session_no_connect()`，但公开头文件中只有 `text_embedding_create_session()` + `text_embedding_init_session()`。需要在适配阶段修复。
 
 ### 3.4 无真实麒麟环境的工作策略
 
