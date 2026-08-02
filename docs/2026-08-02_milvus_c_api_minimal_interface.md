@@ -161,8 +161,7 @@ int vector_engine_insert(
 );
 ```
 
-**说明**：插入一条记忆。稀疏向量在桥接层内部根据 `content` 生成。  
-**参数**：
+**说明**：插入一条记忆。稀疏向量在桥接层内部根据 `content` 生成，**生成规则必须与附录 A 的分词规范逐位一致**（真实桥接层、mock 库、Python `sparse.py` 三方保持一致，否则 insert 与 query 的稀疏索引对不上）。`r`n**参数**：
 - `engine`：引擎句柄
 - `collection_name`：集合名
 - `memory_id`：记忆 ID，字符串主键
@@ -296,6 +295,22 @@ int vector_engine_get_last_error(
 - `out_message`：输出参数，返回错误信息字符串，调用方需释放
 
 **返回值**：`0` 成功，非零失败。
+
+---
+
+## 附录 A：稀疏向量分词规范（三端必须逐位一致）
+
+真实桥接层（`c_api_bridge.cpp`）、mock 库（`third_party/kylin-mock/vector_engine_mock.c`）、Python 查询侧（`memoryhub/storage/vector_engine/sparse.py`）必须使用**完全相同**的稀疏向量生成规则：
+
+1. **分词**：逐字符扫描文本。
+   - ASCII 字母/数字（`[A-Za-z0-9]`）连写为一个 token，**保留原始大小写**（不做 tolower）；
+   - 其余每个非 ASCII UTF-8 码点（如一个汉字）各自成为一个 token；
+   - ASCII 空白与标点仅作分隔符，不产生 token。
+2. **索引**：token 的 UTF-8 字节序列做 FNV-1a 32-bit hash（offset basis `2166136261`，prime `16777619`），结果为 uint32 索引。
+3. **权重**：`token 出现次数 / 总 token 数`（归一化 TF）；同索引去重取最大权重。
+4. **顺序**：输出按 uint32 索引升序排列。
+
+> 2026-08-02 实现时的决策记录：方案文档原建议查询侧用 jieba 分词，但为保证 insert（C 侧）与 query（Python 侧）稀疏索引可比对，三方统一采用上述确定性规则，放弃 jieba。若未来任一端修改规则（例如改为统一转小写），三端必须同步修改并重建索引。
 
 ---
 

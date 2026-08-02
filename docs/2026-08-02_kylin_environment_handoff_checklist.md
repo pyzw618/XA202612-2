@@ -109,24 +109,36 @@ cd /path/to/workspaces/kylin-coreai-embedding/build
 sudo apt install -y cmake g++ libgrpc++-dev protobuf-compiler-grpc libprotobuf-dev
 ```
 
-### 4.2 确认 C API 桥接层文件存在
+### 4.1.1 固定桥接提交
 
-如果 MemoryHub 的集成方案已经实施，应存在以下文件：
+C API 桥接基于 Vector Engine SDK 的 `openkylin/nile-sp2`，并固定为：
 
-```bash
-ls /path/to/workspaces/libkysdk-vector-engine-client/c_api_bridge.h
-ls /path/to/workspaces/libkysdk-vector-engine-client/c_api_bridge.cpp
+```text
+上游 SDK 基线：bed675f418d32c052a6ab4c5c49bae148d90f678
+MemoryHub C API 桥接提交：8b4a1e36a5e01f31fb2aca123275a0dd3ab017c4
 ```
 
-如果不存在，需要从 `docs/2026-08-02_milvus_c_api_minimal_interface.md` 中抄写最小接口实现，或联系当前执行者获取。
+> 第二个提交目前必须由交接方从当前执行者提供的分支或补丁取得；仅克隆上游 Gitee 仓库不会包含 `capi/`。应用该提交后执行 `git rev-parse HEAD`，输出应为上述桥接提交 SHA。
+### 4.2 确认 C API 桥接层文件存在
+
+C API 桥接层已实现并提交，位于仓库的 `capi/` 子目录：
+
+```bash
+ls /path/to/workspaces/libkysdk-vector-engine-client/capi/c_api_bridge.h
+ls /path/to/workspaces/libkysdk-vector-engine-client/capi/c_api_bridge.cpp
+```
+
+`CMakeLists.txt` 中已包含 `kysdk-vector-engine-client-capi` 编译目标（`endif()` 之后），无需手工修改。如果不存在，请联系当前执行者获取补丁。
+
+> **兼容性要求**：桥接要求 `openkylin/nile-sp2` API（`Database::HybridSearch`、`AnnSearchRequest`、`RRFRanker`、`SparseFloatVecFieldData`）。旧 SDK 不得用于构建或部署该桥接；不得将 dense-only 搜索伪装为 HybridSearch。
 
 ### 4.3 修改 CMakeLists.txt
 
-确认 `CMakeLists.txt` 中已增加 `libkysdk-vector-engine-client-capi.so` 编译目标。例如：
+（已由当前执行者完成，无需操作。供参考，capi 目标定义如下：）
 
 ```cmake
 add_library(kysdk-vector-engine-client-capi SHARED
-    c_api_bridge.cpp
+    capi/c_api_bridge.cpp
 )
 target_link_libraries(kysdk-vector-engine-client-capi
     kysdk-vector-engine-client
@@ -217,20 +229,16 @@ pip install -r requirements-dev.txt
 ```yaml
 embedding:
   provider: kylin
-  kylin:
-    so_path: /path/to/libkylin-coreai-embedding.so
-    model_name: ensemble-embd_gte-base_uint8-text
-    dim: 768
+  so_path: /path/to/libkylin-coreai-embedding.so
+  model_name: ensemble-embd_gte-base_uint8-text
+  dimension: 768
 
 vector_engine:
   provider: milvus
-  milvus:
-    so_path: /path/to/libkysdk-vector-engine-client-capi.so
-    host: 127.0.0.1
-    port: 19530
-    collection: memoryhub
-    dimension: 768
-    metric: cosine
+  so_path: /path/to/libkysdk-vector-engine-client-capi.so
+  host: 127.0.0.1
+  port: 19530
+  collection: memoryhub
 ```
 
 如使用默认搜索路径，可省略 `so_path`。
@@ -271,10 +279,16 @@ PY
 ```bash
 python - <<'PY'
 from memoryhub.storage.vector_engine import create_vector_engine
-engine = create_vector_engine(provider="milvus")
-print("created")
-engine.connect()
+engine = create_vector_engine(
+    provider="milvus",
+    so_path="/usr/lib/libkysdk-vector-engine-client-capi.so",
+    host="127.0.0.1",
+    port=19530,
+    collection="memoryhub_smoke",
+    dimension=768,
+)
 print("connected")
+engine.close()
 PY
 ```
 
@@ -384,7 +398,7 @@ docker logs milvus-standalone
 
 - 检查 collection 是否已 `load`
 - 检查稀疏向量索引是否正确创建
-- 检查 query 是否经过 `jieba` 分词且生成了有效 sparse_terms
+- 检查 Python、C API 与 mock 是否均使用 FNV-1a 确定性分词/hash 规则生成 sparse_terms
 - 检查 embedding 是否返回非零向量
 
 ### 9.7 内存泄漏或段错误
@@ -425,7 +439,7 @@ export LD_LIBRARY_PATH=/path/to/so/dir:$LD_LIBRARY_PATH
 python -c "from memoryhub.embedding import create_embedding_client; c=create_embedding_client('kylin'); print(c.embed('测试')[:5])"
 
 # 验证 Vector Engine
-python -c "from memoryhub.storage.vector_engine import create_vector_engine; e=create_vector_engine('milvus'); e.connect(); print('ok')"
+python -c "from memoryhub.storage.vector_engine import create_vector_engine; e=create_vector_engine(provider='milvus', host='127.0.0.1', port=19530, collection='memoryhub_smoke', dimension=768); e.close(); print('ok')"
 
 # 跑端到端测试
 python scripts/run_milvus_real_smoke_test.py

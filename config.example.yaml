@@ -1,4 +1,4 @@
-﻿# Kylin-MemoryHub 配置文件示例
+# Kylin-MemoryHub 配置文件示例
 # 复制此文件为 config.yaml 并根据实际环境修改
 
 # ==================== 存储配置 ====================
@@ -57,14 +57,37 @@ llm:
 
 # ==================== Embedding 配置 ====================
 embedding:
-  # 提供商: "kylin" (麒麟 SDK) | "mock" (开发测试)
-  provider: "kylin"
-  
-  # 向量维度
+  # 提供商: "kylin" (麒麟真实 SDK) | "kylin_mock" (项目内 mock 动态库)
+  #         | "mock" (纯 Python 开发测试) | "auto" (自动选择，kylin 优先)
+  # 注意: 显式 "kylin"/"kylin_mock" 在动态库不可用时会直接报错
+  provider: "mock"
+
+  # 向量维度 (kylin/kylin_mock 的默认模型固定 768 维)
   dimension: 1024
-  
-  # 模型名称 (kylin 模式下填写)
-  model_name: "kylin-embedding-v1"
+
+  # 模型名称 (kylin 模式下填写，如 ensemble-embd_gte-base_uint8-text)
+  model_name: ""
+
+  # 动态库显式路径 (kylin/kylin_mock 模式，空则按默认路径探测；
+  # kylin_mock 缺省指向 third_party/kylin-mock/build/)
+  so_path: ""
+
+# ==================== 向量引擎配置 ====================
+vector_engine:
+  # 提供商: "faiss" (本地 FAISS 索引，默认) | "milvus" (麒麟 Milvus SDK)
+  #         | "milvus_mock" (项目内 mock 动态库，非麒麟环境测试)
+  provider: "faiss"
+
+  # Milvus C API 动态库显式路径 (milvus 模式，空则按默认路径探测；
+  # milvus_mock 缺省指向 third_party/kylin-mock/build/)
+  so_path: ""
+
+  # Milvus 服务地址与端口
+  host: "127.0.0.1"
+  port: 19530
+
+  # Milvus 集合名
+  collection: "memoryhub"
 
 # ==================== 安全配置 ====================
 safety:
