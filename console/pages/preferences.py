@@ -317,6 +317,7 @@ class PreferencesPage(BasePage):
 
         # --- 信号 ---
         self.mock.preferences_ready.connect(self._on_data_loaded)
+        self.mock.preference_versions_ready.connect(self._on_versions_loaded)
         self.mock.error_occurred.connect(self._on_error)
         self.mock.load_preferences()
 
@@ -535,16 +536,32 @@ class PreferencesPage(BasePage):
         d = next((x for x in self._raw_data if x["memory_id"] == mid), None)
         if d:
             self._show_evidences(d.get("evidences", []))
-            self._show_versions(d.get("versions", []))
+            # Live 模式：版本链需单独请求（列表接口不返回 versions 字段）
+            if self.mock._is_live:
+                self.mock.load_preference_versions(mid)
+            else:
+                self._show_versions(d.get("versions", []))
         self._detail_panel.show()
 
+    def _on_versions_loaded(self, versions: list[dict]):
+        """Live 模式下版本历史接口返回后填充版本链"""
+        self._show_versions(versions)
+
     def _show_versions(self, versions: list[dict]):
+        if not versions:
+            empty = QLabel("暂无版本历史")
+            empty.setFont(QFont("Microsoft YaHei", 10))
+            empty.setStyleSheet("color:#9CA3AF;padding:8px 0;")
+            self._version_list.insertWidget(self._version_list.count()-1, empty)
+            return
         for v in versions:
             c = QFrame(); c.setStyleSheet("QFrame{background:#F9FAFB;border-radius:8px;}")
             cl = QHBoxLayout(c); cl.setContentsMargins(12,8,12,8); cl.setSpacing(12)
-            b = QLabel(f"v{v['version']}"); b.setFont(QFont("Microsoft YaHei",10,QFont.Weight.Bold))
+            b = QLabel(f"v{v.get('version', '?')}"); b.setFont(QFont("Microsoft YaHei",10,QFont.Weight.Bold))
             b.setStyleSheet("color:#3B82F6;"); b.setFixedWidth(28); cl.addWidget(b)
-            ch = QLabel(v.get("change","")); ch.setFont(QFont("Microsoft YaHei",10))
+            # Mock 格式用 change，API 格式回退到 content
+            desc = v.get("change") or v.get("content") or ""
+            ch = QLabel(desc); ch.setFont(QFont("Microsoft YaHei",10))
             ch.setStyleSheet("color:#374151;"); ch.setWordWrap(True)
             ch.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             cl.addWidget(ch, 1)
@@ -555,6 +572,12 @@ class PreferencesPage(BasePage):
             self._version_list.insertWidget(self._version_list.count()-1, c)
 
     def _show_evidences(self, evidences: list[dict]):
+        if not evidences:
+            empty = QLabel("暂无证据记录")
+            empty.setFont(QFont("Microsoft YaHei", 10))
+            empty.setStyleSheet("color:#9CA3AF;padding:8px 0;")
+            self._evidence_list.insertWidget(self._evidence_list.count()-1, empty)
+            return
         for ev in evidences:
             c = QFrame(); c.setStyleSheet("QFrame{background:#F9FAFB;border-radius:8px;}")
             cl = QVBoxLayout(c); cl.setContentsMargins(12,8,12,8); cl.setSpacing(2)

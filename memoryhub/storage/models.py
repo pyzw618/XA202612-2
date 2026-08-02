@@ -54,6 +54,11 @@ class PreferenceRow(Base):
     version = Column(Integer, default=1)
     parent_id = Column(String(32))
     evidences = Column(JSON)
+    # --- 健康度字段（遗忘模块使用）---
+    health_score = Column(Float, default=1.0, index=True)
+    stability = Column(Float, default=1.0)
+    last_accessed_at = Column(DateTime, nullable=True)
+    access_count_30d = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -82,6 +87,11 @@ class KnowledgeRow(Base):
     version = Column(Integer, default=1)
     parent_id = Column(String(32))
     evidences = Column(JSON)
+    # --- 健康度字段（遗忘模块使用）---
+    health_score = Column(Float, default=1.0, index=True)
+    stability = Column(Float, default=1.0)
+    last_accessed_at = Column(DateTime, nullable=True)
+    access_count_30d = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 

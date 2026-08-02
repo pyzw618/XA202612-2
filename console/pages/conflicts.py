@@ -255,13 +255,12 @@ class ConflictsPage(BasePage):
 
         # 原因
         reason = data.get("reason", "")
-        if reason:
-            reason_lbl = QLabel(f"原因: {reason}")
-            reason_lbl.setFont(QFont("Microsoft YaHei", 10))
-            reason_lbl.setStyleSheet("color:#6B7280;")
-            reason_lbl.setWordWrap(True)
-            reason_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            cl.addWidget(reason_lbl)
+        reason_lbl = QLabel(f"原因: {reason}" if reason else "原因: 暂无说明")
+        reason_lbl.setFont(QFont("Microsoft YaHei", 10))
+        reason_lbl.setStyleSheet("color:#6B7280;" if reason else "color:#9CA3AF;")
+        reason_lbl.setWordWrap(True)
+        reason_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        cl.addWidget(reason_lbl)
 
         # 操作按钮（仅 pending）
         if decision == "pending":
@@ -325,8 +324,13 @@ class ConflictsPage(BasePage):
         return w
 
     def _resolve(self, conflict_id: str, decision: str):
-        for d in self._raw_data:
-            if d.get("conflict_id") == conflict_id:
-                d["decision"] = decision
-                break
-        self._apply_filter()
+        if self.mock._is_live:
+            # Live 模式：调用 API，成功后自动重新加载冲突列表
+            self.mock.resolve_conflict(conflict_id, decision)
+        else:
+            # Mock 模式：本地修改
+            for d in self._raw_data:
+                if d.get("conflict_id") == conflict_id:
+                    d["decision"] = decision
+                    break
+            self._apply_filter()

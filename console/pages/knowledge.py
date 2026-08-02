@@ -350,6 +350,12 @@ class KnowledgePage(BasePage):
         self._detail_panel.show()
 
     def _show_steps(self, steps):
+        if not steps:
+            empty = QLabel("暂无执行步骤")
+            empty.setFont(QFont("Microsoft YaHei", 10))
+            empty.setStyleSheet("color:#9CA3AF;padding:8px 0;")
+            self._steps_list.insertWidget(self._steps_list.count()-1, empty)
+            return
         for i, step in enumerate(steps):
             c = QFrame(); c.setStyleSheet("QFrame{background:#F9FAFB;border-radius:8px;}")
             cl = QHBoxLayout(c); cl.setContentsMargins(12,8,12,8); cl.setSpacing(12)

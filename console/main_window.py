@@ -74,7 +74,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 560)
 
         self.client = MemoryHubClient()
-        self.mock = MockDataController()
+        self.mock = MockDataController(client=self.client)
 
         # 最大化状态必须在 _setup_ui 之前初始化（_apply_style 会读它）
         self._maximized: bool = False
