@@ -57,9 +57,21 @@ class LLMConfig:
 class EmbeddingConfig:
     """Embedding 配置"""
 
-    provider: str = "mock"  # "kylin" | "mock"
+    provider: str = "mock"  # "kylin" | "kylin_mock" | "mock" | "auto"
     dimension: int = 1024
     model_name: str = ""
+    so_path: str = ""  # 动态库显式路径（kylin/kylin_mock 模式，空则按默认路径探测）
+
+
+@dataclass
+class VectorEngineConfig:
+    """向量引擎配置"""
+
+    provider: str = "faiss"  # "faiss" | "milvus" | "milvus_mock"
+    so_path: str = ""  # Milvus C API 动态库显式路径（空则按默认路径探测）
+    host: str = "127.0.0.1"
+    port: int = 19530
+    collection: str = "memoryhub"
 
 
 @dataclass(frozen=True)
@@ -347,6 +359,7 @@ class AppConfig:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+    vector_engine: VectorEngineConfig = field(default_factory=VectorEngineConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     debug: bool = False
 
@@ -375,21 +388,38 @@ def load_config(config_path: str | None = None) -> AppConfig:
     if yaml_path:
         try:
             import yaml
+        except ImportError as exc:
+            raise RuntimeError("PyYAML is required to load configuration files") from exc
+
+        try:
             with open(yaml_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
-            if data:
-                if "storage" in data:
-                    config.storage = StorageConfig(**{**config.storage.__dict__, **data["storage"]})
-                if "retrieval" in data:
-                    config.retrieval = RetrievalConfig(**{**config.retrieval.__dict__, **data["retrieval"]})
-                if "llm" in data:
-                    config.llm = LLMConfig(**{**config.llm.__dict__, **data["llm"]})
-                if "embedding" in data:
-                    config.embedding = EmbeddingConfig(**{**config.embedding.__dict__, **data["embedding"]})
-                if "debug" in data:
-                    config.debug = bool(data["debug"])
-        except Exception:
-            pass  # YAML 加载失败时使用默认配置
+        except (OSError, yaml.YAMLError) as exc:
+            raise ValueError(f"invalid configuration file {yaml_path}: {exc}") from exc
+
+        if not isinstance(data, Mapping):
+            raise ValueError(f"configuration root in {yaml_path} must be a mapping")
+
+        def section(name: str) -> Mapping:
+            value = data.get(name, {})
+            if not isinstance(value, Mapping):
+                raise ValueError(f"configuration section {name!r} must be a mapping")
+            return value
+
+        try:
+            config.storage = StorageConfig(**{**config.storage.__dict__, **section("storage")})
+            config.retrieval = RetrievalConfig(**{**config.retrieval.__dict__, **section("retrieval")})
+            config.llm = LLMConfig(**{**config.llm.__dict__, **section("llm")})
+            config.embedding = EmbeddingConfig(
+                **{**config.embedding.__dict__, **section("embedding")}
+            )
+            config.vector_engine = VectorEngineConfig(
+                **{**config.vector_engine.__dict__, **section("vector_engine")}
+            )
+        except TypeError as exc:
+            raise ValueError(f"invalid configuration in {yaml_path}: {exc}") from exc
+        if "debug" in data:
+            config.debug = bool(data["debug"])
 
     # 环境变量覆盖
     if os.environ.get("MEMORYHUB_DB_PATH"):

@@ -243,12 +243,14 @@ def create_app(
         from memoryhub.retrieval.cache import SearchCache
         from memoryhub.retrieval.hybrid import HybridRetriever
         from memoryhub.retrieval.keyword_search import KeywordSearcher
+        from memoryhub.retrieval.milvus_hybrid import MilvusHybridRetriever
         from memoryhub.retrieval.reranker import Reranker
         from memoryhub.storage.database import (
             Database,
             KnowledgeRepository,
             PreferenceRepository,
         )
+        from memoryhub.storage.vector_engine import create_vector_engine
         from memoryhub.storage.vector_store import VectorStore
 
         # 存储层：SQLite 是记忆记录的事实来源，VectorStore 是向量索引的事实来源
@@ -261,20 +263,58 @@ def create_app(
         memories = [*pref_repo.list_all(), *know_repo.list_all()]
         memory_lookup = {m.memory_id: m for m in memories}
 
-        embedding_client = create_embedding_client(dim=config.embedding.dimension)
-
-        # 向量索引：优先从磁盘加载；为空时按记忆文本重新 embedding 全量重建
-        vector_store = VectorStore(
-            index_path=config.storage.vector_index_path,
-            dimension=embedding_client.get_dimension(),
+        embedding_kwargs = {"dim": config.embedding.dimension}
+        if config.embedding.model_name:
+            embedding_kwargs["model_name"] = config.embedding.model_name
+        if config.embedding.so_path:
+            embedding_kwargs["so_path"] = config.embedding.so_path
+        embedding_provider = config.embedding.provider
+        embedding_client = create_embedding_client(
+            provider=embedding_provider if embedding_provider != "auto" else None,
+            **embedding_kwargs,
         )
-        vector_store.init_index()
-        if vector_store.index.ntotal == 0 and memories:
+
+        # 向量引擎分支：faiss 走本地 VectorStore；milvus/milvus_mock 走麒麟向量引擎
+        engine_provider = config.vector_engine.provider
+        vector_store = None
+        vector_engine = None
+        vector_search_adapter = None
+
+        if engine_provider == "faiss":
+            # 向量索引：优先从磁盘加载；为空时按记忆文本重新 embedding 全量重建
+            vector_store = VectorStore(
+                index_path=config.storage.vector_index_path,
+                dimension=embedding_client.get_dimension(),
+            )
+            vector_store.init_index()
+            if vector_store.index.ntotal == 0 and memories:
+                for memory in memories:
+                    vector_store.add(
+                        memory.memory_id, embedding_client.embed(_memory_text(memory))
+                    )
+                vector_store.save()
+            vector_search_adapter = _VectorStoreSearchAdapter(vector_store, memory_lookup)
+        elif engine_provider in ("milvus", "milvus_mock"):
+            engine_kwargs = {
+                "host": config.vector_engine.host,
+                "port": config.vector_engine.port,
+                "collection": config.vector_engine.collection,
+                "dimension": embedding_client.get_dimension(),
+            }
+            if config.vector_engine.so_path:
+                engine_kwargs["so_path"] = config.vector_engine.so_path
+            vector_engine = create_vector_engine(engine_provider, **engine_kwargs)
+            # 启动时对存量记忆全量 insert（重复插入视为更新）
             for memory in memories:
-                vector_store.add(
-                    memory.memory_id, embedding_client.embed(_memory_text(memory))
+                text = _memory_text(memory)
+                vector_engine.insert(
+                    memory.memory_id,
+                    text,
+                    embedding_client.embed(text),
+                    metadata=_memory_metadata(memory),
                 )
-            vector_store.save()
+        else:
+            raise ValueError(f"unknown vector_engine provider: {engine_provider}")
 
         # 关键词索引：BM25 索引可重建，启动时从 SQLite 全量构建
         keyword_search = KeywordSearcher()
@@ -299,15 +339,24 @@ def create_app(
         app.state.pref_repo = pref_repo
         app.state.know_repo = know_repo
         app.state.vector_store = vector_store
-        app.state.retriever = HybridRetriever(
-            vector_search=_VectorStoreSearchAdapter(vector_store, memory_lookup),
-            keyword_search=keyword_search,
-            reranker=Reranker(),
-            cache=cache,
-            config=config.retrieval,
-            embedding_fn=embedding_client.embed,
-            memory_lookup=memory_lookup,
-        )
+        app.state.vector_engine = vector_engine
+        if vector_engine is not None:
+            app.state.retriever = MilvusHybridRetriever(
+                engine=vector_engine,
+                embedding_fn=embedding_client.embed,
+                config=config.retrieval,
+                memory_lookup=memory_lookup,
+            )
+        else:
+            app.state.retriever = HybridRetriever(
+                vector_search=vector_search_adapter,
+                keyword_search=keyword_search,
+                reranker=Reranker(),
+                cache=cache,
+                config=config.retrieval,
+                embedding_fn=embedding_client.embed,
+                memory_lookup=memory_lookup,
+            )
 
     @app.on_event("shutdown")
     async def shutdown():
@@ -327,6 +376,13 @@ def create_app(
         vector_store = getattr(app.state, "vector_store", None)
         if vector_store is not None:
             vector_store.save()
+        vector_engine = getattr(app.state, "vector_engine", None)
+        if vector_engine is not None:
+            try:
+                vector_engine.persist()
+            finally:
+                vector_engine.close()
+            app.state.vector_engine = None
         db = getattr(app.state, "db", None)
         if db is not None:
             db.close()
