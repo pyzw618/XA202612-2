@@ -29,12 +29,14 @@ except AttributeError:
 # 将项目根目录加入路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from memoryhub.adapter.schemas import SearchRequest
+from memoryhub.adapter.schemas import KnowledgeMemory, SearchRequest
 from memoryhub.config import RetrievalConfig
 from memoryhub.embedding import KylinEmbeddingClient, MockEmbeddingClient
 from memoryhub.retrieval.hybrid import HybridRetriever
 from memoryhub.retrieval.keyword_search import KeywordSearcher
+from memoryhub.retrieval.milvus_hybrid import MilvusHybridRetriever
 from memoryhub.retrieval.vector_search import VectorSearcher
+from memoryhub.storage.vector_engine import create_vector_engine
 
 from evaluation.metrics.retrieval_eval import RetrievalEvaluator, percentile
 from tests.eval_dataset import load_dataset, save_dataset
@@ -80,24 +82,26 @@ def build_embedding_client(provider: str, dim: int):
     return MockEmbeddingClient(dim=dim, latency=0.0)
 
 
-def build_retriever(memories: list[dict], embed_fn, dim: int, config: RetrievalConfig) -> HybridRetriever:
-    """
-    按方案 §5.2 构造检索器：
-    - BM25 索引覆盖全部记忆；
-    - FAISS 索引覆盖全部记忆；
-    - 元数据从简：统一 memory_type="knowledge"，无 scope/confidence，
-      metadata 路对所有候选给统一 0.5 分（常数偏移，不影响排序），
-      _filter_by_context 全部放行；
-    - 必须 cache=None，避免跨消融组缓存污染；
-    - reranker=None，走纯分数排序分支，只测融合本身。
-    """
+def build_retriever(memories, embed_fn, dim, config, engine="faiss", engine_kwargs=None):
+    """Build a retriever for either the legacy FAISS path or a vector engine."""
+    if engine != "faiss":
+        vector_engine = create_vector_engine(engine, dimension=dim, **(engine_kwargs or {}))
+        memory_lookup = {}
+        for memory in memories:
+            record = KnowledgeMemory(
+                memory_id=memory["id"], name=memory["id"], content=memory["content"], confidence=1.0
+            )
+            memory_lookup[record.memory_id] = record
+            vector_engine.insert(record.memory_id, record.content, embed_fn(record.content))
+        retriever = MilvusHybridRetriever(vector_engine, embed_fn, config, memory_lookup)
+        retriever._evaluation_engine = vector_engine
+        return retriever
+
     keyword_search = KeywordSearcher()
     keyword_search.build_index([(m["id"], m["content"], "") for m in memories])
-
     vector_search = VectorSearcher(dimension=dim)
-    for m in memories:
-        vector_search.add(m["id"], embed_fn(m["content"]), metadata={"memory_type": "knowledge"})
-
+    for memory in memories:
+        vector_search.add(memory["id"], embed_fn(memory["content"]), metadata={"memory_type": "knowledge"})
     return HybridRetriever(
         vector_search=vector_search,
         keyword_search=keyword_search,
@@ -106,11 +110,6 @@ def build_retriever(memories: list[dict], embed_fn, dim: int, config: RetrievalC
         config=config,
         embedding_fn=embed_fn,
     )
-
-
-# ============================================================
-# 评测执行
-# ============================================================
 
 def evaluate_group(retriever: HybridRetriever, queries: list[dict]) -> dict:
     """跑一组消融：逐 query 检索并计算指标，返回总体 + 难度分层 + 逐 query 明细。"""
@@ -214,6 +213,11 @@ def main() -> None:
                         help="数据集 JSON 路径（缺失时自动生成）")
     parser.add_argument("--output", default=os.path.join("evaluation", "results", "retrieval_eval_v2.json"),
                         help="JSON 报告输出路径（本地产物，不入库）")
+    parser.add_argument("--engine", choices=["faiss", "milvus", "milvus_mock"], default="faiss")
+    parser.add_argument("--engine-so-path", default="")
+    parser.add_argument("--milvus-host", default="127.0.0.1")
+    parser.add_argument("--milvus-port", type=int, default=19530)
+    parser.add_argument("--collection", default="memoryhub_eval")
     args = parser.parse_args()
 
     # 数据集缺失时自动生成（save_dataset() 产物，不入库）
@@ -232,6 +236,7 @@ def main() -> None:
         "environment": {
             "embedding_provider": args.provider,
             "embedding_dim": embed_client.get_dimension(),
+            "vector_engine": args.engine,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "git_commit": get_git_commit(),
             "top_k": TOP_K,
@@ -242,8 +247,22 @@ def main() -> None:
 
     for group_name, desc, vw, kw, mw in ABLATION_GROUPS:
         config = RetrievalConfig(vector_weight=vw, keyword_weight=kw, metadata_weight=mw)
-        retriever = build_retriever(memories, embed_client.embed, args.dim, config)
-        metrics = evaluate_group(retriever, queries)
+        engine_kwargs = {
+            "collection": f"{args.collection}_{group_name.lower()}",
+            "host": args.milvus_host,
+            "port": args.milvus_port,
+        }
+        if args.engine_so_path:
+            engine_kwargs["so_path"] = args.engine_so_path
+        retriever = build_retriever(
+            memories, embed_client.embed, args.dim, config, args.engine, engine_kwargs
+        )
+        try:
+            metrics = evaluate_group(retriever, queries)
+        finally:
+            vector_engine = getattr(retriever, "_evaluation_engine", None)
+            if vector_engine is not None:
+                vector_engine.close()
         print_group_table(group_name, desc, (vw, kw, mw), metrics)
         report["groups"][group_name] = {
             "description": desc,
