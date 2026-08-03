@@ -7,7 +7,10 @@ Milvus 混合检索器
 便于 API 层无差别切换。
 """
 
+import logging
+import re
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 
 from memoryhub.adapter.schemas import (
@@ -18,7 +21,13 @@ from memoryhub.adapter.schemas import (
     SearchResult,
 )
 from memoryhub.config import RetrievalConfig
+from memoryhub.retrieval.cache import SearchCache
 from memoryhub.storage.vector_engine import BaseVectorEngine, build_sparse_vector
+
+logger = logging.getLogger(__name__)
+
+# 生产模式下普通重排最多只能处理前 20 个候选
+_RERANK_CANDIDATE_LIMIT = 20
 
 
 def _memory_text(memory: PreferenceMemory | KnowledgeMemory) -> str:
@@ -40,17 +49,21 @@ def _memory_metadata(memory: PreferenceMemory | KnowledgeMemory) -> dict:
 
 class MilvusHybridRetriever:
     """
-    基于向量引擎的混合检索器
+    生产环境唯一的混合检索器
 
     使用方式:
         retriever = MilvusHybridRetriever(engine, embedding_fn, memory_lookup=lookup)
         response = retriever.search(request)
 
     数据流:
-        SearchRequest → embedding_fn(query) 生成稠密向量
+        SearchRequest → 规范化查询并截断
+                      → 查询结果缓存命中时直接返回
+                      → 查询向量缓存命中时复用稠密向量
+                      → embedding_fn(query) 生成稠密向量
                       → build_sparse_vector(query) 生成稀疏向量
                       → engine.hybrid_search（引擎内部 RRF 融合）
-                      → memory_lookup 补齐 metadata → SearchResponse
+                      → 元数据过滤、SQLite 回表补齐详情
+                      → 返回 Top-K 并写入缓存
     """
 
     def __init__(
@@ -59,20 +72,34 @@ class MilvusHybridRetriever:
         embedding_fn: Callable[[str], list[float]],
         config: RetrievalConfig | None = None,
         memory_lookup: dict | None = None,
+        cache: SearchCache | None = None,
+        index_version: str = "",
+        reranker: object | None = None,
+        query_vector_cache_size: int = 1000,
     ):
         """
         参数:
-            engine: 向量引擎实例（milvus / milvus_mock / faiss 均可）
+            engine: 向量引擎实例（生产环境要求 milvus）
             embedding_fn: query 文本 → 稠密向量的函数
             config: 检索配置，缺省用 RetrievalConfig 默认值
             memory_lookup: memory_id → PreferenceMemory/KnowledgeMemory 的映射，
                 用于补齐 SearchResult 的 metadata 和 SearchResponse 的
                 preferences/knowledge（与 HybridRetriever 行为一致）
+            cache: SearchCache 实例；为 None 时禁用结果缓存
+            index_version: 索引版本号，会作为结果缓存键的一部分
+            reranker: 可选的重排器；生产模式下默认关闭，开启时仅对前 20 候选生效
+            query_vector_cache_size: 查询向量 LRU 缓存大小
         """
         self.engine = engine
         self.embedding_fn = embedding_fn
         self.config = config or RetrievalConfig()
         self.memory_lookup = memory_lookup or {}
+        self.cache = cache
+        self.index_version = index_version
+        self.reranker = reranker
+        # 查询向量 LRU 缓存：query text -> dense vector
+        self._query_vector_cache: OrderedDict[str, list[float]] = OrderedDict()
+        self._query_vector_cache_size = query_vector_cache_size
 
     def search(self, request: SearchRequest) -> SearchResponse:
         """
@@ -84,26 +111,100 @@ class MilvusHybridRetriever:
         返回:
             SearchResponse（含偏好和知识列表），结构同 HybridRetriever.search
         """
-        start = time.perf_counter()
+        total_start = time.perf_counter()
+        timings: dict[str, float] = {}
 
-        if not request.query:
-            return self._format_response([], 0.0)
+        # 1. 规范化查询并限制长度
+        normalized_query = self._normalize_query(request.query)
+        if not normalized_query:
+            latency_ms = (time.perf_counter() - total_start) * 1000
+            return self._format_response([], latency_ms)
 
-        # 多取候选再按 context 过滤，避免过滤后不足 top_k
-        fetch_k = max(request.top_k * 2, 10)
+        # 使用规范化后的请求进行缓存与检索，使等价查询命中同一缓存
+        search_request = request.model_copy(update={"query": normalized_query})
 
-        dense_vector = self.embedding_fn(request.query)
-        sparse_terms = build_sparse_vector(request.query)
+        # 2. 查询结果缓存命中时直接返回
+        if self.cache is not None:
+            cached = self.cache.get(search_request, version=self.index_version)
+            if cached is not None:
+                return cached
+
+        # 3. 查询向量缓存命中时复用 768 维向量
+        t0 = time.perf_counter()
+        dense_vector = self._get_cached_vector(normalized_query)
+        if dense_vector is None:
+            dense_vector = self.embedding_fn(normalized_query)
+            self._set_cached_vector(normalized_query, dense_vector)
+        timings["embedding_ms"] = (time.perf_counter() - t0) * 1000
+
+        # 4. 用与 C API 一致的 FNV-1a 规则构造稀疏向量
+        t0 = time.perf_counter()
+        sparse_terms = build_sparse_vector(normalized_query)
+        timings["sparse_ms"] = (time.perf_counter() - t0) * 1000
+
+        # 5. 调用 Milvus HybridSearch，召回 top_k * candidate_multiplier 候选
+        t0 = time.perf_counter()
+        fetch_k = max(search_request.top_k * self.config.candidate_multiplier, 1)
         hits = self.engine.hybrid_search(dense_vector, sparse_terms, fetch_k)
+        timings["hybrid_search_ms"] = (time.perf_counter() - t0) * 1000
 
+        # 6. 回表 SQLite 补齐详情，并按 memory_type/scope/confidence 过滤
+        t0 = time.perf_counter()
         results = [self._to_search_result(hit) for hit in hits]
-        filtered = self._filter_by_context(results, request)
-        top_results = filtered[: request.top_k]
+        filtered = self._filter_by_context(results, search_request)
 
-        latency_ms = (time.perf_counter() - start) * 1000
-        return self._format_response(top_results, latency_ms)
+        # 7. 普通重排默认关闭；开启时仅对前 20 个候选执行无模型规则重排
+        if self.reranker is not None and self.config.rerank_enabled:
+            filtered = self.reranker.rerank(filtered[:_RERANK_CANDIDATE_LIMIT], search_request)
+
+        top_results = filtered[: search_request.top_k]
+        timings["filter_ms"] = (time.perf_counter() - t0) * 1000
+
+        latency_ms = (time.perf_counter() - total_start) * 1000
+        response = self._format_response(top_results, latency_ms)
+
+        # 8. 写入结果缓存（缓存键包含索引版本号）
+        if self.cache is not None:
+            self.cache.set(search_request, response, version=self.index_version)
+
+        timings["total_ms"] = latency_ms
+        self._log_timings(timings)
+
+        return response
 
     # ---- 内部 ----
+
+    def _normalize_query(self, query: str) -> str:
+        """规范化查询：去除首尾空白、折叠连续空白、截断至 max_query_chars。"""
+        query = (query or "").strip()
+        if not query:
+            return ""
+        # 折叠连续空白为单个空格
+        query = re.sub(r"\s+", " ", query)
+        max_chars = self.config.max_query_chars
+        if max_chars > 0 and len(query) > max_chars:
+            query = query[:max_chars]
+        return query
+
+    def _get_cached_vector(self, query: str) -> list[float] | None:
+        """从 LRU 查询向量缓存中读取稠密向量。"""
+        vector = self._query_vector_cache.get(query)
+        if vector is not None:
+            self._query_vector_cache.move_to_end(query)
+        return vector
+
+    def _set_cached_vector(self, query: str, vector: list[float]) -> None:
+        """写入 LRU 查询向量缓存。"""
+        self._query_vector_cache[query] = vector
+        self._query_vector_cache.move_to_end(query)
+        while len(self._query_vector_cache) > self._query_vector_cache_size:
+            self._query_vector_cache.popitem(last=False)
+
+    def _log_timings(self, timings: dict[str, float]) -> None:
+        """输出分段耗时指标，供基准脚本与可观测性系统采集。"""
+        # 保留两位小数，避免日志过度膨胀
+        formatted = {k: round(v, 2) for k, v in timings.items()}
+        logger.info("milvus_hybrid_search_timings: %s", formatted)
 
     def _to_search_result(self, hit) -> SearchResult:
         """VectorSearchResult → adapter 的 SearchResult（source 固定为 hybrid）"""

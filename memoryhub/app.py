@@ -280,6 +280,14 @@ def create_app(
         vector_engine = None
         vector_search_adapter = None
 
+        # 生产模式仅允许真实 Milvus；development/test 保留 faiss 降级路径
+        if config.runtime.is_production and engine_provider != "milvus":
+            from memoryhub.config import ProductionGateError
+
+            raise ProductionGateError(
+                f"production requires vector_engine.provider='milvus', got {engine_provider!r}"
+            )
+
         if engine_provider == "faiss":
             # 向量索引：优先从磁盘加载；为空时按记忆文本重新 embedding 全量重建
             vector_store = VectorStore(
@@ -319,38 +327,56 @@ def create_app(
         # 生产模式运行时门禁：校验 SDK/引擎可用性与实际维度
         validate_production_runtime(config, embedding_client, vector_engine)
 
-        # 关键词索引：BM25 索引可重建，启动时从 SQLite 全量构建
-        keyword_search = KeywordSearcher()
-        if memories:
-            keyword_search.build_index(
-                [
-                    (
-                        m.memory_id,
-                        _memory_text(m),
-                        json.dumps(_memory_metadata(m), ensure_ascii=False),
-                    )
-                    for m in memories
-                ]
-            )
-
+        # 检索缓存（生产与 development/test 共用）
         cache = SearchCache(
             max_size=config.storage.cache_max_size,
             ttl_seconds=config.retrieval.cache_ttl_seconds,
         )
+
+        # 索引版本号：后续由写入/同步链路维护（TASK-009）；当前使用固定占位值，
+        # 仅保证缓存键结构已就绪。
+        index_version = "1"
 
         app.state.db = db
         app.state.pref_repo = pref_repo
         app.state.know_repo = know_repo
         app.state.vector_store = vector_store
         app.state.vector_engine = vector_engine
-        if vector_engine is not None:
+
+        if config.runtime.is_production:
+            # 生产路径：仅装配 MilvusHybridRetriever，不构建 KeywordSearcher / HybridRetriever
             app.state.retriever = MilvusHybridRetriever(
                 engine=vector_engine,
                 embedding_fn=embedding_client.embed,
                 config=config.retrieval,
                 memory_lookup=memory_lookup,
+                cache=cache,
+                index_version=index_version,
+            )
+        elif vector_engine is not None:
+            # development/test 使用 milvus / milvus_mock
+            app.state.retriever = MilvusHybridRetriever(
+                engine=vector_engine,
+                embedding_fn=embedding_client.embed,
+                config=config.retrieval,
+                memory_lookup=memory_lookup,
+                cache=cache,
+                index_version=index_version,
             )
         else:
+            # 关键词索引：BM25 索引可重建，启动时从 SQLite 全量构建
+            keyword_search = KeywordSearcher()
+            if memories:
+                keyword_search.build_index(
+                    [
+                        (
+                            m.memory_id,
+                            _memory_text(m),
+                            json.dumps(_memory_metadata(m), ensure_ascii=False),
+                        )
+                        for m in memories
+                    ]
+                )
             app.state.retriever = HybridRetriever(
                 vector_search=vector_search_adapter,
                 keyword_search=keyword_search,

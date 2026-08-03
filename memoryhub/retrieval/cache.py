@@ -32,17 +32,21 @@ class SearchCache:
         self.ttl_seconds = ttl_seconds
         self._cache: OrderedDict[str, tuple[float, SearchResponse]] = OrderedDict()
 
-    def get(self, request: SearchRequest) -> SearchResponse | None:
+    def get(
+        self, request: SearchRequest, version: str | None = None
+    ) -> SearchResponse | None:
         """
         查询缓存
 
         参数:
             request: 检索请求
+            version: 可选的版本号，会作为缓存键的一部分；
+                用于在索引版本变化时隔离旧缓存。
 
         返回:
             缓存的 SearchResponse 或 None（未命中/已过期）
         """
-        key = self._make_key(request)
+        key = self._make_key(request, version)
         entry = self._cache.get(key)
         if entry is None:
             return None
@@ -56,15 +60,21 @@ class SearchCache:
         self._cache.move_to_end(key)
         return response
 
-    def set(self, request: SearchRequest, response: SearchResponse) -> None:
+    def set(
+        self,
+        request: SearchRequest,
+        response: SearchResponse,
+        version: str | None = None,
+    ) -> None:
         """
         写入缓存
 
         参数:
             request: 检索请求（作为 key）
             response: 检索结果（作为 value）
+            version: 可选的版本号，会作为缓存键的一部分
         """
-        key = self._make_key(request)
+        key = self._make_key(request, version)
         self._cache[key] = (time.time(), response)
         self._cache.move_to_end(key)
         while len(self._cache) > self.max_size:
@@ -95,9 +105,12 @@ class SearchCache:
         """返回当前缓存条目数"""
         return len(self._cache)
 
-    def _make_key(self, request: SearchRequest) -> str:
-        """生成缓存 key（请求的 canonical JSON 表示）"""
-        return request.model_dump_json()
+    def _make_key(self, request: SearchRequest, version: str | None = None) -> str:
+        """生成缓存 key（索引版本 + 请求的 canonical JSON 表示）"""
+        base = request.model_dump_json()
+        if version:
+            return f"{version}:{base}"
+        return base
 
     @staticmethod
     def _contains_memory(response: SearchResponse, memory_id: str) -> bool:
