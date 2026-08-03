@@ -62,8 +62,8 @@ embedding:
   # 注意: 显式 "kylin"/"kylin_mock" 在动态库不可用时会直接报错
   provider: "mock"
 
-  # 向量维度 (kylin/kylin_mock 的默认模型固定 768 维)
-  dimension: 1024
+  # 向量维度（kylin/kylin_mock 的默认模型固定 768 维；mock 可任选）
+  dimension: 768
 
   # 模型名称 (kylin 模式下填写，如 ensemble-embd_gte-base_uint8-text)
   model_name: ""
