@@ -41,7 +41,7 @@ git checkout openkylin/nile-sp2
 
 ### 2.2 Vector Engine SDK
 
-Vector Engine SDK（含 C API 桥接层）已作为 `third_party/kylin-embedding/` 随仓库提供，无需单独克隆。
+Vector Engine SDK（含 C API 桥接层）已作为 `third_party/libkysdk-vector-engine-client-nile-sp2/` 随仓库提供，无需单独克隆。
 
 ### 2.3 克隆 MemoryHub
 
@@ -103,25 +103,25 @@ cd /path/to/workspaces/kylin-coreai-embedding/build
 ```bash
 sudo apt install -y cmake g++ pkg-config libgrpc++-dev protobuf-compiler-grpc libprotobuf-dev libsqlitecpp-dev libsqlcipher-dev nlohmann-json3-dev
 # 额外依赖 KylinAiProto 及 kylin_ai_generate_grpc_proto_* 工具链，
-# 请先阅读 third_party/kylin-embedding/README.md 并按实际环境补齐麒麟 SDK 包。
+# 请先阅读 third_party/libkysdk-vector-engine-client-nile-sp2/README.md 并按实际环境补齐麒麟 SDK 包。
 ```
 
 ### 4.1.1 C API 桥接层来源
 
-C API 桥接层随 MemoryHub 位于 `third_party/kylin-embedding/capi/`，`CMakeLists.txt` 中已包含 `kysdk-vector-engine-client-capi` 编译目标，无需额外补丁。
+C API 桥接层随 MemoryHub 位于 `third_party/libkysdk-vector-engine-client-nile-sp2/capi/`，`CMakeLists.txt` 中已包含 `kysdk-vector-engine-client-capi` 编译目标，无需额外补丁。
 
 ### 4.2 确认 C API 桥接层文件存在
 
 C API 桥接层已实现并提交，位于仓库的 `capi/` 子目录：
 
 ```bash
-ls third_party/kylin-embedding/capi/c_api_bridge.h
-ls third_party/kylin-embedding/capi/c_api_bridge.cpp
+ls third_party/libkysdk-vector-engine-client-nile-sp2/capi/c_api_bridge.h
+ls third_party/libkysdk-vector-engine-client-nile-sp2/capi/c_api_bridge.cpp
 ```
 
 `CMakeLists.txt` 中已包含 `kysdk-vector-engine-client-capi` 编译目标（`endif()` 之后），无需手工修改。如果不存在，请联系当前执行者获取补丁。
 
-> **兼容性要求**：本桥接使用 `third_party/kylin-embedding` 中的 SDK API（`Database::HybridSearch`、`AnnSearchRequest`、`RRFRanker`、`SparseFloatVecFieldData`）。不得使用其他版本 SDK 构建或部署该桥接。
+> **兼容性要求**：本桥接使用 `third_party/libkysdk-vector-engine-client-nile-sp2` 中的 SDK API（`Database::HybridSearch`、`AnnSearchRequest`、`RRFRanker`、`SparseFloatVecFieldData`）。不得使用其他版本 SDK 构建或部署该桥接。
 
 ### 4.3 修改 CMakeLists.txt
 
@@ -139,7 +139,7 @@ target_link_libraries(kysdk-vector-engine-client-capi
 ### 4.4 编译
 
 ```bash
-cd third_party/kylin-embedding
+cd third_party/libkysdk-vector-engine-client-nile-sp2
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
@@ -148,7 +148,7 @@ make -j$(nproc)
 ### 4.5 确认 .so 输出
 
 ```bash
-find third_party/kylin-embedding/build -name "*.so"
+find third_party/libkysdk-vector-engine-client-nile-sp2/build -name "*.so"
 ```
 
 预期至少看到：
@@ -158,7 +158,7 @@ find third_party/kylin-embedding/build -name "*.so"
 ### 4.6 设置动态库搜索路径
 
 ```bash
-export LD_LIBRARY_PATH=third_party/kylin-embedding/build:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=third_party/libkysdk-vector-engine-client-nile-sp2/build:$LD_LIBRARY_PATH
 # 建议写入 ~/.bashrc 或测试脚本
 ```
 

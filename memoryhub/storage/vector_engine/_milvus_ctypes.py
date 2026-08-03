@@ -41,7 +41,7 @@ _REAL_LIB_NAMES = {
 
 # 真实库的常见安装路径（含项目内 bundled SDK 构建目录）
 _BUNDLED_BUILD_DIR = (
-    Path(__file__).resolve().parents[2] / "third_party" / "kylin-embedding" / "build"
+    Path(__file__).resolve().parents[2] / "third_party" / "libkysdk-vector-engine-client-nile-sp2" / "build"
 )
 _DEFAULT_SEARCH_DIRS = [
     str(_BUNDLED_BUILD_DIR),
