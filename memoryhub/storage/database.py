@@ -300,7 +300,7 @@ class PreferenceRepository:
                 memory_id=memory.memory_id,
                 user_id=memory.user_id,
                 preference_type=memory.preference_type.value if hasattr(memory.preference_type, "value") else str(memory.preference_type),
-                content=memory.content,
+                content=memory.text,
                 scope_scene=memory.scope.scene,
                 scope_task_type=memory.scope.task_type,
                 scope_app=memory.scope.app,

@@ -32,7 +32,7 @@ def seeded_config(tmp_path):
 
     pref = PreferenceMemory(
         user_id="u1",
-        content="项目周报默认使用 Markdown 格式",
+        text="项目周报默认使用 Markdown 格式",
         scope=SceneScope(scene="office", task_type="office.weekly_report"),
         confidence=0.9,
     )
@@ -76,7 +76,7 @@ def test_search_returns_full_memory_objects(seeded_config):
 
     # 返回的是完整记忆对象，不是空壳
     full_pref = body["preferences"][pref_ids.index(pref.memory_id)]
-    assert full_pref["content"] == "项目周报默认使用 Markdown 格式"
+    assert full_pref["text"] == "项目周报默认使用 Markdown 格式"
     assert full_pref["confidence"] == 0.9
     full_know = body["knowledge"][know_ids.index(know.memory_id)]
     assert full_know["name"] == "周报生成流程"
