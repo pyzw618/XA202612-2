@@ -76,6 +76,7 @@ class BaseVectorEngine(ABC):
         dense_vector: list[float],
         sparse_terms: list[tuple[int, float]],
         top_k: int,
+        filters: Optional[dict[str, Any]] = None,
     ) -> list[VectorSearchResult]:
         """
         混合检索（稠密 + 稀疏，RRF 融合）。
@@ -85,6 +86,7 @@ class BaseVectorEngine(ABC):
             sparse_terms: 查询稀疏向量，[(token 索引, 权重), ...]，
                 由 sparse.build_sparse_vector 生成
             top_k: 返回数量
+            filters: 可选的 scalar 过滤条件；引擎能力不同时可本地后过滤或忽略
 
         返回:
             VectorSearchResult 列表，按 RRF 融合分降序

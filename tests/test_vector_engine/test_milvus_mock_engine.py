@@ -14,6 +14,7 @@ from memoryhub.storage.vector_engine import (
     build_sparse_vector,
     create_vector_engine,
 )
+from memoryhub.storage.vector_engine._milvus_ctypes import MilvusEngineError
 
 DIM = 768
 
@@ -111,3 +112,60 @@ class TestMilvusMockEngine:
     def test_dimension_mismatch(self, engine):
         with pytest.raises(ValueError, match="维度"):
             engine.insert("mem_1", "文本", [0.1] * 10)
+
+
+class TestMilvusVectorEnginePhase3:
+    """阶段三新增：schema 校验、批量 upsert、scalar filters、超时配置。"""
+
+    def test_schema_dimension_fixed_to_768(self):
+        """collection schema 维度固定为 768；非 768 构造即失败。"""
+        with pytest.raises(MilvusEngineError, match="schema_dimension_mismatch"):
+            create_vector_engine(
+                provider="milvus_mock",
+                collection="bad_dim",
+                dimension=512,
+            )
+
+    def test_upsert_batch_returns_failed_ids(self, engine):
+        """批量 upsert 失败项应返回，便于调用方标记 pending_index。"""
+        engine.insert("mem_ok", "正常", _one_hot(0))
+        items = [
+            ("mem_ok", "更新", _one_hot(0), None),
+            ("mem_new", "新增", _one_hot(1), {"memory_type": "preference"}),
+        ]
+        failed = engine.upsert_batch(items)
+        assert failed == []
+        results = engine.search(_one_hot(1), top_k=2)
+        assert any(r.memory_id == "mem_new" for r in results)
+
+    def test_hybrid_search_with_scalar_filters(self, engine):
+        """hybrid_search 接受 filters 参数，对内存中的 scalar fields 做后过滤。"""
+        engine.insert(
+            "pref_1",
+            "偏好 Markdown",
+            _one_hot(0),
+            metadata={"memory_type": "preference", "status": "active"},
+        )
+        engine.insert(
+            "know_1",
+            "知识 Markdown",
+            _one_hot(0),
+            metadata={"memory_type": "knowledge", "status": "active"},
+        )
+        sparse_terms = build_sparse_vector("Markdown")
+        results = engine.hybrid_search(_one_hot(0), sparse_terms, top_k=5)
+        assert len(results) == 2
+        filtered = engine.hybrid_search(
+            _one_hot(0), sparse_terms, top_k=5, filters={"memory_type": "knowledge"}
+        )
+        assert [r.memory_id for r in filtered] == ["know_1"]
+
+    def test_search_timeout_ms_is_stored(self, engine):
+        """构造时传入的 search_timeout_ms 应被记录。"""
+        assert engine.search_timeout_ms == 120  # 默认值
+
+    def test_upsert_alias_matches_insert(self, engine):
+        """upsert 语义与 insert 相同。"""
+        engine.upsert("mem_alias", "别名测试", _one_hot(0))
+        results = engine.search(_one_hot(0), top_k=1)
+        assert results[0].memory_id == "mem_alias"

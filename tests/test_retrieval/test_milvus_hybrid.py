@@ -21,7 +21,7 @@ from memoryhub.adapter.schemas import (
 from memoryhub.retrieval.milvus_hybrid import MilvusHybridRetriever, _memory_text
 from memoryhub.storage.vector_engine import build_sparse_vector, create_vector_engine
 
-DIM = 32
+DIM = 768
 
 
 def _bow_embedding(text: str) -> list[float]:

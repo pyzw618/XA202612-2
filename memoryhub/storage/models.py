@@ -6,7 +6,7 @@ SQLAlchemy ORM 模型定义
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -54,7 +54,10 @@ class PreferenceRow(Base):
     version = Column(Integer, default=1)
     parent_id = Column(String(32))
     evidences = Column(JSON)
-    # --- 健康度字段（遗忘模块使用）---
+    # --- 向量索引同步状态 ---
+    pending_index = Column(Boolean, default=True, index=True)
+    index_version = Column(Integer, default=0, index=True)
+
     health_score = Column(Float, default=1.0, index=True)
     stability = Column(Float, default=1.0)
     last_accessed_at = Column(DateTime, nullable=True)
@@ -87,7 +90,10 @@ class KnowledgeRow(Base):
     version = Column(Integer, default=1)
     parent_id = Column(String(32))
     evidences = Column(JSON)
-    # --- 健康度字段（遗忘模块使用）---
+    # --- 向量索引同步状态 ---
+    pending_index = Column(Boolean, default=True, index=True)
+    index_version = Column(Integer, default=0, index=True)
+
     health_score = Column(Float, default=1.0, index=True)
     stability = Column(Float, default=1.0)
     last_accessed_at = Column(DateTime, nullable=True)

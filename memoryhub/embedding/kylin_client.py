@@ -24,9 +24,11 @@ SDK 调用流程（基于 kylin-coreai-embedding C API 公开头文件，
 """
 
 import ctypes
+import logging
 import os
 import platform
 import sys
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 from typing import List, Optional
 
@@ -38,6 +40,9 @@ DEFAULT_DIM = 768
 
 # mock 动态库固定输出 768 维（见 third_party/kylin-mock/embedding_mock.c）
 MOCK_DIM = 768
+
+# 最大输入字符数（查询侧）
+MAX_QUERY_CHARS = 512
 
 # .so 搜索路径（按优先级）
 SO_CANDIDATES = [
@@ -57,6 +62,8 @@ _MOCK_LIB_NAMES = {
     "linux": "libkylin-coreai-embedding-mock.so",
     "darwin": "libkylin-coreai-embedding-mock.dylib",
 }
+
+logger = logging.getLogger(__name__)
 
 
 def _platform_key() -> str:
@@ -90,26 +97,40 @@ class KylinEmbeddingClient(BaseEmbeddingClient):
         so_path: Optional[str] = None,
         use_mock: bool = False,
         mock_so_path: Optional[str] = None,
+        query_timeout_ms: int = 250,
         **kwargs,  # 接受但不使用 Mock 专用参数（latency, seed 等）
     ):
         """
         参数:
             model_name: 模型名称（真实 SDK 模式）
-            dim: 向量维度；mock 模式固定为 768，传入值会被忽略
+            dim: 向量维度；mock 模式固定为 768，真实 SDK 模式固定为 768
             so_path: 真实 .so 显式路径（优先于候选列表）
             use_mock: 是否使用项目内 mock 动态库
             mock_so_path: mock 动态库显式路径，缺省指向
                 third_party/kylin-mock/build/
+            query_timeout_ms: 单次推理超时毫秒数；超时时返回稳定错误码
+                embedding.timeout；ctypes 无法真正中断 C 调用，超时返回后
+                原后台线程可能仍在运行，生产部署应依赖 SDK 原生超时。
         """
         self._model_name = model_name
         self._use_mock = use_mock
-        # mock 动态库只提供 768 维模型，维度以库的实际输出为准
-        self._dim = MOCK_DIM if use_mock else dim
+        # 生产链路固定输出 768 维；mock 库也只提供 768 维模型
+        self._dim = MOCK_DIM if use_mock else DEFAULT_DIM
+        if not use_mock and dim != DEFAULT_DIM:
+            raise KylinEmbeddingError("embedding.dimension_mismatch")
         self._lib = None
         self._session = None
         self._so_path = mock_so_path if use_mock else so_path
+        self.query_timeout_ms = max(1, query_timeout_ms)
 
+        # 常驻会话：应用生命周期内只初始化一次；__init__ 失败即不可用
         self._try_load()
+
+        # C API 会话不一定是线程安全的，且不支持中断阻塞调用。
+        # 使用单线程执行器串行化所有 embed 调用，并通过 future.result(timeout)
+        # 实现超时检测。
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kylin_embedding")
+        self._executor_shutdown = False
 
     # ---- 公开接口 ----
 
@@ -120,14 +141,42 @@ class KylinEmbeddingClient(BaseEmbeddingClient):
         return self._dim
 
     def embed(self, text: str) -> List[float]:
+        """对单条文本生成向量；输入超长时截断至 512 字符。"""
         if not self.is_available():
             raise KylinEmbeddingError("embedding.unavailable")
-        return self._call_embed(text)
+        text = self._normalize_input(text)
+        # 正常初始化会创建 _executor；测试桩可能直接构造对象，此时退化到同步调用
+        if getattr(self, "_executor", None) is None:
+            return self._call_embed(text)
+        return self._run_with_timeout(lambda: self._call_embed(text), "embed")
 
     def embed_batch(self, texts: List[str]) -> List[List[float]]:
+        """对多条文本批量生成向量。"""
         if not self.is_available():
             raise KylinEmbeddingError("embedding.unavailable")
-        return [self._call_embed(t) for t in texts]
+        return [self.embed(t) for t in texts]
+
+    def close(self) -> None:
+        """销毁常驻会话并关闭执行器。幂等。"""
+        if getattr(self, "_executor_shutdown", False):
+            return
+        self._executor_shutdown = True
+        executor = getattr(self, "_executor", None)
+        if executor is not None:
+            try:
+                executor.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+        if self._lib is not None and self._session is not None:
+            self._destroy_session(self._lib, self._session)
+        self._session = None
+
+    def __del__(self):
+        """销毁会话与执行器。"""
+        try:
+            self.close()
+        except Exception:
+            pass
 
     # ---- 内部：.so 加载与会话初始化 ----
 
@@ -216,6 +265,39 @@ class KylinEmbeddingClient(BaseEmbeddingClient):
             destroy_fn(ctypes.byref(session))
         except Exception:
             pass
+
+    # ---- 内部：输入处理与超时 ----
+
+    @staticmethod
+    def _normalize_input(text: str) -> str:
+        """限制输入长度在 512 字符以内，超长时截断并记录警告。"""
+        if text is None:
+            text = ""
+        if len(text) > MAX_QUERY_CHARS:
+            logger.warning(
+                "embedding input truncated from %d to %d characters", len(text), MAX_QUERY_CHARS
+            )
+            text = text[:MAX_QUERY_CHARS]
+        return text
+
+    def _run_with_timeout(self, fn, operation: str):
+        """在单线程执行器中运行 C API 调用，并施加 query_timeout_ms。"""
+        executor = getattr(self, "_executor", None)
+        if executor is None:
+            return fn()
+        if getattr(self, "_executor_shutdown", False):
+            raise KylinEmbeddingError("embedding.unavailable")
+        try:
+            future = executor.submit(fn)
+            return future.result(timeout=self.query_timeout_ms / 1000.0)
+        except TimeoutError:
+            raise KylinEmbeddingError(
+                f"embedding.timeout: {operation} 超过 {self.query_timeout_ms}ms"
+            ) from None
+        except KylinEmbeddingError:
+            raise
+        except Exception as exc:
+            raise KylinEmbeddingError(f"embedding.call_failed: {operation} 失败: {exc}") from None
 
     # ---- 内部：Embedding 调用 ----
 
@@ -307,11 +389,3 @@ class KylinEmbeddingClient(BaseEmbeddingClient):
         if backend_error or vector is None:
             raise KylinEmbeddingError("embedding.backend_error") from None
         return vector
-
-    def __del__(self):
-        """销毁会话。"""
-        if (
-            getattr(self, "_lib", None) is not None
-            and getattr(self, "_session", None) is not None
-        ):
-            self._destroy_session(self._lib, self._session)

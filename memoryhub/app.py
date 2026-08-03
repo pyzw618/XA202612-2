@@ -26,6 +26,7 @@ from memoryhub.core.safety.user_rules import (
     build_user_rule_service,
 )
 
+
 def _memory_text(memory: PreferenceMemory | KnowledgeMemory) -> str:
     """用于建索引的记忆文本：知识记忆拼上名称，偏好记忆用正文"""
     if memory.memory_type == "knowledge":
@@ -41,6 +42,18 @@ def _memory_metadata(memory: PreferenceMemory | KnowledgeMemory) -> dict:
         "confidence": memory.confidence,
         "scope": memory.scope.model_dump(),
     }
+
+
+def _max_index_version(db) -> int:
+    """获取 SQLite 中已同步记忆的当前最大 index_version（不存在时返回 1）。"""
+    from sqlalchemy import func
+
+    from memoryhub.storage.models import KnowledgeRow, PreferenceRow
+
+    with db.session() as s:
+        pref_max = s.query(func.max(PreferenceRow.index_version)).scalar() or 0
+        know_max = s.query(func.max(KnowledgeRow.index_version)).scalar() or 0
+    return max(int(pref_max), int(know_max), 1)
 
 
 class _VectorStoreSearchAdapter:
@@ -268,6 +281,7 @@ def create_app(
             embedding_kwargs["model_name"] = config.embedding.model_name
         if config.embedding.so_path:
             embedding_kwargs["so_path"] = config.embedding.so_path
+        embedding_kwargs["query_timeout_ms"] = config.embedding.query_timeout_ms
         embedding_provider = config.embedding.provider
         embedding_client = create_embedding_client(
             provider=embedding_provider if embedding_provider != "auto" else None,
@@ -287,6 +301,9 @@ def create_app(
             raise ProductionGateError(
                 f"production requires vector_engine.provider='milvus', got {engine_provider!r}"
             )
+
+        # 索引版本号：从 SQLite 中已同步记录的最大版本开始；后续写入会递增
+        index_version = _max_index_version(db)
 
         if engine_provider == "faiss":
             # 向量索引：优先从磁盘加载；为空时按记忆文本重新 embedding 全量重建
@@ -308,19 +325,39 @@ def create_app(
                 "port": config.vector_engine.port,
                 "collection": config.vector_engine.collection,
                 "dimension": embedding_client.get_dimension(),
+                "search_timeout_ms": config.vector_engine.search_timeout_ms,
             }
             if config.vector_engine.so_path:
                 engine_kwargs["so_path"] = config.vector_engine.so_path
             vector_engine = create_vector_engine(engine_provider, **engine_kwargs)
-            # 启动时对存量记忆全量 insert（重复插入视为更新）
-            for memory in memories:
-                text = _memory_text(memory)
-                vector_engine.insert(
-                    memory.memory_id,
-                    text,
-                    embedding_client.embed(text),
-                    metadata=_memory_metadata(memory),
-                )
+            # SQLite 作为唯一事实源；Milvus 是可重建的检索投影。
+            # 启动时只同步 pending_index=True 的记录，避免每次全量 embedding 和重复插入。
+            pending_memories = [*pref_repo.list_pending(), *know_repo.list_pending()]
+            if pending_memories:
+                index_version += 1
+                batch_items = []
+                for memory in pending_memories:
+                    text = _memory_text(memory)
+                    batch_items.append(
+                        (
+                            memory.memory_id,
+                            text,
+                            embedding_client.embed(text),
+                            _memory_metadata(memory),
+                        )
+                    )
+                failed_ids = vector_engine.upsert_batch(batch_items)
+                succeeded_ids = [
+                    m.memory_id for m in pending_memories if m.memory_id not in failed_ids
+                ]
+                pending_pref_ids = {p.memory_id for p in pref_repo.list_pending()}
+                pending_know_ids = {k.memory_id for k in know_repo.list_pending()}
+                pref_ids = [m for m in succeeded_ids if m in pending_pref_ids]
+                know_ids = [m for m in succeeded_ids if m in pending_know_ids]
+                if pref_ids:
+                    pref_repo.mark_indexed(pref_ids, index_version)
+                if know_ids:
+                    know_repo.mark_indexed(know_ids, index_version)
         else:
             raise ValueError(f"unknown vector_engine provider: {engine_provider}")
 
@@ -333,6 +370,8 @@ def create_app(
             ttl_seconds=config.retrieval.cache_ttl_seconds,
         )
 
+        index_version_str = str(index_version)
+
         # 索引版本号：后续由写入/同步链路维护（TASK-009）；当前使用固定占位值，
         # 仅保证缓存键结构已就绪。
         index_version = "1"
@@ -342,6 +381,7 @@ def create_app(
         app.state.know_repo = know_repo
         app.state.vector_store = vector_store
         app.state.vector_engine = vector_engine
+        app.state.embedding_client = embedding_client
 
         if config.runtime.is_production:
             # 生产路径：仅装配 MilvusHybridRetriever，不构建 KeywordSearcher / HybridRetriever
@@ -351,7 +391,7 @@ def create_app(
                 config=config.retrieval,
                 memory_lookup=memory_lookup,
                 cache=cache,
-                index_version=index_version,
+                index_version=index_version_str,
             )
         elif vector_engine is not None:
             # development/test 使用 milvus / milvus_mock
@@ -361,7 +401,7 @@ def create_app(
                 config=config.retrieval,
                 memory_lookup=memory_lookup,
                 cache=cache,
-                index_version=index_version,
+                index_version=index_version_str,
             )
         else:
             # 关键词索引：BM25 索引可重建，启动时从 SQLite 全量构建
@@ -415,6 +455,16 @@ def create_app(
         db = getattr(app.state, "db", None)
         if db is not None:
             db.close()
+        embedding_client = getattr(app.state, "embedding_client", None)
+        if embedding_client is not None:
+            close = getattr(embedding_client, "close", None)
+            try:
+                if callable(close):
+                    close()
+            except Exception:
+                pass
+            finally:
+                app.state.embedding_client = None
 
     return app
 

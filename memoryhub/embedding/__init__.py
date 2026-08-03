@@ -23,7 +23,7 @@ __all__ = [
     "create_embedding_client",
 ]
 
-_KYLIN_KWARGS = ("dim", "model_name", "so_path", "mock_so_path")
+_KYLIN_KWARGS = ("dim", "model_name", "so_path", "mock_so_path", "query_timeout_ms")
 _MOCK_KWARGS = ("dim", "latency", "seed")
 
 

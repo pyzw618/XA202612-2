@@ -30,10 +30,10 @@ from memoryhub.config import (
     VectorEngineConfig,
 )
 from memoryhub.storage.database import Database, KnowledgeRepository
-from memoryhub.storage.models import PreferenceRow
+from memoryhub.storage.models import KnowledgeRow, PreferenceRow
 
 
-def _save_preference(db: Database, memory: PreferenceMemory) -> None:
+def _save_preference(db: Database, memory: PreferenceMemory, pending_index: bool = True) -> None:
     """直接写 PreferenceRow（PreferenceRepository.save 依赖已错位的 content 字段）"""
     with db.session() as s:
         s.merge(
@@ -51,6 +51,7 @@ def _save_preference(db: Database, memory: PreferenceMemory) -> None:
                 version=memory.version,
                 parent_id=memory.parent_id or None,
                 evidences=[],
+                pending_index=pending_index,
             )
         )
 
@@ -150,7 +151,8 @@ def test_milvus_mock_embedding_python_client(tmp_path):
             vector_index_path=str(tmp_path / "vector_index"),
             evidence_path=str(tmp_path / "evidence"),
         ),
-        embedding=EmbeddingConfig(provider="mock", dimension=64),
+        # 使用 mock embedding 的 768 维输出配合 milvus_mock 引擎
+        embedding=EmbeddingConfig(provider="mock", dimension=768),
         vector_engine=VectorEngineConfig(provider="milvus_mock"),
     )
     with TestClient(create_app(config)) as client:
@@ -161,3 +163,64 @@ def test_milvus_mock_embedding_python_client(tmp_path):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert [p["memory_id"] for p in body["preferences"]] == [pref.memory_id]
+
+
+def test_milvus_startup_marks_synced_memories(milvus_mock_config):
+    """启动同步后，SQLite 中的 pending_index 应被标记为 False 并写入 index_version。"""
+    pref, know = milvus_mock_config._seeded
+    with TestClient(create_app(milvus_mock_config)):
+        pass
+
+    db = Database(db_path=milvus_mock_config.storage.db_path)
+    db.init_schema()
+    with db.session() as s:
+        pref_row = s.query(PreferenceRow).filter(PreferenceRow.memory_id == pref.memory_id).first()
+        know_row = s.query(KnowledgeRow).filter(KnowledgeRow.memory_id == know.memory_id).first()
+        assert pref_row.pending_index is False
+        assert know_row.pending_index is False
+        assert pref_row.index_version > 0
+        assert know_row.index_version > 0
+        assert pref_row.index_version == know_row.index_version
+    db.close()
+
+
+def test_milvus_startup_only_syncs_pending_memories(tmp_path):
+    """启动时仅同步 pending_index=True 的记忆；pending_index=False 的记录不参与检索。"""
+
+    db_path = str(tmp_path / "memoryhub.db")
+    db = Database(db_path=db_path)
+    db.init_schema()
+
+    pending_pref = PreferenceMemory(
+        user_id="u1",
+        text="待同步的偏好记录",
+        confidence=0.9,
+    )
+    synced_pref = PreferenceMemory(
+        user_id="u1",
+        text="已同步的偏好记录",
+        confidence=0.8,
+    )
+    _save_preference(db, pending_pref, pending_index=True)
+    _save_preference(db, synced_pref, pending_index=False)
+    db.close()
+
+    config = AppConfig(
+        storage=StorageConfig(
+            db_path=db_path,
+            vector_index_path=str(tmp_path / "vector_index"),
+            evidence_path=str(tmp_path / "evidence"),
+        ),
+        embedding=EmbeddingConfig(provider="kylin_mock", dimension=768),
+        vector_engine=VectorEngineConfig(provider="milvus_mock"),
+    )
+
+    with TestClient(create_app(config)) as client:
+        resp = client.post(
+            "/api/memory/search",
+            json={"user_id": "u1", "query": "同步", "top_k": 5},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # 只有 pending 记录被同步到 Milvus，因此只有 pending_pref 可被召回
+    assert [p["memory_id"] for p in body["preferences"]] == [pending_pref.memory_id]

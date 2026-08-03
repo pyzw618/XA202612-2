@@ -80,8 +80,12 @@ class FAISSVectorEngine(BaseVectorEngine):
         dense_vector: list[float],
         sparse_terms: list[tuple[int, float]],
         top_k: int,
+        filters: Optional[dict[str, Any]] = None,
     ) -> list[VectorSearchResult]:
-        """混合检索：dense 路 FAISS + sparse 路稀疏点积，RRF（k=60）融合。"""
+        """混合检索：dense 路 FAISS + sparse 路稀疏点积，RRF（k=60）融合。
+
+        filters 参数保留以兼容接口；FAISS 引擎不在引擎层做过滤。
+        """
         self._ensure_open()
         size = self._store.size()
         if size == 0:

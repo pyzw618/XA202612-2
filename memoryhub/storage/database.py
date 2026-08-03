@@ -6,14 +6,12 @@
 
 import os
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import create_engine, func
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import Session, sessionmaker
 
 from memoryhub.adapter.schemas import (
-    Evidence,
     ForgetRecord,
     KnowledgeMemory,
     MemoryEvent,
@@ -29,7 +27,6 @@ from memoryhub.storage.models import (
     KnowledgeRow,
     PreferenceRow,
 )
-
 
 # ============================================================
 # 数据库管理器
@@ -68,7 +65,37 @@ class Database:
             conn.exec_driver_sql("PRAGMA foreign_keys=ON")
 
         Base.metadata.create_all(self.engine)
+        self._migrate_legacy_schema()
         self.session_factory = sessionmaker(bind=self.engine)
+
+    def _migrate_legacy_schema(self) -> None:
+        """为已存在的老表补齐新增列与索引，避免 schema 变更后启动失败。"""
+        if self.engine is None:
+            return
+        inspector = inspect(self.engine)
+        for table_name in ("preferences", "knowledge"):
+            if table_name not in inspector.get_table_names():
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table_name)}
+            with self.engine.connect() as conn:
+                if "pending_index" not in existing:
+                    conn.exec_driver_sql(
+                        f"ALTER TABLE {table_name} ADD COLUMN pending_index BOOLEAN DEFAULT 1"
+                    )
+                if "index_version" not in existing:
+                    conn.exec_driver_sql(
+                        f"ALTER TABLE {table_name} ADD COLUMN index_version INTEGER DEFAULT 0"
+                    )
+                # SQLite 不支持在 ALTER TABLE 中直接加索引，需单独创建
+                conn.exec_driver_sql(
+                    f"CREATE INDEX IF NOT EXISTS ix_{table_name}_pending_index "
+                    f"ON {table_name} (pending_index)"
+                )
+                conn.exec_driver_sql(
+                    f"CREATE INDEX IF NOT EXISTS ix_{table_name}_index_version "
+                    f"ON {table_name} (index_version)"
+                )
+                conn.commit()
 
     @contextmanager
     def session(self) -> Session:
@@ -294,7 +321,7 @@ class PreferenceRepository:
         self.db = db
 
     def save(self, memory: PreferenceMemory) -> None:
-        """保存偏好"""
+        """保存偏好；新写入或更新后标记为待同步到向量索引。"""
         with self.db.session() as s:
             row = PreferenceRow(
                 memory_id=memory.memory_id,
@@ -310,8 +337,36 @@ class PreferenceRepository:
                 version=memory.version,
                 parent_id=memory.parent_id or None,
                 evidences=[e.model_dump() for e in memory.evidences] if memory.evidences else [],
+                pending_index=True,
             )
             s.merge(row)
+
+    def list_pending(self) -> list[PreferenceMemory]:
+        """列出需要同步到向量索引的偏好记忆。"""
+        with self.db.session() as s:
+            rows = (
+                s.query(PreferenceRow)
+                .filter(PreferenceRow.pending_index.is_(True))
+                .order_by(PreferenceRow.updated_at.desc())
+                .all()
+            )
+            return [_pref_row_to_pydantic(r) for r in rows]
+
+    def mark_indexed(self, memory_ids: list[str], index_version: int) -> None:
+        """标记指定记忆已同步到向量索引。"""
+        from datetime import datetime
+
+        with self.db.session() as s:
+            s.query(PreferenceRow).filter(
+                PreferenceRow.memory_id.in_(memory_ids)
+            ).update(
+                {
+                    "pending_index": False,
+                    "index_version": index_version,
+                    "updated_at": datetime.now(),
+                },
+                synchronize_session=False,
+            )
 
     def get_by_id(self, memory_id: str) -> Optional[PreferenceMemory]:
         """按 ID 查询"""
@@ -413,7 +468,7 @@ class KnowledgeRepository:
         self.db = db
 
     def save(self, memory: KnowledgeMemory) -> None:
-        """保存知识"""
+        """保存知识；新写入或更新后标记为待同步到向量索引。"""
         with self.db.session() as s:
             row = KnowledgeRow(
                 memory_id=memory.memory_id,
@@ -435,8 +490,36 @@ class KnowledgeRepository:
                 version=memory.version,
                 parent_id=memory.parent_id or None,
                 evidences=[e.model_dump() for e in memory.evidences] if memory.evidences else [],
+                pending_index=True,
             )
             s.merge(row)
+
+    def list_pending(self) -> list[KnowledgeMemory]:
+        """列出需要同步到向量索引的知识记忆。"""
+        with self.db.session() as s:
+            rows = (
+                s.query(KnowledgeRow)
+                .filter(KnowledgeRow.pending_index.is_(True))
+                .order_by(KnowledgeRow.updated_at.desc())
+                .all()
+            )
+            return [_know_row_to_pydantic(r) for r in rows]
+
+    def mark_indexed(self, memory_ids: list[str], index_version: int) -> None:
+        """标记指定记忆已同步到向量索引。"""
+        from datetime import datetime
+
+        with self.db.session() as s:
+            s.query(KnowledgeRow).filter(
+                KnowledgeRow.memory_id.in_(memory_ids)
+            ).update(
+                {
+                    "pending_index": False,
+                    "index_version": index_version,
+                    "updated_at": datetime.now(),
+                },
+                synchronize_session=False,
+            )
 
     def get_by_id(self, memory_id: str) -> Optional[KnowledgeMemory]:
         """按 ID 查询"""
@@ -536,8 +619,9 @@ class ConflictRepository:
 
     def get_pending(self) -> list:
         """获取待解决的冲突"""
-        from memoryhub.adapter.schemas import ConflictRecord
         from datetime import datetime
+
+        from memoryhub.adapter.schemas import ConflictRecord
 
         with self.db.session() as s:
             rows = s.query(ConflictRow).filter(ConflictRow.decision == "pending").all()
