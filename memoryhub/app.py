@@ -26,20 +26,36 @@ from memoryhub.core.safety.user_rules import (
     build_user_rule_service,
 )
 
-def _memory_text(memory: PreferenceMemory | KnowledgeMemory) -> str:
-    """用于建索引的记忆文本：知识记忆拼上名称，偏好记忆用正文"""
+def _memory_text(memory) -> str:
+    """Build shared index text for preference, knowledge, and fact memories."""
     if memory.memory_type == "knowledge":
-        return f"{memory.name} {memory.content}".strip()
+        from memoryhub.core.memory_write import MemoryWriteService
+
+        return MemoryWriteService.index_text(memory)
+    if memory.memory_type == "fact":
+        return memory.content
     return memory.text
 
 
-def _memory_metadata(memory: PreferenceMemory | KnowledgeMemory) -> dict:
-    """检索结果随行的元数据（融合过滤依赖 memory_type/confidence/scope）"""
+def _memory_metadata(memory) -> dict:
+    """Metadata used by owner, type, confidence, and scope filters."""
+    if memory.memory_type == "fact":
+        scope = {"scope": memory.scope, "project_id": memory.project_id or ""}
+        fact_fields = {
+            "subject_id": memory.subject_id,
+            "predicate_id": memory.predicate_id,
+            "object_id": memory.object_id,
+        }
+    else:
+        scope = memory.scope.model_dump()
+        fact_fields = {}
     return {
         "memory_type": memory.memory_type,
+        "user_id": memory.user_id,
         "content": _memory_text(memory),
         "confidence": memory.confidence,
-        "scope": memory.scope.model_dump(),
+        "scope": scope,
+        **fact_fields,
     }
 
 
@@ -129,6 +145,9 @@ def create_app(
     config: AppConfig | None = None,
     user_rule_service: object | None = None,
     user_rule_identity_resolver: Callable[[Request], str] | None = None,
+    safety_gate: object | None = None,
+    event_ingestion_service: object | None = None,
+    fact_pipeline: object | None = None,
 ) -> FastAPI:
     """
     创建 FastAPI 应用
@@ -165,6 +184,16 @@ def create_app(
     app.state.user_rule_identity_resolver = user_rule_identity_resolver
     app.state.user_rule_service_error = ""
     app.state.owns_user_rule_service = False
+    app.state.safety_gate = safety_gate
+    app.state.safety_gate_error = ""
+    app.state.event_ingestion_service = event_ingestion_service
+    app.state.extraction_task_repo = None
+    app.state.extraction_retry_service = None
+    app.state.memory_write_service = None
+    app.state.fact_pipeline = fact_pipeline
+    app.state.fact_store = getattr(fact_pipeline, "store", None)
+    app.state.fact_index_service = None
+    app.state.owns_fact_pipeline = False
 
     @app.exception_handler(RequestValidationError)
     async def safe_request_validation_error(
@@ -237,9 +266,27 @@ def create_app(
                         app.state.owns_user_rule_service = True
 
         # ---- 存储层与检索引擎 ----
+        if app.state.user_rule_service_error == "user_rule.key_unavailable":
+            return
+
         import json
 
+        from memoryhub.core.fact import (
+            FactIngestionAdapter, FactIndexService, FactMemoryPipeline,
+        )
+        from memoryhub.core.ingestion.extraction import ExtractionExecutor
+        from memoryhub.core.ingestion.quality import QualityScorer
+        from memoryhub.core.ingestion.retry import ExtractionRetryService
+        from memoryhub.core.ingestion.service import EventIngestionService
+        from memoryhub.core.knowledge.extractor import KnowledgeExtractor
+        from memoryhub.core.memory_write import MemoryWriteService
+        from memoryhub.core.preference.extractor import PreferenceExtractor
+        from memoryhub.core.preference.updater import PreferenceUpdater
+        from memoryhub.core.safety.detector import SensitiveDetector
+        from memoryhub.core.safety.gate import SafetyGateError, SafetyWriteGate
         from memoryhub.embedding import create_embedding_client
+        from memoryhub.llm.ollama_client import OllamaClient
+        from memoryhub.llm.openai_client import OpenAIClient
         from memoryhub.retrieval.cache import SearchCache
         from memoryhub.retrieval.hybrid import HybridRetriever
         from memoryhub.retrieval.keyword_search import KeywordSearcher
@@ -247,20 +294,83 @@ def create_app(
         from memoryhub.retrieval.reranker import Reranker
         from memoryhub.storage.database import (
             Database,
+            EventRepository,
+            ExtractionTaskRepository,
+            ConflictRepository,
+            ForgetRepository,
             KnowledgeRepository,
             PreferenceRepository,
         )
         from memoryhub.storage.vector_engine import create_vector_engine
         from memoryhub.storage.vector_store import VectorStore
+        from memoryhub.storage.evidence_store import EvidenceStore
+
+        if app.state.safety_gate is None:
+            audit_key = _user_rule_master_key_from_env(config.safety.audit.hmac_key_env)
+            quarantine_key = _user_rule_master_key_from_env(
+                config.safety.quarantine.encryption_key_env
+            )
+            if audit_key is None or quarantine_key is None:
+                app.state.safety_gate_error = "gate.key_unavailable"
+            else:
+                try:
+                    if app.state.user_rule_service is not None:
+                        app.state.safety_gate = SafetyWriteGate.from_user_rule_config(
+                            app.state.user_rule_service,
+                            config.safety,
+                            audit_hmac_key=audit_key,
+                            quarantine_key=quarantine_key,
+                        )
+                    elif config.safety.user_rules.enabled:
+                        app.state.safety_gate_error = (
+                            app.state.user_rule_service_error
+                            or "gate.detector_unavailable"
+                        )
+                    else:
+                        app.state.safety_gate = SafetyWriteGate.from_config(
+                            SensitiveDetector.from_config(config.safety),
+                            config.safety,
+                            audit_hmac_key=audit_key,
+                            quarantine_key=quarantine_key,
+                        )
+                except SafetyGateError as exc:
+                    app.state.safety_gate_error = exc.code
+                except Exception:
+                    app.state.safety_gate_error = "gate.service_unavailable"
+
+        llm_kwargs = {
+            "api_base": config.llm.api_base,
+            "model": config.llm.model,
+            "temperature": config.llm.temperature,
+            "max_tokens": config.llm.max_tokens,
+        }
+        llm_provider = config.llm.provider.lower()
+        if llm_provider == "openai":
+            llm_client = OpenAIClient(api_key=config.llm.api_key, **llm_kwargs)
+        elif llm_provider == "ollama":
+            llm_client = OllamaClient(**llm_kwargs)
+        else:
+            raise ValueError(f"unknown llm provider: {config.llm.provider}")
 
         # 存储层：SQLite 是记忆记录的事实来源，VectorStore 是向量索引的事实来源
         db = Database(db_path=config.storage.db_path)
         db.init_schema()
         pref_repo = PreferenceRepository(db)
         know_repo = KnowledgeRepository(db)
+        event_repo = EventRepository(db)
+        extraction_task_repo = ExtractionTaskRepository(db)
+        conflict_repo = ConflictRepository(db)
+        forget_repo = ForgetRepository(db)
 
-        # 全量加载活跃记忆，构建 memory_id → 记忆对象 的映射
-        memories = [*pref_repo.list_all(), *know_repo.list_all()]
+        if app.state.fact_pipeline is None:
+            app.state.fact_pipeline = FactMemoryPipeline(
+                db_path=config.storage.db_path, llm_client=llm_client,
+            )
+            app.state.owns_fact_pipeline = True
+        fact_store = app.state.fact_pipeline.store
+        facts = fact_store.list_facts(status="active", limit=100000)
+
+        memories = [*pref_repo.list_all(), *know_repo.list_all(), *facts]
         memory_lookup = {m.memory_id: m for m in memories}
 
         embedding_kwargs = {"dim": config.embedding.dimension}
@@ -338,14 +448,94 @@ def create_app(
         app.state.db = db
         app.state.pref_repo = pref_repo
         app.state.know_repo = know_repo
+        app.state.event_repo = event_repo
+        app.state.extraction_task_repo = extraction_task_repo
+        app.state.conflict_repo = conflict_repo
+        app.state.forget_repo = forget_repo
+        app.state.search_cache = cache
+        app.state.keyword_search = keyword_search
+        app.state.memory_lookup = memory_lookup
+        app.state.embedding_client = embedding_client
+        app.state.llm_client = llm_client
         app.state.vector_store = vector_store
         app.state.vector_engine = vector_engine
+        app.state.evidence_store = EvidenceStore(config.storage.evidence_path)
+        app.state.fact_store = fact_store
+        app.state.fact_index_service = FactIndexService(
+            fact_store=fact_store,
+            vector_store=vector_store,
+            vector_engine=vector_engine,
+            keyword_search=keyword_search,
+            memory_lookup=memory_lookup,
+            search_cache=cache,
+            embedding_client=embedding_client,
+        )
+        app.state.fact_pipeline.index_service = app.state.fact_index_service
+        for fact in facts:
+            app.state.fact_index_service.sync_fact(fact)
+
+        app.state.memory_write_service = MemoryWriteService(
+            pref_repo=pref_repo,
+            know_repo=know_repo,
+            vector_store=vector_store,
+            vector_engine=vector_engine,
+            keyword_search=keyword_search,
+            memory_lookup=memory_lookup,
+            search_cache=cache,
+            embedding_client=embedding_client,
+            evidence_store=app.state.evidence_store,
+        )
+        pref_repo.write_service = app.state.memory_write_service
+        know_repo.write_service = app.state.memory_write_service
+        preference_extractor = PreferenceExtractor(llm_client=llm_client)
+        preference_updater = PreferenceUpdater(
+            llm_client=llm_client,
+            pref_repo=pref_repo,
+            conflict_repo=conflict_repo,
+            write_service=app.state.memory_write_service,
+        )
+        knowledge_extractor = KnowledgeExtractor(llm_client=llm_client)
+        fact_ingestion_adapter = FactIngestionAdapter(app.state.fact_pipeline)
+        extraction_executor = ExtractionExecutor(
+            memory_write_service=app.state.memory_write_service,
+            preference_extractor=preference_extractor,
+            preference_updater=preference_updater,
+            knowledge_extractor=knowledge_extractor,
+            fact_ingestion_adapter=fact_ingestion_adapter,
+        )
+        if (
+            app.state.event_ingestion_service is None
+            and app.state.safety_gate is not None
+        ):
+            app.state.event_ingestion_service = EventIngestionService(
+                event_repo=event_repo,
+                safety_gate=app.state.safety_gate,
+                quality_scorer=QualityScorer(),
+                memory_write_service=app.state.memory_write_service,
+                preference_extractor=preference_extractor,
+                preference_updater=preference_updater,
+                knowledge_extractor=knowledge_extractor,
+                fact_ingestion_adapter=fact_ingestion_adapter,
+                extraction_task_repo=extraction_task_repo,
+                extraction_executor=extraction_executor,
+            )
+        retry_executor = getattr(
+            app.state.event_ingestion_service,
+            "extraction_executor",
+            extraction_executor,
+        )
+        app.state.extraction_retry_service = ExtractionRetryService(
+            task_repo=extraction_task_repo,
+            event_repo=event_repo,
+            executor=retry_executor,
+        )
         if vector_engine is not None:
             app.state.retriever = MilvusHybridRetriever(
                 engine=vector_engine,
                 embedding_fn=embedding_client.embed,
                 config=config.retrieval,
                 memory_lookup=memory_lookup,
+                fact_store=fact_store,
             )
         else:
             app.state.retriever = HybridRetriever(
@@ -356,6 +546,7 @@ def create_app(
                 config=config.retrieval,
                 embedding_fn=embedding_client.embed,
                 memory_lookup=memory_lookup,
+                fact_store=fact_store,
             )
 
     @app.on_event("shutdown")
@@ -373,6 +564,15 @@ def create_app(
                 app.state.user_rule_service = None
                 app.state.owns_user_rule_service = False
         # 保存向量索引并关闭数据库
+        if app.state.owns_fact_pipeline:
+            owned_fact_pipeline = getattr(app.state, "fact_pipeline", None)
+            if owned_fact_pipeline is not None:
+                try:
+                    owned_fact_pipeline.close()
+                finally:
+                    app.state.fact_pipeline = None
+                    app.state.fact_store = None
+                    app.state.owns_fact_pipeline = False
         vector_store = getattr(app.state, "vector_store", None)
         if vector_store is not None:
             vector_store.save()

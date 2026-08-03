@@ -8,7 +8,7 @@ import os
 import re
 from typing import Optional
 
-from openai import OpenAI
+from .llm import build_chat_client
 
 from .models import RawTriple, EntityType
 from .prompts import EXTRACTION_SYSTEM_PROMPT, EXTRACTION_USER_TEMPLATE
@@ -34,12 +34,14 @@ class TripleExtractor:
         api_key: str = "",
         model: str = DEEPSEEK_MODEL,
         base_url: str = DEEPSEEK_BASE_URL,
+        llm_client=None,
     ):
         self.model = model
-        api_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
         base_url = base_url or os.environ.get("DEEPSEEK_BASE_URL", DEEPSEEK_BASE_URL)
-
-        self._client = OpenAI(api_key=api_key, base_url=base_url)
+        self._client = build_chat_client(
+            api_key=api_key, llm_client=llm_client, base_url=base_url
+        )
+        self.last_error: Exception | None = None
 
     def extract(self, text: str, source_id: str = "") -> list[RawTriple]:
         """
@@ -52,6 +54,7 @@ class TripleExtractor:
         Returns:
             RawTriple 列表，提取失败返回空列表
         """
+        self.last_error = None
         if not text.strip():
             return []
 

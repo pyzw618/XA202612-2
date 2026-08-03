@@ -163,7 +163,12 @@ Output JSON format:
                 prompt_payload += f"\nPrevious Draft: {draft_content}\nVerifier Rejection: {verifier_feedback}\nRefine draft."
 
             try:
-                response_text = self.llm_client.generate(system_prompt, prompt_payload)
+                response = self.llm_client.generate(
+                    prompt_payload, system_prompt=system_prompt
+                )
+                response_text = (
+                    response.content if hasattr(response, "content") else str(response)
+                )
                 
                 # 增强：防止 LLM 输出 Markdown json 块导致解析失败
                 if "```" in response_text:

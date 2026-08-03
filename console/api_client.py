@@ -128,9 +128,11 @@ class MemoryHubClient:
         """GET /api/memory/preferences — 列出偏好记忆"""
         return self._get("/preferences", {"user_id": user_id, "scene": scene, "status": status})  # type: ignore[return-value]
 
-    def get_preference(self, memory_id: str) -> dict:
+    def get_preference(self, memory_id: str, user_id: str = "default") -> dict:
         """GET /api/memory/preferences/{id} — 获取单条偏好详情"""
-        return self._get(f"/preferences/{memory_id}")  # type: ignore[return-value]
+        return self._get(
+            f"/preferences/{memory_id}", {"user_id": user_id}
+        )  # type: ignore[return-value]
 
     def get_preference_versions(self, memory_id: str) -> list[dict]:
         """GET /api/memory/preferences/{id}/versions — 获取版本历史链"""
@@ -148,20 +150,26 @@ class MemoryHubClient:
             "user_id": user_id, "scene": scene, "knowledge_type": knowledge_type
         })
 
-    def get_knowledge(self, memory_id: str) -> dict:
+    def get_knowledge(self, memory_id: str, user_id: str = "default") -> dict:
         """GET /api/memory/knowledge/{id} — 获取单条知识详情"""
-        return self._get(f"/knowledge/{memory_id}")  # type: ignore[return-value]
+        return self._get(
+            f"/knowledge/{memory_id}", {"user_id": user_id}
+        )  # type: ignore[return-value]
 
     # ============================================================
     # 管理接口 — 冲突
     # ============================================================
 
-    def list_conflicts(self, status: str = "pending") -> list[dict]:
-        """GET /api/memory/conflicts — 列出冲突记录"""
-        return self._get("/conflicts", {"status": status})  # type: ignore[return-value]
+    def list_conflicts(
+        self, status: str = "pending", user_id: str = "default"
+    ) -> list[dict]:
+        """GET /api/memory/conflicts — 列出当前用户的冲突记录"""
+        return self._get(
+            "/conflicts", {"status": status, "user_id": user_id}
+        )  # type: ignore[return-value]
 
     def resolve_conflict(self, conflict_id: str, decision: str,
-                         reason: str = "") -> dict:
+                         reason: str = "", user_id: str = "default") -> dict:
         """
         POST /api/memory/conflicts/{id}/resolve — 手动解决冲突
 
@@ -171,7 +179,7 @@ class MemoryHubClient:
             reason: 处理原因说明
         """
         return self._post(f"/conflicts/{conflict_id}/resolve", {
-            "decision": decision, "reason": reason
+            "user_id": user_id, "decision": decision, "reason": reason
         })
 
     # ============================================================

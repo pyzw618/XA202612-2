@@ -6,7 +6,9 @@ SQLAlchemy ORM 模型定义
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import (
+    Boolean, JSON, Column, DateTime, Float, Integer, String, Text, UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -45,15 +47,22 @@ class PreferenceRow(Base):
     memory_type = Column(String(16), default="preference")
     preference_type = Column(String(32))
     content = Column(Text)
+    payload = Column(JSON)
     scope_scene = Column(String(64), index=True)
     scope_task_type = Column(String(128), index=True)
     scope_app = Column(String(64))
+    is_global = Column(Boolean, default=False)
     confidence = Column(Float, default=0.0)
+    quality_score = Column(Float, default=1.0)
+    extract_source = Column(String(32), default="implicit_inference")
     status = Column(String(16), default="active", index=True)
     level = Column(String(16), default="long")
     version = Column(Integer, default=1)
     parent_id = Column(String(32))
+    root_id = Column(String(32))
     evidences = Column(JSON)
+    tags = Column(JSON)
+    extra_payload = Column(JSON)
     # --- 健康度字段（遗忘模块使用）---
     health_score = Column(Float, default=1.0, index=True)
     stability = Column(Float, default=1.0)
@@ -101,6 +110,7 @@ class ConflictRow(Base):
     __tablename__ = "conflicts"
 
     conflict_id = Column(String(32), primary_key=True)
+    user_id = Column(String(64), default="default", index=True)
     old_memory_id = Column(String(32))
     new_memory_id = Column(String(32))
     memory_type = Column(String(16))
@@ -124,3 +134,26 @@ class ForgetRow(Base):
     target_memory_ids = Column(JSON)
     deleted_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now)
+
+
+class ExtractionTaskRow(Base):
+    """可重试抽取任务；不保存事件正文、prompt 或异常原文。"""
+    __tablename__ = "extraction_tasks"
+    __table_args__ = (
+        UniqueConstraint("task_key", name="uq_extraction_tasks_task_key"),
+    )
+
+    task_id = Column(String(32), primary_key=True)
+    task_key = Column(String(64), nullable=False)
+    event_id = Column(String(32), nullable=False, index=True)
+    event_ids = Column(JSON, nullable=False)
+    user_id = Column(String(64), nullable=False, index=True)
+    extractor_type = Column(String(16), nullable=False, index=True)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
+    next_retry_at = Column(DateTime, nullable=True, index=True)
+    lease_expires_at = Column(DateTime, nullable=True)
+    last_error_code = Column(String(128), nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)

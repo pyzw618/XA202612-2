@@ -4,16 +4,28 @@
 基于 SQLAlchemy ORM，提供 SQLite 持久化和 Repository CRUD。
 """
 
+from __future__ import annotations
+
+import hashlib
+import hashlib
 import os
+import re
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import create_engine, func
+from sqlalchemy import create_engine, func, or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from memoryhub.adapter.schemas import (
     Evidence,
+    ExtractionTask,
+    ExtractionTaskStatus,
+    ExtractionType,
+    ExtractionTask,
+    ExtractionTaskStatus,
+    ExtractionType,
     ForgetRecord,
     KnowledgeMemory,
     MemoryEvent,
@@ -25,6 +37,8 @@ from memoryhub.storage.models import (
     Base,
     ConflictRow,
     EventRow,
+    ExtractionTaskRow,
+    ExtractionTaskRow,
     ForgetRow,
     KnowledgeRow,
     PreferenceRow,
@@ -68,7 +82,55 @@ class Database:
             conn.exec_driver_sql("PRAGMA foreign_keys=ON")
 
         Base.metadata.create_all(self.engine)
+        self._ensure_compatible_schema()
         self.session_factory = sessionmaker(bind=self.engine)
+
+    def _ensure_compatible_schema(self) -> None:
+        """Apply additive SQLite migrations required by the current data contract."""
+        migrations = {
+            "events": {
+                "turn_id": "VARCHAR(64)",
+                "tool_calls": "JSON",
+                "schema_version": "VARCHAR(16) DEFAULT '1.1'",
+                "source_hash": "VARCHAR(64)",
+                "redactions": "JSON",
+                "quality": "JSON",
+            },
+            "preferences": {
+                "payload": "JSON",
+                "is_global": "BOOLEAN DEFAULT 0",
+                "quality_score": "FLOAT DEFAULT 1.0",
+                "extract_source": "VARCHAR(32) DEFAULT 'implicit_inference'",
+                "root_id": "VARCHAR(32)",
+                "tags": "JSON",
+                "extra_payload": "JSON",
+                "health_score": "FLOAT DEFAULT 1.0",
+                "stability": "FLOAT DEFAULT 1.0",
+                "last_accessed_at": "DATETIME",
+                "access_count_30d": "INTEGER DEFAULT 0",
+            },
+            "knowledge": {
+                "health_score": "FLOAT DEFAULT 1.0",
+                "stability": "FLOAT DEFAULT 1.0",
+                "last_accessed_at": "DATETIME",
+                "access_count_30d": "INTEGER DEFAULT 0",
+            },
+            "conflicts": {
+                "user_id": "VARCHAR(64) DEFAULT 'default'",
+                "result_memory_id": "VARCHAR(32)",
+                "resolved_at": "DATETIME",
+            },
+        }
+        with self.engine.begin() as conn:
+            for table, columns in migrations.items():
+                existing = {row[1] for row in conn.exec_driver_sql(
+                    f"PRAGMA table_info({table})"
+                ).fetchall()}
+                for column, ddl in columns.items():
+                    if column not in existing:
+                        conn.exec_driver_sql(
+                            f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"
+                        )
 
     @contextmanager
     def session(self) -> Session:
@@ -108,17 +170,28 @@ def _pref_row_to_pydantic(row: PreferenceRow) -> PreferenceMemory:
         user_id=row.user_id,
         preference_type=row.preference_type,
         text=row.content,
+        payload=row.payload or {},
         scope=SceneScope(
             scene=row.scope_scene or "",
             task_type=row.scope_task_type or "",
             app=row.scope_app or "",
         ),
+        is_global=bool(row.is_global),
         confidence=row.confidence or 0.0,
+        quality_score=row.quality_score if row.quality_score is not None else 1.0,
+        extract_source=row.extract_source or "implicit_inference",
         status=MemoryStatus(row.status) if row.status else MemoryStatus.ACTIVE,
         level=row.level or "long",
         version=row.version or 1,
         parent_id=row.parent_id or "",
+        root_id=row.root_id or "",
         evidences=row.evidences or [],
+        tags=row.tags or [],
+        extra_payload=row.extra_payload or {},
+        health_score=row.health_score if row.health_score is not None else 1.0,
+        stability=row.stability if row.stability is not None else 1.0,
+        last_accessed_at=row.last_accessed_at,
+        access_count_30d=row.access_count_30d or 0,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -148,6 +221,10 @@ def _know_row_to_pydantic(row: KnowledgeRow) -> KnowledgeMemory:
         version=row.version or 1,
         parent_id=row.parent_id or "",
         evidences=row.evidences or [],
+        health_score=row.health_score if row.health_score is not None else 1.0,
+        stability=row.stability if row.stability is not None else 1.0,
+        last_accessed_at=row.last_accessed_at,
+        access_count_30d=row.access_count_30d or 0,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -159,131 +236,113 @@ def _know_row_to_pydantic(row: KnowledgeRow) -> KnowledgeMemory:
 
 
 class EventRepository:
-    """事件数据仓储"""
+    """Convert an event ORM row into a complete MemoryEvent model."""
 
     def __init__(self, db: Database):
         self.db = db
 
+    @staticmethod
+    def _parse_occurred_at(value: str):
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ") if value else None
+
+    @classmethod
+    def _to_row(cls, event: MemoryEvent) -> EventRow:
+        return EventRow(
+            event_id=event.event_id,
+            source_type=event.source_type.value,
+            event_type=event.event_type,
+            user_id=event.user_id,
+            session_id=event.session_id,
+            turn_id=event.turn_id,
+            scene=event.scene,
+            task_type=event.task_type,
+            occurred_at=cls._parse_occurred_at(event.occurred_at),
+            text=event.text,
+            payload=event.payload,
+            tool_calls=[call.model_dump(mode="json") for call in event.tool_calls],
+            schema_version=event.schema_version,
+            source_hash=event.source_hash,
+            redactions=event.redactions,
+            quality=event.quality.model_dump(mode="json"),
+        )
+
     def save(self, event: MemoryEvent) -> None:
-        """保存事件"""
-        with self.db.session() as s:
-            row = EventRow(
-                event_id=event.event_id,
-                source_type=event.source_type.value if hasattr(event.source_type, "value") else str(event.source_type),
-                event_type=event.event_type,
-                user_id=event.user_id,
-                session_id=event.session_id,
-                scene=event.scene,
-                task_type=event.task_type,
-                occurred_at=event.occurred_at,
-                text=event.text,
-                payload=event.payload,
-                source_hash=event.source_hash,
-                quality=event.quality.model_dump() if event.quality else {},
-            )
-            s.add(row)
+        with self.db.session() as session:
+            session.merge(self._to_row(event))
 
     def batch_save(self, events: list[MemoryEvent]) -> int:
-        """批量保存事件，返回成功数量"""
-        with self.db.session() as s:
+        with self.db.session() as session:
             for event in events:
-                row = EventRow(
-                    event_id=event.event_id,
-                    source_type=event.source_type.value if hasattr(event.source_type, "value") else str(event.source_type),
-                    event_type=event.event_type,
-                    user_id=event.user_id,
-                    session_id=event.session_id,
-                    scene=event.scene,
-                    task_type=event.task_type,
-                    occurred_at=event.occurred_at,
-                    text=event.text,
-                    payload=event.payload,
-                    source_hash=event.source_hash,
-                    quality=event.quality.model_dump() if event.quality else {},
-                )
-                s.add(row)
-            return len(events)
+                session.merge(self._to_row(event))
+        return len(events)
 
     def get_by_id(self, event_id: str) -> Optional[MemoryEvent]:
-        """按 ID 查询事件"""
-        with self.db.session() as s:
-            row = s.query(EventRow).filter(EventRow.event_id == event_id).first()
-            if row is None:
-                return None
-            return MemoryEvent(
-                event_id=row.event_id,
-                source_type=SourceType(row.source_type) if row.source_type else SourceType.TOOL_RESULT,
-                event_type=row.event_type or "",
-                user_id=row.user_id or "",
-                session_id=row.session_id or "",
-                scene=row.scene or "",
-                task_type=row.task_type or "",
-                text=row.text or "",
-                payload=row.payload or {},
-                occurred_at=row.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ") if row.occurred_at else "",
-                source_hash=row.source_hash or "0" * 64,
-            )
+        with self.db.session() as session:
+            row = session.query(EventRow).filter(EventRow.event_id == event_id).first()
+            return _event_row_to_pydantic(row) if row is not None else None
 
     def get_by_session(self, session_id: str) -> list[MemoryEvent]:
-        """按会话 ID 查询事件列表"""
-        with self.db.session() as s:
-            rows = s.query(EventRow).filter(EventRow.session_id == session_id).all()
-            return [_event_row_to_pydantic(r) for r in rows]
+        with self.db.session() as session:
+            rows = session.query(EventRow).filter(EventRow.session_id == session_id).all()
+            return [_event_row_to_pydantic(row) for row in rows]
 
     def get_by_task_type(self, user_id: str, task_type: str) -> list[MemoryEvent]:
-        """按用户和任务类型查询事件列表"""
-        with self.db.session() as s:
-            rows = (
-                s.query(EventRow)
-                .filter(EventRow.user_id == user_id, EventRow.task_type == task_type)
-                .all()
+        with self.db.session() as session:
+            rows = session.query(EventRow).filter(
+                EventRow.user_id == user_id, EventRow.task_type == task_type
+            ).all()
+            return [_event_row_to_pydantic(row) for row in rows]
+
+    def get_trajectory(
+        self, user_id: str, session_id: str, task_type: str = ""
+    ) -> list[MemoryEvent]:
+        """Load one persisted safe trajectory in deterministic execution order."""
+        with self.db.session() as session:
+            query = session.query(EventRow).filter(
+                EventRow.user_id == user_id,
+                EventRow.session_id == session_id,
             )
-            return [_event_row_to_pydantic(r) for r in rows]
+            if task_type:
+                query = query.filter(EventRow.task_type == task_type)
+            rows = query.order_by(
+                EventRow.occurred_at.asc(),
+                EventRow.turn_id.asc(),
+                EventRow.event_id.asc(),
+            ).all()
+            return [_event_row_to_pydantic(row) for row in rows]
 
     def get_recent(self, user_id: str, limit: int = 100) -> list[MemoryEvent]:
-        """获取最近的事件"""
-        with self.db.session() as s:
+        with self.db.session() as session:
             rows = (
-                s.query(EventRow)
-                .filter(EventRow.user_id == user_id)
-                .order_by(EventRow.occurred_at.desc())
-                .limit(limit)
-                .all()
+                session.query(EventRow).filter(EventRow.user_id == user_id)
+                .order_by(EventRow.occurred_at.desc()).limit(limit).all()
             )
-            return [_event_row_to_pydantic(r) for r in rows]
+            return [_event_row_to_pydantic(row) for row in rows]
 
 
 def _event_row_to_pydantic(row: EventRow) -> MemoryEvent:
-    from memoryhub.adapter.schemas import EventQuality, QualityStatus, SourceType
-    quality_data = row.quality or {}
-    if isinstance(quality_data, dict):
-        quality = EventQuality(
-            score=quality_data.get("score", 0.0),
-            status=quality_data.get("status", QualityStatus.REJECTED),
-            completeness=quality_data.get("completeness", 0.0),
-            validity=quality_data.get("validity", 0.0),
-            consistency=quality_data.get("consistency", 0.0),
-        )
-    else:
-        quality = quality_data
     return MemoryEvent(
         event_id=row.event_id,
-        source_type=SourceType(row.source_type) if row.source_type else SourceType.TOOL_RESULT,
+        source_type=row.source_type,
         event_type=row.event_type or "",
         user_id=row.user_id or "",
         session_id=row.session_id or "",
+        turn_id=row.turn_id or "",
         scene=row.scene or "",
         task_type=row.task_type or "",
-        occurred_at=row.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ") if row.occurred_at else "",
+        occurred_at=(row.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ") if row.occurred_at else ""),
         text=row.text or "",
         payload=row.payload or {},
+        tool_calls=row.tool_calls or [],
+        schema_version=row.schema_version or "1.1",
         source_hash=row.source_hash or "0" * 64,
-        quality=quality,
+        redactions=row.redactions or [],
+        quality=row.quality or {},
     )
 
 
 # ============================================================
-# 偏好 CRUD
+# ?? CRUD
 # ============================================================
 
 
@@ -301,15 +360,28 @@ class PreferenceRepository:
                 user_id=memory.user_id,
                 preference_type=memory.preference_type.value if hasattr(memory.preference_type, "value") else str(memory.preference_type),
                 content=memory.text,
+                payload=memory.payload,
                 scope_scene=memory.scope.scene,
                 scope_task_type=memory.scope.task_type,
                 scope_app=memory.scope.app,
+                is_global=memory.is_global,
                 confidence=memory.confidence,
+                quality_score=memory.quality_score,
+                extract_source=memory.extract_source,
                 status=memory.status.value if hasattr(memory.status, "value") else str(memory.status),
                 level=memory.level.value if hasattr(memory.level, "value") else memory.level,
                 version=memory.version,
                 parent_id=memory.parent_id or None,
-                evidences=[e.model_dump() for e in memory.evidences] if memory.evidences else [],
+                root_id=memory.root_id or None,
+                evidences=[e.model_dump(mode="json") for e in memory.evidences] if memory.evidences else [],
+                tags=memory.tags,
+                extra_payload=memory.extra_payload,
+                health_score=memory.health_score,
+                stability=memory.stability,
+                last_accessed_at=memory.last_accessed_at,
+                access_count_30d=memory.access_count_30d,
+                created_at=memory.created_at,
+                updated_at=memory.updated_at,
             )
             s.merge(row)
 
@@ -349,25 +421,37 @@ class PreferenceRepository:
             )
             return [_pref_row_to_pydantic(r) for r in rows]
 
-    def list_all(self, status: str = "active") -> list[PreferenceMemory]:
+    def list_all(self, status: str = "active", user_id: str = "") -> list[PreferenceMemory]:
         """列出指定状态的全部偏好记忆（应用启动时全量加载用）"""
         with self.db.session() as s:
-            rows = (
-                s.query(PreferenceRow)
-                .filter(PreferenceRow.status == status)
-                .order_by(PreferenceRow.confidence.desc())
-                .all()
-            )
+            query = s.query(PreferenceRow).filter(PreferenceRow.status == status)
+            if user_id:
+                query = query.filter(PreferenceRow.user_id == user_id)
+            rows = query.order_by(PreferenceRow.confidence.desc()).all()
             return [_pref_row_to_pydantic(r) for r in rows]
 
-    def update_status(self, memory_id: str, status: str) -> None:
+    def update_status(self, memory_id: str, status: str, user_id: str = "") -> bool:
         """更新状态"""
-        from datetime import datetime
+        from datetime import datetime, timedelta, timezone
 
         with self.db.session() as s:
-            s.query(PreferenceRow).filter(
-                PreferenceRow.memory_id == memory_id
-            ).update({"status": status, "updated_at": datetime.now()})
+            q = s.query(PreferenceRow).filter(PreferenceRow.memory_id == memory_id)
+            if user_id:
+                q = q.filter(PreferenceRow.user_id == user_id)
+            return q.update({"status": status, "updated_at": datetime.now()}) == 1
+
+    def record_access(self, memory_id: str, user_id: str = "") -> bool:
+        """Record an owner-bound retrieval for lifecycle health calculations."""
+        with self.db.session() as session:
+            query = session.query(PreferenceRow).filter(PreferenceRow.memory_id == memory_id)
+            if user_id:
+                query = query.filter(PreferenceRow.user_id == user_id)
+            return query.update({
+                "last_accessed_at": datetime.now(),
+                "access_count_30d": func.coalesce(PreferenceRow.access_count_30d, 0) + 1,
+                "updated_at": datetime.now(),
+            }) == 1
+
 
     def get_version_chain(self, memory_id: str) -> list[PreferenceMemory]:
         """获取版本链"""
@@ -434,7 +518,13 @@ class KnowledgeRepository:
                 level=memory.level.value if hasattr(memory.level, "value") else memory.level,
                 version=memory.version,
                 parent_id=memory.parent_id or None,
-                evidences=[e.model_dump() for e in memory.evidences] if memory.evidences else [],
+                evidences=[e.model_dump(mode="json") for e in memory.evidences] if memory.evidences else [],
+                health_score=memory.health_score,
+                stability=memory.stability,
+                last_accessed_at=memory.last_accessed_at,
+                access_count_30d=memory.access_count_30d,
+                created_at=memory.created_at,
+                updated_at=memory.updated_at,
             )
             s.merge(row)
 
@@ -459,52 +549,78 @@ class KnowledgeRepository:
             return [_know_row_to_pydantic(r) for r in rows]
 
     def get_by_scope(self, user_id: str, scene: str, task_type: str) -> list[KnowledgeMemory]:
-        """按 scope 查询"""
+        """? scope ????????????????"""
         with self.db.session() as s:
-            rows = (
-                s.query(KnowledgeRow)
-                .filter(
-                    KnowledgeRow.user_id == user_id,
-                    KnowledgeRow.scope_scene == scene,
-                    KnowledgeRow.scope_task_type == task_type,
-                    KnowledgeRow.status == "active",
-                )
-                .order_by(KnowledgeRow.confidence.desc())
-                .all()
+            query = s.query(KnowledgeRow).filter(
+                KnowledgeRow.user_id == user_id,
+                KnowledgeRow.status == "active",
             )
+            if scene:
+                query = query.filter(KnowledgeRow.scope_scene == scene)
+            if task_type:
+                query = query.filter(KnowledgeRow.scope_task_type == task_type)
+            rows = query.order_by(KnowledgeRow.confidence.desc()).all()
             return [_know_row_to_pydantic(r) for r in rows]
 
-    def list_all(self, status: str = "active") -> list[KnowledgeMemory]:
+    def list_all(self, status: str = "active", user_id: str = "") -> list[KnowledgeMemory]:
         """列出指定状态的全部知识记忆（应用启动时全量加载用）"""
         with self.db.session() as s:
-            rows = (
-                s.query(KnowledgeRow)
-                .filter(KnowledgeRow.status == status)
-                .order_by(KnowledgeRow.confidence.desc())
-                .all()
-            )
+            query = s.query(KnowledgeRow).filter(KnowledgeRow.status == status)
+            if user_id:
+                query = query.filter(KnowledgeRow.user_id == user_id)
+            rows = query.order_by(KnowledgeRow.confidence.desc()).all()
             return [_know_row_to_pydantic(r) for r in rows]
 
-    def search_by_name(self, keyword: str) -> list[KnowledgeMemory]:
-        """按名称模糊搜索"""
+    def update_status(self, memory_id: str, status: str, user_id: str = "") -> bool:
+        """Update knowledge status with an optional owner constraint."""
+        with self.db.session() as session:
+            query = session.query(KnowledgeRow).filter(KnowledgeRow.memory_id == memory_id)
+            if user_id:
+                query = query.filter(KnowledgeRow.user_id == user_id)
+            return query.update({"status": status, "updated_at": datetime.now()}) == 1
+
+    def search_by_name(
+        self, keyword: str, user_id: str = ""
+    ) -> list[KnowledgeMemory]:
+        """???????????? owner?"""
         with self.db.session() as s:
-            rows = (
-                s.query(KnowledgeRow)
-                .filter(KnowledgeRow.name.contains(keyword))
-                .order_by(KnowledgeRow.confidence.desc())
-                .all()
+            query = s.query(KnowledgeRow).filter(
+                KnowledgeRow.name.contains(keyword),
+                KnowledgeRow.status == "active",
             )
+            if user_id:
+                query = query.filter(KnowledgeRow.user_id == user_id)
+            rows = query.order_by(KnowledgeRow.confidence.desc()).all()
             return [_know_row_to_pydantic(r) for r in rows]
 
-    def increment_usage(self, memory_id: str, success: bool) -> None:
-        """增加使用计数"""
-        from datetime import datetime
+    def record_access(self, memory_id: str, user_id: str = "") -> bool:
+        """Record an owner-bound retrieval for lifecycle health calculations."""
+        with self.db.session() as session:
+            query = session.query(KnowledgeRow).filter(KnowledgeRow.memory_id == memory_id)
+            if user_id:
+                query = query.filter(KnowledgeRow.user_id == user_id)
+            return query.update({
+                "last_accessed_at": datetime.now(),
+                "access_count_30d": func.coalesce(KnowledgeRow.access_count_30d, 0) + 1,
+                "updated_at": datetime.now(),
+            }) == 1
 
+
+    def increment_usage(
+        self, memory_id: str, success: bool, user_id: str = ""
+    ) -> None:
+        """??????????? owner?"""
         with self.db.session() as s:
-            updates = {"total_count": KnowledgeRow.total_count + 1, "updated_at": datetime.now()}
+            updates = {
+                "total_count": KnowledgeRow.total_count + 1,
+                "updated_at": datetime.now(),
+            }
             if success:
                 updates["success_count"] = KnowledgeRow.success_count + 1
-            s.query(KnowledgeRow).filter(KnowledgeRow.memory_id == memory_id).update(updates)
+            query = s.query(KnowledgeRow).filter(KnowledgeRow.memory_id == memory_id)
+            if user_id:
+                query = query.filter(KnowledgeRow.user_id == user_id)
+            query.update(updates)
 
 
 # ============================================================
@@ -523,50 +639,96 @@ class ConflictRepository:
         with self.db.session() as s:
             row = ConflictRow(
                 conflict_id=conflict.conflict_id,
+                user_id=conflict.user_id,
                 old_memory_id=conflict.old_memory_id,
                 new_memory_id=conflict.new_memory_id,
                 memory_type=conflict.memory_type,
                 old_content=conflict.old_content,
                 new_content=conflict.new_content,
+                conflict_field=conflict.conflict_field,
                 decision=conflict.decision.value if hasattr(conflict.decision, "value") else conflict.decision,
                 reason=conflict.reason,
                 result_memory_id=conflict.result_memory_id if hasattr(conflict, "result_memory_id") else "",
+                created_at=conflict.created_at,
+                resolved_at=conflict.resolved_at,
             )
             s.add(row)
 
-    def get_pending(self) -> list:
-        """获取待解决的冲突"""
+    def list_all(self, status: str = "", user_id: str = "") -> list:
+        """List conflicts, optionally filtering by decision/status."""
         from memoryhub.adapter.schemas import ConflictRecord
-        from datetime import datetime
 
-        with self.db.session() as s:
-            rows = s.query(ConflictRow).filter(ConflictRow.decision == "pending").all()
+        with self.db.session() as session:
+            query = session.query(ConflictRow)
+            if status:
+                query = query.filter(ConflictRow.decision == status)
+            if user_id:
+                query = query.filter(ConflictRow.user_id == user_id)
+            rows = query.order_by(ConflictRow.created_at.desc()).all()
             return [
                 ConflictRecord(
-                    conflict_id=r.conflict_id,
-                    old_memory_id=r.old_memory_id,
-                    new_memory_id=r.new_memory_id,
-                    memory_type=r.memory_type,
-                    old_content=r.old_content,
-                    new_content=r.new_content,
-                    decision=r.decision,
-                    reason=r.reason or "",
-                    created_at=r.created_at or datetime.now(),
+                    conflict_id=row.conflict_id,
+                    user_id=row.user_id or "default",
+                    old_memory_id=row.old_memory_id,
+                    new_memory_id=row.new_memory_id,
+                    memory_type=row.memory_type,
+                    old_content=row.old_content,
+                    new_content=row.new_content,
+                    decision=row.decision,
+                    reason=row.reason or "",
+                    result_memory_id=row.result_memory_id or "",
+                    created_at=row.created_at or datetime.now(),
+                    resolved_at=row.resolved_at,
                 )
-                for r in rows
+                for row in rows
             ]
 
-    def resolve(self, conflict_id: str, decision: str, reason: str, result_id: str) -> None:
-        """记录冲突解决结果"""
-        from datetime import datetime
+    def get_pending(self) -> list:
+        """Return unresolved conflicts."""
+        return self.list_all("pending")
 
-        with self.db.session() as s:
-            s.query(ConflictRow).filter(ConflictRow.conflict_id == conflict_id).update({
-                "decision": decision,
-                "reason": reason,
-                "result_memory_id": result_id,
-                "resolved_at": datetime.now(),
-            })
+    def delete_for_memories(self, memory_ids: list[str]) -> int:
+        """Delete conflicts linked to already owner-validated memory IDs."""
+        ids = {item for item in memory_ids if item}
+        if not ids:
+            return 0
+        with self.db.session() as session:
+            rows = session.query(ConflictRow).filter(
+                (ConflictRow.old_memory_id.in_(ids))
+                | (ConflictRow.new_memory_id.in_(ids))
+                | (ConflictRow.result_memory_id.in_(ids))
+            ).all()
+            count = len(rows)
+            for row in rows:
+                session.delete(row)
+            return count
+
+    def resolve(
+        self,
+        conflict_id: str,
+        decision: str,
+        reason: str,
+        result_id: str = "",
+        user_id: str = "",
+    ) -> bool:
+        """Persist a conflict decision and report whether the record existed."""
+        with self.db.session() as session:
+            count = (
+                session.query(ConflictRow)
+                .filter(
+                    ConflictRow.conflict_id == conflict_id,
+                    *([ConflictRow.user_id == user_id] if user_id else []),
+                )
+                .update(
+                    {
+                        "decision": decision,
+                        "reason": reason,
+                        "result_memory_id": result_id,
+                        "resolved_at": datetime.now(),
+                    }
+                )
+            )
+            return count == 1
 
 
 # ============================================================
@@ -637,3 +799,269 @@ class ForgetRepository:
                 .delete(synchronize_session=False)
             )
             return count
+
+
+# ============================================================
+# 持久化抽取任务
+# ============================================================
+
+
+_SAFE_EXTRACTION_ERROR_CODE = re.compile(r"^extraction\.[a-z0-9_.-]{1,100}$")
+
+
+def _safe_extraction_error_code(value: str) -> str:
+    if not value:
+        return ""
+    return value if _SAFE_EXTRACTION_ERROR_CODE.fullmatch(value) else "extraction.internal_error"
+
+
+def _utcnow_naive() -> datetime:
+    """Return UTC suitable for SQLite DATETIME comparisons."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _extraction_task_row_to_pydantic(row: ExtractionTaskRow) -> ExtractionTask:
+    return ExtractionTask(
+        task_id=row.task_id,
+        event_id=row.event_id,
+        event_ids=row.event_ids or [row.event_id],
+        user_id=row.user_id,
+        extractor_type=row.extractor_type,
+        status=row.status,
+        attempt_count=row.attempt_count or 0,
+        max_attempts=row.max_attempts or 3,
+        next_retry_at=row.next_retry_at,
+        lease_expires_at=row.lease_expires_at,
+        last_error_code=row.last_error_code or "",
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+class ExtractionTaskRepository:
+    """Durable retry/dead-letter state referencing gate-approved events only."""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    @staticmethod
+    def _identity(event_ids: list[str], extractor_type: str) -> tuple[str, str]:
+        normalized_ids = sorted({event_id for event_id in event_ids if event_id})
+        if not normalized_ids:
+            raise ValueError("event_ids must not be empty")
+        kind = extractor_type.value if hasattr(extractor_type, "value") else str(extractor_type)
+        if kind not in {item.value for item in ExtractionType}:
+            raise ValueError("unsupported extractor type")
+        task_key = hashlib.sha256(
+            (kind + "|" + "|".join(normalized_ids)).encode("utf-8")
+        ).hexdigest()
+        return task_key, f"xt_{task_key[:29]}"
+
+    def enqueue(
+        self,
+        *,
+        event_ids: list[str],
+        user_id: str,
+        extractor_type: str,
+        max_attempts: int = 3,
+        error_code: str = "",
+        now: datetime | None = None,
+    ) -> tuple[ExtractionTask, bool]:
+        """Idempotently enqueue one extractor/event-set pair."""
+        task_key, task_id = self._identity(event_ids, extractor_type)
+        ordered_ids = list(dict.fromkeys(event_ids))
+        current = now or _utcnow_naive()
+        with self.db.session() as session:
+            existing = (
+                session.query(ExtractionTaskRow)
+                .filter(ExtractionTaskRow.task_key == task_key)
+                .first()
+            )
+            if existing is not None:
+                return _extraction_task_row_to_pydantic(existing), False
+            row = ExtractionTaskRow(
+                task_id=task_id,
+                task_key=task_key,
+                event_id=ordered_ids[0],
+                event_ids=ordered_ids,
+                user_id=user_id,
+                extractor_type=(
+                    extractor_type.value
+                    if hasattr(extractor_type, "value")
+                    else str(extractor_type)
+                ),
+                status=ExtractionTaskStatus.PENDING.value,
+                attempt_count=0,
+                max_attempts=max(1, int(max_attempts)),
+                next_retry_at=current,
+                lease_expires_at=None,
+                last_error_code=_safe_extraction_error_code(error_code),
+                created_at=current,
+                updated_at=current,
+            )
+            session.add(row)
+            session.flush()
+            return _extraction_task_row_to_pydantic(row), True
+
+    def get(self, task_id: str, *, user_id: str | None = None) -> ExtractionTask | None:
+        with self.db.session() as session:
+            query = session.query(ExtractionTaskRow).filter(
+                ExtractionTaskRow.task_id == task_id
+            )
+            if user_id is not None:
+                query = query.filter(ExtractionTaskRow.user_id == user_id)
+            row = query.first()
+            return _extraction_task_row_to_pydantic(row) if row is not None else None
+
+    def list(
+        self,
+        *,
+        user_id: str,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[ExtractionTask]:
+        with self.db.session() as session:
+            query = session.query(ExtractionTaskRow).filter(
+                ExtractionTaskRow.user_id == user_id
+            )
+            if status:
+                query = query.filter(ExtractionTaskRow.status == status)
+            rows = (
+                query.order_by(ExtractionTaskRow.created_at.desc())
+                .limit(max(1, min(int(limit), 500)))
+                .all()
+            )
+            return [_extraction_task_row_to_pydantic(row) for row in rows]
+
+    def claim_due(
+        self,
+        *,
+        user_id: str | None = None,
+        limit: int = 20,
+        now: datetime | None = None,
+        lease_seconds: int = 300,
+    ) -> list[ExtractionTask]:
+        """Claim due work; expired running leases are recoverable after process loss."""
+        current = now or _utcnow_naive()
+        with self.db.session() as session:
+            due = or_(
+                ExtractionTaskRow.status.in_([
+                    ExtractionTaskStatus.PENDING.value,
+                    ExtractionTaskStatus.RETRY.value,
+                ]) & or_(
+                    ExtractionTaskRow.next_retry_at.is_(None),
+                    ExtractionTaskRow.next_retry_at <= current,
+                ),
+                (ExtractionTaskRow.status == ExtractionTaskStatus.RUNNING.value)
+                & (ExtractionTaskRow.lease_expires_at <= current),
+            )
+            query = session.query(ExtractionTaskRow).filter(due)
+            if user_id is not None:
+                query = query.filter(ExtractionTaskRow.user_id == user_id)
+            rows = (
+                query.order_by(ExtractionTaskRow.created_at.asc())
+                .limit(max(1, min(int(limit), 200)))
+                .all()
+            )
+            claimed: list[ExtractionTask] = []
+            for row in rows:
+                row.status = ExtractionTaskStatus.RUNNING.value
+                row.attempt_count = (row.attempt_count or 0) + 1
+                row.lease_expires_at = current + timedelta(seconds=max(1, lease_seconds))
+                row.updated_at = current
+                claimed.append(_extraction_task_row_to_pydantic(row))
+            session.flush()
+            return claimed
+
+    def mark_succeeded(self, task_id: str, *, now: datetime | None = None) -> ExtractionTask:
+        return self._finish(
+            task_id,
+            status=ExtractionTaskStatus.SUCCEEDED.value,
+            error_code="",
+            next_retry_at=None,
+            now=now,
+        )
+
+    def mark_failed(
+        self,
+        task_id: str,
+        *,
+        error_code: str,
+        now: datetime | None = None,
+        base_delay_seconds: int = 60,
+    ) -> ExtractionTask:
+        current = now or _utcnow_naive()
+        with self.db.session() as session:
+            row = session.get(ExtractionTaskRow, task_id)
+            if row is None:
+                raise KeyError(task_id)
+            if (row.attempt_count or 0) >= (row.max_attempts or 3):
+                row.status = ExtractionTaskStatus.DEAD_LETTER.value
+                row.next_retry_at = None
+            else:
+                row.status = ExtractionTaskStatus.RETRY.value
+                delay = max(1, base_delay_seconds) * (2 ** max(0, row.attempt_count - 1))
+                row.next_retry_at = current + timedelta(seconds=delay)
+            row.last_error_code = _safe_extraction_error_code(error_code)
+            row.lease_expires_at = None
+            row.updated_at = current
+            session.flush()
+            return _extraction_task_row_to_pydantic(row)
+
+    def mark_dead(
+        self, task_id: str, *, error_code: str, now: datetime | None = None
+    ) -> ExtractionTask:
+        return self._finish(
+            task_id,
+            status=ExtractionTaskStatus.DEAD_LETTER.value,
+            error_code=error_code,
+            next_retry_at=None,
+            now=now,
+        )
+
+    def retry_dead(
+        self, task_id: str, *, user_id: str, now: datetime | None = None
+    ) -> ExtractionTask | None:
+        current = now or _utcnow_naive()
+        with self.db.session() as session:
+            row = (
+                session.query(ExtractionTaskRow)
+                .filter(
+                    ExtractionTaskRow.task_id == task_id,
+                    ExtractionTaskRow.user_id == user_id,
+                    ExtractionTaskRow.status == ExtractionTaskStatus.DEAD_LETTER.value,
+                )
+                .first()
+            )
+            if row is None:
+                return None
+            row.status = ExtractionTaskStatus.RETRY.value
+            row.attempt_count = 0
+            row.next_retry_at = current
+            row.lease_expires_at = None
+            row.last_error_code = ""
+            row.updated_at = current
+            session.flush()
+            return _extraction_task_row_to_pydantic(row)
+
+    def _finish(
+        self,
+        task_id: str,
+        *,
+        status: str,
+        error_code: str,
+        next_retry_at: datetime | None,
+        now: datetime | None,
+    ) -> ExtractionTask:
+        current = now or _utcnow_naive()
+        with self.db.session() as session:
+            row = session.get(ExtractionTaskRow, task_id)
+            if row is None:
+                raise KeyError(task_id)
+            row.status = status
+            row.last_error_code = _safe_extraction_error_code(error_code)
+            row.next_retry_at = next_retry_at
+            row.lease_expires_at = None
+            row.updated_at = current
+            session.flush()
+            return _extraction_task_row_to_pydantic(row)

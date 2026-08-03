@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable
 
 from memoryhub.adapter.schemas import (
+    FactMemory,
     KnowledgeMemory,
     PreferenceMemory,
     SearchRequest,
@@ -21,20 +22,31 @@ from memoryhub.config import RetrievalConfig
 from memoryhub.storage.vector_engine import BaseVectorEngine, build_sparse_vector
 
 
-def _memory_text(memory: PreferenceMemory | KnowledgeMemory) -> str:
+def _memory_text(memory) -> str:
     """用于建索引的记忆文本：知识记忆拼上名称，偏好记忆用正文"""
     if memory.memory_type == "knowledge":
         return f"{memory.name} {memory.content}".strip()
+    if memory.memory_type == "fact":
+        return memory.content
     return memory.text
 
 
-def _memory_metadata(memory: PreferenceMemory | KnowledgeMemory) -> dict:
+def _memory_metadata(memory) -> dict:
     """检索结果随行的元数据（与 app.py 中 _VectorStoreSearchAdapter 的补全逻辑一致）"""
     return {
         "memory_type": memory.memory_type,
+        "user_id": memory.user_id,
         "content": _memory_text(memory),
         "confidence": memory.confidence,
-        "scope": memory.scope.model_dump(),
+        "scope": (
+            {"scope": memory.scope, "project_id": memory.project_id or ""}
+            if memory.memory_type == "fact" else memory.scope.model_dump()
+        ),
+        **({
+            "subject_id": memory.subject_id,
+            "predicate_id": memory.predicate_id,
+            "object_id": memory.object_id,
+        } if memory.memory_type == "fact" else {}),
     }
 
 
@@ -59,6 +71,7 @@ class MilvusHybridRetriever:
         embedding_fn: Callable[[str], list[float]],
         config: RetrievalConfig | None = None,
         memory_lookup: dict | None = None,
+        fact_store=None,
     ):
         """
         参数:
@@ -72,7 +85,8 @@ class MilvusHybridRetriever:
         self.engine = engine
         self.embedding_fn = embedding_fn
         self.config = config or RetrievalConfig()
-        self.memory_lookup = memory_lookup or {}
+        self.memory_lookup = memory_lookup if memory_lookup is not None else {}
+        self.fact_store = fact_store
 
     def search(self, request: SearchRequest) -> SearchResponse:
         """
@@ -98,6 +112,7 @@ class MilvusHybridRetriever:
 
         results = [self._to_search_result(hit) for hit in hits]
         filtered = self._filter_by_context(results, request)
+        filtered = self._suppress_shadowed_global_facts(filtered, request)
         top_results = filtered[: request.top_k]
 
         latency_ms = (time.perf_counter() - start) * 1000
@@ -124,6 +139,10 @@ class MilvusHybridRetriever:
         """按记忆类型、置信度和场景 scope 过滤结果（与 HybridRetriever 一致）"""
         filtered = []
         for result in results:
+            memory = self.memory_lookup.get(result.memory_id)
+            result_user_id = result.metadata.get("user_id") or getattr(memory, "user_id", "")
+            if result_user_id and result_user_id != request.user_id:
+                continue
             if request.memory_types and result.memory_type:
                 if result.memory_type not in request.memory_types:
                     continue
@@ -134,6 +153,30 @@ class MilvusHybridRetriever:
                 continue
             filtered.append(result)
         return filtered
+
+
+    def _suppress_shadowed_global_facts(
+        self, results: list[SearchResult], request: SearchRequest
+    ) -> list[SearchResult]:
+        if self.fact_store is None or not request.project_id:
+            return results
+        project_facts = self.fact_store.list_facts(
+            status="active", limit=100000, scope="project",
+            project_id=request.project_id, user_id=request.user_id,
+        )
+        shadowed = set()
+        for fact in project_facts:
+            predicate = self.fact_store.get_predicate(fact.predicate_id)
+            if predicate is None or predicate.single_value:
+                shadowed.add((fact.subject_id, fact.predicate_id))
+        kept = []
+        for result in results:
+            scope = result.metadata.get("scope") or {}
+            key = (result.metadata.get("subject_id"), result.metadata.get("predicate_id"))
+            if result.memory_type == "fact" and scope.get("scope") == "global" and key in shadowed:
+                continue
+            kept.append(result)
+        return kept
 
     @staticmethod
     def _scope_conflict(result: SearchResult, request: SearchRequest) -> bool:
@@ -154,16 +197,20 @@ class MilvusHybridRetriever:
         """将检索结果格式化为 SearchResponse（与 HybridRetriever 一致）"""
         preferences: list[PreferenceMemory] = []
         knowledge: list[KnowledgeMemory] = []
+        facts: list[FactMemory] = []
         for result in results:
             memory = self.memory_lookup.get(result.memory_id)
             if isinstance(memory, PreferenceMemory):
                 preferences.append(memory)
             elif isinstance(memory, KnowledgeMemory):
                 knowledge.append(memory)
+            elif getattr(memory, "memory_type", "") == "fact":
+                facts.append(FactMemory.model_validate(memory))
         return SearchResponse(
             results=results,
             preferences=preferences,
             knowledge=knowledge,
+            facts=facts,
             latency_ms=round(latency_ms, 2),
             total_count=len(results),
         )

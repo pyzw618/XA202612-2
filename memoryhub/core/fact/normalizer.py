@@ -19,7 +19,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from openai import OpenAI
+from .llm import build_chat_client
 
 from .models import Entity, PredicateDef
 from .store import FactStore
@@ -43,10 +43,10 @@ KEYWORD_CONFIDENT_THRESHOLD = 0.85
 PREDICATE_KEYWORD_THRESHOLD = 0.45  # 谓词短，阈值放低
 
 
-def _build_llm_client(api_key: str = "") -> OpenAI:
-    import os
-    key = api_key or os.environ.get("DEEPSEEK_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
-    return OpenAI(api_key=key, base_url=DEEPSEEK_BASE_URL)
+def _build_llm_client(api_key: str = "", llm_client=None):
+    return build_chat_client(
+        api_key=api_key, llm_client=llm_client, base_url=DEEPSEEK_BASE_URL
+    )
 
 
 # ─── 实体归一化 ───────────────────────────────────────────────────────
@@ -69,9 +69,9 @@ class EntityNormalizer:
     VEC_THRESHOLD_FALLBACK = 0.78  # char n-gram 阈值
     VEC_MIN_GAP = 0.12         # top-1 与 top-2 的最小分差（防歧义）
 
-    def __init__(self, store: FactStore, api_key: str = ""):
+    def __init__(self, store: FactStore, api_key: str = "", llm_client=None):
         self.store = store
-        self._llm = _build_llm_client(api_key)
+        self._llm = _build_llm_client(api_key, llm_client)
         self._index = EmbeddingIndex()
         self._using_st = self._check_st_available()
         self._vec_threshold = self.VEC_THRESHOLD_ST if self._using_st else self.VEC_THRESHOLD_FALLBACK
@@ -98,7 +98,7 @@ class EntityNormalizer:
             )
         logger.info(f"实体索引已构建: {len(self._index)} 条")
 
-    def normalize(self, text: str, entity_type: str) -> str:
+    def normalize(self, text: str, entity_type: str, user_id: str = "default") -> str:
         """
         Args:
             text: 原始文本中的实体名
@@ -106,48 +106,55 @@ class EntityNormalizer:
         """
         text = text.strip()
         if not text:
-            return Entity.make_id(entity_type, "unknown")
+            return Entity.make_id(entity_type, "unknown", user_id)
 
         # ── 1. 同 type 内精确匹配 aliases ──
-        matches = self.store.find_entity_by_name(text, entity_type)
+        matches = self.store.find_entity_by_name(text, entity_type, user_id=user_id)
         if matches:
             eid = matches[0].entity_id
-            self._add_alias_if_new(eid, text)
+            self._add_alias_if_new(eid, text, user_id=user_id)
             return eid
 
         # ── 2. 同 type 内精确匹配 canonical_name ──
-        all_same = self.store.list_entities_by_type(entity_type)
+        all_same = self.store.list_entities_by_type(entity_type, user_id=user_id)
         for ent in all_same:
             if ent.canonical_name.strip().lower() == text.lower():
-                self._add_alias_if_new(ent.entity_id, text)
+                self._add_alias_if_new(ent.entity_id, text, user_id=user_id)
                 return ent.entity_id
 
         # ── 3. 关键词 bigram 包含度 → 高分直接命中 ──
-        keyword_hit = self._keyword_match(text, entity_type)
+        keyword_hit = self._keyword_match(text, entity_type, user_id=user_id)
         if keyword_hit:
             eid = keyword_hit
-            self._add_alias_if_new(eid, text)
+            self._add_alias_if_new(eid, text, user_id=user_id)
             logger.info(f"关键词直接命中: '{text}' → {eid}")
             return eid
 
         # ── 4. 向量粗筛 → 高分直接命中 / 否则 LLM 精判 ──
         type_prefix = f"entity:{entity_type.lower()}:"
-        candidates = self._index.search(text, top_k=VECTOR_SEARCH_LIMIT, type_filter=[type_prefix])
+        candidates = self._index.search(
+            text, top_k=max(VECTOR_SEARCH_LIMIT, len(self._index)),
+            type_filter=[type_prefix],
+        )
+        candidates = [
+            item for item in candidates
+            if self.store.get_entity(item[0], user_id=user_id) is not None
+        ][:VECTOR_SEARCH_LIMIT]
         if candidates:
             # 高分 + 无歧义 → 直接命中，跳过 LLM
             if self._vector_confident(candidates):
                 eid = candidates[0][0]
-                self._add_alias_if_new(eid, text)
+                self._add_alias_if_new(eid, text, user_id=user_id)
                 logger.info(f"向量直接命中: '{text}' → {eid} (score={candidates[0][1]:.3f})")
                 return eid
             # 否则 LLM 精判（低分也可能匹配，LLM 说了算）
-            eid = self._llm_disambiguate(text, entity_type, candidates)
+            eid = self._llm_disambiguate(text, entity_type, candidates, user_id=user_id)
             if eid:
-                self._add_alias_if_new(eid, text)
+                self._add_alias_if_new(eid, text, user_id=user_id)
                 return eid
 
         # ── 5. 创建新实体 ──
-        return self._create_entity(text, entity_type)
+        return self._create_entity(text, entity_type, user_id=user_id)
 
     def _vector_confident(self, candidates: list[tuple[str, float]]) -> bool:
         """
@@ -167,7 +174,7 @@ class EntityNormalizer:
                 return False
         return True
 
-    def _keyword_match(self, text: str, entity_type: str) -> Optional[str]:
+    def _keyword_match(self, text: str, entity_type: str, user_id: str = "default") -> Optional[str]:
         """
         关键词匹配：遍历同类型实体的所有名字，
         bigram 包含度 ≥ KEYWORD_CONFIDENT_THRESHOLD 的直接返回实体 ID。
@@ -176,7 +183,7 @@ class EntityNormalizer:
         best_eid = None
         best_score = 0.0
 
-        for ent in self.store.list_entities_by_type(entity_type):
+        for ent in self.store.list_entities_by_type(entity_type, user_id=user_id):
             # 组装该实体的所有名字
             names = [ent.canonical_name] + ent.aliases
             for name in names:
@@ -189,7 +196,7 @@ class EntityNormalizer:
             return best_eid
         return None
 
-    def _create_entity(self, text: str, entity_type: str) -> str:
+    def _create_entity(self, text: str, entity_type: str, user_id: str = "default") -> str:
         """创建新实体，知名类型用 LLM 生成别名 + 后续归一化命中时自动追加"""
         # 只对 Organization/Location 调 LLM 生成别名（人名的别名不可靠，靠实际使用长出来）
         guessed_aliases = self._generate_aliases(text, entity_type) \
@@ -204,10 +211,11 @@ class EntityNormalizer:
                 seen.add(a)
 
         entity = Entity(
-            entity_id=Entity.make_id(entity_type, text),
+            entity_id=Entity.make_id(entity_type, text, user_id),
             canonical_name=text,
             entity_type=entity_type,
             aliases=all_aliases,
+            user_id=user_id,
         )
         self.store.upsert_entity(entity)
         self._index.add(entity.entity_id, entity.canonical_name, entity.aliases)
@@ -241,11 +249,12 @@ class EntityNormalizer:
         return []
 
     def _llm_disambiguate(self, name: str, entity_type: str,
-                          candidates: list[tuple[str, float]]) -> Optional[str]:
+                          candidates: list[tuple[str, float]],
+                          user_id: str = "default") -> Optional[str]:
         """只在 top-k 候选中让 LLM 判断"""
         existing_str = ""
         for cid, score in candidates:
-            ent = self.store.get_entity(cid)
+            ent = self.store.get_entity(cid, user_id=user_id)
             if ent:
                 existing_str += (
                     f"  ID: {ent.entity_id} | 规范名: {ent.canonical_name} "
@@ -276,22 +285,22 @@ class EntityNormalizer:
             if data.get("is_new"):
                 return None
             eid = data.get("entity_id", "")
-            if self.store.get_entity(eid):
+            if self.store.get_entity(eid, user_id=user_id):
                 logger.info(f"LLM 匹配实体: '{name}' → {eid}")
                 return eid
         except Exception as e:
             logger.warning(f"实体 LLM 归一化失败: {e}")
         return None
 
-    def _add_alias_if_new(self, entity_id: str, alias: str):
-        entity = self.store.get_entity(entity_id)
+    def _add_alias_if_new(self, entity_id: str, alias: str, user_id: str = "default"):
+        entity = self.store.get_entity(entity_id, user_id=user_id)
         if entity and alias not in entity.aliases:
             entity.aliases.append(alias)
             self.store.upsert_entity(entity)
             self._index.add(entity.entity_id, entity.canonical_name, entity.aliases)
 
-    def add_alias(self, entity_id: str, alias: str):
-        self._add_alias_if_new(entity_id, alias)
+    def add_alias(self, entity_id: str, alias: str, user_id: str = "default"):
+        self._add_alias_if_new(entity_id, alias, user_id=user_id)
 
 
 # ─── 谓词归一化 ──────────────────────────────────────────────────────
@@ -311,9 +320,9 @@ class PredicateNormalizer:
     VEC_THRESHOLD_FALLBACK = 0.82
     VEC_MIN_GAP = 0.12
 
-    def __init__(self, store: FactStore, ontology_path: Optional[str] = None, api_key: str = ""):
+    def __init__(self, store: FactStore, ontology_path: Optional[str] = None, api_key: str = "", llm_client=None):
         self.store = store
-        self._llm = _build_llm_client(api_key)
+        self._llm = _build_llm_client(api_key, llm_client)
         self._alias_to_id: dict[str, str] = {}
         self._index = EmbeddingIndex()
         self._using_st = EntityNormalizer._check_st_available()

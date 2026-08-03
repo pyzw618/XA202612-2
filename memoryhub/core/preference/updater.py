@@ -58,8 +58,11 @@ class ConflictDetector:
                 f"Respond with JSON: {{\"conflict\": true/false}}"
             )
             try:
-                res = self.llm_client.generate("You are a semantic evaluator.", prompt)
-                return json.loads(res).get("conflict", False)
+                res = self.llm_client.generate(
+                    prompt, system_prompt="You are a semantic evaluator."
+                )
+                content = res.content if hasattr(res, "content") else str(res)
+                return json.loads(content).get("conflict", False)
             except Exception:
                 pass
 
@@ -104,11 +107,21 @@ class ConflictResolver:
 class PreferenceUpdater:
     """偏好更新与持久化/中长期版本管理器"""
 
-    def __init__(self, llm_client=None, db_client=None, pref_repo=None):
+    def __init__(
+        self,
+        llm_client=None,
+        db_client=None,
+        pref_repo=None,
+        conflict_repo=None,
+        write_service=None,
+    ):
         self.detector = ConflictDetector(llm_client=llm_client)
         self.resolver = ConflictResolver()
         self.db_client = db_client
         self.pref_repo = pref_repo
+        self.conflict_repo = conflict_repo
+        self.write_service = write_service
+        self._mock_db: dict[str, PreferenceMemory] = {}
 
     def add(self, preference: PreferenceMemory) -> str:
         """新增或更新偏好"""
@@ -131,6 +144,7 @@ class PreferenceUpdater:
                 e.decision = decision
 
         conflict_rec = ConflictRecord(
+            user_id=preference.user_id,
             old_memory_id=existing_pref.memory_id,
             new_memory_id=preference.memory_id,
             memory_type="preference",
@@ -145,8 +159,9 @@ class PreferenceUpdater:
 
         elif decision == ConflictDecision.MERGE:
             merged = self.merge(existing_pref, preference)
-            self._save(merged)
             self._save(existing_pref, new_status=MemoryStatus.ARCHIVED)
+            self._save(merged)
+            self._record_conflict(conflict_rec, merged.memory_id)
             return merged.memory_id
 
         elif decision == ConflictDecision.COEXIST:
@@ -155,6 +170,7 @@ class PreferenceUpdater:
             preference.created_at = datetime.now(timezone.utc)
             preference.updated_at = datetime.now(timezone.utc)
             self._save(preference)
+            self._record_conflict(conflict_rec, preference.memory_id)
             return preference.memory_id
 
         else:
@@ -164,6 +180,7 @@ class PreferenceUpdater:
             preference.created_at = datetime.now(timezone.utc)
             preference.updated_at = datetime.now(timezone.utc)
             self._save(preference)
+            self._record_conflict(conflict_rec, preference.memory_id)
             return preference.memory_id
 
     def update(self, memory_id: str, new_pref: PreferenceMemory, conflict_rec=None) -> str:
@@ -182,17 +199,28 @@ class PreferenceUpdater:
         old_pref.updated_at = datetime.now(timezone.utc)
         self._save(old_pref)
         new_pref.status = MemoryStatus.ACTIVE
+        new_pref.parent_id = old_pref.memory_id
+        new_pref.root_id = old_pref.root_id or old_pref.memory_id
+        new_pref.version = old_pref.version + 1
         new_pref.updated_at = datetime.now(timezone.utc)
         self._save(new_pref)
+        if conflict_rec is not None:
+            self._record_conflict(conflict_rec, new_pref.memory_id)
 
         return new_pref.memory_id
 
     def merge(self, pref_a: PreferenceMemory, pref_b: PreferenceMemory) -> PreferenceMemory:
-        """合并两条偏好"""
-        pref_a.updated_at = datetime.now(timezone.utc)
-        pref_a.confidence = max(pref_a.confidence, pref_b.confidence)
-        pref_a.evidences = pref_a.evidences + pref_b.evidences
-        return pref_a
+        """Create a new active version without mutating the archived parent."""
+        merged = pref_b.model_copy(deep=True)
+        merged.parent_id = pref_a.memory_id
+        merged.root_id = pref_a.root_id or pref_a.memory_id
+        merged.version = pref_a.version + 1
+        merged.status = MemoryStatus.ACTIVE
+        merged.confidence = max(pref_a.confidence, pref_b.confidence)
+        merged.evidences = [*pref_a.evidences, *pref_b.evidences]
+        merged.created_at = datetime.now(timezone.utc)
+        merged.updated_at = datetime.now(timezone.utc)
+        return merged
 
     def archive(self, memory_id: str):
         """归档偏好"""
@@ -206,29 +234,64 @@ class PreferenceUpdater:
         """获取版本链"""
         if self.pref_repo is not None:
             return self.pref_repo.get_version_chain(memory_id)
-        return []
+        current = self._mock_db.get(memory_id)
+        chain: list[PreferenceMemory] = []
+        visited: set[str] = set()
+        while current is not None and current.memory_id not in visited:
+            chain.append(current)
+            visited.add(current.memory_id)
+            current = self._mock_db.get(current.parent_id) if current.parent_id else None
+        chain.reverse()
+        return chain
 
     def _find_existing(self, preference: PreferenceMemory):
         """查找当前活跃的候选旧偏好"""
         if self.pref_repo is not None:
             candidates = self.pref_repo.get_active(preference.user_id)
-            for pref in candidates:
-                if (
-                    pref.preference_type == preference.preference_type
-                    and self.detector.check_preference(pref, preference)
-                ):
-                    return pref
+        else:
+            candidates = [
+                pref for pref in self._mock_db.values()
+                if pref.user_id == preference.user_id
+                and pref.status == MemoryStatus.ACTIVE
+            ]
+        for pref in candidates:
+            same_type = pref.preference_type == preference.preference_type
+            scope_overlap = (
+                pref.is_global
+                or preference.is_global
+                or (
+                    pref.scope.scene in ("*", preference.scope.scene)
+                    or preference.scope.scene in ("*", pref.scope.scene)
+                )
+                and (
+                    pref.scope.task_type in ("*", preference.scope.task_type)
+                    or preference.scope.task_type in ("*", pref.scope.task_type)
+                )
+            )
+            if same_type and scope_overlap:
+                return pref
         return None
 
     def _get(self, memory_id: str):
         """获取偏好"""
         if self.pref_repo is not None:
             return self.pref_repo.get_by_id(memory_id)
-        return None
+        return self._mock_db.get(memory_id)
+
+    def _record_conflict(self, conflict: ConflictRecord, result_id: str) -> None:
+        conflict.result_memory_id = result_id
+        if conflict.decision != ConflictDecision.PENDING:
+            conflict.resolved_at = datetime.now(timezone.utc)
+        if self.conflict_repo is not None:
+            self.conflict_repo.save(conflict)
 
     def _save(self, preference: PreferenceMemory, new_status=None):
-        """持久化偏好"""
+        """Persist and synchronize one preference version."""
         if new_status is not None:
             preference.status = new_status
-        if self.pref_repo is not None:
+        if self.write_service is not None:
+            self.write_service.upsert_memory(preference)
+        elif self.pref_repo is not None:
             self.pref_repo.save(preference)
+        else:
+            self._mock_db[preference.memory_id] = preference

@@ -1,114 +1,133 @@
-"""自动遗忘引擎 — 基于健康度的被动遗忘"""
+"""Automatic forgetting based on memory health."""
 
 import logging
 
-from memoryhub.adapter.schemas import MemoryLevel, MemoryStatus
+from memoryhub.adapter.schemas import (
+    KnowledgeMemory, MemoryLevel, MemoryStatus, PreferenceMemory,
+)
 from memoryhub.core.forget.health import HealthCalculator
 
 logger = logging.getLogger(__name__)
 
 
 class AutoForgetEngine:
-    """
-    自动遗忘引擎：定期扫描所有活跃记忆，基于健康度决定归档/降级/审查。
+    """Scan active preference, knowledge, and fact memories for lifecycle actions."""
 
-    使用方式:
-        engine = AutoForgetEngine(pref_repo=pref_repo, know_repo=know_repo, db=db)
-        stats = engine.run()
-    """
+    ARCHIVE_THRESHOLD = 0.2
+    DEMOTE_THRESHOLD = 0.4
+    REVIEW_THRESHOLD = 0.6
 
-    ARCHIVE_THRESHOLD = 0.2   # 健康度 < 0.2 → 归档
-    DEMOTE_THRESHOLD = 0.4    # 健康度 < 0.4 → 降级
-    REVIEW_THRESHOLD = 0.6    # 健康度 < 0.6 → 待审查
-
-    def __init__(self, pref_repo=None, know_repo=None, db=None, calculator=None):
-        """
-        参数:
-            pref_repo: PreferenceRepository 实例
-            know_repo: KnowledgeRepository 实例
-            db: Database 实例（向后兼容）
-            calculator: HealthCalculator 实例
-        """
+    def __init__(
+        self,
+        pref_repo=None,
+        know_repo=None,
+        db=None,
+        calculator=None,
+        fact_store=None,
+        fact_index_service=None,
+    ):
         self.pref_repo = pref_repo
         self.know_repo = know_repo
         self.db = db
+        self.fact_store = fact_store
+        self.fact_index_service = fact_index_service
         self.calculator = calculator or HealthCalculator()
 
     def run(self) -> dict:
-        """
-        执行一次自动遗忘扫描。
-
-        返回:
-            {"archived": int, "demoted": int, "reviewed": int, "kept": int}
-        """
         stats = {"archived": 0, "demoted": 0, "reviewed": 0, "kept": 0}
-
-        active_memories = self._load_active_memories()
-
-        for memory in active_memories:
-            health = self.calculator.calculate(memory)
-
+        for memory in self._load_active_memories():
+            is_fact = getattr(memory, "memory_type", "") == "fact"
+            health = (
+                self.calculator.calculate_from_row(memory)
+                if is_fact else self.calculator.calculate(memory)
+            )
             if health < self.ARCHIVE_THRESHOLD:
                 self._update_status(memory, MemoryStatus.ARCHIVED, health)
                 stats["archived"] += 1
             elif health < self.DEMOTE_THRESHOLD:
-                new_level = self._demote_level(memory)
-                self._update_level(memory, new_level, health)
-                stats["demoted"] += 1
+                if is_fact:
+                    self._update_status(memory, MemoryStatus.PENDING, health)
+                    stats["reviewed"] += 1
+                else:
+                    self._update_level(memory, self._demote_level(memory), health)
+                    stats["demoted"] += 1
             elif health < self.REVIEW_THRESHOLD:
                 self._update_status(memory, MemoryStatus.PENDING, health)
                 stats["reviewed"] += 1
             else:
                 stats["kept"] += 1
-
-        logger.info(f"自动遗忘扫描完成: {stats}")
+        logger.info("????????: %s", stats)
         return stats
 
     def _load_active_memories(self) -> list:
-        """从数据库加载所有活跃记忆"""
         memories = []
         if self.pref_repo is not None:
             memories.extend(self.pref_repo.list_all(status="active"))
         if self.know_repo is not None:
             memories.extend(self.know_repo.list_all(status="active"))
+        if self.fact_store is not None:
+            memories.extend(self.fact_store.list_facts(status="active", limit=100000))
         return memories
 
     def _update_status(self, memory, status: MemoryStatus, health: float):
-        """更新记忆状态"""
+        status_value = status.value if hasattr(status, "value") else str(status)
+        if getattr(memory, "memory_type", "") == "fact":
+            if self.fact_store is None:
+                return
+            try:
+                changed = self.fact_store.update_fact_status(
+                    memory.fact_id, status_value, user_id=memory.user_id
+                )
+                if changed and self.fact_index_service is not None:
+                    current = self.fact_store.get_fact(
+                        memory.fact_id, user_id=memory.user_id
+                    )
+                    if current is not None:
+                        self.fact_index_service.sync_fact(current)
+            except Exception as exc:
+                logger.warning("???????? %s: %s", memory.fact_id, exc)
+            return
+
         repo = self._repo_for(memory)
         if repo is not None:
             try:
-                repo.update_status(memory.memory_id, status.value if hasattr(status, "value") else str(status))
-            except Exception as e:
-                logger.warning(f"更新记忆状态失败 {memory.memory_id}: {e}")
+                memory.status = status
+                memory.health_score = health
+                write_service = getattr(repo, "write_service", None)
+                if write_service is not None:
+                    write_service.upsert_memory(memory)
+                else:
+                    repo.update_status(
+                        memory.memory_id, status_value, user_id=memory.user_id
+                    )
+            except Exception as exc:
+                logger.warning("?????????? %s: %s", memory.memory_id, exc)
 
     def _update_level(self, memory, level: MemoryLevel, health: float):
-        """更新记忆级别"""
         repo = self._repo_for(memory)
         if repo is not None:
             try:
-                level_str = level.value if hasattr(level, "value") else str(level)
-                repo.update_status(memory.memory_id, memory.status.value if hasattr(memory.status, "value") else str(memory.status))
-            except Exception as e:
-                logger.warning(f"更新记忆级别失败 {memory.memory_id}: {e}")
+                memory.level = level
+                memory.health_score = health
+                write_service = getattr(repo, "write_service", None)
+                if write_service is not None:
+                    write_service.upsert_memory(memory)
+                else:
+                    repo.save(memory)
+            except Exception as exc:
+                logger.warning("???????? %s: %s", memory.memory_id, exc)
 
-    def _demote_level(self, memory) -> MemoryLevel:
-        """根据当前级别确定降级目标"""
-        current = memory.level
-        if hasattr(current, "value"):
-            current = current.value
-        demotion_map = {
+    @staticmethod
+    def _demote_level(memory) -> MemoryLevel:
+        current = memory.level.value if hasattr(memory.level, "value") else memory.level
+        return {
             "long": MemoryLevel.MID,
             "mid": MemoryLevel.SHORT,
-        }
-        return demotion_map.get(str(current).lower(), MemoryLevel.SHORT)
+        }.get(str(current).lower(), MemoryLevel.SHORT)
 
     def _repo_for(self, memory):
-        """根据记忆类型返回对应的 Repository"""
-        memory_type = getattr(memory, "memory_type", "")
-        if memory_type == "preference":
+        if isinstance(memory, PreferenceMemory):
             return self.pref_repo
-        elif memory_type == "knowledge":
+        if isinstance(memory, KnowledgeMemory):
             return self.know_repo
-        # fallback: try both
-        return self.pref_repo or self.know_repo
+        return None

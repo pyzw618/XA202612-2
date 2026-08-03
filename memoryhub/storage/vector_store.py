@@ -95,6 +95,13 @@ class VectorStore:
         self.reverse_map[memory_id] = idx
         self._next_id += 1
 
+    def update(self, memory_id: str, vector: list[float]) -> None:
+        """Upsert one vector without leaving a stale same-ID vector searchable."""
+        if memory_id in self.reverse_map:
+            self._removed_ids.add(memory_id)
+            self.rebuild_index()
+        self.add(memory_id, vector)
+
     def batch_add(self, items: list[tuple[str, list[float]]]) -> None:
         """
         批量添加向量。
