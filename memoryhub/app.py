@@ -258,11 +258,15 @@ def create_app(
         from memoryhub.retrieval.keyword_search import KeywordSearcher
         from memoryhub.retrieval.milvus_hybrid import MilvusHybridRetriever
         from memoryhub.retrieval.reranker import Reranker
+        from memoryhub.storage.compensation_task import (
+            PendingIndexCompensationTask,
+        )
         from memoryhub.storage.database import (
             Database,
             KnowledgeRepository,
             PreferenceRepository,
         )
+        from memoryhub.storage.sync_service import MemorySyncService
         from memoryhub.storage.vector_engine import create_vector_engine
         from memoryhub.storage.vector_store import VectorStore
 
@@ -330,34 +334,6 @@ def create_app(
             if config.vector_engine.so_path:
                 engine_kwargs["so_path"] = config.vector_engine.so_path
             vector_engine = create_vector_engine(engine_provider, **engine_kwargs)
-            # SQLite 作为唯一事实源；Milvus 是可重建的检索投影。
-            # 启动时只同步 pending_index=True 的记录，避免每次全量 embedding 和重复插入。
-            pending_memories = [*pref_repo.list_pending(), *know_repo.list_pending()]
-            if pending_memories:
-                index_version += 1
-                batch_items = []
-                for memory in pending_memories:
-                    text = _memory_text(memory)
-                    batch_items.append(
-                        (
-                            memory.memory_id,
-                            text,
-                            embedding_client.embed(text),
-                            _memory_metadata(memory),
-                        )
-                    )
-                failed_ids = vector_engine.upsert_batch(batch_items)
-                succeeded_ids = [
-                    m.memory_id for m in pending_memories if m.memory_id not in failed_ids
-                ]
-                pending_pref_ids = {p.memory_id for p in pref_repo.list_pending()}
-                pending_know_ids = {k.memory_id for k in know_repo.list_pending()}
-                pref_ids = [m for m in succeeded_ids if m in pending_pref_ids]
-                know_ids = [m for m in succeeded_ids if m in pending_know_ids]
-                if pref_ids:
-                    pref_repo.mark_indexed(pref_ids, index_version)
-                if know_ids:
-                    know_repo.mark_indexed(know_ids, index_version)
         else:
             raise ValueError(f"unknown vector_engine provider: {engine_provider}")
 
@@ -370,38 +346,16 @@ def create_app(
             ttl_seconds=config.retrieval.cache_ttl_seconds,
         )
 
-        index_version_str = str(index_version)
-
-        # 索引版本号：后续由写入/同步链路维护（TASK-009）；当前使用固定占位值，
-        # 仅保证缓存键结构已就绪。
-        index_version = "1"
-
-        app.state.db = db
-        app.state.pref_repo = pref_repo
-        app.state.know_repo = know_repo
-        app.state.vector_store = vector_store
-        app.state.vector_engine = vector_engine
-        app.state.embedding_client = embedding_client
-
-        if config.runtime.is_production:
+        if config.runtime.is_production or vector_engine is not None:
             # 生产路径：仅装配 MilvusHybridRetriever，不构建 KeywordSearcher / HybridRetriever
-            app.state.retriever = MilvusHybridRetriever(
+            retriever = MilvusHybridRetriever(
                 engine=vector_engine,
                 embedding_fn=embedding_client.embed,
                 config=config.retrieval,
+                runtime_config=config.runtime,
                 memory_lookup=memory_lookup,
                 cache=cache,
-                index_version=index_version_str,
-            )
-        elif vector_engine is not None:
-            # development/test 使用 milvus / milvus_mock
-            app.state.retriever = MilvusHybridRetriever(
-                engine=vector_engine,
-                embedding_fn=embedding_client.embed,
-                config=config.retrieval,
-                memory_lookup=memory_lookup,
-                cache=cache,
-                index_version=index_version_str,
+                index_version=str(index_version),
             )
         else:
             # 关键词索引：BM25 索引可重建，启动时从 SQLite 全量构建
@@ -417,7 +371,7 @@ def create_app(
                         for m in memories
                     ]
                 )
-            app.state.retriever = HybridRetriever(
+            retriever = HybridRetriever(
                 vector_search=vector_search_adapter,
                 keyword_search=keyword_search,
                 reranker=Reranker(),
@@ -426,6 +380,40 @@ def create_app(
                 embedding_fn=embedding_client.embed,
                 memory_lookup=memory_lookup,
             )
+
+        # 写入同步服务：SQLite 事实源 ↔ Milvus 检索投影
+        sync_service = MemorySyncService(
+            pref_repo=pref_repo,
+            know_repo=know_repo,
+            embedding_client=embedding_client,
+            vector_engine=vector_engine,
+            cache=cache,
+            retriever=retriever if isinstance(retriever, MilvusHybridRetriever) else None,
+            index_version=index_version,
+            config=config,
+        )
+
+        # 启动时仅同步 pending_index 记录，禁止全量重建
+        sync_service.repair_at_startup()
+
+        # 启动异步补偿任务，持续扫描 pending_index 并重试
+        compensation_task = PendingIndexCompensationTask(
+            sync_service=sync_service,
+            interval_seconds=30.0,
+            enabled=vector_engine is not None,
+        )
+        compensation_task.start()
+
+        app.state.db = db
+        app.state.pref_repo = pref_repo
+        app.state.know_repo = know_repo
+        app.state.vector_store = vector_store
+        app.state.vector_engine = vector_engine
+        app.state.embedding_client = embedding_client
+        app.state.cache = cache
+        app.state.retriever = retriever
+        app.state.sync_service = sync_service
+        app.state.compensation_task = compensation_task
 
     @app.on_event("shutdown")
     async def shutdown():
@@ -441,6 +429,15 @@ def create_app(
             finally:
                 app.state.user_rule_service = None
                 app.state.owns_user_rule_service = False
+        # 停止 pending_index 补偿任务
+        compensation_task = getattr(app.state, "compensation_task", None)
+        if compensation_task is not None:
+            try:
+                compensation_task.stop()
+            except Exception:
+                pass
+            app.state.compensation_task = None
+
         # 保存向量索引并关闭数据库
         vector_store = getattr(app.state, "vector_store", None)
         if vector_store is not None:

@@ -9,11 +9,13 @@
 
 from typing import Any
 
+from memoryhub.storage.vector_engine._milvus_ctypes import MilvusEngineError
 from memoryhub.storage.vector_engine.base import BaseVectorEngine, VectorSearchResult
 from memoryhub.storage.vector_engine.sparse import build_sparse_vector
 
 __all__ = [
     "BaseVectorEngine",
+    "MilvusEngineError",
     "VectorSearchResult",
     "build_sparse_vector",
     "create_vector_engine",

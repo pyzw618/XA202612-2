@@ -302,6 +302,14 @@ class MilvusVectorEngine(BaseVectorEngine):
             future = self._executor.submit(fn)
             return future.result(timeout=timeout_ms / 1000.0)
         except TimeoutError:
+            logger.warning(
+                "milvus_timeout_alert: %s",
+                {
+                    "operation": operation,
+                    "timeout_ms": timeout_ms,
+                    "code": "milvus.timeout",
+                },
+            )
             raise MilvusEngineError(f"milvus.timeout: {operation} 超过 {timeout_ms}ms") from None
         except MilvusEngineError:
             raise

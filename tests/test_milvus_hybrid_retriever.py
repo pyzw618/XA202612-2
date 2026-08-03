@@ -12,9 +12,11 @@ from memoryhub.adapter.schemas import (
     SearchRequest,
     SearchResponse,
 )
-from memoryhub.config import RetrievalConfig
+from memoryhub.config import RetrievalConfig, RuntimeConfig
+from memoryhub.embedding import KylinEmbeddingError
 from memoryhub.retrieval.cache import SearchCache
 from memoryhub.retrieval.milvus_hybrid import MilvusHybridRetriever
+from memoryhub.storage.vector_engine import MilvusEngineError
 from memoryhub.storage.vector_engine.base import BaseVectorEngine, VectorSearchResult
 
 
@@ -276,7 +278,9 @@ class TestMilvusHybridRetrieverSearch:
             config=RetrievalConfig(candidate_multiplier=2),
             memory_lookup=memories,
         )
-        response = retriever.search(SearchRequest(query="周报", top_k=5, memory_types=["knowledge"]))
+        response = retriever.search(
+            SearchRequest(query="周报", top_k=5, memory_types=["knowledge"])
+        )
         assert response.total_count == 1
         assert response.results[0].memory_id == "k1"
 
@@ -327,3 +331,180 @@ class TestMilvusHybridRetrieverSearch:
         )
         assert response.total_count == 1
         assert response.results[0].memory_id == "m1"
+
+    def test_metrics_collector_receives_segmented_timings(self) -> None:
+        """检索完成后 metrics_collector 应收到包含各阶段耗时与延迟预算的字典。"""
+        engine = FakeVectorEngine()
+        engine.set_results(
+            [VectorSearchResult(memory_id="m1", content="c1", score=0.9)]
+        )
+        collected: list[dict] = []
+
+        def collector(metrics: dict[str, float]) -> None:
+            collected.append(metrics)
+
+        retriever = MilvusHybridRetriever(
+            engine=engine,
+            embedding_fn=_embedding_fn,
+            config=RetrievalConfig(
+                candidate_multiplier=2,
+                target_p95_ms=350,
+                target_p99_ms=500,
+            ),
+            metrics_collector=collector,
+        )
+        response = retriever.search(SearchRequest(query="周报", top_k=3))
+        assert response.total_count == 1
+        assert len(collected) == 1
+        metrics = collected[0]
+        expected_keys = {
+            "validate_ms",
+            "result_cache_ms",
+            "embedding_ms",
+            "sparse_ms",
+            "hybrid_search_ms",
+            "filter_ms",
+            "sqlite_lookup_ms",
+            "serialize_ms",
+            "total_ms",
+            "budget_p95_ms",
+            "budget_p99_ms",
+            "cache_hit",
+            "vector_cache_hit",
+        }
+        assert expected_keys.issubset(set(metrics.keys()))
+        assert metrics["total_ms"] >= 0
+        assert metrics["budget_p95_ms"] == 350.0
+        assert metrics["budget_p99_ms"] == 500.0
+        assert metrics["cache_hit"] == 0.0
+
+    def test_cache_hit_metrics_collector(self) -> None:
+        """结果缓存命中时 metrics_collector 应收到 cache_hit=1.0。"""
+        engine = FakeVectorEngine()
+        engine.set_results(
+            [VectorSearchResult(memory_id="m1", content="c1", score=0.9)]
+        )
+        cache = SearchCache(max_size=10, ttl_seconds=300)
+        collected: list[dict] = []
+
+        retriever = MilvusHybridRetriever(
+            engine=engine,
+            embedding_fn=_embedding_fn,
+            config=RetrievalConfig(candidate_multiplier=2),
+            cache=cache,
+            index_version="v1",
+            metrics_collector=collected.append,
+        )
+        retriever.search(SearchRequest(query="周报", top_k=3))
+        retriever.search(SearchRequest(query="周报", top_k=3))
+        assert len(collected) == 2
+        assert collected[0]["cache_hit"] == 0.0
+        assert collected[1]["cache_hit"] == 1.0
+
+    def test_production_mode_raises_on_embedding_timeout(self) -> None:
+        """生产模式 Embedding 超时不得降级，必须抛出稳定错误。"""
+        engine = FakeVectorEngine()
+
+        def failing_embedding(_text: str) -> list[float]:
+            raise KylinEmbeddingError("embedding.timeout: embed 超过 250ms")
+
+        retriever = MilvusHybridRetriever(
+            engine=engine,
+            embedding_fn=failing_embedding,
+            runtime_config=RuntimeConfig(mode="production", allow_fallback=False),
+        )
+        with pytest.raises(KylinEmbeddingError):
+            retriever.search(SearchRequest(query="周报", top_k=3))
+
+    def test_production_mode_raises_on_milvus_timeout(self) -> None:
+        """生产模式 Milvus 超时不得降级，必须抛出稳定错误。"""
+
+        class FailingEngine(BaseVectorEngine):
+            dimension = 768
+
+            def hybrid_search(self, dense_vector, sparse_terms, top_k):
+                raise MilvusEngineError("milvus.timeout: hybrid_search 超过 120ms")
+
+            def insert(self, memory_id, text, vector, metadata=None):
+                pass
+
+            def search(self, query_vector, top_k, filters=None):
+                return []
+
+            def delete(self, memory_id):
+                pass
+
+            def persist(self):
+                pass
+
+            def close(self):
+                pass
+
+        retriever = MilvusHybridRetriever(
+            engine=FailingEngine(),
+            embedding_fn=_embedding_fn,
+            runtime_config=RuntimeConfig(mode="production", allow_fallback=False),
+        )
+        with pytest.raises(MilvusEngineError):
+            retriever.search(SearchRequest(query="周报", top_k=3))
+
+    def test_dev_mode_with_fallback_calls_fallback_on_embedding_timeout(self) -> None:
+        """development/test 模式 allow_fallback=True 且提供 fallback 时，超时后应降级。"""
+        engine = FakeVectorEngine()
+        fallback_response = SearchResponse(
+            results=[],
+            preferences=[],
+            knowledge=[],
+            latency_ms=1.0,
+            total_count=0,
+        )
+        fallback_calls: list[SearchRequest] = []
+
+        def fallback_retriever(req: SearchRequest) -> SearchResponse:
+            fallback_calls.append(req)
+            return fallback_response
+
+        def failing_embedding(_text: str) -> list[float]:
+            raise KylinEmbeddingError("embedding.timeout: embed 超过 250ms")
+
+        retriever = MilvusHybridRetriever(
+            engine=engine,
+            embedding_fn=failing_embedding,
+            runtime_config=RuntimeConfig(mode="development", allow_fallback=True),
+            fallback_retriever=fallback_retriever,
+        )
+        response = retriever.search(SearchRequest(query="周报", top_k=3))
+        assert response is fallback_response
+        assert len(fallback_calls) == 1
+        assert fallback_calls[0].query == "周报"
+
+    def test_dev_mode_without_fallback_raises_on_timeout(self) -> None:
+        """development/test 模式未提供 fallback 时，超时仍应抛出异常。"""
+        engine = FakeVectorEngine()
+
+        def failing_embedding(_text: str) -> list[float]:
+            raise KylinEmbeddingError("embedding.timeout: embed 超过 250ms")
+
+        retriever = MilvusHybridRetriever(
+            engine=engine,
+            embedding_fn=failing_embedding,
+            runtime_config=RuntimeConfig(mode="development", allow_fallback=True),
+        )
+        with pytest.raises(KylinEmbeddingError):
+            retriever.search(SearchRequest(query="周报", top_k=3))
+
+    def test_dev_mode_disallow_fallback_raises_on_timeout(self) -> None:
+        """development/test 模式 allow_fallback=False 时，超时不得降级。"""
+        engine = FakeVectorEngine()
+
+        def failing_embedding(_text: str) -> list[float]:
+            raise KylinEmbeddingError("embedding.timeout: embed 超过 250ms")
+
+        retriever = MilvusHybridRetriever(
+            engine=engine,
+            embedding_fn=failing_embedding,
+            runtime_config=RuntimeConfig(mode="test", allow_fallback=False),
+            fallback_retriever=lambda _req: SearchResponse(),
+        )
+        with pytest.raises(KylinEmbeddingError):
+            retriever.search(SearchRequest(query="周报", top_k=3))

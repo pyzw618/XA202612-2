@@ -11,9 +11,9 @@ import uuid
 from datetime import datetime
 
 from memoryhub.adapter.schemas import (
+    ForgetRecord,
     ForgetRequest,
     ForgetResponse,
-    ForgetRecord,
     SceneScope,
 )
 
@@ -39,6 +39,7 @@ class MemoryForgetter:
         llm_client=None,
         storage=None,
         vector_store=None,
+        vector_engine=None,
         cache=None,
         pref_repo=None,
         know_repo=None,
@@ -48,7 +49,8 @@ class MemoryForgetter:
         参数:
             llm_client: LLM 客户端，用于自然语言意图解析
             storage: SQLite/SQLAlchemy 存储层（Database 实例，向后兼容）
-            vector_store: FAISS 向量存储
+            vector_store: FAISS 向量存储（development/test 降级路径）
+            vector_engine: Milvus 向量引擎（生产路径）
             cache: 检索缓存
             pref_repo: PreferenceRepository 实例
             know_repo: KnowledgeRepository 实例
@@ -57,6 +59,7 @@ class MemoryForgetter:
         self.llm_client = llm_client
         self.storage = storage or db
         self.vector_store = vector_store
+        self.vector_engine = vector_engine
         self.cache = cache
         self.pref_repo = pref_repo
         self.know_repo = know_repo
@@ -246,8 +249,13 @@ class MemoryForgetter:
                 deleted += 1
 
                 if cascade:
-                    # 清理向量索引
-                    if self.vector_store is not None:
+                    # 清理向量索引：优先 Milvus 向量引擎，其次 FAISS 降级路径
+                    if self.vector_engine is not None:
+                        try:
+                            self.vector_engine.delete(memory_id)
+                        except Exception:
+                            pass
+                    elif self.vector_store is not None:
                         try:
                             self.vector_store.remove(memory_id)
                         except Exception:
@@ -258,6 +266,8 @@ class MemoryForgetter:
                         try:
                             if hasattr(self.cache, 'cache'):
                                 self.cache.cache.invalidate(memory_id)
+                            elif hasattr(self.cache, 'invalidate'):
+                                self.cache.invalidate(memory_id)
                         except Exception:
                             pass
 

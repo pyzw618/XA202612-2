@@ -20,7 +20,7 @@ from memoryhub.adapter.schemas import (
     SearchResponse,
     SearchResult,
 )
-from memoryhub.config import RetrievalConfig
+from memoryhub.config import RetrievalConfig, RuntimeConfig
 from memoryhub.retrieval.cache import SearchCache
 from memoryhub.storage.vector_engine import BaseVectorEngine, build_sparse_vector
 
@@ -28,6 +28,44 @@ logger = logging.getLogger(__name__)
 
 # 生产模式下普通重排最多只能处理前 20 个候选
 _RERANK_CANDIDATE_LIMIT = 20
+
+# 稳定的检索超时/不可用错误码，供 API 层映射为 HTTP 503/504
+_RETRIEVAL_TIMEOUT_CODES = {
+    "embedding.timeout",
+    "milvus.timeout",
+}
+_RETRIEVAL_UNAVAILABLE_CODES = {
+    "embedding.unavailable",
+    "milvus.call_failed",
+    "milvus.schema_dimension_mismatch",
+    "embedding.dimension_mismatch",
+    "embedding.backend_error",
+    "embedding.sdk_error",
+    "embedding.call_failed",
+    "embedding.invalid_text",
+}
+
+
+def _is_timeout_error(exc: Exception) -> bool:
+    """判断异常是否为已知的超时错误。"""
+    code = getattr(exc, "code", "")
+    if isinstance(code, str):
+        if code in _RETRIEVAL_TIMEOUT_CODES:
+            return True
+        if code.startswith("embedding.timeout") or code.startswith("milvus.timeout"):
+            return True
+    return False
+
+
+def _is_unavailable_error(exc: Exception) -> bool:
+    """判断异常是否为已知的后端不可用错误。"""
+    code = getattr(exc, "code", "")
+    if isinstance(code, str):
+        if code in _RETRIEVAL_UNAVAILABLE_CODES:
+            return True
+        if code.startswith("embedding.") or code.startswith("milvus."):
+            return True
+    return False
 
 
 def _memory_text(memory: PreferenceMemory | KnowledgeMemory) -> str:
@@ -71,17 +109,21 @@ class MilvusHybridRetriever:
         engine: BaseVectorEngine,
         embedding_fn: Callable[[str], list[float]],
         config: RetrievalConfig | None = None,
+        runtime_config: RuntimeConfig | None = None,
         memory_lookup: dict | None = None,
         cache: SearchCache | None = None,
         index_version: str = "",
         reranker: object | None = None,
         query_vector_cache_size: int = 1000,
+        fallback_retriever: Callable[[SearchRequest], SearchResponse] | None = None,
+        metrics_collector: Callable[[dict[str, float]], None] | None = None,
     ):
         """
         参数:
             engine: 向量引擎实例（生产环境要求 milvus）
             embedding_fn: query 文本 → 稠密向量的函数
             config: 检索配置，缺省用 RetrievalConfig 默认值
+            runtime_config: 运行时配置，控制生产/开发模式与降级策略
             memory_lookup: memory_id → PreferenceMemory/KnowledgeMemory 的映射，
                 用于补齐 SearchResult 的 metadata 和 SearchResponse 的
                 preferences/knowledge（与 HybridRetriever 行为一致）
@@ -89,10 +131,14 @@ class MilvusHybridRetriever:
             index_version: 索引版本号，会作为结果缓存键的一部分
             reranker: 可选的重排器；生产模式下默认关闭，开启时仅对前 20 候选生效
             query_vector_cache_size: 查询向量 LRU 缓存大小
+            fallback_retriever: 可选的降级检索器；仅在 development/test 模式且
+                allow_fallback=True 时，于 Embedding/Milvus 超时后调用
+            metrics_collector: 可选的指标采集回调，每次检索完成后收到分段耗时字典
         """
         self.engine = engine
         self.embedding_fn = embedding_fn
         self.config = config or RetrievalConfig()
+        self.runtime_config = runtime_config or RuntimeConfig()
         self.memory_lookup = memory_lookup or {}
         self.cache = cache
         self.index_version = index_version
@@ -100,6 +146,8 @@ class MilvusHybridRetriever:
         # 查询向量 LRU 缓存：query text -> dense vector
         self._query_vector_cache: OrderedDict[str, list[float]] = OrderedDict()
         self._query_vector_cache_size = query_vector_cache_size
+        self.fallback_retriever = fallback_retriever
+        self.metrics_collector = metrics_collector
 
     def search(self, request: SearchRequest) -> SearchResponse:
         """
@@ -110,32 +158,56 @@ class MilvusHybridRetriever:
 
         返回:
             SearchResponse（含偏好和知识列表），结构同 HybridRetriever.search
+
+        异常:
+            KylinEmbeddingError/MilvusEngineError: 生产模式下 Embedding/Milvus 超时或
+                不可用会直接抛出稳定错误码，不会静默降级到 FAISS。
         """
         total_start = time.perf_counter()
         timings: dict[str, float] = {}
 
-        # 1. 规范化查询并限制长度
+        # 1. 请求校验、规范化查询并构造缓存键
+        t0 = time.perf_counter()
         normalized_query = self._normalize_query(request.query)
+        search_request = request.model_copy(update={"query": normalized_query})
+        timings["validate_ms"] = (time.perf_counter() - t0) * 1000
+
         if not normalized_query:
             latency_ms = (time.perf_counter() - total_start) * 1000
-            return self._format_response([], latency_ms)
-
-        # 使用规范化后的请求进行缓存与检索，使等价查询命中同一缓存
-        search_request = request.model_copy(update={"query": normalized_query})
+            response = self._format_response([], latency_ms)
+            self._emit_metrics(timings, response.latency_ms)
+            return response
 
         # 2. 查询结果缓存命中时直接返回
+        t0 = time.perf_counter()
         if self.cache is not None:
             cached = self.cache.get(search_request, version=self.index_version)
             if cached is not None:
+                timings["result_cache_ms"] = (time.perf_counter() - t0) * 1000
+                self._emit_metrics(timings, cached.latency_ms, cache_hit=True)
                 return cached
+        timings["result_cache_ms"] = (time.perf_counter() - t0) * 1000
 
-        # 3. 查询向量缓存命中时复用 768 维向量
+        # 3. 查询向量缓存命中时复用 768 维向量，否则调用 Embedding SDK
         t0 = time.perf_counter()
-        dense_vector = self._get_cached_vector(normalized_query)
-        if dense_vector is None:
-            dense_vector = self.embedding_fn(normalized_query)
-            self._set_cached_vector(normalized_query, dense_vector)
-        timings["embedding_ms"] = (time.perf_counter() - t0) * 1000
+        try:
+            dense_vector = self._get_cached_vector(normalized_query)
+            vector_cache_hit = dense_vector is not None
+            if not vector_cache_hit:
+                dense_vector = self.embedding_fn(normalized_query)
+                self._set_cached_vector(normalized_query, dense_vector)
+            timings["embedding_ms"] = (time.perf_counter() - t0) * 1000
+        except Exception as exc:
+            timings["embedding_ms"] = (time.perf_counter() - t0) * 1000
+            return self._handle_retrieval_error(
+                exc,
+                "embedding",
+                self.config.target_p95_ms if self.config else 0,
+                search_request,
+                timings,
+                total_start,
+                vector_cache_hit=False,
+            )
 
         # 4. 用与 C API 一致的 FNV-1a 规则构造稀疏向量
         t0 = time.perf_counter()
@@ -144,13 +216,25 @@ class MilvusHybridRetriever:
 
         # 5. 调用 Milvus HybridSearch，召回 top_k * candidate_multiplier 候选
         t0 = time.perf_counter()
-        fetch_k = max(search_request.top_k * self.config.candidate_multiplier, 1)
-        hits = self.engine.hybrid_search(dense_vector, sparse_terms, fetch_k)
-        timings["hybrid_search_ms"] = (time.perf_counter() - t0) * 1000
+        try:
+            fetch_k = max(search_request.top_k * self.config.candidate_multiplier, 1)
+            hits = self.engine.hybrid_search(dense_vector, sparse_terms, fetch_k)
+            timings["hybrid_search_ms"] = (time.perf_counter() - t0) * 1000
+        except Exception as exc:
+            timings["hybrid_search_ms"] = (time.perf_counter() - t0) * 1000
+            return self._handle_retrieval_error(
+                exc,
+                "milvus",
+                self.config.target_p95_ms if self.config else 0,
+                search_request,
+                timings,
+                total_start,
+                vector_cache_hit=vector_cache_hit,
+            )
 
-        # 6. 回表 SQLite 补齐详情，并按 memory_type/scope/confidence 过滤
+        # 6. 元数据过滤（含回表读取记忆元数据）
         t0 = time.perf_counter()
-        results = [self._to_search_result(hit) for hit in hits]
+        results = [self._to_search_result(hit, timings) for hit in hits]
         filtered = self._filter_by_context(results, search_request)
 
         # 7. 普通重排默认关闭；开启时仅对前 20 个候选执行无模型规则重排
@@ -160,16 +244,22 @@ class MilvusHybridRetriever:
         top_results = filtered[: search_request.top_k]
         timings["filter_ms"] = (time.perf_counter() - t0) * 1000
 
+        # 8. SQLite 回表补齐详情并序列化为响应
+        t0 = time.perf_counter()
         latency_ms = (time.perf_counter() - total_start) * 1000
-        response = self._format_response(top_results, latency_ms)
+        response = self._format_response(top_results, latency_ms, timings)
+        timings["serialize_ms"] = (time.perf_counter() - t0) * 1000
 
-        # 8. 写入结果缓存（缓存键包含索引版本号）
+        # 9. 写入结果缓存（缓存键包含索引版本号）
         if self.cache is not None:
             self.cache.set(search_request, response, version=self.index_version)
 
-        timings["total_ms"] = latency_ms
-        self._log_timings(timings)
-
+        self._emit_metrics(
+            timings,
+            response.latency_ms,
+            cache_hit=False,
+            vector_cache_hit=vector_cache_hit,
+        )
         return response
 
     # ---- 内部 ----
@@ -200,15 +290,122 @@ class MilvusHybridRetriever:
         while len(self._query_vector_cache) > self._query_vector_cache_size:
             self._query_vector_cache.popitem(last=False)
 
-    def _log_timings(self, timings: dict[str, float]) -> None:
-        """输出分段耗时指标，供基准脚本与可观测性系统采集。"""
-        # 保留两位小数，避免日志过度膨胀
-        formatted = {k: round(v, 2) for k, v in timings.items()}
-        logger.info("milvus_hybrid_search_timings: %s", formatted)
+    def _emit_metrics(
+        self,
+        timings: dict[str, float],
+        total_ms: float,
+        cache_hit: bool = False,
+        vector_cache_hit: bool = False,
+    ) -> None:
+        """汇总并输出分段耗时指标，供基准脚本与可观测性系统采集。"""
+        metrics: dict[str, float] = {
+            **{k: round(v, 2) for k, v in timings.items()},
+            "total_ms": round(total_ms, 2),
+            "budget_p95_ms": float(self.config.target_p95_ms),
+            "budget_p99_ms": float(self.config.target_p99_ms),
+            "cache_hit": 1.0 if cache_hit else 0.0,
+            "vector_cache_hit": 1.0 if vector_cache_hit else 0.0,
+        }
+        # 与延迟预算对比：超过预算时记录警告，便于告警与后续调优
+        if total_ms > self.config.target_p99_ms:
+            metrics["budget_violation"] = 99.0
+            logger.warning(
+                "milvus_hybrid_search_timings: %s (exceeds P99 budget %dms)",
+                metrics,
+                self.config.target_p99_ms,
+            )
+        elif total_ms > self.config.target_p95_ms:
+            metrics["budget_violation"] = 95.0
+            logger.warning(
+                "milvus_hybrid_search_timings: %s (exceeds P95 budget %dms)",
+                metrics,
+                self.config.target_p95_ms,
+            )
+        else:
+            metrics["budget_violation"] = 0.0
+            logger.info("milvus_hybrid_search_timings: %s", metrics)
 
-    def _to_search_result(self, hit) -> SearchResult:
+        if self.metrics_collector is not None:
+            try:
+                self.metrics_collector(metrics)
+            except Exception:
+                logger.exception("metrics_collector failed")
+
+    def _handle_retrieval_error(
+        self,
+        exc: Exception,
+        stage: str,
+        budget_ms: int,
+        request: SearchRequest,
+        timings: dict[str, float],
+        total_start: float,
+        vector_cache_hit: bool = False,
+    ) -> SearchResponse:
+        """
+        统一处理 Embedding/Milvus 超时或不可用异常。
+
+        - 生产模式：记录结构化告警后直接抛出，禁止静默降级。
+        - development/test 模式且 allow_fallback=True：在记录告警后可调用
+          fallback_retriever 返回降级结果；无 fallback 时同样抛出。
+        """
+        elapsed_ms = (time.perf_counter() - total_start) * 1000
+        is_timeout = _is_timeout_error(exc)
+        is_unavailable = _is_unavailable_error(exc)
+        code = getattr(exc, "code", "retrieval.error")
+
+        alert = {
+            "event": "retrieval_alert",
+            "stage": stage,
+            "code": code,
+            "is_timeout": is_timeout,
+            "is_unavailable": is_unavailable,
+            "elapsed_ms": round(elapsed_ms, 2),
+            "budget_ms": budget_ms,
+        }
+        if is_timeout:
+            logger.warning("retrieval_timeout_alert: %s", alert)
+        else:
+            logger.warning("retrieval_unavailable_alert: %s", alert)
+
+        # 生产模式禁止静默降级
+        if self.runtime_config.is_production:
+            raise
+
+        # development/test 模式：allow_fallback 为 true 且提供 fallback 时启用降级
+        if self.runtime_config.allow_fallback and self.fallback_retriever is not None:
+            logger.warning(
+                "retrieval_fallback_triggered: stage=%s code=%s mode=%s",
+                stage,
+                code,
+                self.runtime_config.mode,
+            )
+            try:
+                response = self.fallback_retriever(request)
+                self._emit_metrics(
+                    timings,
+                    response.latency_ms,
+                    cache_hit=False,
+                    vector_cache_hit=vector_cache_hit,
+                )
+                return response
+            except Exception as fallback_exc:
+                logger.exception("retrieval_fallback_failed: stage=%s", stage)
+                # 降级失败时，把原始异常带出来，避免吞掉错误
+                raise fallback_exc from exc
+
+        # 非生产模式也不允许降级时，同样抛出原始异常
+        raise
+
+    def _to_search_result(
+        self, hit, timings: dict[str, float] | None = None
+    ) -> SearchResult:
         """VectorSearchResult → adapter 的 SearchResult（source 固定为 hybrid）"""
+        t0 = time.perf_counter()
         memory = self.memory_lookup.get(hit.memory_id)
+        if timings is not None:
+            timings["sqlite_lookup_ms"] = timings.get("sqlite_lookup_ms", 0.0) + (
+                time.perf_counter() - t0
+            ) * 1000
         metadata = _memory_metadata(memory) if memory is not None else dict(hit.metadata)
         return SearchResult(
             memory_id=hit.memory_id,
@@ -250,13 +447,21 @@ class MilvusHybridRetriever:
         return False
 
     def _format_response(
-        self, results: list[SearchResult], latency_ms: float
+        self,
+        results: list[SearchResult],
+        latency_ms: float,
+        timings: dict[str, float] | None = None,
     ) -> SearchResponse:
         """将检索结果格式化为 SearchResponse（与 HybridRetriever 一致）"""
         preferences: list[PreferenceMemory] = []
         knowledge: list[KnowledgeMemory] = []
         for result in results:
+            t0 = time.perf_counter()
             memory = self.memory_lookup.get(result.memory_id)
+            if timings is not None:
+                timings["sqlite_lookup_ms"] = timings.get("sqlite_lookup_ms", 0.0) + (
+                    time.perf_counter() - t0
+                ) * 1000
             if isinstance(memory, PreferenceMemory):
                 preferences.append(memory)
             elif isinstance(memory, KnowledgeMemory):

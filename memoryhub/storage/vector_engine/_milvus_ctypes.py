@@ -6,11 +6,10 @@ Milvus 向量引擎 C API 的 ctypes 桥接。
 milvus_engine.MilvusVectorEngine 内部使用。
 """
 
-import ctypes
 import sys
 from ctypes import (
-    POINTER,
     CDLL,
+    POINTER,
     byref,
     c_char_p,
     c_float,
@@ -41,7 +40,10 @@ _REAL_LIB_NAMES = {
 
 # 真实库的常见安装路径（含项目内 bundled SDK 构建目录）
 _BUNDLED_BUILD_DIR = (
-    Path(__file__).resolve().parents[2] / "third_party" / "libkysdk-vector-engine-client-nile-sp2" / "build"
+    Path(__file__).resolve().parents[2]
+    / "third_party"
+    / "libkysdk-vector-engine-client-nile-sp2"
+    / "build"
 )
 _DEFAULT_SEARCH_DIRS = [
     str(_BUNDLED_BUILD_DIR),
@@ -54,6 +56,25 @@ _DEFAULT_SEARCH_DIRS = [
 
 class MilvusEngineError(RuntimeError):
     """向量引擎 C API 调用失败。异常信息只含错误文本，不含用户数据。"""
+
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code or self._infer_code(message)
+
+    @staticmethod
+    def _infer_code(message: str) -> str:
+        """从已知错误文本前缀推断稳定错误码。"""
+        known_prefixes = (
+            "milvus.timeout",
+            "milvus.call_failed",
+            "milvus.schema_dimension_mismatch",
+        )
+        for prefix in known_prefixes:
+            if message.startswith(prefix):
+                return prefix
+        if message == "向量引擎已关闭":
+            return "milvus.engine_closed"
+        return "milvus.error"
 
 
 def _platform_key() -> str:

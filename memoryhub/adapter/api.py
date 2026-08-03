@@ -36,6 +36,8 @@ from memoryhub.adapter.user_rule_schemas import (
     UserRuleResponse,
 )
 from memoryhub.core.forget import MemoryForgetter
+from memoryhub.embedding import KylinEmbeddingError
+from memoryhub.storage.vector_engine import MilvusEngineError
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
@@ -75,6 +77,29 @@ MemoryHubUserHeader = Annotated[
 def _user_rule_http_error(code: str, status_code: int) -> HTTPException:
     """Build a stable error without retaining service exception context."""
     return HTTPException(status_code=status_code, detail={"code": code})
+
+
+def _retrieval_http_error(exc: Exception) -> HTTPException:
+    """把 Embedding/Milvus 超时或不可用异常映射为稳定的 HTTP 503/504。"""
+    code = getattr(exc, "code", "retrieval.error")
+    if not isinstance(code, str):
+        code = "retrieval.error"
+
+    is_timeout = isinstance(code, str) and (
+        code in {"embedding.timeout", "milvus.timeout"}
+        or code.startswith("embedding.timeout:")
+        or code.startswith("milvus.timeout:")
+    )
+    # 其余 embedding./milvus. 开头的稳定错误统一视为后端不可用
+    is_backend_error = isinstance(code, str) and (
+        code.startswith("embedding.") or code.startswith("milvus.")
+    )
+
+    if is_timeout:
+        return HTTPException(status_code=504, detail={"code": code})
+    if is_backend_error:
+        return HTTPException(status_code=503, detail={"code": code})
+    return HTTPException(status_code=500, detail={"code": code})
 
 
 def _user_rule_service(request: Request) -> Any:
@@ -350,7 +375,11 @@ async def write_events(req: WriteEventRequest, request: Request):
     try:
         accepted = repo.batch_save(req.events)
         event_ids = [e.event_id for e in req.events]
-        return WriteEventResponse(accepted=accepted, rejected=len(req.events) - accepted, event_ids=event_ids)
+        return WriteEventResponse(
+            accepted=accepted,
+            rejected=len(req.events) - accepted,
+            event_ids=event_ids,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"failed to write events: {str(e)}") from None
 
@@ -386,6 +415,8 @@ async def search_memory(req: SearchRequest, request: Request):
         raise HTTPException(status_code=503, detail="retrieval service not initialized")
     try:
         return retriever.search(req)
+    except (KylinEmbeddingError, MilvusEngineError) as exc:
+        raise _retrieval_http_error(exc) from None
     except HTTPException:
         raise
     except ValueError:
@@ -410,6 +441,8 @@ async def get_memory_context(req: SearchRequest, request: Request):
         raise HTTPException(status_code=503, detail="retrieval service not initialized")
     try:
         response = retriever.search(req)
+    except (KylinEmbeddingError, MilvusEngineError) as exc:
+        raise _retrieval_http_error(exc) from None
     except HTTPException:
         raise
     except ValueError:
@@ -549,10 +582,10 @@ async def resolve_conflict(conflict_id: str, body: ResolveConflictRequest, reque
 @router.post("/feedback")
 async def submit_feedback(req: FeedbackRequest, request: Request):
     """
-    提交用户反馈，触发偏好更新
+    提交用户反馈，触发偏好更新并同步到向量索引
 
-    数据流: 用户反馈 → submit_feedback → PreferenceExtractor.extract
-            → ConflictDetector.check → 更新/新增偏好
+    数据流: 用户反馈 → submit_feedback → 更新 SQLite → 同步 Milvus
+            → 失效检索缓存
 
     参数:
         req.memory_id: 关联的记忆 ID
@@ -560,6 +593,7 @@ async def submit_feedback(req: FeedbackRequest, request: Request):
         req.action: "update" | "confirm" | "reject"
     """
     pref_repo = getattr(request.app.state, "pref_repo", None)
+    sync_service = getattr(request.app.state, "sync_service", None)
     if pref_repo is None:
         raise HTTPException(status_code=503, detail="preference repository not initialized")
     # 根据反馈更新偏好记忆
@@ -573,7 +607,63 @@ async def submit_feedback(req: FeedbackRequest, request: Request):
         memory.status = MemoryStatus.ARCHIVED
     # confirm 无需操作，仅记录
     pref_repo.save(memory)
+
+    # 通过同步服务保持 SQLite 与 Milvus 一致
+    if sync_service is not None:
+        if memory.status in (MemoryStatus.ARCHIVED, MemoryStatus.DELETED):
+            sync_service.delete_memory(memory.memory_id)
+        else:
+            sync_service.index_memory(memory)
+
     return {"status": "ok", "action": req.action}
+
+
+# ============================================================
+# 记忆写入（显式写入入口）
+# ============================================================
+
+def _get_sync_service(request: Request):
+    """从应用状态获取 MemorySyncService 实例。"""
+    service = getattr(request.app.state, "sync_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="memory sync service not initialized")
+    return service
+
+
+@router.post("/memories/preference")
+async def write_preference_memory(
+    req: PreferenceMemory,
+    request: Request,
+    sync_service=Depends(_get_sync_service),
+):
+    """
+    显式写入/更新偏好记忆，并同步到 Milvus。
+
+    数据流: PreferenceMemory → SQLite 事务写入 → Embedding → Milvus upsert
+            → 标记 index_version → 失效检索缓存
+    """
+    sqlite_ok, memory_id = sync_service.index_memory(req)
+    if not sqlite_ok:
+        raise HTTPException(status_code=503, detail="memory write failed")
+    return {"status": "ok", "memory_id": memory_id}
+
+
+@router.post("/memories/knowledge")
+async def write_knowledge_memory(
+    req: KnowledgeMemory,
+    request: Request,
+    sync_service=Depends(_get_sync_service),
+):
+    """
+    显式写入/更新知识记忆，并同步到 Milvus。
+
+    数据流: KnowledgeMemory → SQLite 事务写入 → Embedding → Milvus upsert
+            → 标记 index_version → 失效检索缓存
+    """
+    sqlite_ok, memory_id = sync_service.index_memory(req)
+    if not sqlite_ok:
+        raise HTTPException(status_code=503, detail="memory write failed")
+    return {"status": "ok", "memory_id": memory_id}
 
 
 # ============================================================
@@ -584,12 +674,13 @@ def _get_forgetter(request: Request) -> MemoryForgetter:
     """
     从应用状态获取 MemoryForgetter 实例
 
-    注入真实的 db / vector_store / cache / repositories。
+    注入真实的 db / vector_engine(Milvus) / vector_store(FAISS 降级) / cache / repositories。
     """
     return MemoryForgetter(
         llm_client=getattr(request.app.state, "llm_client", None),
         storage=getattr(request.app.state, "db", None),
         vector_store=getattr(request.app.state, "vector_store", None),
+        vector_engine=getattr(request.app.state, "vector_engine", None),
         cache=getattr(request.app.state, "retriever", None),
         pref_repo=getattr(request.app.state, "pref_repo", None),
         know_repo=getattr(request.app.state, "know_repo", None),
@@ -622,7 +713,9 @@ async def forget_memory(
 
 
 @router.get("/forget/history", response_model=list[ForgetRecord])
-async def list_forget_history(user_id: str = "default", request: Request = None) -> list[ForgetRecord]:
+async def list_forget_history(
+    user_id: str = "default", request: Request = None
+) -> list[ForgetRecord]:
     """
     列出指定用户的遗忘操作历史
 

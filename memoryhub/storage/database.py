@@ -589,6 +589,15 @@ class KnowledgeRepository:
                 updates["success_count"] = KnowledgeRow.success_count + 1
             s.query(KnowledgeRow).filter(KnowledgeRow.memory_id == memory_id).update(updates)
 
+    def update_status(self, memory_id: str, status: str) -> None:
+        """更新状态"""
+        from datetime import datetime
+
+        with self.db.session() as s:
+            s.query(KnowledgeRow).filter(
+                KnowledgeRow.memory_id == memory_id
+            ).update({"status": status, "updated_at": datetime.now()})
+
 
 # ============================================================
 # 冲突 CRUD

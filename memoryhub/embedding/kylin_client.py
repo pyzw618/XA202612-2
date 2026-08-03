@@ -291,6 +291,14 @@ class KylinEmbeddingClient(BaseEmbeddingClient):
             future = executor.submit(fn)
             return future.result(timeout=self.query_timeout_ms / 1000.0)
         except TimeoutError:
+            logger.warning(
+                "embedding_timeout_alert: %s",
+                {
+                    "operation": operation,
+                    "timeout_ms": self.query_timeout_ms,
+                    "code": "embedding.timeout",
+                },
+            )
             raise KylinEmbeddingError(
                 f"embedding.timeout: {operation} 超过 {self.query_timeout_ms}ms"
             ) from None
