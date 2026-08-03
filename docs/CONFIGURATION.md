@@ -1,4 +1,4 @@
-﻿# Kylin-MemoryHub 配置说明
+# Kylin-MemoryHub 配置说明
 
 > 当前 v0.1.0 的 `load_config()` 仍只返回代码默认值；通用环境变量和 YAML
 > 加载尚未实现。例外是应用启动时会读取 `SafetyConfig.user_rules` 指定的
@@ -29,6 +29,16 @@ cp config.example.yaml config.yaml
 ---
 
 ## 配置项详解
+
+### 运行模式配置
+
+| 环境变量 | YAML 路径 | 默认值 | 说明 |
+|---------|----------|-------|------|
+| `MEMORYHUB_RUNTIME_MODE` | `runtime.mode` | `development` | 运行模式：`production` / `development` / `test` |
+| `MEMORYHUB_RUNTIME_ALLOW_FALLBACK` | `runtime.allow_fallback` | `true`（dev/test）/ `false`（production） | 是否允许 FAISS 等降级后端 |
+
+`production` 模式下禁止 `mock`、`kylin_mock`、`faiss`、`milvus_mock` 和静默降级；
+`development` / `test` 模式可在明确记录告警后启用 `allow_fallback`。
 
 ### LLM 配置
 
@@ -67,29 +77,31 @@ cp config.example.yaml config.yaml
 
 **支持的 Embedding 后端：**
 
-- **麒麟 SDK**（生产推荐）
+- **麒麟 SDK**（生产唯一允许）
   ```yaml
   embedding:
     provider: "kylin"
-    dimension: 1024
-    model_name: "kylin-embedding-v1"
+    dimension: 768
+    model_name: "ensemble-embd_gte-base_uint8-text"
   ```
 
-- **Mock**（开发测试）
+- **Mock / kylin_mock**（开发测试或诊断场景）
   ```yaml
   embedding:
     provider: "mock"
-    dimension: 1024
+    dimension: 768
   ```
+
+生产模式（`runtime.mode=production`）下禁止 `mock`、`kylin_mock` 和 `auto`。
 
 ### 检索配置
 
 | 环境变量 | YAML 路径 | 默认值 | 说明 |
 |---------|----------|-------|------|
 | `RETRIEVAL_TOP_K` | `retrieval.default_top_k` | `5` | 返回结果数 |
-| `VECTOR_WEIGHT` | `retrieval.vector_weight` | `0.6` | 向量检索权重 |
-| `KEYWORD_WEIGHT` | `retrieval.keyword_weight` | `0.3` | BM25 权重 |
-| `METADATA_WEIGHT` | `retrieval.metadata_weight` | `0.1` | 元数据权重 |
+| `VECTOR_WEIGHT` | `retrieval.vector_weight` | `0.6` | 向量检索权重（仅 HybridRetriever fallback 使用） |
+| `KEYWORD_WEIGHT` | `retrieval.keyword_weight` | `0.3` | BM25 权重（仅 HybridRetriever fallback 使用） |
+| `METADATA_WEIGHT` | `retrieval.metadata_weight` | `0.1` | 元数据权重（仅 HybridRetriever fallback 使用） |
 
 **权重调整建议：**
 
@@ -101,8 +113,8 @@ cp config.example.yaml config.yaml
 
 | 环境变量 | YAML 路径 | 默认值 | 说明 |
 |---------|----------|-------|------|
-| `DB_PATH` | `storage.db_path` | `data/memoryhub.db` | SQLite 路径 |
-| `VECTOR_INDEX_PATH` | `storage.vector_index_path` | `data/vector_index` | FAISS 索引路径 |
+| `DB_PATH` | `storage.db_path` | `data/memoryhub.db` | SQLite 路径（端侧唯一事实源） |
+| `VECTOR_INDEX_PATH` | `storage.vector_index_path` | `data/vector_index` | FAISS 索引路径（仅 development/test 使用） |
 | `EVIDENCE_PATH` | `storage.evidence_path` | `data/evidence` | 证据链路径 |
 
 ### 安全配置
@@ -318,9 +330,13 @@ embedding:
 debug: true
 ```
 
-### 场景 2：生产环境（OpenAI）
+### 场景 2：生产环境（OpenAI + 麒麟 SDK）
 
 ```yaml
+runtime:
+  mode: production
+  allow_fallback: false
+
 llm:
   provider: "openai"
   api_base: "https://api.openai.com/v1"
@@ -329,7 +345,12 @@ llm:
 
 embedding:
   provider: "kylin"
-  model_name: "kylin-embedding-v1"
+  dimension: 768
+  model_name: "ensemble-embd_gte-base_uint8-text"
+
+vector_engine:
+  provider: "milvus"
+  dimension: 768
 
 debug: false
 ```

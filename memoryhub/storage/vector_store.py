@@ -2,12 +2,15 @@
 FAISS 向量存储管理
 
 管理 FAISS 索引的创建、持久化和 CRUD。
+
+注意：FAISS 仅允许在 development、test 环境或显式启用的故障诊断场景中使用；
+生产模式（runtime.mode=production）下不可将其作为向量索引事实来源。
 """
 
 import json
+import logging
 import os
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -16,10 +19,12 @@ try:
 except ImportError:
     faiss = None
 
+logger = logging.getLogger(__name__)
+
 
 class VectorStore:
     """
-    FAISS 向量存储管理器 — 向量索引的事实来源。
+    FAISS 向量存储管理器 — development/test 环境的向量索引实现。
 
     检索层的 VectorSearcher 从本类加载索引，不自行持久化。
 
@@ -28,9 +33,20 @@ class VectorStore:
         store.init_index()
         store.add("mem_001", [0.1, 0.2, ...])
         results = store.search([0.1, 0.2, ...], top_k=5)
+
+    注意:
+        本类仅用于 development/test 或显式诊断场景；生产环境请使用
+        MilvusVectorEngine。
     """
 
     def __init__(self, index_path: str = "data/vector_index", dimension: int = 1024):
+        from memoryhub.config import is_production_mode
+
+        if is_production_mode():
+            logger.warning(
+                "faiss_vector_store_initialized_in_production: "
+                "FAISS is not a production backend; use Milvus instead"
+            )
         self.index_path = Path(index_path)
         self.dimension = dimension
         self.index = None

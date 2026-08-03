@@ -6,6 +6,7 @@ FastAPI 应用入口
 
 import base64
 import binascii
+import logging
 import os
 import re
 from collections.abc import Callable
@@ -25,6 +26,8 @@ from memoryhub.core.safety.user_rules import (
     UserRuleError,
     build_user_rule_service,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _memory_text(memory: PreferenceMemory | KnowledgeMemory) -> str:
@@ -154,10 +157,15 @@ def create_app(
 
     初始化流程:
         1. 加载配置
-        2. 初始化存储层（SQLite + FAISS）
+        2. 初始化存储层（SQLite + 向量引擎）
         3. 初始化 LLM / Embedding 客户端
         4. 注册路由
         5. 注册生命周期钩子
+
+    注意:
+        生产模式（runtime.mode=production）下仅允许装配 MilvusHybridRetriever；
+        FAISS / HybridRetriever / KeywordSearcher 仅在 development/test 或显式
+        故障诊断场景下作为降级路径保留。
     """
     if config is None:
         config = load_config()
@@ -292,13 +300,12 @@ def create_app(
             **embedding_kwargs,
         )
 
-        # 向量引擎分支：faiss 走本地 VectorStore；milvus/milvus_mock 走麒麟向量引擎
+        # 向量引擎分支：生产模式仅允许真实 Milvus；development/test 保留 faiss 降级路径
         engine_provider = config.vector_engine.provider
         vector_store = None
         vector_engine = None
         vector_search_adapter = None
 
-        # 生产模式仅允许真实 Milvus；development/test 保留 faiss 降级路径
         if config.runtime.is_production and engine_provider != "milvus":
             from memoryhub.config import ProductionGateError
 
@@ -310,7 +317,12 @@ def create_app(
         index_version = _max_index_version(db)
 
         if engine_provider == "faiss":
-            # 向量索引：优先从磁盘加载；为空时按记忆文本重新 embedding 全量重建
+            logger.warning(
+                "app_faiss_fallback_path_selected: "
+                "provider=faiss is only allowed in development/test "
+                "or explicit diagnostic scenarios"
+            )
+            # FAISS 索引：优先从磁盘加载；为空时按记忆文本重新 embedding 全量重建
             vector_store = VectorStore(
                 index_path=config.storage.vector_index_path,
                 dimension=embedding_client.get_dimension(),
@@ -358,7 +370,12 @@ def create_app(
                 index_version=str(index_version),
             )
         else:
-            # 关键词索引：BM25 索引可重建，启动时从 SQLite 全量构建
+            # development/test 降级路径：构建 KeywordSearcher / HybridRetriever（FAISS + BM25）
+            logger.warning(
+                "app_hybrid_retriever_fallback_selected: "
+                "HybridRetriever is only allowed in development/test "
+                "or explicit diagnostic scenarios"
+            )
             keyword_search = KeywordSearcher()
             if memories:
                 keyword_search.build_index(

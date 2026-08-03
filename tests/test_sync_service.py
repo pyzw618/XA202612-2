@@ -398,3 +398,87 @@ def test_api_forget_removes_from_milvus(tmp_path):
         row = s.query(PreferenceRow).filter(PreferenceRow.memory_id == pref.memory_id).first()
         assert row.status == "deleted"
     db.close()
+
+
+def test_milvus_success_sqlite_mark_indexed_failure_compensates(sync_setup):
+    """Milvus upsert 成功但 SQLite 标记 indexed 失败时，记忆应保持 pending
+    并可被补偿修复，避免幽灵向量被检索。"""
+    service = sync_setup["service"]
+    pref_repo = sync_setup["pref_repo"]
+    vector_engine = sync_setup["vector_engine"]
+    embedding_client = sync_setup["embedding_client"]
+
+    pref = PreferenceMemory(
+        user_id="u1",
+        text="Milvus 成功 SQLite 标记失败补偿测试",
+        confidence=0.7,
+    )
+
+    # 第一次写入：SQLite 保存成功，Milvus upsert 成功，但 mark_indexed 被模拟失败
+    original_mark_indexed = pref_repo.mark_indexed
+    call_count = 0
+
+    def failing_mark_indexed(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("模拟 SQLite 标记 indexed 失败")
+
+    pref_repo.mark_indexed = failing_mark_indexed
+    try:
+        sqlite_ok, memory_id = service.index_memory(pref)
+    finally:
+        pref_repo.mark_indexed = original_mark_indexed
+
+    assert sqlite_ok is True
+    assert call_count >= 1
+
+    # 记忆应保持 pending_index，避免被当作已同步检索
+    with sync_setup["db"].session() as s:
+        row = s.query(PreferenceRow).filter(PreferenceRow.memory_id == memory_id).first()
+        assert row.pending_index is True
+
+    # Milvus 中已有向量（这是 Milvus 成功而 SQLite 失败产生的潜在幽灵向量）
+    query_vec = embedding_client.embed("Milvus 成功 SQLite 标记失败补偿测试")
+    results = vector_engine.search(query_vec, top_k=5)
+    assert any(r.memory_id == memory_id for r in results)
+
+    # 通过补偿任务修复：重新 upsert（幂等）并正确标记 indexed
+    result = service.sync_pending()
+    assert memory_id in result.succeeded
+
+    with sync_setup["db"].session() as s:
+        row = s.query(PreferenceRow).filter(PreferenceRow.memory_id == memory_id).first()
+        assert row.pending_index is False
+        assert row.index_version > 0
+
+
+def test_sqlite_write_failure_does_not_create_ghost_vector(sync_setup):
+    """SQLite 初始写入失败时，不应向 Milvus 写入向量，避免幽灵向量。"""
+    service = sync_setup["service"]
+    pref_repo = sync_setup["pref_repo"]
+    vector_engine = sync_setup["vector_engine"]
+    embedding_client = sync_setup["embedding_client"]
+
+    pref = PreferenceMemory(
+        user_id="u1",
+        text="SQLite 写入失败不应产生幽灵向量",
+        confidence=0.6,
+    )
+
+    original_save = pref_repo.save
+
+    def failing_save(*args, **kwargs):
+        raise RuntimeError("模拟 SQLite 写入失败")
+
+    pref_repo.save = failing_save
+    try:
+        sqlite_ok, memory_id = service.index_memory(pref)
+    finally:
+        pref_repo.save = original_save
+
+    assert sqlite_ok is False
+
+    # Milvus 中不应存在该记忆的向量
+    query_vec = embedding_client.embed("SQLite 写入失败不应产生幽灵向量")
+    results = vector_engine.search(query_vec, top_k=5)
+    assert not any(r.memory_id == memory_id for r in results)

@@ -121,7 +121,16 @@ class MemorySyncService:
         # SQLite 已持久化；后续 Milvus 失败可通过 pending_index 补偿
         vector_ok = self._upsert_to_vector_engine(memory)
         if vector_ok:
-            self._mark_indexed([memory_id])
+            try:
+                self._mark_indexed([memory_id])
+            except Exception:
+                # Milvus 已写入但 SQLite 标记失败：保留 pending_index=True，
+                # 由补偿任务幂等重试，避免产生可被检索的幽灵向量。
+                logger.exception(
+                    "mark_indexed failed for memory %s after milvus upsert; "
+                    "leaving pending_index=True for compensation",
+                    memory_id,
+                )
         else:
             logger.warning(
                 "vector engine upsert failed for memory %s, marked pending_index", memory_id

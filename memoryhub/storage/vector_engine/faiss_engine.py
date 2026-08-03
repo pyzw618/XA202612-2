@@ -2,19 +2,25 @@
 FAISS 向量引擎实现。
 
 包装现有 memoryhub.storage.vector_store.VectorStore（不修改其代码），
-实现 BaseVectorEngine 接口，作为默认 fallback 引擎。
+实现 BaseVectorEngine 接口，作为 development/test 环境的 fallback 引擎。
 hybrid_search 在 Python 层实现：dense 路走 FAISS，sparse 路对 insert
 时保存的文本用 sparse.py 的稀疏向量做点积，两路 RRF 融合（k=60），
 与 mock C 库行为对齐。
+
+注意：FAISS 仅允许在 development、test 环境或显式启用的故障诊断场景中使用；
+生产模式（runtime.mode=production）下该 provider 会被启动门禁拒绝。
 """
 
 import json
+import logging
 import os
 from typing import Any, Optional
 
 from memoryhub.storage.vector_engine.base import BaseVectorEngine, VectorSearchResult
 from memoryhub.storage.vector_engine.sparse import build_sparse_vector
 from memoryhub.storage.vector_store import VectorStore
+
+logger = logging.getLogger(__name__)
 
 # RRF 融合常数，与 Milvus RRFRanker / mock C 库一致
 _RRF_K = 60
@@ -29,6 +35,10 @@ class FAISSVectorEngine(BaseVectorEngine):
         engine.insert("mem_001", "文本", [0.1] * 1024)
         results = engine.search([0.1] * 1024, top_k=5)
         engine.close()
+
+    注意:
+        本引擎仅用于 development/test 或显式诊断场景；生产环境请使用
+        MilvusVectorEngine。
     """
 
     def __init__(self, index_path: str = "data/vector_index", dimension: int = 1024):
@@ -37,6 +47,14 @@ class FAISSVectorEngine(BaseVectorEngine):
             index_path: FAISS 索引文件路径前缀（不含扩展名）
             dimension: 向量维度
         """
+        from memoryhub.config import is_production_mode
+
+        if is_production_mode():
+            logger.warning(
+                "faiss_vector_engine_initialized_in_production: "
+                "provider=faiss is not allowed in production; "
+                "use vector_engine.provider=milvus instead"
+            )
         self._store = VectorStore(index_path=index_path, dimension=dimension)
         self._store.init_index()
         self._texts_path = str(index_path) + ".texts.json"

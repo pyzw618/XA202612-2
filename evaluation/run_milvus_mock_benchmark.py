@@ -1,15 +1,18 @@
 """
-Milvus mock 环境性能基准驱动脚本（方案 §4.9.2）
+Milvus mock 环境性能基准驱动脚本（阶段七 TASK-014 验证用）
 
-在项目内 mock 动态库（third_party/kylin-mock/build/）上跑完整链路基准：
-embed → build_sparse_vector → engine.hybrid_search，
-验证性能测试代码路径正确。
+默认运行完整生产检索链路基准（SQLite + MilvusHybridRetriever），
+用于在本地/非麒麟环境验证 run_milvus_kylin_benchmark.py 的代码路径。
+
+如需仅验证引擎层（embed → sparse → hybrid_search），可传 --engine_only。
 
 用法:
     python evaluation/run_milvus_mock_benchmark.py
-    python evaluation/run_milvus_mock_benchmark.py --memory_count 500 --query_count 20 --iterations 30
+    python evaluation/run_milvus_mock_benchmark.py \
+        --memory_count 500 --query_count 20 --iterations 3
+    python evaluation/run_milvus_mock_benchmark.py --engine_only
 
-注意: mock 环境的延迟数值不具真实参考意义，仅用于验证脚本路径。
+注意: mock 环境的延迟数值与召回数值不具真实参考意义，仅用于验证脚本路径。
 """
 
 from __future__ import annotations
@@ -29,13 +32,14 @@ except AttributeError:
 # 将项目根目录加入路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from evaluation.metrics.full_chain_benchmark import run_full_chain_benchmark
+from evaluation.metrics.latency_benchmark import LatencyBenchmark
 from memoryhub.embedding import create_embedding_client
 from memoryhub.storage.vector_engine import build_sparse_vector, create_vector_engine
 
-from evaluation.metrics.latency_benchmark import LatencyBenchmark
-
 MOCK_LIMITATION_NOTICE = """
-[!] 注意：mock 环境的延迟数值不具真实参考意义，仅用于验证脚本路径。
+[!] 注意：mock 环境的延迟数值与 Recall@5/NDCG@10 不具真实参考意义，
+    仅用于验证基准脚本路径与指标采集逻辑。
     真实性能数据请以麒麟环境 run_milvus_kylin_benchmark.py 的结果为准。
 """
 
@@ -82,7 +86,7 @@ def build_embedding_client(provider: str, dimension: int, **kwargs):
     return create_embedding_client(provider=provider, **kwargs)
 
 
-def run_benchmark(
+def run_engine_benchmark(
     engine_provider: str,
     embedding_provider: str,
     memory_count: int,
@@ -94,15 +98,8 @@ def run_benchmark(
     engine_kwargs: dict | None = None,
     embedding_kwargs: dict | None = None,
 ) -> dict:
-    """
-    基准主流程（mock / kylin 两个驱动脚本共用）：
-
-        建引擎 → 合成数据批量 insert（计时） → 逐 query 走完整链路计时 → 返回结果
-
-    engine_kwargs 额外透传给 create_vector_engine（如 so_path/host/port），
-    embedding_kwargs 额外透传给 create_embedding_client（如 so_path）。
-    """
-    collection = f"bench_{uuid.uuid4().hex[:8]}"  # 随机后缀，避免状态污染
+    """引擎层基准主流程（旧路径，用于快速验证引擎接口）。"""
+    collection = f"bench_{uuid.uuid4().hex[:8]}"
     engine = create_vector_engine(
         provider=engine_provider,
         collection=collection,
@@ -110,7 +107,9 @@ def run_benchmark(
         **(engine_kwargs or {}),
     )
     try:
-        embed_client = build_embedding_client(embedding_provider, dimension, **(embedding_kwargs or {}))
+        embed_client = build_embedding_client(
+            embedding_provider, dimension, **(embedding_kwargs or {})
+        )
         print(f"引擎: provider={engine_provider}, collection={collection}, dimension={dimension}")
         print(f"embedding: provider={embedding_provider}, dim={embed_client.get_dimension()}")
 
@@ -136,7 +135,7 @@ def run_benchmark(
 
         search_benchmark = LatencyBenchmark(search_fn=_search_one)
         search_result = search_benchmark.benchmark_search(queries, iterations=iterations)
-        print(f"检索基准（完整链路 embed → sparse → hybrid_search，top_k={top_k}）：")
+        print(f"检索基准（引擎层 embed → sparse → hybrid_search，top_k={top_k}）：")
         print(search_result)
 
         return {"insert": insert_result, "search": search_result}
@@ -145,28 +144,68 @@ def run_benchmark(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Milvus mock 环境性能基准（验证性能测试代码路径）")
+    parser = argparse.ArgumentParser(
+        description="Milvus mock 环境性能基准（验证性能测试代码路径）"
+    )
     parser.add_argument("--memory_count", type=int, default=1000, help="合成记忆条数")
     parser.add_argument("--query_count", type=int, default=50, help="测试查询条数")
     parser.add_argument("--iterations", type=int, default=100, help="检索循环轮数")
     parser.add_argument("--top_k", type=int, default=5, help="检索返回数量")
     parser.add_argument("--dimension", type=int, default=768, help="稠密向量维度")
-    parser.add_argument("--embedding_provider", choices=["kylin_mock", "mock"], default="kylin_mock",
-                        help="embedding provider（kylin_mock 固定 768 维）")
+    parser.add_argument(
+        "--embedding_provider",
+        choices=["kylin_mock", "mock"],
+        default="kylin_mock",
+        help="embedding provider（kylin_mock 固定 768 维）",
+    )
     parser.add_argument("--seed", type=int, default=42, help="合成数据随机种子")
+    parser.add_argument(
+        "--engine_only",
+        action="store_true",
+        help="仅运行引擎层基准（旧路径），否则默认运行完整生产链路基准",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="",
+        help="将完整链路结构化 JSON 结果写入指定路径",
+    )
     args = parser.parse_args()
 
     try:
-        run_benchmark(
-            engine_provider="milvus_mock",
-            embedding_provider=args.embedding_provider,
-            memory_count=args.memory_count,
-            query_count=args.query_count,
-            iterations=args.iterations,
-            top_k=args.top_k,
-            dimension=args.dimension,
-            seed=args.seed,
-        )
+        if args.engine_only:
+            run_engine_benchmark(
+                engine_provider="milvus_mock",
+                embedding_provider=args.embedding_provider,
+                memory_count=args.memory_count,
+                query_count=args.query_count,
+                iterations=args.iterations,
+                top_k=args.top_k,
+                dimension=args.dimension,
+                seed=args.seed,
+            )
+        else:
+            result = run_full_chain_benchmark(
+                engine_provider="milvus_mock",
+                embedding_provider=args.embedding_provider,
+                memory_count=args.memory_count,
+                query_count=args.query_count,
+                iterations=args.iterations,
+                top_k=args.top_k,
+                dimension=args.dimension,
+                seed=args.seed,
+                runtime_mode="test",
+                allow_fallback=False,
+            )
+            if args.output:
+                import json
+                from pathlib import Path
+
+                output_path = Path(args.output)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(output_path, "w", encoding="utf-8") as f:
+                    json.dump(result.to_dict(), f, ensure_ascii=False, indent=2)
+                print(f"\n结构化结果已保存: {output_path}")
     except Exception as exc:
         print(f"\n[失败] mock 基准运行出错: {exc}")
         sys.exit(1)

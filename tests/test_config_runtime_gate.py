@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -14,6 +13,7 @@ from memoryhub.config import (
     ProductionGateError,
     RuntimeConfig,
     VectorEngineConfig,
+    is_production_mode,
     load_config,
     validate_production_gate,
     validate_production_runtime,
@@ -57,6 +57,26 @@ class TestRuntimeConfig:
     def test_allow_fallback_must_be_boolean(self) -> None:
         with pytest.raises(ValueError, match="allow_fallback must be a boolean"):
             RuntimeConfig(allow_fallback="yes")
+
+
+class TestIsProductionMode:
+    def test_returns_true_when_env_is_production(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MEMORYHUB_RUNTIME_MODE", "production")
+        assert is_production_mode() is True
+
+    def test_returns_false_when_env_is_development(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MEMORYHUB_RUNTIME_MODE", "development")
+        assert is_production_mode() is False
+
+    def test_returns_false_when_env_is_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("MEMORYHUB_RUNTIME_MODE", raising=False)
+        assert is_production_mode() is False
 
 
 class TestValidateProductionGate:
@@ -210,7 +230,9 @@ class TestLoadConfig:
         assert cfg.vector_engine.provider == "milvus"
         assert cfg.vector_engine.dimension == 768
 
-    def test_environment_variable_overrides(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_environment_variable_overrides(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         config_path = tmp_path / "config.yaml"
         config_path.write_text(
             "runtime:\n  mode: development\n  allow_fallback: true\n"
@@ -229,14 +251,18 @@ class TestLoadConfig:
         assert cfg.embedding.provider == "kylin"
         assert cfg.vector_engine.provider == "milvus"
 
-    def test_invalid_runtime_mode_from_env_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_invalid_runtime_mode_from_env_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         config_path = tmp_path / "config.yaml"
         config_path.write_text("runtime:\n  mode: development\n", encoding="utf-8")
         monkeypatch.setenv("MEMORYHUB_RUNTIME_MODE", "invalid_mode")
         with pytest.raises(ValueError, match="runtime.mode must be one of"):
             load_config(str(config_path))
 
-    def test_production_gate_runs_after_env_override(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_production_gate_runs_after_env_override(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         config_path = tmp_path / "config.yaml"
         config_path.write_text("runtime:\n  mode: development\n", encoding="utf-8")
         monkeypatch.setenv("MEMORYHUB_RUNTIME_MODE", "production")

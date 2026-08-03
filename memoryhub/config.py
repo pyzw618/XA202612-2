@@ -41,6 +41,18 @@ _PRODUCTION_VECTOR_ENGINE_PROVIDER = "milvus"
 _PRODUCTION_DIMENSION = 768
 
 
+def is_production_mode() -> bool:
+    """根据当前生效的运行时配置判断是否处于 production 模式。
+
+    优先读取 ``MEMORYHUB_RUNTIME_MODE`` 环境变量；未设置时返回 False，
+    避免低层模块在导入阶段依赖完整 ``load_config()`` 流程。
+    """
+    import os
+
+    mode = os.environ.get("MEMORYHUB_RUNTIME_MODE", "")
+    return mode == "production"
+
+
 @dataclass
 class RuntimeConfig:
     """运行时模式与降级策略配置"""
@@ -538,9 +550,15 @@ def load_config(config_path: str | None = None) -> AppConfig:
             return value
 
         try:
-            config.runtime = RuntimeConfig(**{**config.runtime.__dict__, **section("runtime")})
-            config.storage = StorageConfig(**{**config.storage.__dict__, **section("storage")})
-            config.retrieval = RetrievalConfig(**{**config.retrieval.__dict__, **section("retrieval")})
+            config.runtime = RuntimeConfig(
+                **{**config.runtime.__dict__, **section("runtime")}
+            )
+            config.storage = StorageConfig(
+                **{**config.storage.__dict__, **section("storage")}
+            )
+            config.retrieval = RetrievalConfig(
+                **{**config.retrieval.__dict__, **section("retrieval")}
+            )
             config.llm = LLMConfig(**{**config.llm.__dict__, **section("llm")})
             config.embedding = EmbeddingConfig(
                 **{**config.embedding.__dict__, **section("embedding")}

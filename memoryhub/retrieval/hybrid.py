@@ -1,7 +1,9 @@
 """
-混合检索入口
+混合检索入口（development/test 降级路径）。
 
-组合向量检索、关键词检索、元数据过滤，返回融合结果。
+组合 FAISS 向量检索、BM25 关键词检索、元数据过滤，返回融合结果。
+生产环境请使用 MilvusHybridRetriever，本类仅在 development/test 模式或
+显式故障诊断场景下作为 fallback 保留。
 """
 
 import time
@@ -19,11 +21,15 @@ from memoryhub.config import RetrievalConfig
 
 class HybridRetriever:
     """
-    混合检索器
+    混合检索器（development/test 的 FAISS + BM25 fallback）。
 
     使用方式:
         retriever = HybridRetriever(vector_search, keyword_search, reranker, cache)
         response = retriever.search(request)
+
+    注意:
+        本检索器仅用于 development/test 或显式诊断场景；生产环境请使用
+        MilvusHybridRetriever。
     """
 
     def __init__(
@@ -189,7 +195,9 @@ class HybridRetriever:
 
         return sorted(merged.values(), key=lambda r: r.score, reverse=True)
 
-    def _filter_by_context(self, results: list[SearchResult], request: SearchRequest) -> list[SearchResult]:
+    def _filter_by_context(
+        self, results: list[SearchResult], request: SearchRequest
+    ) -> list[SearchResult]:
         """按记忆类型、场景 scope 和置信度过滤结果"""
         filtered = []
         for result in results:

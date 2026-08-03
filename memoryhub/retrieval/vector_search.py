@@ -1,7 +1,7 @@
 """
-向量检索模块
+向量检索模块（development/test 降级路径）。
 
-基于 FAISS 的语义向量检索。
+基于 FAISS 的语义向量检索；生产环境请使用 MilvusHybridRetriever。
 """
 
 import json
@@ -19,7 +19,7 @@ except ImportError:
 
 class VectorSearcher:
     """
-    FAISS 向量检索器
+    FAISS 向量检索器（development/test 使用）。
 
     使用内积索引（IndexFlatIP），L2 归一化后内积等价于余弦相似度。
 
@@ -27,6 +27,10 @@ class VectorSearcher:
         searcher = VectorSearcher(index_path="data/vector_index", dimension=1024)
         searcher.add(memory_id, vector)
         results = searcher.search(query_vector, top_k=5)
+
+    注意:
+        本检索器仅用于 development/test 或显式诊断场景；生产环境请使用
+        MilvusHybridRetriever。
     """
 
     def __init__(self, index_path: str = "", dimension: int = 1024):

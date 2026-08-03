@@ -118,6 +118,15 @@ SafetyWriteGate
 
 SDK 推理超过 250ms、Milvus 查询超过 120ms 时，生产环境应返回稳定的超时/不可用错误，不得静默返回 FAISS 结果。开发环境可在明确记录结构化告警后按 `allow_fallback` 启用降级。
 
+## 6. FAISS 降级路径隔离
+
+FAISS 仅允许在 `development`、`test` 环境，或显式启用的故障诊断场景中作为降级后端；不得参与生产部署和性能验收。
+
+- 生产模式启动门禁（`validate_production_gate`）拒绝 `vector_engine.provider=faiss`。
+- `create_vector_engine("faiss", ...)`、`FAISSVectorEngine`、`VectorStore` 在检测到 `runtime.mode=production` 时输出结构化警告日志。
+- `app.py` 中 `faiss` 分支与 `HybridRetriever` 装配路径均记录明确的环境说明日志。
+- `HybridRetriever` / `VectorSearcher` / `KeywordSearcher` 等旧检索链路仅在 development/test 模式下作为 fallback 保留。
+
 ## 7. 改造范围
 
 | 模块 | 改造内容 |
