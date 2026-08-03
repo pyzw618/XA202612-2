@@ -3,7 +3,7 @@
 **文档编号**：CHK-2026-08-02-001  
 **日期**：2026-08-02  
 **目标读者**：拥有真实麒麟 OS 环境、负责验证 MemoryHub 路线 B 的测试人员  
-**前置条件**：已阅读 `docs/2026-08-02_kylin_embedding_vector_engine_integration_plan.md`
+**前置条件**：已阅读 `2026-08-02_kylin_embedding_vector_engine_integration_plan.md`
 
 > 本文档假设测试人员有麒麟 OS 设备或容器，且具备基础 Linux 运维和 C++ 编译能力。
 
@@ -486,10 +486,10 @@ uvicorn memoryhub.app:app
 
 ## 参考文档
 
-- 集成方案：`docs/2026-08-02_kylin_embedding_vector_engine_integration_plan.md`
-- Embedding SDK 接口签名：`docs/2026-08-02_kylin_embedding_sdk_api_signatures.md`
-- Vector Engine SDK 接口签名：`docs/2026-08-02_kylin_vector_engine_sdk_api_signatures.md`
-- 最小 C API 接口：`docs/2026-08-02_milvus_c_api_minimal_interface.md`
+- 集成方案：`2026-08-02_kylin_embedding_vector_engine_integration_plan.md`
+- Embedding SDK 接口签名：`2026-08-02_kylin_embedding_sdk_api_signatures.md`
+- Vector Engine SDK 接口签名：`2026-08-02_kylin_vector_engine_sdk_api_signatures.md`
+- 最小 C API 接口：`2026-08-02_milvus_c_api_minimal_interface.md`
 - Embedding SDK 测试示例：[TestTextEmbedding.cpp](https://gitee.com/openkylin/kylin-coreai-embedding/blob/openkylin/nile-sp2/test/TestTextEmbedding.cpp)
 - Vector Engine SDK 混合检索示例：[exampleHybridSearch.cpp](https://gitee.com/openkylin/libkysdk-vector-engine-client/blob/openkylin/nile-sp2/demo/client/exampleHybridSearch.cpp)
 - Milvus 文档：https://milvus.io/docs/zh/index.md

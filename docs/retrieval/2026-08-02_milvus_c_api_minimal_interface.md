@@ -426,7 +426,7 @@ finally:
 
 ## 十、参考文档
 
-- 集成方案：`docs/2026-08-02_kylin_embedding_vector_engine_integration_plan.md`
-- Embedding SDK 接口签名：`docs/2026-08-02_kylin_embedding_sdk_api_signatures.md`
-- Vector Engine SDK 接口签名：`docs/2026-08-02_kylin_vector_engine_sdk_api_signatures.md`
-- 环境交接清单：`docs/2026-08-02_kylin_environment_handoff_checklist.md`
+- 集成方案：`2026-08-02_kylin_embedding_vector_engine_integration_plan.md`
+- Embedding SDK 接口签名：`2026-08-02_kylin_embedding_sdk_api_signatures.md`
+- Vector Engine SDK 接口签名：`2026-08-02_kylin_vector_engine_sdk_api_signatures.md`
+- 环境交接清单：`2026-08-02_kylin_environment_handoff_checklist.md`

@@ -1,5 +1,7 @@
 """全局配置管理"""
 
+from __future__ import annotations
+
 import math
 import re
 from collections.abc import Mapping
@@ -29,11 +31,45 @@ class StorageConfig:
     cache_max_size: int = 1000
 
 
+class ProductionGateError(ValueError):
+    """生产环境启动门禁未通过。"""
+
+
+_RUNTIME_MODES = frozenset({"production", "development", "test"})
+_PRODUCTION_EMBEDDING_PROVIDER = "kylin"
+_PRODUCTION_VECTOR_ENGINE_PROVIDER = "milvus"
+_PRODUCTION_DIMENSION = 768
+
+
+@dataclass
+class RuntimeConfig:
+    """运行时模式与降级策略配置"""
+
+    mode: str = "development"  # "production" | "development" | "test"
+    allow_fallback: bool = True  # development/test 默认可降级；生产强制 false
+
+    def __post_init__(self) -> None:
+        if self.mode not in _RUNTIME_MODES:
+            raise ValueError(
+                f"runtime.mode must be one of {_RUNTIME_MODES}, got {self.mode!r}"
+            )
+        if type(self.allow_fallback) is not bool:
+            raise ValueError("runtime.allow_fallback must be a boolean")
+
+    @property
+    def is_production(self) -> bool:
+        return self.mode == "production"
+
+
 @dataclass
 class RetrievalConfig:
     """检索相关配置"""
 
     default_top_k: int = 5
+    candidate_multiplier: int = 4
+    max_query_chars: int = 512
+    target_p95_ms: int = 350
+    target_p99_ms: int = 500
     vector_weight: float = 0.6
     keyword_weight: float = 0.3
     metadata_weight: float = 0.1
@@ -61,6 +97,7 @@ class EmbeddingConfig:
     dimension: int = 1024
     model_name: str = ""
     so_path: str = ""  # 动态库显式路径（kylin/kylin_mock 模式，空则按默认路径探测）
+    query_timeout_ms: int = 250
 
 
 @dataclass
@@ -72,6 +109,8 @@ class VectorEngineConfig:
     host: str = "127.0.0.1"
     port: int = 19530
     collection: str = "memoryhub"
+    dimension: int = 768
+    search_timeout_ms: int = 120
 
 
 @dataclass(frozen=True)
@@ -351,10 +390,104 @@ class SafetyConfig:
         return tuple(self.sensitive_patterns)
 
 
+def validate_production_gate(config: AppConfig) -> None:
+    """生产模式静态配置门禁：校验 provider、维度与降级策略。
+
+    动态库加载与会话初始化等运行时检查由 ``validate_production_runtime``
+    在客户端/引擎构造完成后执行。
+    """
+    if not config.runtime.is_production:
+        return
+
+    errors: list[str] = []
+
+    # 生产模式下禁止显式允许降级
+    if config.runtime.allow_fallback:
+        errors.append("runtime.allow_fallback must be false in production mode")
+
+    # Embedding 必须是真实麒麟 SDK
+    if config.embedding.provider != _PRODUCTION_EMBEDDING_PROVIDER:
+        errors.append(
+            f"production requires embedding.provider='{_PRODUCTION_EMBEDDING_PROVIDER}', "
+            f"got {config.embedding.provider!r}"
+        )
+
+    # 向量引擎必须是真实 Milvus
+    if config.vector_engine.provider != _PRODUCTION_VECTOR_ENGINE_PROVIDER:
+        errors.append(
+            f"production requires vector_engine.provider='{_PRODUCTION_VECTOR_ENGINE_PROVIDER}', "
+            f"got {config.vector_engine.provider!r}"
+        )
+
+    # 维度固定 768
+    if config.embedding.dimension != _PRODUCTION_DIMENSION:
+        errors.append(
+            f"production requires embedding.dimension={_PRODUCTION_DIMENSION}, "
+            f"got {config.embedding.dimension}"
+        )
+    if config.vector_engine.dimension != _PRODUCTION_DIMENSION:
+        errors.append(
+            f"production requires vector_engine.dimension={_PRODUCTION_DIMENSION}, "
+            f"got {config.vector_engine.dimension}"
+        )
+
+    # 禁止 mock / kylin_mock / faiss 进入生产配置
+    forbidden = {"mock", "kylin_mock", "faiss", "milvus_mock"}
+    if config.embedding.provider in forbidden:
+        errors.append(
+            f"embedding provider {config.embedding.provider!r} is not allowed in production"
+        )
+    if config.vector_engine.provider in forbidden:
+        errors.append(
+            f"vector_engine provider {config.vector_engine.provider!r} is not allowed in production"
+        )
+
+    if errors:
+        raise ProductionGateError("; ".join(errors))
+
+
+def validate_production_runtime(
+    config: AppConfig,
+    embedding_client: object,
+    vector_engine: object,
+) -> None:
+    """生产模式运行时门禁：校验 SDK/引擎可用性与实际输出维度。"""
+    if not config.runtime.is_production:
+        return
+
+    errors: list[str] = []
+
+    # Embedding SDK 可加载且会话可初始化
+    available = getattr(embedding_client, "is_available", None)
+    if available is None or not available():
+        errors.append("embedding client is not available (SO load or session init failed)")
+
+    # 实际输出维度为 768
+    get_dim = getattr(embedding_client, "get_dimension", None)
+    if callable(get_dim):
+        actual_dim = get_dim()
+        if actual_dim != _PRODUCTION_DIMENSION:
+            errors.append(
+                f"embedding actual dimension is {actual_dim}, expected {_PRODUCTION_DIMENSION}"
+            )
+
+    # 向量引擎 C API 可加载且已连接 Milvus
+    connected = getattr(vector_engine, "_connected", None)
+    closed = getattr(vector_engine, "_closed", None)
+    if connected is None or not connected:
+        errors.append("vector engine is not connected to Milvus")
+    if closed is True:
+        errors.append("vector engine is closed")
+
+    if errors:
+        raise ProductionGateError("; ".join(errors))
+
+
 @dataclass
 class AppConfig:
     """应用总配置"""
 
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
@@ -376,8 +509,6 @@ def load_config(config_path: str | None = None) -> AppConfig:
         config_path,
         os.environ.get("MEMORYHUB_CONFIG", ""),
         "config.yaml",
-        "config.example.yaml",
-        str(Path(__file__).parent.parent / "config.example.yaml"),
     ]
     yaml_path = None
     for p in search_paths:
@@ -407,6 +538,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
             return value
 
         try:
+            config.runtime = RuntimeConfig(**{**config.runtime.__dict__, **section("runtime")})
             config.storage = StorageConfig(**{**config.storage.__dict__, **section("storage")})
             config.retrieval = RetrievalConfig(**{**config.retrieval.__dict__, **section("retrieval")})
             config.llm = LLMConfig(**{**config.llm.__dict__, **section("llm")})
@@ -422,15 +554,32 @@ def load_config(config_path: str | None = None) -> AppConfig:
             config.debug = bool(data["debug"])
 
     # 环境变量覆盖
+    if os.environ.get("MEMORYHUB_RUNTIME_MODE"):
+        config.runtime.mode = os.environ["MEMORYHUB_RUNTIME_MODE"]
+    if os.environ.get("MEMORYHUB_RUNTIME_ALLOW_FALLBACK"):
+        config.runtime.allow_fallback = os.environ[
+            "MEMORYHUB_RUNTIME_ALLOW_FALLBACK"
+        ].lower() in ("1", "true", "yes")
+    # 环境变量可能绕过 dataclass __post_init__，重新构造以校验 runtime.mode
+    config.runtime = RuntimeConfig(
+        mode=config.runtime.mode, allow_fallback=config.runtime.allow_fallback
+    )
     if os.environ.get("MEMORYHUB_DB_PATH"):
         config.storage.db_path = os.environ["MEMORYHUB_DB_PATH"]
     if os.environ.get("MEMORYHUB_DEBUG"):
         config.debug = os.environ["MEMORYHUB_DEBUG"].lower() in ("1", "true", "yes")
+    if os.environ.get("MEMORYHUB_EMBEDDING_PROVIDER"):
+        config.embedding.provider = os.environ["MEMORYHUB_EMBEDDING_PROVIDER"]
+    if os.environ.get("MEMORYHUB_VECTOR_ENGINE_PROVIDER"):
+        config.vector_engine.provider = os.environ["MEMORYHUB_VECTOR_ENGINE_PROVIDER"]
     if os.environ.get("MEMORYHUB_LLM_PROVIDER"):
         config.llm.provider = os.environ["MEMORYHUB_LLM_PROVIDER"]
     if os.environ.get("MEMORYHUB_LLM_API_KEY"):
         config.llm.api_key = os.environ["MEMORYHUB_LLM_API_KEY"]
     if os.environ.get("MEMORYHUB_LLM_MODEL"):
         config.llm.model = os.environ["MEMORYHUB_LLM_MODEL"]
+
+    # 生产模式静态门禁必须在环境变量覆盖后执行
+    validate_production_gate(config)
 
     return config

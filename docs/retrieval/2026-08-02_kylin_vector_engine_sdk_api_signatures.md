@@ -550,7 +550,7 @@ for (const auto& result : results.Results()) {
 
 由于 `VectorDB::Database` 是 C++ 类，不能直接被 ctypes 调用，需要封装一层 C 函数。最小接口参见：
 
-`docs/2026-08-02_milvus_c_api_minimal_interface.md`
+`2026-08-02_milvus_c_api_minimal_interface.md`
 
 ### 10.1 设计原则
 
@@ -602,6 +602,6 @@ extern "C" {
 - Gitee 混合检索示例：[exampleHybridSearch.cpp](https://gitee.com/openkylin/libkysdk-vector-engine-client/blob/openkylin/nile-sp2/demo/client/exampleHybridSearch.cpp)
 - 本地头文件：`D:/project/libkysdk-vector-engine-client/include/kysdk-vector-engine-client/`
 - 本地实现：`D:/project/libkysdk-vector-engine-client/src/impl/MilvusClientImpl.cpp`
-- 集成方案：`docs/2026-08-02_kylin_embedding_vector_engine_integration_plan.md`
-- 环境交接清单：`docs/2026-08-02_kylin_environment_handoff_checklist.md`
-- 最小 C API 接口：`docs/2026-08-02_milvus_c_api_minimal_interface.md`
+- 集成方案：`2026-08-02_kylin_embedding_vector_engine_integration_plan.md`
+- 环境交接清单：`2026-08-02_kylin_environment_handoff_checklist.md`
+- 最小 C API 接口：`2026-08-02_milvus_c_api_minimal_interface.md`

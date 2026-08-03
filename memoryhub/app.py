@@ -20,7 +20,7 @@ from memoryhub.adapter import schemas as adapter_schemas
 from memoryhub.adapter import user_rule_schemas
 from memoryhub.adapter.api import router as memory_router
 from memoryhub.adapter.schemas import KnowledgeMemory, PreferenceMemory, SearchResult
-from memoryhub.config import AppConfig, load_config
+from memoryhub.config import AppConfig, load_config, validate_production_runtime
 from memoryhub.core.safety.user_rules import (
     UserRuleError,
     build_user_rule_service,
@@ -315,6 +315,9 @@ def create_app(
                 )
         else:
             raise ValueError(f"unknown vector_engine provider: {engine_provider}")
+
+        # 生产模式运行时门禁：校验 SDK/引擎可用性与实际维度
+        validate_production_runtime(config, embedding_client, vector_engine)
 
         # 关键词索引：BM25 索引可重建，启动时从 SQLite 全量构建
         keyword_search = KeywordSearcher()

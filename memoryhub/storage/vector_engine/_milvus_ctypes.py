@@ -1,7 +1,7 @@
 """
 Milvus 向量引擎 C API 的 ctypes 桥接。
 
-按 docs/2026-08-02_milvus_c_api_minimal_interface.md 绑定全部导出函数，
+按 docs/retrieval/2026-08-02_milvus_c_api_minimal_interface.md 绑定全部导出函数，
 封装句柄管理、错误检查和 out_json 缓冲区释放。仅供
 milvus_engine.MilvusVectorEngine 内部使用。
 """

@@ -1,17 +1,31 @@
-# Kylin-MemoryHub 配置文件示例
+# Kylin-MemoryHub 生产配置文件示例
 # 复制此文件为 config.yaml 并根据实际环境修改
+#
+# 注意：本文件默认展示生产环境（runtime.mode=production）配置，
+# 要求 embedding 使用银河麒麟真实 SDK、向量引擎使用 Milvus 真实 SDK，
+# 且向量维度固定为 768。本地开发/测试请改为 development/test 模式。
+
+# ==================== 运行模式配置 ====================
+runtime:
+  # 运行模式: "production" | "development" | "test"
+  # production 模式下禁止 mock/kylin_mock/faiss/milvus_mock 和静默降级
+  mode: production
+
+  # 是否允许在 development/test 环境下触发 FAISS 等降级后端
+  # production 模式下必须为 false
+  allow_fallback: false
 
 # ==================== 存储配置 ====================
 storage:
-  # SQLite 数据库路径
+  # SQLite 数据库路径（端侧唯一事实源）
   db_path: "data/memoryhub.db"
-  
-  # FAISS 向量索引路径
+
+  # FAISS 向量索引路径（仅 development/test 使用，生产模式不可达）
   vector_index_path: "data/vector_index"
-  
+
   # 证据链存储路径 (JSONL格式)
   evidence_path: "data/evidence"
-  
+
   # 检索缓存最大条目数
   cache_max_size: 1000
 
@@ -19,15 +33,26 @@ storage:
 retrieval:
   # 默认返回 Top-K 结果数
   default_top_k: 5
-  
-  # 混合检索权重 (总和建议为 1.0)
-  vector_weight: 0.6      # 向量检索权重
-  keyword_weight: 0.3     # BM25 关键词检索权重
-  metadata_weight: 0.1    # 元数据过滤权重
-  
-  # 是否启用 Reranker 重排序
-  rerank_enabled: true
-  
+
+  # HybridSearch 召回候选倍数：最终召回 top_k * candidate_multiplier 个候选
+  candidate_multiplier: 4
+
+  # 查询文本最大字符数
+  max_query_chars: 512
+
+  # 延迟预算（毫秒），供可观测性指标与后续真实环境验收使用
+  target_p95_ms: 350
+  target_p99_ms: 500
+
+  # 以下权重字段仅 HybridRetriever（FAISS + BM25）使用；
+  # 生产模式使用 MilvusHybridRetriever，由引擎执行稠密/稀疏 RRF 融合
+  vector_weight: 0.6
+  keyword_weight: 0.3
+  metadata_weight: 0.1
+
+  # 是否启用 Reranker 重排序；生产模式下建议关闭
+  rerank_enabled: false
+
   # 检索缓存 TTL (秒)
   cache_ttl_seconds: 300
 
@@ -35,59 +60,63 @@ retrieval:
 llm:
   # 提供商: "openai" (兼容 OpenAI API) | "ollama" (本地推理)
   provider: "ollama"
-  
+
   # API 基础地址
   # OpenAI 兼容: https://api.openai.com/v1 或其他兼容端点
   # Ollama: http://localhost:11434/v1
   api_base: "http://localhost:11434/v1"
-  
+
   # API 密钥 (OpenAI 兼容模式需要)
   api_key: ""
-  
+
   # 模型名称
   # OpenAI: "gpt-4o-mini", "gpt-4o"
   # Ollama: "qwen2:1.5b", "qwen2:7b", "llama3:8b"
   model: "qwen2:7b"
-  
+
   # 生成温度 (0.0 - 2.0)
   temperature: 0.1
-  
+
   # 最大生成 token 数
   max_tokens: 2048
 
 # ==================== Embedding 配置 ====================
 embedding:
-  # 提供商: "kylin" (麒麟真实 SDK) | "kylin_mock" (项目内 mock 动态库)
-  #         | "mock" (纯 Python 开发测试) | "auto" (自动选择，kylin 优先)
-  # 注意: 显式 "kylin"/"kylin_mock" 在动态库不可用时会直接报错
-  provider: "mock"
+  # 生产模式必须使用 "kylin"（银河麒麟真实 SDK）
+  # 其他可选: "kylin_mock" | "mock" | "auto"（仅 development/test）
+  provider: "kylin"
 
-  # 向量维度（kylin/kylin_mock 的默认模型固定 768 维；mock 可任选）
+  # 麒麟模型固定输出 768 维；生产模式必须与 vector_engine.dimension 一致
   dimension: 768
 
-  # 模型名称 (kylin 模式下填写，如 ensemble-embd_gte-base_uint8-text)
-  model_name: ""
+  # 模型名称 (kylin 模式下必填)
+  model_name: "ensemble-embd_gte-base_uint8-text"
 
-  # 动态库显式路径 (kylin/kylin_mock 模式，空则按默认路径探测；
-  # kylin_mock 缺省指向 third_party/kylin-mock/build/)
-  so_path: ""
+  # 动态库显式路径 (kylin/kylin_mock 模式，空则按默认路径探测)
+  so_path: "/usr/lib/libkylin-coreai-embedding.so"
+
+  # Embedding 推理超时（毫秒）；超过时生产环境返回稳定超时错误
+  query_timeout_ms: 250
 
 # ==================== 向量引擎配置 ====================
 vector_engine:
-  # 提供商: "faiss" (本地 FAISS 索引，默认) | "milvus" (麒麟 Milvus SDK)
-  #         | "milvus_mock" (项目内 mock 动态库，非麒麟环境测试)
-  provider: "faiss"
+  # 生产模式必须使用 "milvus"（麒麟 Milvus SDK）
+  # 其他可选: "faiss" | "milvus_mock"（仅 development/test）
+  provider: "milvus"
 
-  # Milvus C API 动态库显式路径 (milvus 模式，空则按默认路径探测；
-  # milvus_mock 缺省指向 third_party/kylin-mock/build/)
-  so_path: ""
+  # Milvus C API 动态库显式路径 (milvus 模式，空则按默认路径探测)
+  so_path: "/usr/lib/libkysdk-vector-engine-client-capi.so"
 
   # Milvus 服务地址与端口
   host: "127.0.0.1"
   port: 19530
 
-  # Milvus 集合名
+  # Milvus 集合名；生产模式 collection schema 维度固定 768
   collection: "memoryhub"
+  dimension: 768
+
+  # Milvus 查询超时（毫秒）；超过时生产环境返回稳定超时错误
+  search_timeout_ms: 120
 
 # ==================== 安全配置 ====================
 safety:
@@ -118,7 +147,7 @@ safety:
     on_unmaskable: "review"
     auto_sanitize: true
     fail_closed: true
-  
+
   # 旧版兼容开关，只能收紧策略：
   # reject_on_detect=true 强制拒绝；auto_mask=false 将 MASK 提升为 REVIEW
   auto_mask: true

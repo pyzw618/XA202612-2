@@ -45,7 +45,7 @@ TROUBLESHOOT_HINT = """
     2. 确认 Milvus 服务已启动并可连接（--host/--port，默认 127.0.0.1:19530，
        可用 standalone Docker 部署）；
     3. 确认 Embedding 后端服务正常（DBus 服务）；
-    4. 详细环境准备步骤见 docs/2026-08-02_kylin_environment_handoff_checklist.md；
+    4. 详细环境准备步骤见 docs/retrieval/2026-08-02_kylin_environment_handoff_checklist.md；
     5. 可先运行 scripts/verify_kylin_environment.py 逐项定位问题。
 """
 

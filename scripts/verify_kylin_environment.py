@@ -145,7 +145,7 @@ def main() -> None:
     failed = len(results) - passed
     print(f"\n=== 汇总: {passed} PASS / {failed} FAIL ===")
     if failed:
-        print("存在未通过项，请按 docs/2026-08-02_kylin_environment_handoff_checklist.md 排查。")
+        print("存在未通过项，请按 docs/retrieval/2026-08-02_kylin_environment_handoff_checklist.md 排查。")
         sys.exit(1)
     print("环境就绪。")
     sys.exit(0)

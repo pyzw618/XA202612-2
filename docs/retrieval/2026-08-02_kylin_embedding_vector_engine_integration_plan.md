@@ -159,7 +159,7 @@ MemoryHub SearchResponse
    麒麟环境测试人员只需改配置 + 替换 `.so` 路径即可启用真实链路。
 
 5. **测试交接文档**  
-   在 `docs/2026-08-02_kylin_environment_handoff_checklist.md` 中提供：
+   在 `2026-08-02_kylin_environment_handoff_checklist.md` 中提供：
    - 麒麟环境准备步骤；
    - SDK 编译命令；
    - Milvus 部署命令；
@@ -187,7 +187,7 @@ MemoryHub SearchResponse
 - 错误码定义
 - 资源释放函数
 
-输出文件：`docs/2026-08-02_kylin_embedding_sdk_api_signatures.md`
+输出文件：`2026-08-02_kylin_embedding_sdk_api_signatures.md`
 
 #### 4.1.2 提取 Vector Engine SDK 接口签名
 
@@ -199,7 +199,7 @@ MemoryHub SearchResponse
 - 错误处理模式（`Status.IsOk()`）
 - `HybridSearch` 完整参数顺序和类型
 
-输出文件：`docs/2026-08-02_kylin_vector_engine_sdk_api_signatures.md`
+输出文件：`2026-08-02_kylin_vector_engine_sdk_api_signatures.md`
 
 #### 4.1.3 输出最小可用 C API 清单
 
@@ -233,7 +233,7 @@ extern "C" {
 }
 ```
 
-输出文件：`docs/2026-08-02_milvus_c_api_minimal_interface.md`
+输出文件：`2026-08-02_milvus_c_api_minimal_interface.md`
 
 > **交付标准**：任何人拿到这三份文档，能在不看源码的情况下知道要封装哪些函数、参数含义、返回值格式。
 
@@ -285,7 +285,7 @@ C++ SDK 本身依赖 Milvus gRPC 客户端。在真实麒麟环境需要：
 - Milvus Lite（Python 内嵌，无需独立服务）
 - Milvus Standalone Docker
 
-> **文档要求**：在 `docs/2026-08-02_kylin_environment_handoff_checklist.md` 中写明 Milvus 部署命令。
+> **文档要求**：在 `2026-08-02_kylin_environment_handoff_checklist.md` 中写明 Milvus 部署命令。
 
 ---
 
@@ -515,7 +515,7 @@ class LatencyBenchmark:
 
 #### 4.10.1 环境准备
 
-按 `docs/2026-08-02_kylin_environment_handoff_checklist.md` 执行：
+按 `2026-08-02_kylin_environment_handoff_checklist.md` 执行：
 
 1. 克隆并编译 `kylin-coreai-embedding`，安装 `.so`
 2. 编译 `libkysdk-vector-engine-client` + `c_api_bridge.cpp`
@@ -548,11 +548,11 @@ python evaluation/run_milvus_kylin_benchmark.py --memory_count 10000
 
 | 操作 | 路径 | 说明 |
 |---|---|---|
-| 新增 | `docs/2026-08-02_kylin_embedding_vector_engine_integration_plan.md` | 本方案文档 |
-| 新增 | `docs/2026-08-02_kylin_embedding_sdk_api_signatures.md` | Embedding SDK 接口签名文档 |
-| 新增 | `docs/2026-08-02_kylin_vector_engine_sdk_api_signatures.md` | Vector Engine SDK 接口签名文档 |
-| 新增 | `docs/2026-08-02_milvus_c_api_minimal_interface.md` | 最小 C API 接口文档 |
-| 新增 | `docs/2026-08-02_kylin_environment_handoff_checklist.md` | 麒麟环境测试交接清单 |
+| 新增 | `2026-08-02_kylin_embedding_vector_engine_integration_plan.md` | 本方案文档 |
+| 新增 | `2026-08-02_kylin_embedding_sdk_api_signatures.md` | Embedding SDK 接口签名文档 |
+| 新增 | `2026-08-02_kylin_vector_engine_sdk_api_signatures.md` | Vector Engine SDK 接口签名文档 |
+| 新增 | `2026-08-02_milvus_c_api_minimal_interface.md` | 最小 C API 接口文档 |
+| 新增 | `2026-08-02_kylin_environment_handoff_checklist.md` | 麒麟环境测试交接清单 |
 | 新增 | `third_party/kylin-mock/embedding_mock.c` | Embedding Mock `.so` 源码 |
 | 新增 | `third_party/kylin-mock/vector_engine_mock.c` | Vector Engine Mock `.so` 源码 |
 | 新增 | `memoryhub/storage/vector_engine/__init__.py` | 向量引擎工厂 |
@@ -639,14 +639,14 @@ Week 5+（由麒麟环境测试人员执行）
 
 ### 阶段 1 验收标准（当前执行者，无真实麒麟环境可完成）
 
-1. **接口文档完整**：`docs/2026-08-02_kylin_embedding_sdk_api_signatures.md`、`docs/2026-08-02_kylin_vector_engine_sdk_api_signatures.md`、`docs/2026-08-02_milvus_c_api_minimal_interface.md` 三份文档存在且可指导 ctypes 封装。
+1. **接口文档完整**：`2026-08-02_kylin_embedding_sdk_api_signatures.md`、`2026-08-02_kylin_vector_engine_sdk_api_signatures.md`、`2026-08-02_milvus_c_api_minimal_interface.md` 三份文档存在且可指导 ctypes 封装。
 2. **C API 桥接层可编译**：`libkysdk-vector-engine-client` 能编译出 `libkysdk-vector-engine-client-capi.so`（在 Linux/WSL 验证）。
 3. **Mock `.so` 可加载**：`libkylin-coreai-embedding-mock.so` 和 `libkysdk-vector-engine-client-capi-mock.so` 可在 Windows/Linux 被 ctypes 加载，并返回预期结果。
 4. **Python 抽象层可切换**：`config.yaml` 中 `embedding.provider` 和 `vector_engine.provider` 可组合切换，不修改业务代码。
 5. **单元测试通过**：`pytest tests/test_vector_engine/` 和 `pytest tests/test_retrieval/test_milvus_hybrid.py` 全部通过。
 6. **端到端测试通过**：`/api/memory/search` 在 `milvus_mock` + `kylin_mock` 配置下可返回正确结果。
 7. **性能测试脚本可跑**：`evaluation/run_milvus_mock_benchmark.py` 能输出 P50/P95/P99 和 QPS（mock 数值不具真实参考意义，但脚本路径正确）。
-8. **交接文档完整**：`docs/2026-08-02_kylin_environment_handoff_checklist.md` 包含环境准备、编译、部署、验证、排错全部步骤。
+8. **交接文档完整**：`2026-08-02_kylin_environment_handoff_checklist.md` 包含环境准备、编译、部署、验证、排错全部步骤。
 
 ### 阶段 2 验收标准（麒麟环境测试人员）
 

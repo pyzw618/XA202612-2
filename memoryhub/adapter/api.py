@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hmac
 import re
+from collections.abc import Mapping
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status

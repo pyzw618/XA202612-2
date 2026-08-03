@@ -433,5 +433,5 @@ if err.value != 0:
 - 本地错误码头文件：`/d/project/kylin-coreai-embedding/include/kylin-ai/coreai/embedding/error.h`
 - Gitee 测试源码：[TestTextEmbedding.cpp](https://gitee.com/openkylin/kylin-coreai-embedding/blob/openkylin/nile-sp2/test/TestTextEmbedding.cpp)
 - MemoryHub 当前封装：`memoryhub/embedding/kylin_client.py`
-- 集成方案：`docs/2026-08-02_kylin_embedding_vector_engine_integration_plan.md`
-- 环境交接清单：`docs/2026-08-02_kylin_environment_handoff_checklist.md`
+- 集成方案：`2026-08-02_kylin_embedding_vector_engine_integration_plan.md`
+- 环境交接清单：`2026-08-02_kylin_environment_handoff_checklist.md`
