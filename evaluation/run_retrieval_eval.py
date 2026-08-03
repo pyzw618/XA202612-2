@@ -70,13 +70,14 @@ MOCK_LIMITATION_NOTICE = """
 # 检索器构造
 # ============================================================
 
-def build_embedding_client(provider: str, dim: int):
+def build_embedding_client(provider: str, dim: int, so_path: str = ""):
     """构造 embedding 客户端。mock 必须 latency=0.0，避免 100ms 假延迟污染延迟指标。"""
     if provider == "kylin":
-        client = KylinEmbeddingClient(dim=dim)
+        client = KylinEmbeddingClient(dim=dim, so_path=so_path or None)
         if not client.is_available():
             raise RuntimeError(
                 "Kylin embedding 不可用（非麒麟环境或缺少 .so），请改用 --provider mock"
+                f"；so_path={'默认路径' if not so_path else so_path}"
             )
         return client
     return MockEmbeddingClient(dim=dim, latency=0.0)
@@ -209,6 +210,8 @@ def main() -> None:
     parser.add_argument("--provider", choices=["mock", "kylin"], default="mock",
                         help="embedding provider；kylin 用于真实语义检索复测")
     parser.add_argument("--dim", type=int, default=64, help="embedding 维度")
+    parser.add_argument("--embedding-so-path", default="",
+                        help="kylin embedding 动态库显式路径（provider=kylin 时有效）")
     parser.add_argument("--dataset", default=os.path.join("tests", "eval_dataset.json"),
                         help="数据集 JSON 路径（缺失时自动生成）")
     parser.add_argument("--output", default=os.path.join("evaluation", "results", "retrieval_eval_v2.json"),
@@ -229,7 +232,7 @@ def main() -> None:
     print(f"数据集: {len(memories)} 条记忆, {len(queries)} 个 query, "
           f"难度分布: {dataset['metadata']['difficulty_distribution']}")
 
-    embed_client = build_embedding_client(args.provider, args.dim)
+    embed_client = build_embedding_client(args.provider, args.dim, args.embedding_so_path)
     print(f"embedding: provider={args.provider}, dim={embed_client.get_dimension()}")
 
     report = {

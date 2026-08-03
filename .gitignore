@@ -224,4 +224,4 @@ data/
 # 评测本地产物（docs_group2/评测v2-检索评测方案.md §四：不入库）
 tests/eval_dataset.json
 evaluation/results/
-
+config.yaml
