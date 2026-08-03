@@ -39,14 +39,9 @@ cd kylin-coreai-embedding
 git checkout openkylin/nile-sp2
 ```
 
-### 2.2 克隆 Vector Engine SDK
+### 2.2 Vector Engine SDK
 
-```bash
-cd /path/to/workspaces
-git clone https://gitee.com/openkylin/libkysdk-vector-engine-client.git
-cd libkysdk-vector-engine-client
-git checkout openkylin/nile-sp2
-```
+Vector Engine SDK（含 C API 桥接层）已作为 `third_party/kylin-embedding/` 随仓库提供，无需单独克隆。
 
 ### 2.3 克隆 MemoryHub
 
@@ -106,31 +101,25 @@ cd /path/to/workspaces/kylin-coreai-embedding/build
 ### 4.1 安装依赖
 
 ```bash
-sudo apt install -y cmake g++ libgrpc++-dev protobuf-compiler-grpc libprotobuf-dev
+sudo apt install -y cmake g++ libgrpc++-dev protobuf-compiler-grpc libprotobuf-dev libsqlitecpp-dev libsqlcipher-dev
 ```
 
-### 4.1.1 固定桥接提交
+### 4.1.1 C API 桥接层来源
 
-C API 桥接基于 Vector Engine SDK 的 `openkylin/nile-sp2`，并固定为：
+C API 桥接层随 MemoryHub 位于 `third_party/kylin-embedding/capi/`，`CMakeLists.txt` 中已包含 `kysdk-vector-engine-client-capi` 编译目标，无需额外补丁。
 
-```text
-上游 SDK 基线：bed675f418d32c052a6ab4c5c49bae148d90f678
-MemoryHub C API 桥接提交：8b4a1e36a5e01f31fb2aca123275a0dd3ab017c4
-```
-
-> 第二个提交目前必须由交接方从当前执行者提供的分支或补丁取得；仅克隆上游 Gitee 仓库不会包含 `capi/`。应用该提交后执行 `git rev-parse HEAD`，输出应为上述桥接提交 SHA。
 ### 4.2 确认 C API 桥接层文件存在
 
 C API 桥接层已实现并提交，位于仓库的 `capi/` 子目录：
 
 ```bash
-ls /path/to/workspaces/libkysdk-vector-engine-client/capi/c_api_bridge.h
-ls /path/to/workspaces/libkysdk-vector-engine-client/capi/c_api_bridge.cpp
+ls third_party/kylin-embedding/capi/c_api_bridge.h
+ls third_party/kylin-embedding/capi/c_api_bridge.cpp
 ```
 
 `CMakeLists.txt` 中已包含 `kysdk-vector-engine-client-capi` 编译目标（`endif()` 之后），无需手工修改。如果不存在，请联系当前执行者获取补丁。
 
-> **兼容性要求**：桥接要求 `openkylin/nile-sp2` API（`Database::HybridSearch`、`AnnSearchRequest`、`RRFRanker`、`SparseFloatVecFieldData`）。旧 SDK 不得用于构建或部署该桥接；不得将 dense-only 搜索伪装为 HybridSearch。
+> **兼容性要求**：本桥接使用 `third_party/kylin-embedding` 中的 SDK API（`Database::HybridSearch`、`AnnSearchRequest`、`RRFRanker`、`SparseFloatVecFieldData`）。不得使用其他版本 SDK 构建或部署该桥接。
 
 ### 4.3 修改 CMakeLists.txt
 
@@ -148,7 +137,7 @@ target_link_libraries(kysdk-vector-engine-client-capi
 ### 4.4 编译
 
 ```bash
-cd /path/to/workspaces/libkysdk-vector-engine-client
+cd third_party/kylin-embedding
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
@@ -157,7 +146,7 @@ make -j$(nproc)
 ### 4.5 确认 .so 输出
 
 ```bash
-find /path/to/workspaces/libkysdk-vector-engine-client/build -name "*.so"
+find third_party/kylin-embedding/build -name "*.so"
 ```
 
 预期至少看到：
@@ -167,7 +156,7 @@ find /path/to/workspaces/libkysdk-vector-engine-client/build -name "*.so"
 ### 4.6 设置动态库搜索路径
 
 ```bash
-export LD_LIBRARY_PATH=/path/to/workspaces/libkysdk-vector-engine-client/build:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=third_party/kylin-embedding/build:$LD_LIBRARY_PATH
 # 建议写入 ~/.bashrc 或测试脚本
 ```
 
