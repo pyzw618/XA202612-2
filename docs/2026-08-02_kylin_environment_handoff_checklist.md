@@ -224,7 +224,7 @@ pip install -r requirements-dev.txt
 
 ### 6.2 修改配置文件
 
-复制 `config.example.yaml` 为 `config.yaml`（或 `.env`），修改如下：
+复制 `config.example.yaml` 为 `config.yaml`，修改如下：
 
 ```yaml
 embedding:
@@ -241,13 +241,16 @@ vector_engine:
   collection: memoryhub
 ```
 
-如使用默认搜索路径，可省略 `so_path`。
+如两个动态库已安装到系统默认搜索路径，可省略 `so_path`。当前
+`load_config()` 不会自动读取 `.env`；如需使用环境变量，请先由 shell 或
+服务管理器将其导出。
 
 ### 6.3 设置环境变量
 
 ```bash
-export LD_LIBRARY_PATH=/path/to/libkysdk-vector-engine-client-capi.so所在目录:$LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=/path/to/libkylin-coreai-embedding.so所在目录:$LD_LIBRARY_PATH
+export VECTOR_ENGINE_CAPI_SO=/path/to/libkysdk-vector-engine-client-capi.so
+export EMBEDDING_SO=/path/to/libkylin-coreai-embedding.so
+export LD_LIBRARY_PATH="$(dirname "$VECTOR_ENGINE_CAPI_SO"):$(dirname "$EMBEDDING_SO"):${LD_LIBRARY_PATH:-}"
 ```
 
 ---
@@ -261,7 +264,10 @@ cd /path/to/workspaces/XA202612-2
 source .venv/bin/activate
 python - <<'PY'
 from memoryhub.embedding import create_embedding_client
-client = create_embedding_client(provider="kylin")
+client = create_embedding_client(
+    provider="kylin",
+    so_path="/path/to/libkylin-coreai-embedding.so",
+)
 print("available:", client.is_available())
 vec = client.embed("测试文本")
 print("dim:", len(vec))
@@ -297,7 +303,10 @@ PY
 ### 7.3 运行冒烟测试脚本
 
 ```bash
-python scripts/run_milvus_real_smoke_test.py
+python scripts/run_milvus_real_smoke_test.py \
+    --so_path /path/to/libkysdk-vector-engine-client-capi.so \
+    --embedding_so_path /path/to/libkylin-coreai-embedding.so \
+    --host 127.0.0.1 --port 19530 --dimension 768
 ```
 
 预期：
@@ -326,32 +335,41 @@ curl -X POST "http://127.0.0.1:8000/api/memory/search" \
 
 ## 八、性能测试
 
-### 8.1 准备数据集
+### 8.1 运行真实环境性能基准
 
-```bash
-python -c "from tests.eval_dataset import generate_dataset; generate_dataset(count=10000, output='tests/eval_dataset_10k.json')"
-```
-
-> 如果 `generate_dataset` 不支持缩放，需要联系当前执行者确认数据集生成脚本。
-
-### 8.2 运行真实环境性能基准
+该脚本使用可复现的合成数据生成负载，不接受 `--dataset` 参数，也不计算检索质量指标。
 
 ```bash
 python evaluation/run_milvus_kylin_benchmark.py \
-    --dataset tests/eval_dataset_10k.json \
     --memory_count 10000 \
-    --iterations 100
+    --iterations 100 \
+    --so_path /path/to/libkysdk-vector-engine-client-capi.so \
+    --embedding_so_path /path/to/libkylin-coreai-embedding.so \
+    --host 127.0.0.1 --port 19530 --dimension 768
 ```
 
-### 8.3 收集指标
+### 8.2 收集性能指标
 
 脚本应输出：
 - P50/P95/P99 检索延迟
 - QPS
-- Recall@K / Precision@K / MRR / NDCG
 - 索引构建时间
-- 内存占用
 
+### 8.3 运行真实检索质量评测
+
+质量指标（Recall@K / Precision@K / MRR / NDCG）应使用独立评测脚本：
+
+```bash
+python evaluation/run_retrieval_eval.py \
+    --engine milvus --provider kylin --dim 768 \
+    --engine-so-path /path/to/libkysdk-vector-engine-client-capi.so \
+    --milvus-host 127.0.0.1 --milvus-port 19530 \
+    --collection memoryhub_eval \
+    --output evaluation/results/retrieval_eval_kylin.json
+```
+
+该评测中 Milvus 使用 SDK 的 RRF 融合；其 A--E 权重消融仅适用于 FAISS 路径，
+不要将 Milvus 各组的相同结果误判为 SDK 失效。
 ---
 
 ## 九、常见问题排查
@@ -433,19 +451,22 @@ bash standalone_embed.sh start
 bash standalone_embed.sh stop
 
 # 设置库路径
-export LD_LIBRARY_PATH=/path/to/so/dir:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/path/to/vector-engine/dir:/path/to/embedding/dir:${LD_LIBRARY_PATH:-}
 
 # 验证 Embedding
-python -c "from memoryhub.embedding import create_embedding_client; c=create_embedding_client('kylin'); print(c.embed('测试')[:5])"
+python -c "from memoryhub.embedding import create_embedding_client; c=create_embedding_client('kylin', so_path='/path/to/libkylin-coreai-embedding.so'); print(c.embed('测试')[:5])"
 
 # 验证 Vector Engine
-python -c "from memoryhub.storage.vector_engine import create_vector_engine; e=create_vector_engine(provider='milvus', host='127.0.0.1', port=19530, collection='memoryhub_smoke', dimension=768); e.close(); print('ok')"
+python -c "from memoryhub.storage.vector_engine import create_vector_engine; e=create_vector_engine(provider='milvus', so_path='/path/to/libkysdk-vector-engine-client-capi.so', host='127.0.0.1', port=19530, collection='memoryhub_smoke', dimension=768); e.close(); print('ok')"
 
 # 跑端到端测试
-python scripts/run_milvus_real_smoke_test.py
+python scripts/run_milvus_real_smoke_test.py \
+    --so_path /path/to/libkysdk-vector-engine-client-capi.so \
+    --embedding_so_path /path/to/libkylin-coreai-embedding.so \
+    --host 127.0.0.1 --port 19530 --dimension 768
 
 # 跑性能基准
-python evaluation/run_milvus_kylin_benchmark.py --memory_count 10000
+python evaluation/run_milvus_kylin_benchmark.py --memory_count 10000 --so_path /path/to/libkysdk-vector-engine-client-capi.so --embedding_so_path /path/to/libkylin-coreai-embedding.so
 
 # 跑 API
 uvicorn memoryhub.app:app
