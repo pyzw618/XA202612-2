@@ -30,6 +30,7 @@ from console.pages.evaluation import EvaluationPage
 from console.pages.forget import ForgetPage
 from console.pages.knowledge import KnowledgePage
 from console.pages.preferences import PreferencesPage
+from console.pages.safety_rules import SafetyRulesPage
 from console.pages.search_test import SearchTestPage
 from console.widgets.sidebar import Sidebar
 
@@ -185,6 +186,7 @@ class MainWindow(QMainWindow):
             ("检索测试", SearchTestPage),
             ("遗忘管理", ForgetPage),
             ("评测报告", EvaluationPage),
+            ("安全规则", SafetyRulesPage),
         ]
         for label, page_cls in pages:
             page = page_cls(self.client, self.mock)

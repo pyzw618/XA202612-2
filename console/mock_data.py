@@ -95,11 +95,55 @@ class MockDataController(QObject):
     forget_result_ready = pyqtSignal(dict)
     forget_history_ready = pyqtSignal(list)
     eval_reports_ready = pyqtSignal(list)
+    user_rules_ready = pyqtSignal(list)
+    user_rule_saved = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
 
     def __init__(self, client: "MemoryHubClient | None" = None):
         super().__init__()
         self._client = client
+        # Mock 模式下的安全规则内存库（Live 模式走后端 SQLite）
+        self._mock_rules: list[dict] = [
+            {
+                "rule_id": "rule_001",
+                "label": "API Key",
+                "kind": "advanced_regex",
+                "effect": "mask_match",
+                "case_sensitive": False,
+                "replacement": "***",
+                "revision": 1,
+                "enabled": True,
+                "deleted": False,
+                "created_at": "2026-07-20T10:00:00",
+                "updated_at": "2026-07-20T10:00:00",
+            },
+            {
+                "rule_id": "rule_002",
+                "label": "身份证号",
+                "kind": "advanced_regex",
+                "effect": "mask_match",
+                "case_sensitive": False,
+                "replacement": "***",
+                "revision": 1,
+                "enabled": True,
+                "deleted": False,
+                "created_at": "2026-07-21T11:00:00",
+                "updated_at": "2026-07-21T11:00:00",
+            },
+            {
+                "rule_id": "rule_003",
+                "label": "银行卡号",
+                "kind": "advanced_regex",
+                "effect": "drop_event",
+                "case_sensitive": False,
+                "replacement": "***",
+                "revision": 2,
+                "enabled": False,
+                "deleted": False,
+                "created_at": "2026-07-22T09:00:00",
+                "updated_at": "2026-07-28T15:00:00",
+            },
+        ]
 
     @property
     def _is_live(self) -> bool:
@@ -539,6 +583,17 @@ class MockDataController(QObject):
                     # 归一化检索结果
                     prefs = [_normalize_preference(p) for p in data.get("preferences", [])]
                     knows = [_normalize_knowledge(k) for k in data.get("knowledge", [])]
+                    # 后端仅在 results 数组中携带 score，这里按 memory_id 合并进去
+                    # （preferences/knowledge 数组是完整记忆对象，无 score 字段）
+                    score_map = {
+                        r.get("memory_id"): r.get("score")
+                        for r in data.get("results", [])
+                        if r.get("memory_id") is not None
+                    }
+                    for p in prefs:
+                        p["score"] = score_map.get(p.get("memory_id"))
+                    for k in knows:
+                        k["score"] = score_map.get(k.get("memory_id"))
                     self.search_results_ready.emit({
                         "query": query,
                         "latency_ms": data.get("latency_ms", 0),
@@ -672,4 +727,149 @@ class MockDataController(QObject):
                     "p95_latency_ms": 180.0,
                 },
             ])
+        Thread(target=_run, daemon=True).start()
+
+    def run_evaluation(self, task_name: str):
+        """异步运行评测，完成后刷新报告列表"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.run_evaluation(task_name=task_name)
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    # 运行完成后重新加载报告列表
+                    self.load_eval_reports()
+                except Exception as e:
+                    self.error_occurred.emit(f"评测运行失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
+        def _run():
+            _simulate_latency(400)
+            self.load_eval_reports()
+        Thread(target=_run, daemon=True).start()
+
+    # ============================================================
+    # 安全规则（用户自定义敏感规则）
+    # ============================================================
+
+    def load_user_rules(self):
+        """异步加载用户安全规则"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.list_user_rules()
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    items = data if isinstance(data, list) else []
+                    self.user_rules_ready.emit(items)
+                except Exception as e:
+                    self.error_occurred.emit(f"安全规则加载失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
+        def _run():
+            _simulate_latency(200)
+            items = [dict(r) for r in self._mock_rules if not r.get("deleted")]
+            self.user_rules_ready.emit(items)
+        Thread(target=_run, daemon=True).start()
+
+    def create_user_rule(self, label, kind, effect, matcher,
+                         case_sensitive=False, enabled=True):
+        """创建安全规则"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.create_user_rule(
+                        label=label, kind=kind, effect=effect, matcher=matcher,
+                        case_sensitive=case_sensitive, enabled=enabled,
+                    )
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    self.user_rule_saved.emit(data)
+                    self.load_user_rules()
+                except Exception as e:
+                    self.error_occurred.emit(f"创建规则失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
+        def _run():
+            _simulate_latency(200)
+            rule = {
+                "rule_id": f"rule_{random.randint(100, 999)}",
+                "label": label,
+                "kind": kind,
+                "effect": effect,
+                "case_sensitive": case_sensitive,
+                "replacement": "***",
+                "revision": 1,
+                "enabled": enabled,
+                "deleted": False,
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            }
+            self._mock_rules.append(rule)
+            self.user_rule_saved.emit(rule)
+            self.load_user_rules()
+        Thread(target=_run, daemon=True).start()
+
+    def update_user_rule(self, rule_id, expected_revision, **updates):
+        """更新安全规则（乐观锁）"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.update_user_rule(
+                        rule_id, expected_revision, **updates
+                    )
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    self.user_rule_saved.emit(data)
+                    self.load_user_rules()
+                except Exception as e:
+                    self.error_occurred.emit(f"更新规则失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
+        def _run():
+            _simulate_latency(200)
+            for r in self._mock_rules:
+                if r.get("rule_id") == rule_id:
+                    for k, v in updates.items():
+                        if v is not None:
+                            r[k] = v
+                    r["revision"] = r.get("revision", 1) + 1
+                    r["updated_at"] = datetime.now().isoformat(timespec="seconds")
+                    self.user_rule_saved.emit(dict(r))
+                    break
+            self.load_user_rules()
+        Thread(target=_run, daemon=True).start()
+
+    def delete_user_rule(self, rule_id, expected_revision):
+        """删除安全规则（软删除）"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.delete_user_rule(
+                        rule_id, expected_revision
+                    )
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    self.load_user_rules()
+                except Exception as e:
+                    self.error_occurred.emit(f"删除规则失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
+        def _run():
+            _simulate_latency(200)
+            for r in self._mock_rules:
+                if r.get("rule_id") == rule_id:
+                    r["deleted"] = True
+                    break
+            self.load_user_rules()
         Thread(target=_run, daemon=True).start()
