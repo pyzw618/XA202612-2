@@ -196,3 +196,56 @@ knowledge/ingestion/memory_write 变更文件 ruff check: passed
 - 当前语义等价判断使用规则化字符串和步骤集合相似度，尚未引入 embedding 聚类、冲突审计或离线阈值评测。
 - 无 session_id 的事件无法跨请求重建轨迹，继续按当前请求分组处理。
 - 跨 SQLite、Evidence、向量/BM25 的全局事务/补偿协议仍未实现；现有统一写服务和持久化重试提供最终一致性修复路径。
+
+## 2026-08-04：跨存储事务补偿协议（B20 修复）
+
+### 问题
+
+- SQLite、FAISS、Evidence 三个独立存储之间没有事务保证。如果写入 SQLite 成功但 FAISS 失败，已写入 SQLite 的记录无法回滚，产生"幽灵数据"——SQLite 有但 FAISS 搜不到，或 FAISS 搜到但 SQLite 已删除。
+- 删除同理：先删 SQLite 再删 FAISS，中间失败会造成两边不一致。
+- 现有 `MemoryWriteService` 只是顺序写入，没有补偿逻辑。
+
+### 修改
+
+- 新增 `memoryhub/storage/transaction.py`：`StorageTransaction` 补偿式事务管理器。
+  - `on_failure(undo)` 注册回滚操作，按注册的逆序执行。
+  - 支持 `with StorageTransaction("name") as tx:` 上下文管理器，异常自动回滚。
+  - 回滚本身失败时记录错误日志但不吞掉原始异常。
+  - 不是 ACID 事务——补偿是"尽力撤销"，补偿失败意味着需要人工介入或后续一致性检查修复。
+- `memoryhub/storage/database.py`：`PreferenceRepository` 和 `KnowledgeRepository` 各增加 `delete_by_id(memory_id) → bool` 方法，用于回滚时物理删除。
+- 用法示例：
+
+```python
+with StorageTransaction("write_pref") as tx:
+    pref_repo.save(memory)
+    tx.on_failure(lambda: pref_repo.delete_by_id(memory.memory_id))
+
+    vector_store.add(memory.memory_id, vec)
+    tx.on_failure(lambda: vector_store.delete(memory.memory_id))
+
+    evidence_store.save(memory.memory_id, ev)
+    tx.on_failure(lambda: evidence_store.delete(memory.memory_id))
+```
+
+### 新增测试
+
+新增 `tests/test_storage_transaction.py`，覆盖：
+
+1. 全部成功 → 不触发回滚；
+2. FAISS 失败 → SQLite 被回滚；
+3. Evidence 失败 → SQLite + FAISS 都被逆序回滚；
+4. with 语句中抛异常 → 自动回滚 + 异常透传；
+5. with 语句正常退出 → 不回滚；
+6. Knowledge 写入中间失败 → Knowledge + FAISS 回滚；
+7. 回滚本身失败 → 记录日志但不影响其他回滚继续执行。
+
+### 验证
+
+```text
+tests/test_storage_transaction.py: 7 passed
+```
+
+### 保留边界
+
+- 补偿不是 ACID 事务——如果在回滚过程中进程崩溃，部分数据可能已不一致。生产环境需要配合 `verify_integrity()` 定期校验和修复。
+- 跨存储全局两阶段提交或 Saga 编排仍未实现；当前补偿机制提供单次写入/删除路径的最终一致性。

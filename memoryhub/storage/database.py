@@ -520,6 +520,17 @@ class PreferenceRepository:
 
             return [_pref_row_to_pydantic(r) for r in chain]
 
+    def delete_by_id(self, memory_id: str) -> bool:
+        """按 ID 物理删除偏好（用于事务回滚补偿）。"""
+        with self.db.session() as s:
+            row = s.query(PreferenceRow).filter(
+                PreferenceRow.memory_id == memory_id
+            ).first()
+            if row is None:
+                return False
+            s.delete(row)
+            return True
+
 
 # ============================================================
 # 知识 CRUD
@@ -694,6 +705,17 @@ class KnowledgeRepository:
             s.query(KnowledgeRow).filter(
                 KnowledgeRow.memory_id == memory_id
             ).update({"status": status, "updated_at": datetime.now()})
+
+    def delete_by_id(self, memory_id: str) -> bool:
+        """按 ID 物理删除知识（用于事务回滚补偿）。"""
+        with self.db.session() as s:
+            row = s.query(KnowledgeRow).filter(
+                KnowledgeRow.memory_id == memory_id
+            ).first()
+            if row is None:
+                return False
+            s.delete(row)
+            return True
 
 
 # ============================================================
