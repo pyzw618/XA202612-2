@@ -8,9 +8,25 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from memoryhub.adapter.schemas import KnowledgeMemory, PreferenceMemory
+
+
+def _as_datetime(value):
+    """Normalize datetime/ISO values to naive UTC for safe subtraction."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
 
 
 @dataclass
@@ -55,7 +71,7 @@ class HealthCalculator:
         score = 0.6 * factors.time_decay + 0.4 * factors.usage_frequency
 
         # 置信度兜底：置信度越低，健康度上限越低
-        score = min(score, memory.confidence)
+        score = min(score, getattr(memory, "confidence", 1.0) or 1.0)
 
         return max(0.0, min(1.0, score))
 
@@ -68,14 +84,23 @@ class HealthCalculator:
         稳定性越高，衰减越慢。
         """
         now = datetime.now()
-        anchor = memory.last_accessed_at or memory.updated_at or memory.created_at
+        anchor = _as_datetime(
+            getattr(memory, "last_accessed_at", None)
+            or getattr(memory, "updated_at", None)
+            or getattr(memory, "created_at", None)
+            or getattr(memory, "observed_at", None)
+        )
         if anchor is None:
             days = 0.0
         else:
             days = max(0.0, (now - anchor).total_seconds() / 86400.0)
 
         # 使用频率越高，稳定性越强
-        stability = max(1.0, memory.stability * (1 + memory.access_count_30d / 10.0))
+        stability = max(
+            1.0,
+            (getattr(memory, "stability", 1.0) or 1.0)
+            * (1 + (getattr(memory, "access_count_30d", 0) or 0) / 10.0),
+        )
 
         return math.exp(-days / stability)
 
@@ -94,7 +119,12 @@ class HealthCalculator:
         """
         # 从数据库行对象计算健康度，支持 ORM Row 和 Pydantic 模型两种输入。
         now = datetime.now()
-        last_accessed = getattr(row, "last_accessed_at", None) or getattr(row, "updated_at", None) or getattr(row, "created_at", None)
+        last_accessed = _as_datetime(
+            getattr(row, "last_accessed_at", None)
+            or getattr(row, "updated_at", None)
+            or getattr(row, "created_at", None)
+            or getattr(row, "observed_at", None)
+        )
         days = 0.0
         if last_accessed is not None:
             days = max(0.0, (now - last_accessed).total_seconds() / 86400.0)

@@ -60,6 +60,9 @@ class FactMemoryPipeline:
         db_path: str = ":memory:",
         ontology_path: Optional[str] = None,
         admission_policy: Optional[FactAdmissionPolicy] = None,
+        llm_client=None,
+        store: Optional[FactStore] = None,
+        index_service=None,
     ):
         """
         Args:
@@ -67,12 +70,20 @@ class FactMemoryPipeline:
             db_path: SQLite 数据库路径
             ontology_path: 谓词本体 JSON 路径
         """
-        self.store = FactStore(db_path)
-        self.extractor = TripleExtractor(api_key=api_key)
-        self.entity_norm = EntityNormalizer(self.store, api_key=api_key)
-        self.pred_norm = PredicateNormalizer(self.store, ontology_path=ontology_path, api_key=api_key)
-        self.detector = ConflictDetector(self.store, api_key=api_key)
+        self.store = store or FactStore(db_path)
+        self.extractor = TripleExtractor(api_key=api_key, llm_client=llm_client)
+        self.entity_norm = EntityNormalizer(
+            self.store, api_key=api_key, llm_client=llm_client
+        )
+        self.pred_norm = PredicateNormalizer(
+            self.store, ontology_path=ontology_path, api_key=api_key,
+            llm_client=llm_client,
+        )
+        self.detector = ConflictDetector(
+            self.store, api_key=api_key, llm_client=llm_client
+        )
         self.admission = admission_policy or FactAdmissionPolicy()
+        self.index_service = index_service
 
     def propose(
         self,
@@ -87,6 +98,9 @@ class FactMemoryPipeline:
         """
         logger.info(f"[propose] source={source_id}, text_len={len(text)}")
         raw_triples = self.extractor.extract(text, source_id)
+        extraction_error = getattr(self.extractor, "last_error", None)
+        if extraction_error is not None:
+            raise RuntimeError("fact extraction failed") from extraction_error
         proposals: list[FactProposal] = []
 
         for rt in raw_triples:
@@ -117,6 +131,7 @@ class FactMemoryPipeline:
         resolution: Optional[str] = None,
         auto_resolve: bool = True,
         force: bool = False,
+        user_id: Optional[str] = None,
     ) -> ConflictResult:
         """明确提交一个候选事实，并执行同作用域冲突检测与写入。"""
         if not proposal.admission.should_remember and not force:
@@ -129,10 +144,17 @@ class FactMemoryPipeline:
         if final_scope == MemoryScope.GLOBAL.value:
             final_project_id = None
 
+        final_user_id = (
+            user_id or str(proposal.metadata.get("user_id", "")).strip() or "default"
+        )
         rt = proposal.raw_triple
-        subj_id = self.entity_norm.normalize(rt.subject_text, rt.subject_type)
+        subj_id = self._normalize_entity(
+            rt.subject_text, rt.subject_type, final_user_id
+        )
         pred_id = self.pred_norm.normalize(rt.predicate_text)
-        obj_id = self.entity_norm.normalize(rt.object_text, rt.object_type)
+        obj_id = self._normalize_entity(
+            rt.object_text, rt.object_type, final_user_id
+        )
 
         fact = Fact(
             fact_id=Fact.make_id(),
@@ -146,6 +168,7 @@ class FactMemoryPipeline:
             confidence=rt.confidence,
             scope=final_scope,
             project_id=final_project_id,
+            user_id=final_user_id,
         )
         result = self.detector.check(fact)
 
@@ -162,6 +185,8 @@ class FactMemoryPipeline:
                 result.reason = f"[等待主Agent裁决] {result.reason}"
 
         self._apply(result)
+        if getattr(self, "index_service", None) is not None:
+            self.index_service.sync_result(result)
         return result
 
     def ingest(
@@ -170,6 +195,7 @@ class FactMemoryPipeline:
         source_id: str = "",
         project_id: Optional[str] = None,
         scope: Optional[str] = None,
+        user_id: str = "default",
     ) -> list[ConflictResult]:
         """
         送入一段文本，返回所有三元组的冲突检测结果。
@@ -203,6 +229,7 @@ class FactMemoryPipeline:
                 proposal,
                 scope=commit_scope,
                 project_id=project_id,
+                user_id=user_id,
             ))
 
         # 统计
@@ -235,7 +262,10 @@ class FactMemoryPipeline:
             if action == Resolution.REPLACE.value:
                 # 新事实取代旧，旧事实标记 superseded
                 if result.existing_fact:
-                    self.store.update_fact_status(result.existing_fact.fact_id, "superseded")
+                    self.store.update_fact_status(
+                        result.existing_fact.fact_id, "superseded",
+                        user_id=result.existing_fact.user_id,
+                    )
                 self.store.insert_fact(fact)
 
             elif action == Resolution.KEEP_OLD.value:
@@ -245,7 +275,10 @@ class FactMemoryPipeline:
             elif action == Resolution.MERGE.value:
                 # 合并：旧事实标记 superseded，新事实写入（带合并备注）
                 if result.existing_fact:
-                    self.store.update_fact_status(result.existing_fact.fact_id, "superseded")
+                    self.store.update_fact_status(
+                        result.existing_fact.fact_id, "superseded",
+                        user_id=result.existing_fact.user_id,
+                    )
                 self.store.insert_fact(fact)
 
             elif action == Resolution.COEXIST.value:
@@ -262,9 +295,11 @@ class FactMemoryPipeline:
         limit: int = 100,
         scope: Optional[str] = None,
         project_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> list[Fact]:
         return self.store.list_facts(
             status=status, limit=limit, scope=scope, project_id=project_id,
+            user_id=user_id,
         )
 
     def get_effective_facts(
@@ -272,6 +307,7 @@ class FactMemoryPipeline:
         project_id: Optional[str] = None,
         status: str = "active",
         limit: int = 100,
+        user_id: str = "default",
     ) -> list[Fact]:
         """
         获取当前上下文的有效事实。
@@ -280,6 +316,7 @@ class FactMemoryPipeline:
         """
         global_facts = self.store.list_facts(
             status=status, limit=limit, scope=MemoryScope.GLOBAL.value,
+            user_id=user_id,
         )
         if not project_id:
             return global_facts
@@ -289,6 +326,7 @@ class FactMemoryPipeline:
             limit=limit,
             scope=MemoryScope.PROJECT.value,
             project_id=project_id,
+            user_id=user_id,
         )
         project_keys = set()
         for fact in project_facts:
@@ -302,8 +340,19 @@ class FactMemoryPipeline:
         ]
         return (project_facts + inherited)[:limit]
 
-    def get_fact_by_id(self, fact_id: str) -> Optional[Fact]:
-        return self.store.get_fact(fact_id)
+    def get_fact_by_id(
+        self, fact_id: str, user_id: Optional[str] = None
+    ) -> Optional[Fact]:
+        return self.store.get_fact(fact_id, user_id=user_id)
+
+    def _normalize_entity(self, text: str, entity_type: str, user_id: str) -> str:
+        """Call new user-aware normalizers while preserving old test doubles."""
+        try:
+            return self.entity_norm.normalize(text, entity_type, user_id=user_id)
+        except TypeError as exc:
+            if "user_id" not in str(exc):
+                raise
+            return self.entity_norm.normalize(text, entity_type)
 
     def close(self):
         self.store.close()

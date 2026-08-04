@@ -52,18 +52,21 @@ class MemoryScope(str, Enum):
 
 @dataclass
 class Entity:
-    """归一化后的实体"""
-    entity_id: str                          # "entity:organization:byd_abc12345"
-    canonical_name: str                     # "比亚迪股份有限公司"
-    entity_type: str                        # EntityType 之一
-    aliases: list[str] = field(default_factory=list)  # 所有见过的别名
+    """Normalized entity; aliases are isolated by user."""
+    entity_id: str
+    canonical_name: str
+    entity_type: str
+    aliases: list[str] = field(default_factory=list)
+    user_id: str = "default"
 
     @staticmethod
-    def make_id(entity_type: str, name: str) -> str:
-        """生成稳定的实体 ID（确定性 hash，同一实体总是相同 ID）"""
+    def make_id(entity_type: str, name: str, user_id: str = "") -> str:
+        """Build a deterministic, user-scoped entity id."""
         import hashlib
         slug = name.lower().replace(" ", "_").replace("/", "_")
-        digest = hashlib.sha256(f"{entity_type}:{name}".encode()).hexdigest()[:8]
+        digest = hashlib.sha256(
+            f"{user_id}:{entity_type}:{name}".encode()
+        ).hexdigest()[:8]
         return f"entity:{entity_type.lower()}:{slug}_{digest}"
 
 
@@ -120,8 +123,13 @@ class Fact:
     memory_type: str = "fact"               # 当前模块只接受事实记忆
     scope: str = MemoryScope.GLOBAL.value
     project_id: Optional[str] = None
+    user_id: str = "default"
+    last_accessed_at: Optional[str] = None
+    access_count_30d: int = 0
 
     def __post_init__(self):
+        if not self.user_id:
+            raise ValueError("fact requires user_id")
         if self.memory_type != "fact":
             raise ValueError("fact_memory 只接受 memory_type='fact'")
         if self.scope not in MemoryScope.choices():
@@ -130,6 +138,21 @@ class Fact:
             raise ValueError("项目事实必须提供 project_id")
         if self.scope == MemoryScope.GLOBAL.value and self.project_id is not None:
             raise ValueError("全局事实不能绑定 project_id")
+
+    @property
+    def memory_id(self) -> str:
+        """Compatibility alias used by the shared retrieval layer."""
+        return self.fact_id
+
+    @property
+    def content(self) -> str:
+        """Fallback searchable text when entity display names are unavailable."""
+        return " ".join(
+            part for part in (
+                self.subject_id, self.predicate_id, self.object_value,
+                self.source_text,
+            ) if part
+        )
 
     @staticmethod
     def make_id() -> str:

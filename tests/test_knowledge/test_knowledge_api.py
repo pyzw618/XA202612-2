@@ -15,7 +15,7 @@ if str(ROOT_DIR) not in sys.path:
 
 API_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 MODEL_NAME = "qwen3.7-flash"
-DEFAULT_API_KEY = ""  # 已经跑通了测试，复试请自己填
+DEFAULT_API_KEY = "sk-ws-H.EIPEEMI.WNAR.MEYCIQDGUZ2778Niidp7woaLMej95Uv2ODI1s5-nXbBTkv4WJAIhAKDOYNwTWgIAXiZfajqDIZ7127f80JhL8pCu3ohTEdKQ"  # 已经跑通了测试，复试请自己填
 
 
 def _call_dashscope_api(prompt: str, api_key: str | None = None) -> dict:

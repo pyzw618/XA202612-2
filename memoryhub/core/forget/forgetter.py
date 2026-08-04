@@ -43,6 +43,12 @@ class MemoryForgetter:
         cache=None,
         pref_repo=None,
         know_repo=None,
+        keyword_search=None,
+        memory_lookup=None,
+        evidence_store=None,
+        conflict_repo=None,
+        fact_store=None,
+        fact_index_service=None,
         db=None,
     ):
         """
@@ -63,6 +69,13 @@ class MemoryForgetter:
         self.cache = cache
         self.pref_repo = pref_repo
         self.know_repo = know_repo
+        self.keyword_search = keyword_search
+        self.memory_lookup = memory_lookup if memory_lookup is not None else {}
+        self.evidence_store = evidence_store
+        self.conflict_repo = conflict_repo
+        self.fact_store = fact_store
+        self.fact_index_service = fact_index_service
+        self._last_deleted_ids: list[str] = []
 
     def execute(self, request: ForgetRequest) -> ForgetResponse:
         """
@@ -80,14 +93,15 @@ class MemoryForgetter:
 
         deleted_count = 0
         if target_ids:
-            deleted_count = self.delete_memories(target_ids, cascade=request.cascade)
+            deleted_count = self.delete_memories(target_ids, cascade=request.cascade, user_id=request.user_id)
 
-        record = self.create_audit_log(request, target_ids[:deleted_count] if deleted_count else [])
+        deleted_ids = list(self._last_deleted_ids)
+        record = self.create_audit_log(request, deleted_ids)
 
         return ForgetResponse(
             record_id=record.record_id,
             deleted_count=deleted_count,
-            deleted_ids=target_ids[:deleted_count] if deleted_count else target_ids,
+            deleted_ids=deleted_ids,
             audit_log="forgotten",
         )
 
@@ -112,8 +126,12 @@ class MemoryForgetter:
 
         if request.target_memory_ids:
             strategy = "exact"
-        elif request.target_scope and (
-            request.target_scope.scene or request.target_scope.task_type or request.target_scope.app
+        elif request.target_project_id or (
+            request.target_scope and (
+                request.target_scope.scene
+                or request.target_scope.task_type
+                or request.target_scope.app
+            )
         ):
             strategy = "scope"
         else:
@@ -172,15 +190,20 @@ class MemoryForgetter:
         if strategy == "exact" and request.target_memory_ids:
             return request.target_memory_ids
 
-        if strategy == "scope" and request.target_scope:
+        if strategy == "scope":
             return self._locate_by_scope(
-                request.target_scope, intent.get("memory_type", "all"), request.user_id
+                request.target_scope or SceneScope(),
+                intent.get("memory_type", "all"),
+                request.user_id,
+                request.target_project_id,
             )
 
         # 自然语言/关键词模式
         return self._locate_by_keywords(intent, request.user_id)
 
-    def _locate_by_scope(self, scope, memory_type: str, user_id: str) -> list[str]:
+    def _locate_by_scope(
+        self, scope, memory_type: str, user_id: str, project_id: str = ""
+    ) -> list[str]:
         """按 scope 批量定位记忆"""
         ids: list[str] = []
 
@@ -195,6 +218,13 @@ class MemoryForgetter:
                 user_id, scope.scene or "", scope.task_type or ""
             )
             ids.extend(k.memory_id for k in knows)
+
+        if memory_type in ("fact", "all") and self.fact_store is not None and project_id:
+            facts = self.fact_store.list_facts(
+                status="active", limit=100000, scope="project",
+                project_id=project_id, user_id=user_id,
+            )
+            ids.extend(f.fact_id for f in facts)
 
         return ids
 
@@ -215,62 +245,67 @@ class MemoryForgetter:
                     matched.append(p.memory_id)
 
         if memory_type in ("knowledge", "all") and self.know_repo is not None:
-            knows = self.know_repo.list_all(status="active")
+            knows = self.know_repo.list_all(status="active", user_id=user_id)
             for k in knows:
                 text = f"{k.name or ''} {k.content or ''}".lower()
                 if any(kw.lower() in text for kw in keywords):
                     matched.append(k.memory_id)
 
+        if memory_type in ("fact", "all") and self.fact_store is not None:
+            for fact in self.fact_store.list_facts(
+                status="active", limit=100000, user_id=user_id
+            ):
+                text = self.fact_store.render_fact(fact).lower()
+                if any(kw.lower() in text for kw in keywords):
+                    matched.append(fact.fact_id)
+
         return matched
 
-    def delete_memories(self, memory_ids: list[str], cascade: bool = True) -> int:
-        """
-        删除记忆（结构化数据 + 向量索引 + 缓存）。
-
-        采用软删除：status = 'deleted'。
-        """
+    def delete_memories(
+        self, memory_ids: list[str], cascade: bool = True, user_id: str = ""
+    ) -> int:
+        """Soft-delete owned memories and cascade deletion through active indexes."""
         deleted = 0
+        self._last_deleted_ids = []
         for memory_id in memory_ids:
             deleted_this = False
             if self.pref_repo is not None:
-                try:
-                    self.pref_repo.update_status(memory_id, "deleted")
-                    deleted_this = True
-                except Exception:
-                    pass
+                deleted_this = self.pref_repo.update_status(
+                    memory_id, "deleted", user_id=user_id
+                ) or deleted_this
             if self.know_repo is not None:
-                try:
-                    self.know_repo.update_status(memory_id, "deleted")
-                    deleted_this = True
-                except Exception:
-                    pass
-
-            if deleted_this:
-                deleted += 1
-
-                if cascade:
-                    # 清理向量索引：优先 Milvus 向量引擎，其次 FAISS 降级路径
-                    if self.vector_engine is not None:
-                        try:
-                            self.vector_engine.delete(memory_id)
-                        except Exception:
-                            pass
-                    elif self.vector_store is not None:
-                        try:
-                            self.vector_store.remove(memory_id)
-                        except Exception:
-                            pass
-
-                    # 清理检索缓存
-                    if self.cache is not None:
-                        try:
-                            if hasattr(self.cache, 'cache'):
-                                self.cache.cache.invalidate(memory_id)
-                            elif hasattr(self.cache, 'invalidate'):
-                                self.cache.invalidate(memory_id)
-                        except Exception:
-                            pass
-
+                deleted_this = self.know_repo.update_status(
+                    memory_id, "deleted"
+                ) or deleted_this
+            if self.fact_store is not None:
+                deleted_this = self.fact_store.update_fact_status(
+                    memory_id, "deleted", user_id=user_id
+                ) or deleted_this
+            if not deleted_this:
+                continue
+            deleted += 1
+            self._last_deleted_ids.append(memory_id)
+            if cascade:
+                if self.vector_store is not None:
+                    self.vector_store.delete(memory_id)
+                if self.vector_engine is not None:
+                    self.vector_engine.delete(memory_id)
+                if self.keyword_search is not None:
+                    self.keyword_search.delete(memory_id)
+                self.memory_lookup.pop(memory_id, None)
+                if self.evidence_store is not None:
+                    self.evidence_store.delete(memory_id)
+                if self.conflict_repo is not None:
+                    self.conflict_repo.delete_for_memories([memory_id])
+                if self.cache is not None:
+                    self.cache.invalidate(memory_id)
+        if deleted and self.fact_store is not None:
+            self.fact_store.prune_orphan_entities(user_id)
+        if deleted and cascade:
+            if self.vector_store is not None and hasattr(self.vector_store, "save"):
+                self.vector_store.save()
+            if self.vector_engine is not None and hasattr(self.vector_engine, "persist"):
+                self.vector_engine.persist()
         return deleted
 
     def create_audit_log(self, request: ForgetRequest, deleted_ids: list[str]) -> ForgetRecord:

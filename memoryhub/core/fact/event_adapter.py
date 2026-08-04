@@ -65,6 +65,24 @@ class FactIngestionAdapter:
 
         return candidates
 
+
+    def ingest_event(self, event: Any):
+        """Propose and commit admitted facts from one already-safe event."""
+        project_id = self._project_id_hint(event)
+        scope = "project" if project_id else "global"
+        user_id = str(getattr(event, "user_id", "") or "default")
+        results = []
+        for candidate in self.propose_from_event(event):
+            if not candidate.admission.should_remember:
+                continue
+            results.append(self.pipeline.commit(
+                candidate,
+                scope=scope,
+                project_id=project_id,
+                user_id=user_id,
+            ))
+        return results
+
     @staticmethod
     def format_tool_call(call: Any) -> str:
         tool_name = str(getattr(call, "tool_name", "")).strip()
@@ -114,6 +132,7 @@ class FactIngestionAdapter:
         quality = getattr(event, "quality", None)
         return {
             "event_id": str(getattr(event, "event_id", "") or ""),
+            "user_id": str(getattr(event, "user_id", "") or "default"),
             "source_type": FactIngestionAdapter._enum_value(
                 getattr(event, "source_type", "")
             ),

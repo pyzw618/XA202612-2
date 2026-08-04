@@ -119,4 +119,6 @@ class SearchCache:
             return True
         if any(p.memory_id == memory_id for p in response.preferences):
             return True
-        return any(k.memory_id == memory_id for k in response.knowledge)
+        if any(k.memory_id == memory_id for k in response.knowledge):
+            return True
+        return any(f.fact_id == memory_id for f in response.facts)

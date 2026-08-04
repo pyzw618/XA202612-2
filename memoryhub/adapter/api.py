@@ -7,6 +7,7 @@ REST API 路由定义 — Memory Adapter 标准接口
 from __future__ import annotations
 
 import hmac
+import json
 import re
 from collections.abc import Mapping
 from typing import Annotated, Any
@@ -17,6 +18,10 @@ from pydantic import BaseModel
 from memoryhub.adapter.schemas import (
     ConflictRecord,
     EvalReport,
+    ExtractionTask,
+    ExtractionTaskRunRequest,
+    ExtractionTaskRunResponse,
+    ExtractionTaskStatus,
     FeedbackRequest,
     ForgetRecord,
     ForgetRequest,
@@ -353,6 +358,75 @@ def delete_user_rule(
 # ============================================================
 
 
+def _memory_index_text(memory: PreferenceMemory | KnowledgeMemory) -> str:
+    """Build index text using the same contract as application startup."""
+    if memory.memory_type == "knowledge":
+        from memoryhub.core.memory_write import MemoryWriteService
+
+        return MemoryWriteService.index_text(memory)
+    return memory.text
+
+
+def _memory_index_metadata(memory: PreferenceMemory | KnowledgeMemory) -> dict[str, Any]:
+    scope = memory.scope.model_dump() if hasattr(memory.scope, "model_dump") else {}
+    return {
+        "memory_type": memory.memory_type,
+        "user_id": memory.user_id,
+        "content": _memory_index_text(memory),
+        "confidence": memory.confidence,
+        "scope": scope,
+    }
+
+
+def _sync_memory_index(request: Request, memory, *, remove: bool = False) -> None:
+    """Synchronize runtime lookup, vector index, BM25 index, and search cache."""
+    state = request.app.state
+    write_service = getattr(state, "memory_write_service", None)
+    if write_service is not None:
+        write_service.sync_memory(memory, remove=remove)
+        return
+    memory_id = memory.memory_id
+    vector_store = getattr(state, "vector_store", None)
+    vector_engine = getattr(state, "vector_engine", None)
+    keyword_search = getattr(state, "keyword_search", None)
+    memory_lookup = getattr(state, "memory_lookup", None)
+    cache = getattr(state, "search_cache", None)
+
+    if remove:
+        if vector_store is not None:
+            vector_store.delete(memory_id)
+            vector_store.save()
+        if vector_engine is not None:
+            vector_engine.delete(memory_id)
+        if keyword_search is not None:
+            keyword_search.delete(memory_id)
+        if memory_lookup is not None:
+            memory_lookup.pop(memory_id, None)
+    else:
+        text = _memory_index_text(memory)
+        metadata = _memory_index_metadata(memory)
+        embedding_client = getattr(state, "embedding_client", None)
+        if (vector_store is not None or vector_engine is not None) and embedding_client is None:
+            raise RuntimeError("embedding client not initialized")
+        if vector_store is not None:
+            vector_store.update(memory_id, embedding_client.embed(text))
+            vector_store.save()
+        if vector_engine is not None:
+            vector_engine.insert(
+                memory_id, text, embedding_client.embed(text), metadata=metadata
+            )
+        if keyword_search is not None:
+            keyword_search.update(
+                memory_id, text, json.dumps(metadata, ensure_ascii=False)
+            )
+        if memory_lookup is not None:
+            memory_lookup[memory_id] = memory
+
+    # A write can turn a prior cache miss into a hit, so clear all query entries.
+    if cache is not None:
+        cache.clear()
+
+
 @router.post("/events", response_model=WriteEventResponse)
 async def write_events(req: WriteEventRequest, request: Request):
     """
@@ -369,24 +443,102 @@ async def write_events(req: WriteEventRequest, request: Request):
         rejected: 被拒绝的事件数（质量/安全过滤）
         event_ids: 接受的事件 ID 列表
     """
-    repo = getattr(request.app.state, "event_repo", None)
-    if repo is None:
-        raise HTTPException(status_code=503, detail="event repository not initialized")
+    service = getattr(request.app.state, "event_ingestion_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="event ingestion service not initialized")
     try:
-        accepted = repo.batch_save(req.events)
-        event_ids = [e.event_id for e in req.events]
+        result = service.ingest(req.events)
         return WriteEventResponse(
-            accepted=accepted,
-            rejected=len(req.events) - accepted,
-            event_ids=event_ids,
+            accepted=result.accepted,
+            rejected=result.rejected,
+            event_ids=result.event_ids,
+            extraction_failures=result.extraction_failures,
+            retry_tasks_enqueued=result.retry_tasks_enqueued,
+            retry_queue_failures=result.retry_queue_failures,
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"failed to write events: {str(e)}") from None
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="event ingestion failed") from None
+
+
+# ============================================================
+# 抽取任务与死信管理
+# ============================================================
+
+
+@router.get("/extraction/tasks", response_model=list[ExtractionTask])
+async def list_extraction_tasks(
+    request: Request,
+    user_id: str = "default",
+    status: ExtractionTaskStatus | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """按 owner 查看抽取重试、成功和死信状态。"""
+    repo = getattr(request.app.state, "extraction_task_repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="extraction task repository not initialized")
+    return repo.list(
+        user_id=user_id,
+        status=status.value if status is not None else None,
+        limit=limit,
+    )
+
+
+@router.post("/extraction/tasks/run", response_model=ExtractionTaskRunResponse)
+async def run_extraction_tasks(req: ExtractionTaskRunRequest, request: Request):
+    """显式执行当前用户到期任务；不启动测试外的隐式后台线程。"""
+    service = getattr(request.app.state, "extraction_retry_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="extraction retry service not initialized")
+    result = service.run_due(user_id=req.user_id, limit=req.limit)
+    return ExtractionTaskRunResponse(
+        claimed=result.claimed,
+        succeeded=result.succeeded,
+        retried=result.retried,
+        dead_lettered=result.dead_lettered,
+    )
+
+
+@router.post("/extraction/tasks/{task_id}/retry", response_model=ExtractionTask)
+async def retry_dead_extraction_task(
+    task_id: str, request: Request, user_id: str = "default"
+):
+    """由 owner 将一条死信重置为到期重试任务。"""
+    repo = getattr(request.app.state, "extraction_task_repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="extraction task repository not initialized")
+    task = repo.retry_dead(task_id, user_id=user_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="extraction task not found")
+    return task
 
 
 # ============================================================
 # 记忆检索
 # ============================================================
+
+
+def _record_search_access(request: Request, response: SearchResponse) -> None:
+    """Feed successful retrievals back into lifecycle access statistics."""
+    state = request.app.state
+    pref_repo = getattr(state, "pref_repo", None)
+    know_repo = getattr(state, "know_repo", None)
+    seen: set[str] = set()
+    for memory in [*response.preferences, *response.knowledge]:
+        if memory.memory_id in seen:
+            continue
+        seen.add(memory.memory_id)
+        repo = know_repo if memory.memory_type == "knowledge" else pref_repo
+        if repo is not None:
+            repo.record_access(memory.memory_id, user_id=memory.user_id)
+    fact_store = getattr(state, "fact_store", None)
+    if fact_store is not None:
+        for fact in response.facts:
+            if fact.fact_id in seen:
+                continue
+            seen.add(fact.fact_id)
+            fact_store.record_access(fact.fact_id, user_id=fact.user_id)
 
 
 @router.post("/search", response_model=SearchResponse)
@@ -414,7 +566,9 @@ async def search_memory(req: SearchRequest, request: Request):
     if retriever is None:
         raise HTTPException(status_code=503, detail="retrieval service not initialized")
     try:
-        return retriever.search(req)
+        response = retriever.search(req)
+        _record_search_access(request, response)
+        return response
     except (KylinEmbeddingError, MilvusEngineError) as exc:
         raise _retrieval_http_error(exc) from None
     except HTTPException:
@@ -450,6 +604,8 @@ async def get_memory_context(req: SearchRequest, request: Request):
     except Exception:
         raise HTTPException(status_code=500, detail="internal retrieval error") from None
 
+    _record_search_access(request, response)
+
     # 格式化为可注入 prompt 的文本
     lines = []
     if response.preferences:
@@ -480,19 +636,21 @@ async def list_preferences(
     if repo is None:
         raise HTTPException(status_code=503, detail="preference repository not initialized")
     if scene:
-        return repo.get_by_scope(user_id, scene, "")
-    return repo.get_active(user_id)
+        values = repo.get_by_scope(user_id, scene, "")
+    else:
+        values = repo.list_all(status=status, user_id=user_id)
+    return values
 
 
 @router.get("/preferences/{memory_id}", response_model=PreferenceMemory)
-async def get_preference(memory_id: str, request: Request):
+async def get_preference(memory_id: str, request: Request, user_id: str = "default"):
     """获取单条偏好记忆详情"""
     repo = getattr(request.app.state, "pref_repo", None)
     if repo is None:
         raise HTTPException(status_code=503, detail="preference repository not initialized")
     result = repo.get_by_id(memory_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"preference {memory_id} not found")
+    if result is None or result.user_id != user_id:
+        raise HTTPException(status_code=404, detail="preference not found")
     return result
 
 
@@ -521,18 +679,24 @@ async def list_knowledge(
     repo = getattr(request.app.state, "know_repo", None)
     if repo is None:
         raise HTTPException(status_code=503, detail="knowledge repository not initialized")
-    return repo.list_all(status="active")
+    if scene:
+        values = repo.get_by_scope(user_id, scene, "")
+    elif knowledge_type:
+        values = repo.get_by_type(user_id, knowledge_type)
+    else:
+        values = repo.list_all(status="active", user_id=user_id)
+    return values
 
 
 @router.get("/knowledge/{memory_id}", response_model=KnowledgeMemory)
-async def get_knowledge(memory_id: str, request: Request):
+async def get_knowledge(memory_id: str, request: Request, user_id: str = "default"):
     """获取单条知识记忆详情"""
     repo = getattr(request.app.state, "know_repo", None)
     if repo is None:
         raise HTTPException(status_code=503, detail="knowledge repository not initialized")
     result = repo.get_by_id(memory_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"knowledge {memory_id} not found")
+    if result is None or result.user_id != user_id:
+        raise HTTPException(status_code=404, detail="knowledge not found")
     return result
 
 
@@ -542,18 +706,22 @@ async def get_knowledge(memory_id: str, request: Request):
 
 
 @router.get("/conflicts", response_model=list[ConflictRecord])
-async def list_conflicts(status: str = "pending", request: Request = None):
+async def list_conflicts(
+    status: str = "pending", user_id: str = "default", request: Request = None
+):
     """列出冲突记录，支持按状态过滤"""
     # 尝试访问冲突仓储，若不可用则返回空列表
     repo = getattr(request.app.state, "conflict_repo", None) if request else None
     if repo is not None:
-        return repo.list_all(status)
+        return repo.list_all(status, user_id=user_id)
     return []
 
 
 class ResolveConflictRequest(BaseModel):
+    user_id: str = "default"
     decision: str
     reason: str = ""
+    result_id: str = ""
 
 
 @router.post("/conflicts/{conflict_id}/resolve")
@@ -568,10 +736,23 @@ async def resolve_conflict(conflict_id: str, body: ResolveConflictRequest, reque
     if repo is None:
         raise HTTPException(status_code=503, detail="conflict repository not initialized")
     try:
-        result = repo.resolve(conflict_id, body.decision, body.reason)
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from None
+        resolved = repo.resolve(
+            conflict_id, body.decision, body.reason, body.result_id, user_id=body.user_id
+        )
+        if not resolved:
+            raise HTTPException(status_code=404, detail="conflict not found")
+        return {
+            "status": "resolved",
+            "conflict_id": conflict_id,
+            "decision": body.decision,
+            "result_id": body.result_id,
+        }
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="invalid conflict resolution"
+        ) from None
 
 
 # ============================================================
@@ -581,40 +762,40 @@ async def resolve_conflict(conflict_id: str, body: ResolveConflictRequest, reque
 
 @router.post("/feedback")
 async def submit_feedback(req: FeedbackRequest, request: Request):
-    """
-    提交用户反馈，触发偏好更新并同步到向量索引
-
-    数据流: 用户反馈 → submit_feedback → 更新 SQLite → 同步 Milvus
-            → 失效检索缓存
-
-    参数:
-        req.memory_id: 关联的记忆 ID
-        req.feedback_text: 反馈文本
-        req.action: "update" | "confirm" | "reject"
-    """
+    """Apply feedback to preference or knowledge without changing the API contract."""
     pref_repo = getattr(request.app.state, "pref_repo", None)
-    sync_service = getattr(request.app.state, "sync_service", None)
-    if pref_repo is None:
-        raise HTTPException(status_code=503, detail="preference repository not initialized")
-    # 根据反馈更新偏好记忆
-    memory = pref_repo.get_by_id(req.memory_id)
-    if memory is None:
-        raise HTTPException(status_code=404, detail=f"memory {req.memory_id} not found")
-    # 简单实现：更新文本并保存
+    know_repo = getattr(request.app.state, "know_repo", None)
+    if pref_repo is None and know_repo is None:
+        raise HTTPException(status_code=503, detail="memory repository not initialized")
+
+    memory = pref_repo.get_by_id(req.memory_id) if pref_repo is not None else None
+    repo = pref_repo
+    if memory is None and know_repo is not None:
+        memory = know_repo.get_by_id(req.memory_id)
+        repo = know_repo
+    if memory is None or memory.user_id != req.user_id:
+        raise HTTPException(status_code=404, detail="memory not found")
+
     if req.action == "update" and req.feedback_text:
-        memory.text = req.feedback_text
+        if memory.memory_type == "knowledge":
+            memory.content = req.feedback_text
+            memory.version = max(1, memory.version) + 1
+        else:
+            memory.text = req.feedback_text
     elif req.action == "reject":
         memory.status = MemoryStatus.ARCHIVED
-    # confirm 无需操作，仅记录
-    pref_repo.save(memory)
+    elif req.action == "confirm" and memory.memory_type == "knowledge":
+        memory.total_count += 1
+        memory.success_count += 1
 
-    # 通过同步服务保持 SQLite 与 Milvus 一致
-    if sync_service is not None:
-        if memory.status in (MemoryStatus.ARCHIVED, MemoryStatus.DELETED):
-            sync_service.delete_memory(memory.memory_id)
-        else:
-            sync_service.index_memory(memory)
-
+    write_service = getattr(request.app.state, "memory_write_service", None)
+    if write_service is not None:
+        write_service.upsert_memory(memory)
+    else:
+        repo.save(memory)
+        _sync_memory_index(
+            request, memory, remove=memory.status == MemoryStatus.ARCHIVED
+        )
     return {"status": "ok", "action": req.action}
 
 
@@ -670,20 +851,24 @@ async def write_knowledge_memory(
 # 精准遗忘
 # ============================================================
 
-def _get_forgetter(request: Request) -> MemoryForgetter:
-    """
-    从应用状态获取 MemoryForgetter 实例
 
-    注入真实的 db / vector_engine(Milvus) / vector_store(FAISS 降级) / cache / repositories。
-    """
+def _get_forgetter(request: Request) -> MemoryForgetter:
+    """Build a forgetter with all currently initialized persistence and indexes."""
+    state = request.app.state
     return MemoryForgetter(
-        llm_client=getattr(request.app.state, "llm_client", None),
-        storage=getattr(request.app.state, "db", None),
-        vector_store=getattr(request.app.state, "vector_store", None),
-        vector_engine=getattr(request.app.state, "vector_engine", None),
-        cache=getattr(request.app.state, "retriever", None),
-        pref_repo=getattr(request.app.state, "pref_repo", None),
-        know_repo=getattr(request.app.state, "know_repo", None),
+        llm_client=getattr(state, "llm_client", None),
+        storage=getattr(state, "db", None),
+        vector_store=getattr(state, "vector_store", None),
+        vector_engine=getattr(state, "vector_engine", None),
+        cache=getattr(state, "search_cache", None),
+        pref_repo=getattr(state, "pref_repo", None),
+        know_repo=getattr(state, "know_repo", None),
+        keyword_search=getattr(state, "keyword_search", None),
+        memory_lookup=getattr(state, "memory_lookup", None),
+        evidence_store=getattr(state, "evidence_store", None),
+        conflict_repo=getattr(state, "conflict_repo", None),
+        fact_store=getattr(state, "fact_store", None),
+        fact_index_service=getattr(state, "fact_index_service", None),
     )
 
 

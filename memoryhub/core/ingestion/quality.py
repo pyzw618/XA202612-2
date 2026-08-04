@@ -81,6 +81,6 @@ class QualityScorer:
         try:
             ts = datetime.fromisoformat(event.occurred_at.replace("Z", "+00:00"))
             age_days = (datetime.now(timezone.utc) - ts).total_seconds() / 86400.0
-            return max(0.0, 1.0 - age_days / 90.0)  # 90 天线性衰减
+            return min(1.0, max(0.0, 1.0 - age_days / 90.0))  # 90 天线性衰减
         except Exception:
             return 0.5

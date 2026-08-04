@@ -1434,9 +1434,10 @@ class ConflictRecord(BaseModel):
     """
 
     conflict_id: str = Field(default_factory=lambda: f"conf_{uuid.uuid4().hex[:8]}")
+    user_id: str = "default"
     old_memory_id: str = ""
     new_memory_id: str = ""
-    memory_type: str = ""  # "preference" | "knowledge"
+    memory_type: str = ""  # "preference" | "knowledge" | "fact"
 
     # --- 冲突内容 ---
     old_content: str = ""
@@ -1478,12 +1479,41 @@ class ForgetRecord(BaseModel):
 # ============================================================
 
 
+class FactMemory(BaseModel):
+    """Fact view returned by the main retrieval API."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fact_id: str = ""
+    user_id: str = "default"
+    memory_type: Literal["fact"] = "fact"
+    subject_id: str = ""
+    predicate_id: str = ""
+    object_id: str = ""
+    object_value: str = ""
+    source_text: str = ""
+    source_id: str = ""
+    observed_at: str = ""
+    confidence: float = 0.0
+    status: str = "active"
+    version: int = 1
+    scope: Literal["global", "project"] = "global"
+    project_id: str | None = None
+    last_accessed_at: str | None = None
+    access_count_30d: int = 0
+
+    @property
+    def memory_id(self) -> str:
+        return self.fact_id
+
+
 class SearchRequest(BaseModel):
     """检索请求"""
 
     user_id: str = "default"
     query: str = ""
     context: SceneScope = Field(default_factory=SceneScope)
+    project_id: str = ""
     top_k: int = 5
     memory_types: list[str] = Field(default_factory=list)  # 过滤记忆类型
     min_confidence: float = 0.0
@@ -1493,7 +1523,7 @@ class SearchResult(BaseModel):
     """单条检索结果"""
 
     memory_id: str = ""
-    memory_type: str = ""  # "preference" | "knowledge"
+    memory_type: str = ""  # "preference" | "knowledge" | "fact"
     content: str = ""
     score: float = 0.0  # 综合得分
     source: str = ""  # 来源标记："vector" | "keyword" | "metadata"
@@ -1506,6 +1536,7 @@ class SearchResponse(BaseModel):
     results: list[SearchResult] = Field(default_factory=list)
     preferences: list[PreferenceMemory] = Field(default_factory=list)
     knowledge: list[KnowledgeMemory] = Field(default_factory=list)
+    facts: list[FactMemory] = Field(default_factory=list)
     latency_ms: float = 0.0
     total_count: int = 0
 
@@ -1513,6 +1544,58 @@ class SearchResponse(BaseModel):
 # ============================================================
 # 10. 写入/更新请求模型
 # ============================================================
+
+
+class ExtractionTaskStatus(str, Enum):
+    """持久化抽取任务状态。"""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    RETRY = "retry"
+    SUCCEEDED = "succeeded"
+    DEAD_LETTER = "dead_letter"
+
+
+class ExtractionType(str, Enum):
+    """支持重试的抽取子系统。"""
+
+    PREFERENCE = "preference"
+    KNOWLEDGE = "knowledge"
+    FACT = "fact"
+
+
+class ExtractionTask(BaseModel):
+    """只保存安全事件引用和稳定错误码，不复制事件正文或异常文本。"""
+
+    task_id: str
+    event_id: str
+    event_ids: list[str] = Field(default_factory=list)
+    user_id: str
+    extractor_type: ExtractionType
+    status: ExtractionTaskStatus = ExtractionTaskStatus.PENDING
+    attempt_count: int = 0
+    max_attempts: int = 3
+    next_retry_at: datetime | None = None
+    lease_expires_at: datetime | None = None
+    last_error_code: str = ""
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+
+class ExtractionTaskRunRequest(BaseModel):
+    """执行当前用户到期抽取任务。"""
+
+    user_id: str = "default"
+    limit: int = Field(default=20, ge=1, le=200)
+
+
+class ExtractionTaskRunResponse(BaseModel):
+    """一次显式重试执行结果。"""
+
+    claimed: int = 0
+    succeeded: int = 0
+    retried: int = 0
+    dead_lettered: int = 0
 
 
 class WriteEventRequest(BaseModel):
@@ -1527,6 +1610,9 @@ class WriteEventResponse(BaseModel):
     accepted: int = 0
     rejected: int = 0
     event_ids: list[str] = Field(default_factory=list)
+    extraction_failures: int = 0
+    retry_tasks_enqueued: int = 0
+    retry_queue_failures: int = 0
 
 
 class FeedbackRequest(BaseModel):
@@ -1545,6 +1631,7 @@ class ForgetRequest(BaseModel):
     instruction: str = ""  # 自然语言遗忘指令
     target_memory_ids: list[str] = Field(default_factory=list)  # 精确 ID 模式
     target_scope: SceneScope | None = None
+    target_project_id: str = ""
     cascade: bool = True  # 是否级联删除关联数据
 
 

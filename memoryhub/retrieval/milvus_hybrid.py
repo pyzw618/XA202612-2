@@ -12,8 +12,10 @@ import re
 import time
 from collections import OrderedDict
 from collections.abc import Callable
+from typing import Any
 
 from memoryhub.adapter.schemas import (
+    FactMemory,
     KnowledgeMemory,
     PreferenceMemory,
     SearchRequest,
@@ -68,20 +70,31 @@ def _is_unavailable_error(exc: Exception) -> bool:
     return False
 
 
-def _memory_text(memory: PreferenceMemory | KnowledgeMemory) -> str:
+def _memory_text(memory) -> str:
     """用于建索引的记忆文本：知识记忆拼上名称，偏好记忆用正文"""
     if memory.memory_type == "knowledge":
         return f"{memory.name} {memory.content}".strip()
+    if memory.memory_type == "fact":
+        return memory.content
     return memory.text
 
 
-def _memory_metadata(memory: PreferenceMemory | KnowledgeMemory) -> dict:
+def _memory_metadata(memory) -> dict:
     """检索结果随行的元数据（与 app.py 中 _VectorStoreSearchAdapter 的补全逻辑一致）"""
     return {
         "memory_type": memory.memory_type,
+        "user_id": memory.user_id,
         "content": _memory_text(memory),
         "confidence": memory.confidence,
-        "scope": memory.scope.model_dump(),
+        "scope": (
+            {"scope": memory.scope, "project_id": memory.project_id or ""}
+            if memory.memory_type == "fact" else memory.scope.model_dump()
+        ),
+        **({
+            "subject_id": memory.subject_id,
+            "predicate_id": memory.predicate_id,
+            "object_id": memory.object_id,
+        } if memory.memory_type == "fact" else {}),
     }
 
 
@@ -113,10 +126,12 @@ class MilvusHybridRetriever:
         memory_lookup: dict | None = None,
         cache: SearchCache | None = None,
         index_version: str = "",
-        reranker: object | None = None,
+        reranker: Any | None = None,
         query_vector_cache_size: int = 1000,
         fallback_retriever: Callable[[SearchRequest], SearchResponse] | None = None,
         metrics_collector: Callable[[dict[str, float]], None] | None = None,
+        fact_store=None,
+
     ):
         """
         参数:
@@ -148,6 +163,8 @@ class MilvusHybridRetriever:
         self._query_vector_cache_size = query_vector_cache_size
         self.fallback_retriever = fallback_retriever
         self.metrics_collector = metrics_collector
+        self.fact_store = fact_store
+
 
     def search(self, request: SearchRequest) -> SearchResponse:
         """
@@ -209,6 +226,7 @@ class MilvusHybridRetriever:
                 vector_cache_hit=False,
             )
 
+
         # 4. 用与 C API 一致的 FNV-1a 规则构造稀疏向量
         t0 = time.perf_counter()
         sparse_terms = build_sparse_vector(normalized_query)
@@ -218,6 +236,7 @@ class MilvusHybridRetriever:
         t0 = time.perf_counter()
         try:
             fetch_k = max(search_request.top_k * self.config.candidate_multiplier, 1)
+            assert dense_vector is not None
             hits = self.engine.hybrid_search(dense_vector, sparse_terms, fetch_k)
             timings["hybrid_search_ms"] = (time.perf_counter() - t0) * 1000
         except Exception as exc:
@@ -236,6 +255,7 @@ class MilvusHybridRetriever:
         t0 = time.perf_counter()
         results = [self._to_search_result(hit, timings) for hit in hits]
         filtered = self._filter_by_context(results, search_request)
+        filtered = self._suppress_shadowed_global_facts(filtered, search_request)
 
         # 7. 普通重排默认关闭；开启时仅对前 20 个候选执行无模型规则重排
         if self.reranker is not None and self.config.rerank_enabled:
@@ -433,6 +453,30 @@ class MilvusHybridRetriever:
             filtered.append(result)
         return filtered
 
+
+    def _suppress_shadowed_global_facts(
+        self, results: list[SearchResult], request: SearchRequest
+    ) -> list[SearchResult]:
+        if self.fact_store is None or not request.project_id:
+            return results
+        project_facts = self.fact_store.list_facts(
+            status="active", limit=100000, scope="project",
+            project_id=request.project_id, user_id=request.user_id,
+        )
+        shadowed = set()
+        for fact in project_facts:
+            predicate = self.fact_store.get_predicate(fact.predicate_id)
+            if predicate is None or predicate.single_value:
+                shadowed.add((fact.subject_id, fact.predicate_id))
+        kept = []
+        for result in results:
+            scope = result.metadata.get("scope") or {}
+            key = (result.metadata.get("subject_id"), result.metadata.get("predicate_id"))
+            if result.memory_type == "fact" and scope.get("scope") == "global" and key in shadowed:
+                continue
+            kept.append(result)
+        return kept
+
     @staticmethod
     def _scope_conflict(result: SearchResult, request: SearchRequest) -> bool:
         """scope 与请求 context 存在明确冲突时返回 True（无信息不算冲突）"""
@@ -455,6 +499,7 @@ class MilvusHybridRetriever:
         """将检索结果格式化为 SearchResponse（与 HybridRetriever 一致）"""
         preferences: list[PreferenceMemory] = []
         knowledge: list[KnowledgeMemory] = []
+        facts: list[FactMemory] = []
         for result in results:
             t0 = time.perf_counter()
             memory = self.memory_lookup.get(result.memory_id)
@@ -466,10 +511,13 @@ class MilvusHybridRetriever:
                 preferences.append(memory)
             elif isinstance(memory, KnowledgeMemory):
                 knowledge.append(memory)
+            elif getattr(memory, "memory_type", "") == "fact":
+                facts.append(FactMemory.model_validate(memory))
         return SearchResponse(
             results=results,
             preferences=preferences,
             knowledge=knowledge,
+            facts=facts,
             latency_ms=round(latency_ms, 2),
             total_count=len(results),
         )
