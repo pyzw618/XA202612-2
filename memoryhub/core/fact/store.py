@@ -44,9 +44,33 @@ CREATE TABLE IF NOT EXISTS facts (
     user_id          TEXT NOT NULL DEFAULT 'default',
     last_accessed_at TEXT,
     access_count_30d INTEGER NOT NULL DEFAULT 0,
+    pending_index    INTEGER NOT NULL DEFAULT 1,
+    index_version    INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (subject_id) REFERENCES entities(entity_id),
     FOREIGN KEY (predicate_id) REFERENCES predicates(predicate_id)
 );
+CREATE TABLE IF NOT EXISTS fact_evidence (
+    evidence_id TEXT PRIMARY KEY,
+    fact_id     TEXT NOT NULL,
+    user_id     TEXT NOT NULL,
+    source_id   TEXT DEFAULT '',
+    source_text TEXT DEFAULT '',
+    observed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fact_evidence_owner_fact
+    ON fact_evidence(user_id, fact_id);
+CREATE TABLE IF NOT EXISTS fact_conflicts (
+    conflict_id     TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL,
+    new_fact_id     TEXT NOT NULL,
+    existing_fact_id TEXT DEFAULT '',
+    relation        TEXT NOT NULL,
+    resolution      TEXT DEFAULT '',
+    reason          TEXT DEFAULT '',
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fact_conflicts_owner
+    ON fact_conflicts(user_id, created_at);
 """
 
 
@@ -80,6 +104,8 @@ class FactStore:
             "user_id": "ALTER TABLE facts ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'",
             "last_accessed_at": "ALTER TABLE facts ADD COLUMN last_accessed_at TEXT",
             "access_count_30d": "ALTER TABLE facts ADD COLUMN access_count_30d INTEGER NOT NULL DEFAULT 0",
+            "pending_index": "ALTER TABLE facts ADD COLUMN pending_index INTEGER NOT NULL DEFAULT 1",
+            "index_version": "ALTER TABLE facts ADD COLUMN index_version INTEGER NOT NULL DEFAULT 0",
         }
         for column, sql in migrations.items():
             if column not in fact_columns:
@@ -212,19 +238,103 @@ class FactStore:
                (fact_id, subject_id, predicate_id, object_id, object_value,
                 source_text, source_id, observed_at, confidence, status, version,
                 memory_type, scope, project_id, user_id, last_accessed_at,
-                access_count_30d)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                access_count_30d, pending_index, index_version)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 fact.fact_id, fact.subject_id, fact.predicate_id, fact.object_id,
                 fact.object_value, fact.source_text, fact.source_id,
                 fact.observed_at, fact.confidence, fact.status, fact.version,
                 fact.memory_type, fact.scope, fact.project_id, fact.user_id,
                 fact.last_accessed_at, fact.access_count_30d,
+                int(fact.pending_index), fact.index_version,
             ),
         )
         self._conn.commit()
         return fact.fact_id
 
+    def list_pending_facts(self, limit: int = 100) -> list[Fact]:
+        rows = self._conn.execute(
+            "SELECT * FROM facts WHERE pending_index = 1 ORDER BY observed_at ASC LIMIT ?",
+            (max(1, min(int(limit), 500)),),
+        ).fetchall()
+        return [self._row_to_fact(row) for row in rows]
+
+    def mark_indexed(self, fact_id: str, version: int, user_id: str = "") -> bool:
+        query = "UPDATE facts SET pending_index = 0, index_version = ? WHERE fact_id = ?"
+        params: list[object] = [version, fact_id]
+        if user_id:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        cursor = self._conn.execute(query, params)
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def save_fact_evidence(self, fact: Fact) -> None:
+        import hashlib
+
+        evidence_id = "fev_" + hashlib.sha256(
+            f"{fact.user_id}|{fact.fact_id}|{fact.source_id}|{fact.source_text}".encode("utf-8")
+        ).hexdigest()[:24]
+        self._conn.execute(
+            """INSERT OR REPLACE INTO fact_evidence
+               (evidence_id, fact_id, user_id, source_id, source_text, observed_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (evidence_id, fact.fact_id, fact.user_id, fact.source_id, fact.source_text, fact.observed_at),
+        )
+        self._conn.commit()
+
+    def list_fact_evidence(self, fact_id: str, user_id: str) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT * FROM fact_evidence WHERE fact_id = ? AND user_id = ? ORDER BY observed_at",
+            (fact_id, user_id),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_fact_conflict(self, result) -> None:
+        import hashlib
+
+        old_id = result.existing_fact.fact_id if result.existing_fact is not None else ""
+        user_id = result.new_fact.user_id
+        conflict_id = "fconf_" + hashlib.sha256(
+            f"{user_id}|{old_id}|{result.new_fact.fact_id}|{result.relation}".encode("utf-8")
+        ).hexdigest()[:24]
+        self._conn.execute(
+            """INSERT OR REPLACE INTO fact_conflicts
+               (conflict_id, user_id, new_fact_id, existing_fact_id,
+                relation, resolution, reason, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                conflict_id, user_id, result.new_fact.fact_id, old_id,
+                result.relation, result.resolution or "", result.reason,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        self._conn.commit()
+
+    def list_fact_conflicts(self, user_id: str, limit: int = 100) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT * FROM fact_conflicts WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (user_id, max(1, min(int(limit), 500))),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_fact_artifacts(self, fact_ids: list[str], user_id: str) -> int:
+        ids = [item for item in dict.fromkeys(fact_ids) if item]
+        if not ids:
+            return 0
+        placeholders = ",".join("?" for _ in ids)
+        params = [user_id, *ids]
+        evidence = self._conn.execute(
+            f"DELETE FROM fact_evidence WHERE user_id = ? AND fact_id IN ({placeholders})",
+            params,
+        ).rowcount
+        conflicts = self._conn.execute(
+            f"""DELETE FROM fact_conflicts WHERE user_id = ? AND
+                (new_fact_id IN ({placeholders}) OR existing_fact_id IN ({placeholders}))""",
+            [user_id, *ids, *ids],
+        ).rowcount
+        self._conn.commit()
+        return evidence + conflicts
     def find_facts_by_sp(
         self,
         subject_id: str,
@@ -251,7 +361,7 @@ class FactStore:
     def update_fact_status(
         self, fact_id: str, new_status: str, user_id: Optional[str] = None
     ) -> bool:
-        query = "UPDATE facts SET status = ? WHERE fact_id = ?"
+        query = "UPDATE facts SET status = ?, pending_index = 1 WHERE fact_id = ?"
         params: list[object] = [new_status, fact_id]
         if user_id is not None:
             query += " AND user_id = ?"
@@ -364,4 +474,6 @@ class FactStore:
             user_id=row["user_id"],
             last_accessed_at=row["last_accessed_at"],
             access_count_30d=row["access_count_30d"],
+            pending_index=bool(row["pending_index"]),
+            index_version=row["index_version"],
         )

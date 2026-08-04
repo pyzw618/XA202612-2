@@ -374,6 +374,9 @@ def _memory_index_metadata(memory: PreferenceMemory | KnowledgeMemory) -> dict[s
         "user_id": memory.user_id,
         "content": _memory_index_text(memory),
         "confidence": memory.confidence,
+        "status": (
+            memory.status.value if hasattr(memory.status, "value") else str(memory.status)
+        ),
         "scope": scope,
     }
 
@@ -466,6 +469,77 @@ async def write_events(req: WriteEventRequest, request: Request):
 # 抽取任务与死信管理
 # ============================================================
 
+
+
+# ============================================================
+# Facts management
+# ============================================================
+
+@router.get("/facts")
+async def list_facts(request: Request, user_id: str = "default", status: str | None = "active", limit: int = Query(default=100, ge=1, le=500)):
+    store = getattr(request.app.state, "fact_store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="fact store not initialized")
+    return store.list_facts(status=status, user_id=user_id, limit=limit)
+
+@router.get("/facts/conflicts")
+async def list_fact_conflicts(request: Request, user_id: str = "default", limit: int = Query(default=100, ge=1, le=500)):
+    store = getattr(request.app.state, "fact_store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="fact store not initialized")
+    return store.list_fact_conflicts(user_id=user_id, limit=limit)
+
+@router.get("/facts/{fact_id}")
+async def get_fact(fact_id: str, request: Request, user_id: str = "default"):
+    store = getattr(request.app.state, "fact_store", None)
+    fact = store.get_fact(fact_id, user_id=user_id) if store is not None else None
+    if fact is None:
+        raise HTTPException(status_code=404, detail="fact not found")
+    return fact
+
+@router.get("/facts/{fact_id}/evidence")
+async def get_fact_evidence(fact_id: str, request: Request, user_id: str = "default"):
+    store = getattr(request.app.state, "fact_store", None)
+    fact = store.get_fact(fact_id, user_id=user_id) if store is not None else None
+    if fact is None:
+        raise HTTPException(status_code=404, detail="fact not found")
+    return store.list_fact_evidence(fact_id, user_id)
+
+@router.delete("/facts/{fact_id}")
+async def delete_fact(fact_id: str, request: Request, user_id: str = "default"):
+    store = getattr(request.app.state, "fact_store", None)
+    index_service = getattr(request.app.state, "fact_index_service", None)
+    fact = store.get_fact(fact_id, user_id=user_id) if store is not None else None
+    if fact is None:
+        raise HTTPException(status_code=404, detail="fact not found")
+    if not store.update_fact_status(fact_id, "deleted", user_id=user_id):
+        raise HTTPException(status_code=409, detail="fact delete failed")
+    fact.status = "deleted"
+    fact.pending_index = True
+    if index_service is not None:
+        try:
+            index_service.sync_fact(fact, remove=True)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="fact projection delete pending") from exc
+    store.delete_fact_artifacts([fact_id], user_id)
+    store.prune_orphan_entities(user_id)
+    return {"deleted": True, "fact_id": fact_id}
+@router.get("/extraction/tasks/metrics")
+async def extraction_retry_metrics(request: Request):
+    task = getattr(request.app.state, "extraction_retry_task", None)
+    if task is None:
+        raise HTTPException(status_code=503, detail="extraction retry task not initialized")
+    metrics = task.metrics
+    return {
+        "total_runs": metrics.total_runs,
+        "total_claimed": metrics.total_claimed,
+        "total_succeeded": metrics.total_succeeded,
+        "total_retried": metrics.total_retried,
+        "total_dead_lettered": metrics.total_dead_lettered,
+        "last_run_at": metrics.last_run_at,
+        "last_duration_ms": metrics.last_duration_ms,
+        "last_error_code": metrics.last_error_code,
+    }
 
 @router.get("/extraction/tasks", response_model=list[ExtractionTask])
 async def list_extraction_tasks(

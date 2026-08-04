@@ -22,12 +22,18 @@ class ExtractionExecutor:
         preference_updater=None,
         knowledge_extractor=None,
         fact_ingestion_adapter=None,
+        knowledge_merge_config=None,
+        conflict_repo=None,
     ) -> None:
         self.memory_write_service = memory_write_service
         self.preference_extractor = preference_extractor
         self.preference_updater = preference_updater
         self.knowledge_extractor = knowledge_extractor
-        self.knowledge_updater = KnowledgeUpdater(write_service=memory_write_service)
+        self.knowledge_updater = KnowledgeUpdater(
+            write_service=memory_write_service,
+            merge_config=knowledge_merge_config,
+            conflict_repo=conflict_repo,
+        )
         self.fact_ingestion_adapter = fact_ingestion_adapter
 
     @staticmethod

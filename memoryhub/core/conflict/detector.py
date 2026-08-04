@@ -1,89 +1,114 @@
-"""
-冲突检测模块
+"""Deterministic conflict detection for preference and knowledge memories."""
 
-检测新记忆与已有记忆之间的冲突。
-"""
+from __future__ import annotations
 
-from memoryhub.adapter.schemas import (
-    PreferenceMemory,
-    KnowledgeMemory,
-    ConflictRecord,
-)
+import re
+from difflib import SequenceMatcher
+
+from memoryhub.adapter.schemas import ConflictRecord, KnowledgeMemory, PreferenceMemory
 
 
 class ConflictDetector:
-    """
-    冲突检测器
+    """Detect owner- and scope-local semantic conflicts without requiring an LLM."""
 
-    使用方式:
-        detector = ConflictDetector(llm_client=llm)
-        conflicts = detector.check_preference(new_pref, existing_prefs)
-    """
-
-    def __init__(self, llm_client=None):
+    def __init__(self, llm_client=None, *, similarity_threshold: float = 0.55) -> None:
         self.llm_client = llm_client
+        self.similarity_threshold = max(0.0, min(1.0, similarity_threshold))
 
     def check_preference(
         self, new_pref: PreferenceMemory, existing: list[PreferenceMemory]
     ) -> ConflictRecord | None:
-        """
-        检测新偏好与已有偏好是否冲突
-
-        数据流:
-            新偏好 + 已有偏好列表 → check_preference
-              → 同 scope 同 type 的偏好比对
-              → 内容语义比对
-              → 返回冲突记录或 None
-
-        参数:
-            new_pref: 新抽取的候选偏好
-            existing: 同 scope 下的已有偏好列表
-
-        返回:
-            ConflictRecord（检测到冲突时）或 None（无冲突）
-
-        冲突判定条件:
-            1. scope 重叠（同一场景/任务类型）
-            2. preference_type 相同
-            3. 内容语义矛盾
-        """
-        raise NotImplementedError
+        candidates = self._find_similar_preferences(new_pref, existing)
+        for old in candidates:
+            if self._semantic_contradiction(self._text(old), self._text(new_pref)):
+                return ConflictRecord(
+                    user_id=new_pref.user_id,
+                    old_memory_id=old.memory_id,
+                    new_memory_id=new_pref.memory_id,
+                    memory_type="preference",
+                    old_content=self._text(old),
+                    new_content=self._text(new_pref),
+                    conflict_field="text/payload",
+                    reason="same preference type and overlapping scope with contradictory values",
+                )
+        return None
 
     def check_knowledge(
         self, new_know: KnowledgeMemory, existing: list[KnowledgeMemory]
     ) -> ConflictRecord | None:
-        """
-        检测新知识与已有知识是否冲突
-
-        数据流:
-            新知识 + 已有知识列表 → check_knowledge
-              → 同类型知识比对
-              → 步骤/流程比对
-              → 返回冲突记录或 None
-
-        参数:
-            new_know: 新抽取的知识
-            existing: 同类型已有知识列表
-
-        返回:
-            ConflictRecord 或 None
-        """
-        raise NotImplementedError
+        new_type = str(getattr(new_know.knowledge_type, "value", new_know.knowledge_type))
+        new_text = " ".join([new_know.name, new_know.content, *new_know.steps])
+        for old in existing:
+            if old.user_id != new_know.user_id:
+                continue
+            old_type = str(getattr(old.knowledge_type, "value", old.knowledge_type))
+            if old_type != new_type or not self._is_same_scope(old.scope, new_know.scope):
+                continue
+            old_text = " ".join([old.name, old.content, *old.steps])
+            similarity = self._similarity(old_text, new_text)
+            if similarity >= self.similarity_threshold and self._semantic_contradiction(old_text, new_text):
+                return ConflictRecord(
+                    user_id=new_know.user_id,
+                    old_memory_id=old.memory_id,
+                    new_memory_id=new_know.memory_id,
+                    memory_type="knowledge",
+                    old_content=old_text,
+                    new_content=new_text,
+                    conflict_field="content/steps",
+                    reason=f"same knowledge scope with contradictory procedure (similarity={similarity:.3f})",
+                )
+        return None
 
     def _is_same_scope(self, scope_a, scope_b) -> bool:
-        """判断两个 scope 是否重叠"""
-        raise NotImplementedError
+        for field in ("scene", "task_type", "app"):
+            left = getattr(scope_a, field, "")
+            right = getattr(scope_b, field, "")
+            if left and right and left not in ("*", right) and right not in ("*", left):
+                return False
+        return True
 
     def _semantic_contradiction(self, text_a: str, text_b: str) -> bool:
-        """
-        判断两段文本是否语义矛盾
-
-        可使用 LLM 辅助判断。
-        """
-        raise NotImplementedError
+        a = self._tokens(text_a)
+        b = self._tokens(text_b)
+        if not a or not b:
+            return False
+        if a == b:
+            return False
+        neg_a = self._has_negation(text_a)
+        neg_b = self._has_negation(text_b)
+        shared = len(a & b) / max(1, len(a | b))
+        return shared >= self.similarity_threshold and neg_a != neg_b
 
     def _find_similar_preferences(
         self, pref: PreferenceMemory, candidates: list[PreferenceMemory]
     ) -> list[PreferenceMemory]:
-        """在候选列表中找到相似偏好（同 scope + 同 type）"""
-        raise NotImplementedError
+        result = []
+        for candidate in candidates:
+            if candidate.user_id != pref.user_id:
+                continue
+            if candidate.preference_type != pref.preference_type:
+                continue
+            if self._is_same_scope(candidate.scope, pref.scope) or candidate.is_global or pref.is_global:
+                result.append(candidate)
+        return result
+
+    @staticmethod
+    def _text(memory) -> str:
+        payload = getattr(memory, "payload", {}) or {}
+        return " ".join([str(getattr(memory, "text", "")), str(payload)])
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        return re.sub(r"\s+", " ", str(text or "").strip().lower())
+
+    @classmethod
+    def _tokens(cls, text: str) -> set[str]:
+        return set(re.findall(r"[0-9a-zA-Z一-龥]{2,}", cls._normalize(text)))
+
+    @classmethod
+    def _similarity(cls, left: str, right: str) -> float:
+        return SequenceMatcher(None, cls._normalize(left), cls._normalize(right)).ratio()
+
+    @staticmethod
+    def _has_negation(text: str) -> bool:
+        return bool(re.search(r"\b(?:not|never|no|禁止|不要|不能|不应|拒绝|否)\b", text.lower()))

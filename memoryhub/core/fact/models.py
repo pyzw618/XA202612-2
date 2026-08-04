@@ -126,6 +126,8 @@ class Fact:
     user_id: str = "default"
     last_accessed_at: Optional[str] = None
     access_count_30d: int = 0
+    pending_index: bool = True
+    index_version: int = 0
 
     def __post_init__(self):
         if not self.user_id:

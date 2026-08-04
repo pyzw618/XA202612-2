@@ -1,0 +1,17 @@
+[
+  {
+    "label": "equivalent",
+    "left": {"name": "Generate weekly report", "content": "Collect progress and risks", "steps": ["collect progress", "summarize risks", "write next plan"]},
+    "right": {"name": "Weekly report workflow", "content": "Collect progress, risks and next plan", "steps": ["collect progress", "summarize risks", "write next plan"]}
+  },
+  {
+    "label": "distinct",
+    "left": {"name": "Search local files", "content": "Use local file search", "steps": ["open local index", "search filename"]},
+    "right": {"name": "Publish release", "content": "Build and upload release", "steps": ["build package", "upload artifact"]}
+  },
+  {
+    "label": "ambiguous",
+    "left": {"name": "Deploy service", "content": "Deploy to staging then production", "steps": ["deploy staging", "verify", "deploy production"]},
+    "right": {"name": "Deploy service", "content": "Deploy directly to production", "steps": ["deploy production", "verify"]}
+  }
+]

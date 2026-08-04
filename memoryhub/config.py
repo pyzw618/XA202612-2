@@ -125,6 +125,34 @@ class VectorEngineConfig:
     search_timeout_ms: int = 120
 
 
+@dataclass
+class ExtractionRetryConfig:
+    """Durable extraction retry worker settings."""
+
+    enabled: bool = True
+    interval_seconds: float = 30.0
+    batch_size: int = 20
+
+
+@dataclass
+class KnowledgeMergeConfig:
+    """Internal knowledge equivalence and conflict thresholds."""
+
+    name_weight: float = 0.35
+    content_weight: float = 0.35
+    steps_weight: float = 0.30
+    equivalent_threshold: float = 0.72
+    conflict_threshold: float = 0.58
+
+    def __post_init__(self) -> None:
+        weights = (self.name_weight, self.content_weight, self.steps_weight)
+        if any(weight < 0 for weight in weights) or sum(weights) <= 0:
+            raise ValueError("knowledge merge weights must be non-negative and non-zero")
+        if not 0.0 <= self.conflict_threshold <= 1.0:
+            raise ValueError("knowledge conflict threshold must be within [0, 1]")
+        if not 0.0 <= self.equivalent_threshold <= 1.0:
+            raise ValueError("knowledge equivalent threshold must be within [0, 1]")
+
 @dataclass(frozen=True)
 class SafetyAuditConfig:
     """安全处置审计日志配置；密钥只通过环境变量或设备密钥服务提供。"""
@@ -505,6 +533,8 @@ class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     vector_engine: VectorEngineConfig = field(default_factory=VectorEngineConfig)
+    extraction_retry: ExtractionRetryConfig = field(default_factory=ExtractionRetryConfig)
+    knowledge_merge: KnowledgeMergeConfig = field(default_factory=KnowledgeMergeConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     debug: bool = False
 
@@ -565,6 +595,12 @@ def load_config(config_path: str | None = None) -> AppConfig:
             )
             config.vector_engine = VectorEngineConfig(
                 **{**config.vector_engine.__dict__, **section("vector_engine")}
+            )
+            config.extraction_retry = ExtractionRetryConfig(
+                **{**config.extraction_retry.__dict__, **section("extraction_retry")}
+            )
+            config.knowledge_merge = KnowledgeMergeConfig(
+                **{**config.knowledge_merge.__dict__, **section("knowledge_merge")}
             )
         except TypeError as exc:
             raise ValueError(f"invalid configuration in {yaml_path}: {exc}") from exc

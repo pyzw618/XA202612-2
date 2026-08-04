@@ -4,7 +4,9 @@
 采用 规则泛化优先 + LLM 语义增强 的双引擎架构。
 """
 from __future__ import annotations
+
 import re
+
 from memoryhub.adapter.schemas import (
     KnowledgeMemory,
     KnowledgeType,
@@ -12,6 +14,7 @@ from memoryhub.adapter.schemas import (
     MemoryStatus,
     SceneScope,
 )
+from memoryhub.core.knowledge.confidence import KnowledgeConfidenceCalculator
 
 
 class TemplateBuilder:
@@ -23,6 +26,7 @@ class TemplateBuilder:
             llm_client: LLM 抽象客户端，用于语义泛化与模板增强，可选
         """
         self.llm_client = llm_client
+        self.confidence_calculator = KnowledgeConfidenceCalculator()
         self._max_steps_before_llm = 6  # 步骤数阈值，超过则触发LLM精简
 
     def build_from_case(self, case: KnowledgeMemory) -> KnowledgeMemory:
@@ -46,7 +50,11 @@ class TemplateBuilder:
             template_body = f"请根据 {{task_name}} 的需求，参考以下结构执行：{generalized_content}"
 
         # 模板置信度合理衰减
-        template_confidence = max(0.5, min(0.95, case.confidence * 0.9))
+        template_confidence = self.confidence_calculator.template_score(
+            case.confidence,
+            step_count=len(generalized_steps),
+            evidence_count=len(case.evidences),
+        )
 
         # 构造基础模板
         template = KnowledgeMemory(
@@ -83,8 +91,8 @@ class TemplateBuilder:
         updated = self.build_from_case(new_case)
         if template_id:
             updated.memory_id = template_id
-        updated.parent_id = template_id
-        updated.version += 1
+        updated.parent_id = new_case.memory_id
+        updated.version = max(2, new_case.version + 1)
 
         # ========== 阶段1：规则级增量合并（快路径）==========
         if hasattr(updated, 'steps') and hasattr(new_case, 'steps'):
@@ -95,7 +103,13 @@ class TemplateBuilder:
             updated.tools = merged_tools
 
         # 置信度平滑更新
-        updated.confidence = max(0.5, min(0.95, (updated.confidence + new_case.confidence) / 2))
+        updated.confidence = self.confidence_calculator.merge_score(
+            existing_confidence=updated.confidence,
+            incoming_confidence=new_case.confidence,
+            success_count=max(updated.success_count, new_case.success_count),
+            total_count=max(updated.total_count, new_case.total_count) + 1,
+            evidence_count=len(updated.evidences),
+        )
         updated.success_count = max(updated.success_count, new_case.success_count)
         updated.total_count += 1
 

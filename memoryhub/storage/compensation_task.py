@@ -47,6 +47,7 @@ class PendingIndexCompensationTask:
         sync_service: MemorySyncService,
         interval_seconds: float = 30.0,
         enabled: bool = True,
+        fact_index_service=None,
     ):
         """
         参数:
@@ -57,21 +58,24 @@ class PendingIndexCompensationTask:
         self.sync_service = sync_service
         self.interval_seconds = max(1.0, float(interval_seconds))
         self.enabled = enabled
+        self.fact_index_service = fact_index_service
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._metrics = CompensationMetrics()
+        self._metrics_lock = threading.Lock()
 
     @property
     def metrics(self) -> CompensationMetrics:
         """返回补偿任务指标快照。"""
-        return CompensationMetrics(
-            total_runs=self._metrics.total_runs,
-            total_succeeded=self._metrics.total_succeeded,
-            total_failed=self._metrics.total_failed,
-            last_run_at=self._metrics.last_run_at,
-            last_duration_ms=self._metrics.last_duration_ms,
-            last_error=self._metrics.last_error,
-        )
+        with self._metrics_lock:
+            return CompensationMetrics(
+                total_runs=self._metrics.total_runs,
+                total_succeeded=self._metrics.total_succeeded,
+                total_failed=self._metrics.total_failed,
+                last_run_at=self._metrics.last_run_at,
+                last_duration_ms=self._metrics.last_duration_ms,
+                last_error=self._metrics.last_error,
+            )
 
     def start(self) -> None:
         """启动后台补偿线程。"""
@@ -117,21 +121,41 @@ class PendingIndexCompensationTask:
 
     def _execute_sync(self) -> None:
         """执行一次同步并更新指标。"""
-        self._metrics.total_runs += 1
-        self._metrics.last_error = ""
+        started = time.perf_counter()
+        with self._metrics_lock:
+            self._metrics.total_runs += 1
+            self._metrics.last_error = ""
+        result = None
+        fact_result = None
         try:
             result = self.sync_service.sync_pending()
-            self._metrics.total_succeeded += len(result.succeeded)
-            self._metrics.total_failed += len(result.failed)
-            self._metrics.last_duration_ms = result.duration_ms
+        except Exception:
+            with self._metrics_lock:
+                self._metrics.last_error = "memory_projection.failed"
+            logger.exception("memory projection compensation failed")
+        if self.fact_index_service is not None:
+            try:
+                fact_result = self.fact_index_service.sync_pending()
+            except Exception:
+                with self._metrics_lock:
+                    self._metrics.last_error = "fact_projection.failed"
+                logger.exception("fact projection compensation failed")
+        succeeded = (len(result.succeeded) if result is not None else 0) + (
+            len(fact_result.succeeded) if fact_result is not None else 0
+        )
+        failed_ids = (list(result.failed) if result is not None else []) + (
+            list(fact_result.failed) if fact_result is not None else []
+        )
+        with self._metrics_lock:
+            self._metrics.total_succeeded += succeeded
+            self._metrics.total_failed += len(failed_ids)
+            self._metrics.last_duration_ms = (time.perf_counter() - started) * 1000
             self._metrics.last_run_at = time.time()
-            if result.failed:
-                self._metrics.last_error = f"failed ids: {result.failed}"
-                logger.warning(
-                    "compensation run failed for %d memories: %s",
-                    len(result.failed),
-                    result.failed,
-                )
-        except Exception as exc:
-            self._metrics.last_error = str(exc)
-            logger.exception("compensation run encountered error")
+            if failed_ids:
+                self._metrics.last_error = f"failed ids: {failed_ids}"
+        if failed_ids:
+            logger.warning(
+                "compensation run failed for %d memories: %s",
+                len(failed_ids),
+                failed_ids,
+            )

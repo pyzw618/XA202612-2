@@ -36,6 +36,7 @@ from memoryhub.storage.models import (
     ExtractionTaskRow,
     ForgetRow,
     KnowledgeRow,
+    KnowledgeVersionRow,
     PreferenceRow,
 )
 
@@ -474,7 +475,11 @@ class PreferenceRepository:
             q = s.query(PreferenceRow).filter(PreferenceRow.memory_id == memory_id)
             if user_id:
                 q = q.filter(PreferenceRow.user_id == user_id)
-            return q.update({"status": status, "updated_at": datetime.now()}) == 1
+            return q.update({
+                "status": status,
+                "pending_index": True,
+                "updated_at": datetime.now(),
+            }) == 1
 
     def record_access(self, memory_id: str, user_id: str = "") -> bool:
         """Record an owner-bound retrieval for lifecycle health calculations."""
@@ -535,6 +540,21 @@ class KnowledgeRepository:
     def save(self, memory: KnowledgeMemory) -> None:
         """保存知识；新写入或更新后标记为待同步到向量索引。"""
         with self.db.session() as s:
+            existing = s.get(KnowledgeRow, memory.memory_id)
+            if existing is not None and memory.version > (existing.version or 1):
+                snapshot_id = f"{memory.memory_id}:v{existing.version or 1}"
+                if s.get(KnowledgeVersionRow, snapshot_id) is None:
+                    snapshot = _know_row_to_pydantic(existing)
+                    s.add(
+                        KnowledgeVersionRow(
+                            snapshot_id=snapshot_id,
+                            memory_id=existing.memory_id,
+                            user_id=existing.user_id,
+                            version=existing.version or 1,
+                            payload=snapshot.model_dump(mode="json"),
+                            created_at=existing.updated_at or datetime.now(),
+                        )
+                    )
             row = KnowledgeRow(
                 memory_id=memory.memory_id,
                 user_id=memory.user_id,
@@ -564,6 +584,27 @@ class KnowledgeRepository:
                 pending_index=True,
             )
             s.merge(row)
+
+    def get_version_history(
+        self, memory_id: str, *, user_id: str = ""
+    ) -> list[KnowledgeMemory]:
+        """Return immutable prior snapshots followed by the current version."""
+        with self.db.session() as s:
+            query = s.query(KnowledgeVersionRow).filter(
+                KnowledgeVersionRow.memory_id == memory_id
+            )
+            if user_id:
+                query = query.filter(KnowledgeVersionRow.user_id == user_id)
+            snapshots = [
+                KnowledgeMemory.model_validate(row.payload)
+                for row in query.order_by(KnowledgeVersionRow.version.asc()).all()
+            ]
+            current = s.get(KnowledgeRow, memory_id)
+            if current is not None and (not user_id or current.user_id == user_id):
+                current_memory = _know_row_to_pydantic(current)
+                if not snapshots or snapshots[-1].version != current_memory.version:
+                    snapshots.append(current_memory)
+            return snapshots
 
     def list_pending(self) -> list[KnowledgeMemory]:
         """列出需要同步到向量索引的知识记忆。"""
@@ -641,7 +682,11 @@ class KnowledgeRepository:
             query = session.query(KnowledgeRow).filter(KnowledgeRow.memory_id == memory_id)
             if user_id:
                 query = query.filter(KnowledgeRow.user_id == user_id)
-            return query.update({"status": status, "updated_at": datetime.now()}) == 1
+            return query.update({
+                "status": status,
+                "pending_index": True,
+                "updated_at": datetime.now(),
+            }) == 1
 
     def search_by_name(
         self, keyword: str, user_id: str = ""
@@ -686,15 +731,6 @@ class KnowledgeRepository:
                 query = query.filter(KnowledgeRow.user_id == user_id)
             query.update(updates)
 
-    def update_status(self, memory_id: str, status: str) -> None:
-        """更新状态"""
-        from datetime import datetime
-
-        with self.db.session() as s:
-            s.query(KnowledgeRow).filter(
-                KnowledgeRow.memory_id == memory_id
-            ).update({"status": status, "updated_at": datetime.now()})
-
 
 # ============================================================
 # 冲突 CRUD
@@ -710,22 +746,29 @@ class ConflictRepository:
     def save(self, conflict) -> None:
         """保存冲突记录"""
         with self.db.session() as s:
-            row = ConflictRow(
-                conflict_id=conflict.conflict_id,
-                user_id=conflict.user_id,
-                old_memory_id=conflict.old_memory_id,
-                new_memory_id=conflict.new_memory_id,
-                memory_type=conflict.memory_type,
-                old_content=conflict.old_content,
-                new_content=conflict.new_content,
-                conflict_field=conflict.conflict_field,
-                decision=conflict.decision.value if hasattr(conflict.decision, "value") else conflict.decision,
-                reason=conflict.reason,
-                result_memory_id=conflict.result_memory_id if hasattr(conflict, "result_memory_id") else "",
-                created_at=conflict.created_at,
-                resolved_at=conflict.resolved_at,
-            )
-            s.add(row)
+            values = {
+                "user_id": conflict.user_id,
+                "old_memory_id": conflict.old_memory_id,
+                "new_memory_id": conflict.new_memory_id,
+                "memory_type": conflict.memory_type,
+                "old_content": conflict.old_content,
+                "new_content": conflict.new_content,
+                "conflict_field": conflict.conflict_field,
+                "decision": conflict.decision.value if hasattr(conflict.decision, "value") else conflict.decision,
+                "reason": conflict.reason,
+                "result_memory_id": conflict.result_memory_id if hasattr(conflict, "result_memory_id") else "",
+                "resolved_at": conflict.resolved_at,
+            }
+            row = s.get(ConflictRow, conflict.conflict_id)
+            if row is None:
+                s.add(ConflictRow(
+                    conflict_id=conflict.conflict_id,
+                    created_at=conflict.created_at,
+                    **values,
+                ))
+            else:
+                for key, value in values.items():
+                    setattr(row, key, value)
 
     def list_all(self, status: str = "", user_id: str = "") -> list:
         """List conflicts, optionally filtering by decision/status."""
@@ -1036,15 +1079,31 @@ class ExtractionTaskRepository:
                 .limit(max(1, min(int(limit), 200)))
                 .all()
             )
-            claimed: list[ExtractionTask] = []
+            claimed_ids: list[str] = []
+            lease_expires_at = current + timedelta(seconds=max(1, lease_seconds))
             for row in rows:
-                row.status = ExtractionTaskStatus.RUNNING.value
-                row.attempt_count = (row.attempt_count or 0) + 1
-                row.lease_expires_at = current + timedelta(seconds=max(1, lease_seconds))
-                row.updated_at = current
-                claimed.append(_extraction_task_row_to_pydantic(row))
+                # Conditional UPDATE makes the claim atomic across concurrent workers.
+                claimed_count = (
+                    session.query(ExtractionTaskRow)
+                    .filter(ExtractionTaskRow.task_id == row.task_id, due)
+                    .update(
+                        {
+                            ExtractionTaskRow.status: ExtractionTaskStatus.RUNNING.value,
+                            ExtractionTaskRow.attempt_count: (row.attempt_count or 0) + 1,
+                            ExtractionTaskRow.lease_expires_at: lease_expires_at,
+                            ExtractionTaskRow.updated_at: current,
+                        },
+                        synchronize_session=False,
+                    )
+                )
+                if claimed_count == 1:
+                    claimed_ids.append(row.task_id)
             session.flush()
-            return claimed
+            session.expire_all()
+            return [
+                _extraction_task_row_to_pydantic(session.get(ExtractionTaskRow, task_id))
+                for task_id in claimed_ids
+            ]
 
     def mark_succeeded(self, task_id: str, *, now: datetime | None = None) -> ExtractionTask:
         return self._finish(

@@ -93,7 +93,7 @@ class MockDataController(QObject):
                 {
                     "memory_id": "pref_a1b2c3d4",
                     "preference_type": "output_style",
-                    "content": "项目周报默认使用 Markdown 格式，分三部分结构",
+                    "text": "项目周报默认使用 Markdown 格式，分三部分结构",
                     "scope": {"scene": "office", "task_type": "office.weekly_report"},
                     "confidence": 0.92,
                     "status": "active",
@@ -114,7 +114,7 @@ class MockDataController(QObject):
                 {
                     "memory_id": "pref_e5f6g7h8",
                     "preference_type": "tool_preference",
-                    "content": "文件搜索任务优先使用本地检索工具而非网络搜索",
+                    "text": "文件搜索任务优先使用本地检索工具而非网络搜索",
                     "scope": {"scene": "code", "task_type": "code.file_ops"},
                     "confidence": 0.85,
                     "status": "active",
@@ -133,7 +133,7 @@ class MockDataController(QObject):
                 {
                     "memory_id": "pref_i9j0k1l2",
                     "preference_type": "safety_pref",
-                    "content": "不保存 API Key、密码等敏感凭证信息",
+                    "text": "不保存 API Key、密码等敏感凭证信息",
                     "scope": {"scene": "*", "task_type": "*"},
                     "confidence": 1.0,
                     "status": "active",
@@ -151,7 +151,7 @@ class MockDataController(QObject):
                 {
                     "memory_id": "pref_m3n4o5p6",
                     "preference_type": "format_pref",
-                    "content": "代码注释使用中文，函数文档用英文",
+                    "text": "代码注释使用中文，函数文档用英文",
                     "scope": {"scene": "code", "task_type": "code.documentation"},
                     "confidence": 0.78,
                     "status": "active",
@@ -177,7 +177,7 @@ class MockDataController(QObject):
             self.preference_detail_ready.emit({
                 "memory_id": memory_id,
                 "preference_type": "output_style",
-                "content": "项目周报默认使用 Markdown 格式，分三部分结构",
+                "text": "项目周报默认使用 Markdown 格式，分三部分结构",
                 "scope": {"scene": "office", "task_type": "office.weekly_report"},
                 "confidence": 0.92,
                 "status": "active",

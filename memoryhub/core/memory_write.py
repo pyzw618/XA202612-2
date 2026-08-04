@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from memoryhub.adapter.schemas import KnowledgeMemory, MemoryStatus, PreferenceMemory
@@ -25,6 +26,7 @@ class MemoryWriteService:
         search_cache=None,
         embedding_client=None,
         evidence_store=None,
+        conflict_repo=None,
     ) -> None:
         self.pref_repo = pref_repo
         self.know_repo = know_repo
@@ -35,6 +37,7 @@ class MemoryWriteService:
         self.search_cache = search_cache
         self.embedding_client = embedding_client
         self.evidence_store = evidence_store
+        self.conflict_repo = conflict_repo
 
     @staticmethod
     def index_text(memory: Memory) -> str:
@@ -57,6 +60,9 @@ class MemoryWriteService:
             "content": cls.index_text(memory),
             "confidence": memory.confidence,
             "scope": memory.scope.model_dump(),
+            "status": memory.status.value
+            if hasattr(memory.status, "value")
+            else str(memory.status),
         }
 
     def upsert_memory(self, memory: Memory) -> None:
@@ -77,6 +83,12 @@ class MemoryWriteService:
         memory_id = memory.memory_id
 
         if remove:
+            # Publish an inactive tombstone to the shared lookup before external deletes.
+            # If a vector backend is temporarily unavailable, production retrieval will
+            # still fail closed on status instead of returning the stale vector.
+            if self.memory_lookup is not None:
+                self.memory_lookup[memory_id] = memory
+            self._clear_cache()
             if self.vector_store is not None:
                 self.vector_store.delete(memory_id)
                 self.vector_store.save()
@@ -86,9 +98,12 @@ class MemoryWriteService:
                 self.keyword_search.delete(memory_id)
             if self.memory_lookup is not None:
                 self.memory_lookup.pop(memory_id, None)
-            if explicit_remove and self.evidence_store is not None:
+            if (explicit_remove or status == MemoryStatus.DELETED.value) and self.evidence_store is not None:
                 self.evidence_store.delete(memory_id)
+            if (explicit_remove or status == MemoryStatus.DELETED.value) and self.conflict_repo is not None:
+                self.conflict_repo.delete_for_memories([memory_id])
             self._clear_cache()
+            self._mark_synchronized(memory)
             return
 
         text = self.index_text(memory)
@@ -110,6 +125,14 @@ class MemoryWriteService:
         if self.memory_lookup is not None:
             self.memory_lookup[memory_id] = memory
         self._clear_cache()
+        self._mark_synchronized(memory)
+
+    def _mark_synchronized(self, memory: Memory) -> None:
+        """Clear pending_index only after all configured runtime projections succeed."""
+        repo = self.know_repo if memory.memory_type == "knowledge" else self.pref_repo
+        mark_indexed = getattr(repo, "mark_indexed", None)
+        if mark_indexed is not None:
+            mark_indexed([memory.memory_id], time.time_ns())
 
     def _clear_cache(self) -> None:
         if self.search_cache is not None:

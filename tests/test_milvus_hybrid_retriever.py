@@ -30,6 +30,9 @@ class FakeVectorEngine(BaseVectorEngine):
         self._results: list[VectorSearchResult] = []
 
     def set_results(self, results: list[VectorSearchResult]) -> None:
+        for result in results:
+            result.metadata.setdefault("user_id", "u1")
+            result.metadata.setdefault("status", "active")
         self._results = results
 
     def hybrid_search(
@@ -37,6 +40,7 @@ class FakeVectorEngine(BaseVectorEngine):
         dense_vector: list[float],
         sparse_terms: list[tuple[int, float]],
         top_k: int,
+        filters: dict | None = None,
     ) -> list[VectorSearchResult]:
         self.hybrid_search_calls.append((dense_vector, sparse_terms, top_k))
         return list(self._results)
@@ -107,7 +111,7 @@ class TestMilvusHybridRetrieverSearch:
         retriever = MilvusHybridRetriever(
             engine=engine, embedding_fn=_embedding_fn, config=RetrievalConfig()
         )
-        response = retriever.search(SearchRequest(query=""))
+        response = retriever.search(SearchRequest(user_id="u1", query=""))
         assert response.total_count == 0
         assert response.results == []
         assert not engine.hybrid_search_calls
@@ -119,7 +123,7 @@ class TestMilvusHybridRetrieverSearch:
             embedding_fn=_embedding_fn,
             config=RetrievalConfig(max_query_chars=10, candidate_multiplier=2),
         )
-        retriever.search(SearchRequest(query="  hello   world  这是一段很长的查询文本  "))
+        retriever.search(SearchRequest(user_id="u1", query="  hello   world  这是一段很长的查询文本  "))
         assert len(engine.hybrid_search_calls) == 1
         # 规范化后截断至 10 字符
         assert len(engine.hybrid_search_calls[0][1]) > 0  # 稀疏向量非空
@@ -134,7 +138,7 @@ class TestMilvusHybridRetrieverSearch:
             embedding_fn=_embedding_fn,
             config=RetrievalConfig(candidate_multiplier=4),
         )
-        retriever.search(SearchRequest(query="周报", top_k=5))
+        retriever.search(SearchRequest(user_id="u1", query="周报", top_k=5))
         assert engine.hybrid_search_calls[-1][2] == 20  # 5 * 4
 
     def test_top_k_results_returned(self) -> None:
@@ -152,7 +156,7 @@ class TestMilvusHybridRetrieverSearch:
             config=RetrievalConfig(candidate_multiplier=2),
             memory_lookup=memories,
         )
-        response = retriever.search(SearchRequest(query="周报", top_k=3))
+        response = retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
         assert response.total_count == 3
         assert len(response.preferences) == 3
 
@@ -171,8 +175,8 @@ class TestMilvusHybridRetrieverSearch:
             cache=cache,
             index_version="v1",
         )
-        response1 = retriever.search(SearchRequest(query="周报", top_k=3))
-        response2 = retriever.search(SearchRequest(query="周报", top_k=3))
+        response1 = retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
+        response2 = retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
         assert response1.results[0].memory_id == response2.results[0].memory_id
         # 第二次应命中缓存，不再调用引擎
         assert len(engine.hybrid_search_calls) == 1
@@ -200,8 +204,8 @@ class TestMilvusHybridRetrieverSearch:
             cache=cache,
             index_version="v2",
         )
-        retriever_v1.search(SearchRequest(query="周报", top_k=3))
-        retriever_v2.search(SearchRequest(query="周报", top_k=3))
+        retriever_v1.search(SearchRequest(user_id="u1", query="周报", top_k=3))
+        retriever_v2.search(SearchRequest(user_id="u1", query="周报", top_k=3))
         # 不同 index_version 不应共享缓存，因此引擎被调用两次
         assert len(engine.hybrid_search_calls) == 2
 
@@ -222,8 +226,8 @@ class TestMilvusHybridRetrieverSearch:
             embedding_fn=counting_embedding,
             config=RetrievalConfig(candidate_multiplier=2),
         )
-        retriever.search(SearchRequest(query="周报", top_k=3))
-        retriever.search(SearchRequest(query="  周报  ", top_k=3))  # 规范化后相同
+        retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
+        retriever.search(SearchRequest(user_id="u1", query="  周报  ", top_k=3))  # 规范化后相同
         # embedding_fn 只应被调用一次（第二次命中查询向量缓存）
         assert call_count == 1
         # 但引擎 hybrid_search 被调用两次（因为结果未缓存）
@@ -241,7 +245,7 @@ class TestMilvusHybridRetrieverSearch:
             config=RetrievalConfig(rerank_enabled=False),
             reranker=reranker,
         )
-        retriever.search(SearchRequest(query="周报", top_k=3))
+        retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
         assert len(reranker.calls) == 0
 
     def test_rerank_only_top_20_candidates(self) -> None:
@@ -256,7 +260,7 @@ class TestMilvusHybridRetrieverSearch:
             config=RetrievalConfig(candidate_multiplier=6, rerank_enabled=True, default_top_k=5),
             reranker=reranker,
         )
-        retriever.search(SearchRequest(query="周报", top_k=5))
+        retriever.search(SearchRequest(user_id="u1", query="周报", top_k=5))
         assert len(reranker.calls) == 1
         assert len(reranker.calls[0]) == 20
 
@@ -279,7 +283,7 @@ class TestMilvusHybridRetrieverSearch:
             memory_lookup=memories,
         )
         response = retriever.search(
-            SearchRequest(query="周报", top_k=5, memory_types=["knowledge"])
+            SearchRequest(user_id="u1", query="周报", top_k=5, memory_types=["knowledge"])
         )
         assert response.total_count == 1
         assert response.results[0].memory_id == "k1"
@@ -304,7 +308,7 @@ class TestMilvusHybridRetrieverSearch:
             config=RetrievalConfig(candidate_multiplier=2),
             memory_lookup=memories,
         )
-        response = retriever.search(SearchRequest(query="周报", top_k=5, min_confidence=0.5))
+        response = retriever.search(SearchRequest(user_id="u1", query="周报", top_k=5, min_confidence=0.5))
         assert response.total_count == 1
         assert response.results[0].memory_id == "m1"
 
@@ -327,7 +331,7 @@ class TestMilvusHybridRetrieverSearch:
             memory_lookup=memories,
         )
         response = retriever.search(
-            SearchRequest(query="周报", top_k=5, context=SceneScope(scene="office"))
+            SearchRequest(user_id="u1", query="周报", top_k=5, context=SceneScope(scene="office"))
         )
         assert response.total_count == 1
         assert response.results[0].memory_id == "m1"
@@ -353,7 +357,7 @@ class TestMilvusHybridRetrieverSearch:
             ),
             metrics_collector=collector,
         )
-        response = retriever.search(SearchRequest(query="周报", top_k=3))
+        response = retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
         assert response.total_count == 1
         assert len(collected) == 1
         metrics = collected[0]
@@ -395,8 +399,8 @@ class TestMilvusHybridRetrieverSearch:
             index_version="v1",
             metrics_collector=collected.append,
         )
-        retriever.search(SearchRequest(query="周报", top_k=3))
-        retriever.search(SearchRequest(query="周报", top_k=3))
+        retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
+        retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
         assert len(collected) == 2
         assert collected[0]["cache_hit"] == 0.0
         assert collected[1]["cache_hit"] == 1.0
@@ -414,7 +418,7 @@ class TestMilvusHybridRetrieverSearch:
             runtime_config=RuntimeConfig(mode="production", allow_fallback=False),
         )
         with pytest.raises(KylinEmbeddingError):
-            retriever.search(SearchRequest(query="周报", top_k=3))
+            retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
 
     def test_production_mode_raises_on_milvus_timeout(self) -> None:
         """生产模式 Milvus 超时不得降级，必须抛出稳定错误。"""
@@ -422,7 +426,7 @@ class TestMilvusHybridRetrieverSearch:
         class FailingEngine(BaseVectorEngine):
             dimension = 768
 
-            def hybrid_search(self, dense_vector, sparse_terms, top_k):
+            def hybrid_search(self, dense_vector, sparse_terms, top_k, filters=None):
                 raise MilvusEngineError("milvus.timeout: hybrid_search 超过 120ms")
 
             def insert(self, memory_id, text, vector, metadata=None):
@@ -446,7 +450,7 @@ class TestMilvusHybridRetrieverSearch:
             runtime_config=RuntimeConfig(mode="production", allow_fallback=False),
         )
         with pytest.raises(MilvusEngineError):
-            retriever.search(SearchRequest(query="周报", top_k=3))
+            retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
 
     def test_dev_mode_with_fallback_calls_fallback_on_embedding_timeout(self) -> None:
         """development/test 模式 allow_fallback=True 且提供 fallback 时，超时后应降级。"""
@@ -473,7 +477,7 @@ class TestMilvusHybridRetrieverSearch:
             runtime_config=RuntimeConfig(mode="development", allow_fallback=True),
             fallback_retriever=fallback_retriever,
         )
-        response = retriever.search(SearchRequest(query="周报", top_k=3))
+        response = retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
         assert response is fallback_response
         assert len(fallback_calls) == 1
         assert fallback_calls[0].query == "周报"
@@ -491,7 +495,7 @@ class TestMilvusHybridRetrieverSearch:
             runtime_config=RuntimeConfig(mode="development", allow_fallback=True),
         )
         with pytest.raises(KylinEmbeddingError):
-            retriever.search(SearchRequest(query="周报", top_k=3))
+            retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
 
     def test_dev_mode_disallow_fallback_raises_on_timeout(self) -> None:
         """development/test 模式 allow_fallback=False 时，超时不得降级。"""
@@ -507,4 +511,4 @@ class TestMilvusHybridRetrieverSearch:
             fallback_retriever=lambda _req: SearchResponse(),
         )
         with pytest.raises(KylinEmbeddingError):
-            retriever.search(SearchRequest(query="周报", top_k=3))
+            retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
