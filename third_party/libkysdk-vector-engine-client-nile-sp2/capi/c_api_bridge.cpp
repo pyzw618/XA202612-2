@@ -310,13 +310,22 @@ vector_engine_t vector_engine_create() {
     }
 }
 
-int vector_engine_connect(vector_engine_t engine, const char* host, int port) {
+int vector_engine_connect(vector_engine_t engine, const char* app_id, const char* host, int port) {
     auto* handle = AsHandle(engine);
     if (handle == nullptr || !handle->db) {
         return static_cast<int>(VectorDB::StatusCode::UNKNOWN_ERROR);
     }
+    if (app_id == nullptr || app_id[0] == '\0') {
+        return SetError(handle, "app_id cannot be empty", static_cast<int>(VectorDB::StatusCode::INVALID_AGUMENT));
+    }
+    if (port < 1 || port > 65535) {
+        return SetError(handle, "port must be between 1 and 65535", static_cast<int>(VectorDB::StatusCode::INVALID_AGUMENT));
+    }
     try {
-        VectorDB::ConnectParam param(host != nullptr ? host : "127.0.0.1", static_cast<uint16_t>(port));
+        VectorDB::ConnectParam param(
+            app_id,
+            host != nullptr ? host : "127.0.0.1",
+            static_cast<uint16_t>(port));
         auto status = handle->db->Connect(param);
         if (!status.IsOk()) {
             return SetError(handle, status);

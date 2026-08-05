@@ -401,15 +401,19 @@ KYLIN_EXPORT vector_engine_t vector_engine_create(void) {
 }
 
 KYLIN_EXPORT int vector_engine_connect(vector_engine_t engine,
-                                       const char *host, int port) {
+                                       const char *app_id, const char *host, int port) {
     Engine *e = (Engine *)engine;
-    char msg[256];
     (void)host;
-    (void)port;
     if (!e) return 1;
+    if (!app_id || app_id[0] == '\0') {
+        set_last_error(e, "app_id cannot be empty");
+        return 1;
+    }
+    if (port < 1 || port > 65535) {
+        set_last_error(e, "port must be between 1 and 65535");
+        return 1;
+    }
     e->connected = 1;
-    snprintf(msg, sizeof(msg), "mock connected to %s:%d",
-             host ? host : "", port);
     set_last_error(e, NULL);
     return 0;
 }

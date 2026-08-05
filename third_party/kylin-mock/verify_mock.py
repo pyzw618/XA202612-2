@@ -109,7 +109,7 @@ def verify_vector_engine():
     lib.vector_engine_create.restype = c_void_p
     lib.vector_engine_create.argtypes = []
     lib.vector_engine_connect.restype = c_int
-    lib.vector_engine_connect.argtypes = [c_void_p, c_char_p, c_int]
+    lib.vector_engine_connect.argtypes = [c_void_p, c_char_p, c_char_p, c_int]
     lib.vector_engine_disconnect.restype = c_int
     lib.vector_engine_disconnect.argtypes = [c_void_p]
     lib.vector_engine_destroy.restype = None
@@ -141,7 +141,15 @@ def verify_vector_engine():
     try:
         check(
             "connect rc == 0",
-            lib.vector_engine_connect(engine, b"127.0.0.1", 19530) == 0,
+            lib.vector_engine_connect(engine, b"test-app-id", b"127.0.0.1", 19530) == 0,
+        )
+        check(
+            "empty app_id is rejected",
+            lib.vector_engine_connect(engine, b"", b"127.0.0.1", 19530) != 0,
+        )
+        check(
+            "invalid port is rejected",
+            lib.vector_engine_connect(engine, b"test-app-id", b"127.0.0.1", 0) != 0,
         )
         check(
             "create_collection rc == 0",
