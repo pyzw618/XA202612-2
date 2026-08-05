@@ -117,6 +117,15 @@ cp config.example.yaml config.yaml
 | `VECTOR_INDEX_PATH` | `storage.vector_index_path` | `data/vector_index` | FAISS 索引路径（仅 development/test 使用） |
 | `EVIDENCE_PATH` | `storage.evidence_path` | `data/evidence` | 证据链路径 |
 
+### 向量引擎配置
+
+| 环境变量 | YAML 路径 | 默认值 | 说明 |
+|---------|----------|-------|------|
+| `MEMORYHUB_VECTOR_ENGINE_APP_ID` | `vector_engine.app_id` | - | Milvus/Milvus mock 必填的非空 SDK 应用标识 |
+
+`vector_engine.provider=milvus` 或 `milvus_mock` 时必须提供 `app_id`；该值由测试/部署平台提供，
+不是 collection 名或 user ID，也不应写入日志。`faiss` 不消费此字段。
+
 ### 安全配置
 
 ```yaml
@@ -350,6 +359,7 @@ embedding:
 
 vector_engine:
   provider: "milvus"
+  app_id: "<provided-by-deployment-platform>"
   dimension: 768
 
 debug: false

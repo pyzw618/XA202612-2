@@ -183,6 +183,7 @@ def main() -> None:
                 top_k=args.top_k,
                 dimension=args.dimension,
                 seed=args.seed,
+                engine_kwargs={"app_id": "test-app-id"},
             )
         else:
             result = run_full_chain_benchmark(
@@ -196,6 +197,7 @@ def main() -> None:
                 seed=args.seed,
                 runtime_mode="test",
                 allow_fallback=False,
+                engine_kwargs={"app_id": "test-app-id"},
             )
             if args.output:
                 import json

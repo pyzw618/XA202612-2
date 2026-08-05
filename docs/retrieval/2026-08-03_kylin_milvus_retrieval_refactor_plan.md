@@ -46,6 +46,7 @@ embedding:
 
 vector_engine:
   provider: milvus
+  app_id: <provided-by-deployment-platform>  # non-empty SDK app identity, not a collection/user ID
   so_path: /usr/lib/libkysdk-vector-engine-client-capi.so
   host: 127.0.0.1
   port: 19530

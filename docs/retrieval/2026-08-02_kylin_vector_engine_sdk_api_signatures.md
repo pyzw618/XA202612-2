@@ -24,7 +24,7 @@
 | `VectorDB::AnnSearchRequest` | 混合检索中的单路检索请求 |
 | `VectorDB::RRFRanker` | Reciprocal Rank Fusion 融合排序器 |
 | `VectorDB::Status` | 操作结果状态（成功/错误码/消息） |
-| `VectorDB::ConnectParam` | 连接参数（host/port/token） |
+| `VectorDB::ConnectParam` | 连接参数（app_id/host/port） |
 
 ---
 
@@ -39,7 +39,7 @@ namespace VectorDB {
         static std::shared_ptr<Database> Create();
         
         virtual Status Connect(const ConnectParam& connect_param) = 0;
-        Status Connect() { return Connect(ConnectParam()); }
+
         virtual Status Disconnect() = 0;
     };
 }
@@ -47,21 +47,20 @@ namespace VectorDB {
 
 **说明**：`Database::Create()` 当前只返回 `MilvusClientImpl` 实例。  
 **参数**：
-- `ConnectParam`：包含 host、port、authorization、db_name 等
+- `ConnectParam`：必须包含非空 `appId`；可用 host/port 构造函数指定服务地址
 
 ### 2.2 ConnectParam 结构
 
 ```cpp
 class ConnectParam {
 public:
-    ConnectParam();
-    ConnectParam(const std::string& host, int port);
+    explicit ConnectParam(std::string appId);
+    ConnectParam(std::string appId, const std::string& host, uint16_t port);
     
-    // 典型字段
-    std::string host;        // 默认 "127.0.0.1"
-    int port;                // 默认 19530
-    std::string authorization; // 可选
-    std::string db_name;     // 可选
+    std::string Uri() const;
+    uint32_t ConnectTimeout() const;
+    void SetConnectTimeout(uint32_t timeout);
+    std::string AppId() const;
 };
 ```
 
@@ -503,7 +502,7 @@ enum class StatusCode : int {
 
 ```cpp
 auto client = VectorDB::Database::Create();
-VectorDB::ConnectParam param("127.0.0.1", 19530);
+VectorDB::ConnectParam param("test-app-id", "127.0.0.1", 19530);
 client->Connect(param);
 
 // 第一路：稠密向量
@@ -566,7 +565,7 @@ for (const auto& result : results.Results()) {
 extern "C" {
     // 生命周期
     void* vector_engine_create();
-    int vector_engine_connect(void* engine, const char* host, int port);
+    int vector_engine_connect(void* engine, const char* app_id, const char* host, int port);
     int vector_engine_disconnect(void* engine);
     void vector_engine_destroy(void* engine);
 

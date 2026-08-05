@@ -6,7 +6,7 @@
     2. embedding .so 存在且 ctypes 可加载
     3. vector engine capi .so 存在且可加载
     4. create_embedding_client(provider="kylin") 能 embed 出 768 维向量
-    5. create_vector_engine(provider="milvus") 能连接到 Milvus
+    5. create_vector_engine(provider="milvus", app_id=...) 能连接到 Milvus
 
 退出码：全部 PASS → 0；有任一项 FAIL → 1。
 在非麒麟环境上运行时应优雅报告各项 FAIL，不崩溃。
@@ -100,13 +100,14 @@ def check_embedding_client(so_path: str):
 
 
 @check("Milvus 可连接")
-def check_vector_engine(so_path: str, host: str, port: int):
+def check_vector_engine(so_path: str, app_id: str, host: str, port: int):
     from memoryhub.storage.vector_engine import create_vector_engine
 
     collection = "verify_env_check"
     engine = create_vector_engine(
         provider="milvus",
         so_path=so_path,
+        app_id=app_id,
         host=host,
         port=port,
         collection=collection,
@@ -130,6 +131,8 @@ def main() -> None:
                         help="kylin embedding 动态库路径")
     parser.add_argument("--engine_so_path", default=DEFAULT_ENGINE_SO,
                         help="vector engine capi 动态库路径")
+    parser.add_argument("--app_id", default=os.environ.get("MEMORYHUB_VECTOR_ENGINE_APP_ID", ""),
+                        help="非空 SDK app_id（默认读取 MEMORYHUB_VECTOR_ENGINE_APP_ID）")
     parser.add_argument("--host", default="127.0.0.1", help="Milvus 服务地址")
     parser.add_argument("--port", type=int, default=19530, help="Milvus 服务端口")
     args = parser.parse_args()
@@ -139,7 +142,7 @@ def main() -> None:
     check_embedding_so(args.embedding_so_path)
     check_engine_so(args.engine_so_path)
     check_embedding_client(args.embedding_so_path)
-    check_vector_engine(args.engine_so_path, args.host, args.port)
+    check_vector_engine(args.engine_so_path, args.app_id, args.host, args.port)
 
     passed = sum(1 for _, ok, _ in results if ok)
     failed = len(results) - passed

@@ -14,6 +14,15 @@
 - **embedding mock**：`text_embedding` 对输入文本做 FNV-1a hash 作为种子，确定性生成 768 维 float 向量（同文本恒得同向量），L2 归一化；环境变量 `KYLIN_EMBEDDING_MOCK_LATENCY_MS` 可注入延迟；异步 API 通过回调返回"不支持"错误码。
 - **vector engine mock**：纯内存实现 collection → (memory_id, content, dense_vector) 存储；稀疏向量按与真实桥接层一致的规则从 content 生成（非字母数字/空白切词，中文按单字，FNV-1a 32-bit 索引，归一化 TF 权重）；`hybrid_search` = 稠密余弦 top_k + 稀疏点积 top_k，RRF 融合（`1/(60+rank)`）；结果 JSON 由 `vector_engine_free_buffer` 释放。
 
+向量引擎 mock 与真实 C API 使用相同的四参数连接契约：
+
+```c
+vector_engine_connect(engine, app_id, host, port);
+```
+
+`app_id` 必须为非空字符串；mock 不记录或模拟服务端鉴权。验证脚本使用无敏感的
+`test-app-id` fixture，生产/真实环境必须从部署配置传入平台提供的值。
+
 ## 构建
 
 需要项目 venv（已安装 `ziglang`）：

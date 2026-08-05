@@ -61,12 +61,13 @@ vector_engine_t vector_engine_create();
 ### 3.2 连接 Milvus 服务
 
 ```cpp
-int vector_engine_connect(vector_engine_t engine, const char* host, int port);
+int vector_engine_connect(vector_engine_t engine, const char* app_id, const char* host, int port);
 ```
 
-**说明**：使用 host 和 port 连接 Milvus gRPC 服务。  
+**说明**：使用非空 `app_id`、host 和 port 连接 Milvus gRPC 服务。`app_id` 由测试/部署平台提供，不能用 collection 名或 user ID 猜测替代，也不得写入日志。
 **参数**：
 - `engine`：引擎句柄
+- `app_id`：非空的 SDK 应用身份标识
 - `host`：服务器地址，如 `"127.0.0.1"`
 - `port`：服务器端口，如 `19530`
 
@@ -161,7 +162,8 @@ int vector_engine_insert(
 );
 ```
 
-**说明**：插入一条记忆。稀疏向量在桥接层内部根据 `content` 生成，**生成规则必须与附录 A 的分词规范逐位一致**（真实桥接层、mock 库、Python `sparse.py` 三方保持一致，否则 insert 与 query 的稀疏索引对不上）。`r`n**参数**：
+**说明**：插入一条记忆。稀疏向量在桥接层内部根据 `content` 生成，**生成规则必须与附录 A 的分词规范逐位一致**（真实桥接层、mock 库、Python `sparse.py` 三方保持一致，否则 insert 与 query 的稀疏索引对不上）。
+**参数**：
 - `engine`：引擎句柄
 - `collection_name`：集合名
 - `memory_id`：记忆 ID，字符串主键
@@ -330,7 +332,7 @@ lib.vector_engine_create.restype = vector_engine_t
 lib.vector_engine_create.argtypes = []
 
 lib.vector_engine_connect.restype = c_int
-lib.vector_engine_connect.argtypes = [vector_engine_t, c_char_p, c_int]
+lib.vector_engine_connect.argtypes = [vector_engine_t, c_char_p, c_char_p, c_int]
 
 lib.vector_engine_create_collection.restype = c_int
 lib.vector_engine_create_collection.argtypes = [vector_engine_t, c_char_p, c_int]
@@ -373,7 +375,8 @@ if not engine:
     raise RuntimeError("create engine failed")
 
 try:
-    rc = lib.vector_engine_connect(engine, b"127.0.0.1", 19530)
+    # test-app-id is a non-sensitive fixture; production uses the deployment-provided value.
+    rc = lib.vector_engine_connect(engine, b"test-app-id", b"127.0.0.1", 19530)
     if rc != 0:
         raise RuntimeError(f"connect failed: {rc}")
 

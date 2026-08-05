@@ -237,6 +237,7 @@ embedding:
 
 vector_engine:
   provider: milvus
+  app_id: <provided-by-deployment-platform>  # non-empty SDK app identity, not a collection/user ID
   so_path: /path/to/libkysdk-vector-engine-client-capi.so
   host: 127.0.0.1
   port: 19530
@@ -258,6 +259,7 @@ vector_engine:
 ```bash
 export VECTOR_ENGINE_CAPI_SO=/path/to/libkysdk-vector-engine-client-capi.so
 export EMBEDDING_SO=/path/to/libkylin-coreai-embedding.so
+export MEMORYHUB_VECTOR_ENGINE_APP_ID="<provided-by-deployment-platform>"
 export LD_LIBRARY_PATH="$(dirname "$VECTOR_ENGINE_CAPI_SO"):$(dirname "$EMBEDDING_SO"):${LD_LIBRARY_PATH:-}"
 ```
 
@@ -295,6 +297,7 @@ python3 - <<'PY'
 from memoryhub.storage.vector_engine import create_vector_engine
 engine = create_vector_engine(
     provider="milvus",
+    app_id="<provided-by-deployment-platform>",
     so_path="/usr/lib/libkysdk-vector-engine-client-capi.so",
     host="127.0.0.1",
     port=19530,
@@ -312,6 +315,7 @@ PY
 
 ```bash
 python3 scripts/run_milvus_real_smoke_test.py \
+    --app_id "$MEMORYHUB_VECTOR_ENGINE_APP_ID" \
     --so_path /path/to/libkysdk-vector-engine-client-capi.so \
     --embedding_so_path /path/to/libkylin-coreai-embedding.so \
     --host 127.0.0.1 --port 19530 --dimension 768
@@ -350,6 +354,7 @@ curl -X POST "http://127.0.0.1:8000/api/memory/search" \
 
 ```bash
 python3 evaluation/run_milvus_kylin_benchmark.py \
+    --app_id "$MEMORYHUB_VECTOR_ENGINE_APP_ID" \
     --memory_count 10000 \
     --iterations 100 \
     --so_path /path/to/libkysdk-vector-engine-client-capi.so \
@@ -467,16 +472,17 @@ export LD_LIBRARY_PATH=/path/to/vector-engine/dir:/path/to/embedding/dir:${LD_LI
 python3 -c "from memoryhub.embedding import create_embedding_client; c=create_embedding_client('kylin', so_path='/path/to/libkylin-coreai-embedding.so'); print(c.embed('测试')[:5])"
 
 # 验证 Vector Engine
-python3 -c "from memoryhub.storage.vector_engine import create_vector_engine; e=create_vector_engine(provider='milvus', so_path='/path/to/libkysdk-vector-engine-client-capi.so', host='127.0.0.1', port=19530, collection='memoryhub_smoke', dimension=768); e.close(); print('ok')"
+python3 -c "from memoryhub.storage.vector_engine import create_vector_engine; e=create_vector_engine(provider='milvus', app_id='<provided-by-deployment-platform>', so_path='/path/to/libkysdk-vector-engine-client-capi.so', host='127.0.0.1', port=19530, collection='memoryhub_smoke', dimension=768); e.close(); print('ok')"
 
 # 跑端到端测试
 python3 scripts/run_milvus_real_smoke_test.py \
+    --app_id "$MEMORYHUB_VECTOR_ENGINE_APP_ID" \
     --so_path /path/to/libkysdk-vector-engine-client-capi.so \
     --embedding_so_path /path/to/libkylin-coreai-embedding.so \
     --host 127.0.0.1 --port 19530 --dimension 768
 
 # 跑性能基准
-python3 evaluation/run_milvus_kylin_benchmark.py --memory_count 10000 --so_path /path/to/libkysdk-vector-engine-client-capi.so --embedding_so_path /path/to/libkylin-coreai-embedding.so
+python3 evaluation/run_milvus_kylin_benchmark.py --app_id "$MEMORYHUB_VECTOR_ENGINE_APP_ID" --memory_count 10000 --so_path /path/to/libkysdk-vector-engine-client-capi.so --embedding_so_path /path/to/libkylin-coreai-embedding.so
 
 # 跑 API
 uvicorn memoryhub.app:app

@@ -209,7 +209,7 @@ MemoryHub SearchResponse
 extern "C" {
     // 生命周期
     void* vector_engine_create();
-    int vector_engine_connect(void* engine, const char* host, int port);
+    int vector_engine_connect(void* engine, const char* app_id, const char* host, int port);
     int vector_engine_disconnect(void* engine);
     void vector_engine_destroy(void* engine);
 
@@ -325,7 +325,8 @@ C++ SDK 本身依赖 Milvus gRPC 客户端。在真实麒麟环境需要：
 from ctypes import CDLL
 lib = CDLL("./libkysdk-vector-engine-client-capi-mock.so")
 engine = lib.vector_engine_create()
-assert lib.vector_engine_connect(engine, b"127.0.0.1", 19530) == 0
+# test-app-id is a non-sensitive mock fixture; production gets app_id from configuration.
+assert lib.vector_engine_connect(engine, b"test-app-id", b"127.0.0.1", 19530) == 0
 ```
 
 ---
@@ -452,13 +453,13 @@ embedding:
 
 vector_engine:
   provider: milvus_mock  # faiss | milvus | milvus_mock
-  milvus:
-    so_path: /usr/lib/libkysdk-vector-engine-client-capi.so
-    host: 127.0.0.1
-    port: 19530
-    collection: memoryhub
-    dimension: 768
-    metric: cosine
+  app_id: <provided-by-deployment-platform>  # required for milvus/milvus_mock; use test-app-id in mock tests
+  so_path: /usr/lib/libkysdk-vector-engine-client-capi.so
+  host: 127.0.0.1
+  port: 19530
+  collection: memoryhub
+  dimension: 768
+  metric: cosine
   faiss:
     index_path: data/vector_index
 ```
@@ -529,13 +530,14 @@ class LatencyBenchmark:
 python -c "from memoryhub.embedding import create_embedding_client; c=create_embedding_client(provider='kylin'); print(c.embed('测试')[:5])"
 
 # 验证 vector engine SDK
-python scripts/verify_kylin_environment.py
+export MEMORYHUB_VECTOR_ENGINE_APP_ID="<provided-by-deployment-platform>"
+python scripts/verify_kylin_environment.py --app_id "$MEMORYHUB_VECTOR_ENGINE_APP_ID"
 
 # 跑端到端冒烟测试
-python scripts/run_milvus_real_smoke_test.py
+python scripts/run_milvus_real_smoke_test.py --app_id "$MEMORYHUB_VECTOR_ENGINE_APP_ID"
 
 # 跑性能基准
-python evaluation/run_milvus_kylin_benchmark.py --memory_count 10000
+python evaluation/run_milvus_kylin_benchmark.py --app_id "$MEMORYHUB_VECTOR_ENGINE_APP_ID" --memory_count 10000
 ```
 
 #### 4.10.3 问题反馈与修复
@@ -651,7 +653,7 @@ Week 5+（由麒麟环境测试人员执行）
 ### 阶段 2 验收标准（麒麟环境测试人员）
 
 1. 在麒麟设备上，`create_embedding_client(provider="kylin")` 可获取真实 768 维向量。
-2. 在麒麟设备上，`create_vector_engine(provider="milvus")` 可连接真实 Milvus 并完成 HybridSearch。
+2. 在麒麟设备上，`create_vector_engine(provider="milvus", app_id="<provided-by-deployment-platform>")` 可连接真实 Milvus 并完成 HybridSearch。
 3. `/api/memory/search` 在 `kylin` + `milvus` 配置下返回正确结果，与 `mock` 链路结果格式一致。
 4. `evaluation/run_milvus_kylin_benchmark.py` 可输出 P50/P95/P99 延迟和 QPS。
 5. 在 10K 记忆规模下，真实 Milvus 路线 P95 延迟 ≤ 350ms（目标）。

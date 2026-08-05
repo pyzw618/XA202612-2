@@ -29,9 +29,11 @@
     python evaluation/run_milvus_kylin_benchmark.py --memory_count 100 --query_count 20
 
     # 显式指定 .so 路径与服务地址
+    export MEMORYHUB_VECTOR_ENGINE_APP_ID="<provided-by-deployment-platform>"
     python evaluation/run_milvus_kylin_benchmark.py \
         --so_path /usr/lib/libkysdk-vector-engine-client-capi.so \
         --embedding_so_path /usr/lib/libkylin-coreai-embedding.so \
+        --app_id "$MEMORYHUB_VECTOR_ENGINE_APP_ID" \
         --host 127.0.0.1 --port 19530
 
     # 输出 JSON 结果到文件，便于 CI/评测系统解析
@@ -120,6 +122,7 @@ def check_environment(args: argparse.Namespace) -> None:
             engine = create_vector_engine(
                 provider="milvus",
                 so_path=args.so_path,
+                app_id=args.app_id,
                 host=args.host,
                 port=args.port,
                 collection="bench_env_check",
@@ -183,6 +186,10 @@ def main() -> None:
         help="kylin embedding 动态库路径",
     )
     parser.add_argument(
+        "--app_id", default=os.environ.get("MEMORYHUB_VECTOR_ENGINE_APP_ID", ""),
+        help="非空 SDK app_id（默认读取 MEMORYHUB_VECTOR_ENGINE_APP_ID）",
+    )
+    parser.add_argument(
         "--host", default="127.0.0.1", help="Milvus 服务地址"
     )
     parser.add_argument(
@@ -222,6 +229,7 @@ def main() -> None:
             seed=args.seed,
             engine_kwargs={
                 "so_path": args.so_path,
+                "app_id": args.app_id,
                 "host": args.host,
                 "port": args.port,
             },

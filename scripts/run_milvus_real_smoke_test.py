@@ -67,6 +67,8 @@ def main() -> None:
                         help="vector engine capi 动态库路径（--mock 时忽略）")
     parser.add_argument("--embedding_so_path", default=DEFAULT_EMBEDDING_SO,
                         help="kylin embedding 动态库路径（--mock 时忽略）")
+    parser.add_argument("--app_id", default=os.environ.get("MEMORYHUB_VECTOR_ENGINE_APP_ID", ""),
+                        help="非空 SDK app_id（默认读取 MEMORYHUB_VECTOR_ENGINE_APP_ID）")
     parser.add_argument("--host", default="127.0.0.1", help="Milvus 服务地址")
     parser.add_argument("--port", type=int, default=19530, help="Milvus 服务端口")
     parser.add_argument("--dimension", type=int, default=768, help="稠密向量维度")
@@ -82,7 +84,8 @@ def main() -> None:
     engine = None
     try:
         # 1. connect（构造时完成 connect + create/load collection）
-        engine_kwargs = {} if args.mock else {
+        engine_kwargs = {"app_id": "test-app-id"} if args.mock else {
+            "app_id": args.app_id,
             "so_path": args.so_path, "host": args.host, "port": args.port,
         }
         engine = create_vector_engine(
