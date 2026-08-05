@@ -218,6 +218,8 @@ def main() -> None:
                         help="JSON 报告输出路径（本地产物，不入库）")
     parser.add_argument("--engine", choices=["faiss", "milvus", "milvus_mock"], default="faiss")
     parser.add_argument("--engine-so-path", default="")
+    parser.add_argument("--app-id", default=os.environ.get("MEMORYHUB_VECTOR_ENGINE_APP_ID", ""),
+                        help="非空 SDK app_id（engine=milvus/milvus_mock 时必填；默认读取 MEMORYHUB_VECTOR_ENGINE_APP_ID）")
     parser.add_argument("--milvus-host", default="127.0.0.1")
     parser.add_argument("--milvus-port", type=int, default=19530)
     parser.add_argument("--collection", default="memoryhub_eval")
@@ -255,6 +257,8 @@ def main() -> None:
             "host": args.milvus_host,
             "port": args.milvus_port,
         }
+        if args.engine in ("milvus", "milvus_mock"):
+            engine_kwargs["app_id"] = args.app_id
         if args.engine_so_path:
             engine_kwargs["so_path"] = args.engine_so_path
         retriever = build_retriever(

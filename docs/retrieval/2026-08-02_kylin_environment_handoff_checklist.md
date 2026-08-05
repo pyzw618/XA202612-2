@@ -374,8 +374,10 @@ python3 evaluation/run_milvus_kylin_benchmark.py \
 质量指标（Recall@K / Precision@K / MRR / NDCG）应使用独立评测脚本：
 
 ```bash
+export MEMORYHUB_VECTOR_ENGINE_APP_ID="<provided-by-deployment-platform>"
 python3 evaluation/run_retrieval_eval.py \
     --engine milvus --provider kylin --dim 768 \
+    --app-id "$MEMORYHUB_VECTOR_ENGINE_APP_ID" \
     --engine-so-path /path/to/libkysdk-vector-engine-client-capi.so \
     --embedding-so-path /path/to/libkylin-coreai-embedding.so \
     --milvus-host 127.0.0.1 --milvus-port 19530 \
@@ -424,7 +426,7 @@ docker logs milvus-standalone
 
 ### 9.5 向量维度不一致
 
-- 确保 `kylin-coreai-embedding` 输出维度与 `config.yaml` 中 `dim` 一致（当前为 768）
+- 确保 `kylin-coreai-embedding` 输出维度与 `config.yaml` 中 `embedding.dimension` 一致（当前为 768）
 - 确保 Milvus collection 的 dimension 与配置一致
 
 ### 9.6 HybridSearch 返回空结果

@@ -446,9 +446,9 @@ embedding:
   kylin:
     so_path: /usr/lib/libkylin-coreai-embedding.so
     model_name: ensemble-embd_gte-base_uint8-text
-    dim: 768
+    dimension: 768
   mock:
-    dim: 768
+    dimension: 768
     latency: 0.0
 
 vector_engine:
