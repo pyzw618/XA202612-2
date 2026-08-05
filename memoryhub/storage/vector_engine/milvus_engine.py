@@ -31,7 +31,9 @@ class MilvusVectorEngine(BaseVectorEngine):
     Milvus 向量引擎（基于麒麟 C API SDK）。
 
     使用方式:
-        engine = MilvusVectorEngine(mock=True, collection="memoryhub", dimension=768)
+        engine = MilvusVectorEngine(
+            app_id="test-app-id", mock=True, collection="memoryhub", dimension=768
+        )
         engine.insert("mem_001", "文本", [0.1] * 768)
         results = engine.hybrid_search([0.1] * 768, build_sparse_vector("查询"), 5)
         engine.close()
@@ -39,6 +41,7 @@ class MilvusVectorEngine(BaseVectorEngine):
 
     def __init__(
         self,
+        app_id: str = "",
         so_path: Optional[str] = None,
         mock: bool = False,
         host: str = "127.0.0.1",
@@ -51,6 +54,7 @@ class MilvusVectorEngine(BaseVectorEngine):
         """
         参数:
             so_path: 动态库显式路径；mock=True 时默认指向项目内 mock 库
+            app_id: 部署平台提供的非空应用标识
             mock: 是否使用项目内 mock 动态库（非麒麟环境测试用）
             host: Milvus 服务地址
             port: Milvus 服务端口
@@ -60,7 +64,9 @@ class MilvusVectorEngine(BaseVectorEngine):
                 False 时仅加载库并创建句柄（由调用方自行 connect）
             search_timeout_ms: 查询超时毫秒数；超时时返回稳定错误码 milvus.timeout
         """
+        self._validate_app_id(app_id)
         self._validate_dimension(dimension)
+        self._app_id = app_id
         self._api = _MilvusCAPI(so_path=so_path, mock=mock)
         self._handle: Optional[vector_engine_t] = self._api.create()
         self.collection = collection
@@ -95,7 +101,7 @@ class MilvusVectorEngine(BaseVectorEngine):
         self._ensure_open()
 
         def _connect():
-            self._api.connect(self._handle, host, port)
+            self._api.connect(self._handle, self._app_id, host, port)
             self._connected = True
             try:
                 self._api.create_collection(self._handle, self.collection, self.dimension)
@@ -279,6 +285,12 @@ class MilvusVectorEngine(BaseVectorEngine):
             raise ValueError(
                 f"向量维度不一致: 期望 {self.dimension}, 实际 {len(vector)}"
             )
+
+    @staticmethod
+    def _validate_app_id(app_id: str) -> None:
+        """在动态库加载前拒绝缺失的 Milvus 应用标识。"""
+        if not isinstance(app_id, str) or not app_id.strip():
+            raise MilvusEngineError("milvus.app_id must be a non-empty string")
 
     @staticmethod
     def _validate_dimension(dimension: int) -> None:

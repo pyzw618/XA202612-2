@@ -64,7 +64,7 @@ def memories():
 @pytest.fixture()
 def retriever(memories):
     engine = create_vector_engine(
-        provider="milvus_mock",
+        provider="milvus_mock", app_id="test-app-id",
         collection="test_milvus_hybrid",
         dimension=DIM,
     )

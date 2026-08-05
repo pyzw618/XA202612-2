@@ -28,7 +28,7 @@ def _one_hot(position: int) -> list[float]:
 @pytest.fixture()
 def engine():
     eng = create_vector_engine(
-        provider="milvus_mock",
+        provider="milvus_mock", app_id="test-app-id",
         collection="test_collection",
         dimension=DIM,
     )
@@ -99,7 +99,7 @@ class TestMilvusMockEngine:
 
     def test_context_manager(self):
         with create_vector_engine(
-            provider="milvus_mock", collection="ctx_test", dimension=DIM
+            provider="milvus_mock", app_id="test-app-id", collection="ctx_test", dimension=DIM
         ) as eng:
             eng.insert("mem_1", "上下文管理器测试", _one_hot(0))
             results = eng.search(_one_hot(0), top_k=1)
@@ -121,7 +121,7 @@ class TestMilvusVectorEnginePhase3:
         """collection schema 维度固定为 768；非 768 构造即失败。"""
         with pytest.raises(MilvusEngineError, match="schema_dimension_mismatch"):
             create_vector_engine(
-                provider="milvus_mock",
+                provider="milvus_mock", app_id="test-app-id",
                 collection="bad_dim",
                 dimension=512,
             )

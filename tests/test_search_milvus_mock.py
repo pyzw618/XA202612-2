@@ -88,7 +88,7 @@ def milvus_mock_config(tmp_path):
         ),
         # kylin_mock 动态库固定 768 维模型
         embedding=EmbeddingConfig(provider="kylin_mock", dimension=768),
-        vector_engine=VectorEngineConfig(provider="milvus_mock"),
+        vector_engine=VectorEngineConfig(provider="milvus_mock", app_id="test-app-id"),
     )
     config._seeded = (pref, know)
     return config
@@ -153,7 +153,7 @@ def test_milvus_mock_embedding_python_client(tmp_path):
         ),
         # 使用 mock embedding 的 768 维输出配合 milvus_mock 引擎
         embedding=EmbeddingConfig(provider="mock", dimension=768),
-        vector_engine=VectorEngineConfig(provider="milvus_mock"),
+        vector_engine=VectorEngineConfig(provider="milvus_mock", app_id="test-app-id"),
     )
     with TestClient(create_app(config)) as client:
         resp = client.post(
@@ -212,7 +212,7 @@ def test_milvus_startup_only_syncs_pending_memories(tmp_path):
             evidence_path=str(tmp_path / "evidence"),
         ),
         embedding=EmbeddingConfig(provider="kylin_mock", dimension=768),
-        vector_engine=VectorEngineConfig(provider="milvus_mock"),
+        vector_engine=VectorEngineConfig(provider="milvus_mock", app_id="test-app-id"),
     )
 
     with TestClient(create_app(config)) as client:

@@ -78,6 +78,7 @@ def sync_setup(tmp_path):
     embedding_client = create_embedding_client(provider="kylin_mock", dim=768)
     vector_engine = create_vector_engine(
         "milvus_mock",
+        app_id="test-app-id",
         collection="sync_test",
         dimension=768,
     )
@@ -276,7 +277,7 @@ def test_app_startup_creates_sync_service_and_compensation(tmp_path):
             evidence_path=str(tmp_path / "evidence"),
         ),
         embedding=EmbeddingConfig(provider="kylin_mock", dimension=768),
-        vector_engine=VectorEngineConfig(provider="milvus_mock"),
+        vector_engine=VectorEngineConfig(provider="milvus_mock", app_id="test-app-id"),
     )
 
     with TestClient(create_app(config)) as client:
@@ -303,7 +304,7 @@ def _milvus_mock_config(tmp_path, db_path: str):
             evidence_path=str(tmp_path / "evidence"),
         ),
         embedding=EmbeddingConfig(provider="kylin_mock", dimension=768),
-        vector_engine=VectorEngineConfig(provider="milvus_mock"),
+        vector_engine=VectorEngineConfig(provider="milvus_mock", app_id="test-app-id"),
     )
 
 

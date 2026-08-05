@@ -104,6 +104,10 @@ vector_engine:
   # 其他可选: "faiss" | "milvus_mock"（仅 development/test）
   provider: "milvus"
 
+  # 部署平台提供的非空应用标识；不是 collection 或 user ID
+  # 生产环境请替换为实际 app_id，不要将敏感值写入仓库
+  app_id: "<provided-by-deployment-platform>"
+
   # Milvus C API 动态库显式路径 (milvus 模式，空则按默认路径探测)
   so_path: "/usr/lib/libkysdk-vector-engine-client-capi.so"
 

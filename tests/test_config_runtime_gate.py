@@ -95,7 +95,8 @@ class TestValidateProductionGate:
                 provider=embedding_provider, dimension=embedding_dimension
             ),
             vector_engine=VectorEngineConfig(
-                provider=vector_engine_provider, dimension=vector_engine_dimension
+                provider=vector_engine_provider,
+                app_id="test-app-id", dimension=vector_engine_dimension
             ),
         )
 
@@ -152,7 +153,9 @@ class TestValidateProductionRuntime:
         cfg = AppConfig(
             runtime=RuntimeConfig(mode="production", allow_fallback=False),
             embedding=EmbeddingConfig(provider="kylin", dimension=768),
-            vector_engine=VectorEngineConfig(provider="milvus", dimension=768),
+            vector_engine=VectorEngineConfig(
+                provider="milvus", app_id="test-app-id", dimension=768
+            ),
         )
         validate_production_runtime(
             cfg, FakeEmbeddingClient(), FakeVectorEngine(connected=True)
@@ -162,7 +165,9 @@ class TestValidateProductionRuntime:
         cfg = AppConfig(
             runtime=RuntimeConfig(mode="production", allow_fallback=False),
             embedding=EmbeddingConfig(provider="kylin", dimension=768),
-            vector_engine=VectorEngineConfig(provider="milvus", dimension=768),
+            vector_engine=VectorEngineConfig(
+                provider="milvus", app_id="test-app-id", dimension=768
+            ),
         )
         with pytest.raises(ProductionGateError, match="embedding client is not available"):
             validate_production_runtime(
@@ -173,7 +178,9 @@ class TestValidateProductionRuntime:
         cfg = AppConfig(
             runtime=RuntimeConfig(mode="production", allow_fallback=False),
             embedding=EmbeddingConfig(provider="kylin", dimension=768),
-            vector_engine=VectorEngineConfig(provider="milvus", dimension=768),
+            vector_engine=VectorEngineConfig(
+                provider="milvus", app_id="test-app-id", dimension=768
+            ),
         )
         with pytest.raises(ProductionGateError, match="embedding actual dimension"):
             validate_production_runtime(
@@ -184,7 +191,9 @@ class TestValidateProductionRuntime:
         cfg = AppConfig(
             runtime=RuntimeConfig(mode="production", allow_fallback=False),
             embedding=EmbeddingConfig(provider="kylin", dimension=768),
-            vector_engine=VectorEngineConfig(provider="milvus", dimension=768),
+            vector_engine=VectorEngineConfig(
+                provider="milvus", app_id="test-app-id", dimension=768
+            ),
         )
         with pytest.raises(ProductionGateError, match="vector engine is not connected"):
             validate_production_runtime(
@@ -195,7 +204,9 @@ class TestValidateProductionRuntime:
         cfg = AppConfig(
             runtime=RuntimeConfig(mode="production", allow_fallback=False),
             embedding=EmbeddingConfig(provider="kylin", dimension=768),
-            vector_engine=VectorEngineConfig(provider="milvus", dimension=768),
+            vector_engine=VectorEngineConfig(
+                provider="milvus", app_id="test-app-id", dimension=768
+            ),
         )
         with pytest.raises(ProductionGateError, match="vector engine is closed"):
             validate_production_runtime(
@@ -219,7 +230,7 @@ class TestLoadConfig:
         config_path.write_text(
             "runtime:\n  mode: production\n  allow_fallback: false\n"
             "embedding:\n  provider: kylin\n  dimension: 768\n"
-            "vector_engine:\n  provider: milvus\n  dimension: 768\n",
+            "vector_engine:\n  provider: milvus\n  app_id: test-app-id\n  dimension: 768\n",
             encoding="utf-8",
         )
         cfg = load_config(str(config_path))
@@ -244,6 +255,7 @@ class TestLoadConfig:
         monkeypatch.setenv("MEMORYHUB_RUNTIME_ALLOW_FALLBACK", "0")
         monkeypatch.setenv("MEMORYHUB_EMBEDDING_PROVIDER", "kylin")
         monkeypatch.setenv("MEMORYHUB_VECTOR_ENGINE_PROVIDER", "milvus")
+        monkeypatch.setenv("MEMORYHUB_VECTOR_ENGINE_APP_ID", "test-app-id")
 
         cfg = load_config(str(config_path))
         assert cfg.runtime.mode == "test"

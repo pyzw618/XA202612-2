@@ -117,12 +117,23 @@ class VectorEngineConfig:
     """向量引擎配置"""
 
     provider: str = "faiss"  # "faiss" | "milvus" | "milvus_mock"
+    app_id: str = ""  # 部署平台提供的应用标识（milvus/milvus_mock 必填）
     so_path: str = ""  # Milvus C API 动态库显式路径（空则按默认路径探测）
     host: str = "127.0.0.1"
     port: int = 19530
     collection: str = "memoryhub"
     dimension: int = 768
     search_timeout_ms: int = 120
+
+    def __post_init__(self) -> None:
+        """校验向量引擎配置，确保 Milvus 在加载动态库前已有 app_id。"""
+        if not isinstance(self.app_id, str):
+            raise ValueError("vector_engine.app_id must be a string")
+        self.app_id = self.app_id.strip()
+        if self.provider in {"milvus", "milvus_mock"} and not self.app_id:
+            raise ValueError(
+                "vector_engine.app_id must be a non-empty string for Milvus providers"
+            )
 
 
 @dataclass(frozen=True)
@@ -590,12 +601,17 @@ def load_config(config_path: str | None = None) -> AppConfig:
         config.embedding.provider = os.environ["MEMORYHUB_EMBEDDING_PROVIDER"]
     if os.environ.get("MEMORYHUB_VECTOR_ENGINE_PROVIDER"):
         config.vector_engine.provider = os.environ["MEMORYHUB_VECTOR_ENGINE_PROVIDER"]
+    if "MEMORYHUB_VECTOR_ENGINE_APP_ID" in os.environ:
+        config.vector_engine.app_id = os.environ["MEMORYHUB_VECTOR_ENGINE_APP_ID"]
     if os.environ.get("MEMORYHUB_LLM_PROVIDER"):
         config.llm.provider = os.environ["MEMORYHUB_LLM_PROVIDER"]
     if os.environ.get("MEMORYHUB_LLM_API_KEY"):
         config.llm.api_key = os.environ["MEMORYHUB_LLM_API_KEY"]
     if os.environ.get("MEMORYHUB_LLM_MODEL"):
         config.llm.model = os.environ["MEMORYHUB_LLM_MODEL"]
+
+    # 环境变量覆盖后重新构造，以执行 provider/app_id 契约校验。
+    config.vector_engine = VectorEngineConfig(**config.vector_engine.__dict__)
 
     # 生产模式静态门禁必须在环境变量覆盖后执行
     validate_production_gate(config)

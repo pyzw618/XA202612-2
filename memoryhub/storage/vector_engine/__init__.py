@@ -34,7 +34,7 @@ def create_vector_engine(provider: str, **kwargs: Any) -> BaseVectorEngine:
         provider: "faiss" | "milvus" | "milvus_mock"
         **kwargs: 透传给具体引擎构造函数
             - faiss: index_path, dimension
-            - milvus: so_path, host, port, collection, dimension
+            - milvus/milvus_mock: app_id, so_path, host, port, collection, dimension
             - milvus_mock: 同 milvus（so_path 默认指向项目内 mock 库）
 
     返回:

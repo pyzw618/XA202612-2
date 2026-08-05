@@ -65,6 +65,7 @@ class MilvusEngineError(RuntimeError):
     def _infer_code(message: str) -> str:
         """从已知错误文本前缀推断稳定错误码。"""
         known_prefixes = (
+            "milvus.app_id",
             "milvus.timeout",
             "milvus.call_failed",
             "milvus.schema_dimension_mismatch",
@@ -142,7 +143,12 @@ class _MilvusCAPI:
         lib.vector_engine_create.argtypes = []
 
         lib.vector_engine_connect.restype = c_int
-        lib.vector_engine_connect.argtypes = [vector_engine_t, c_char_p, c_int]
+        lib.vector_engine_connect.argtypes = [
+            vector_engine_t,
+            c_char_p,
+            c_char_p,
+            c_int,
+        ]
 
         lib.vector_engine_disconnect.restype = c_int
         lib.vector_engine_disconnect.argtypes = [vector_engine_t]
@@ -208,8 +214,14 @@ class _MilvusCAPI:
             raise MilvusEngineError("创建向量引擎实例失败")
         return handle
 
-    def connect(self, handle: vector_engine_t, host: str, port: int) -> None:
-        rc = self._lib.vector_engine_connect(handle, host.encode("utf-8"), port)
+    def connect(
+        self, handle: vector_engine_t, app_id: str, host: str, port: int
+    ) -> None:
+        if not isinstance(app_id, str) or not app_id.strip():
+            raise MilvusEngineError("milvus.app_id must be a non-empty string")
+        rc = self._lib.vector_engine_connect(
+            handle, app_id.encode("utf-8"), host.encode("utf-8"), port
+        )
         self._check_rc(handle, rc, "connect")
 
     def disconnect(self, handle: vector_engine_t) -> None:

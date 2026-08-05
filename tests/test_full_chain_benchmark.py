@@ -26,6 +26,7 @@ class TestFullChainBenchmark:
         """完整链路基准应返回后续阶段所需的全部性能指标。"""
         result = run_full_chain_benchmark(
             engine_provider="milvus_mock",
+            engine_kwargs={"app_id": "test-app-id"},
             embedding_provider="mock",
             memory_count=50,
             query_count=10,
@@ -58,6 +59,7 @@ class TestFullChainBenchmark:
         """基准结果应可直接序列化为 JSON 文件，便于交接与自动化解析。"""
         result = run_full_chain_benchmark(
             engine_provider="milvus_mock",
+            engine_kwargs={"app_id": "test-app-id"},
             embedding_provider="mock",
             memory_count=30,
             query_count=5,
@@ -101,6 +103,7 @@ class TestFullChainBenchmark:
         """多轮迭代应能统计到结果缓存命中与查询向量缓存命中。"""
         result = run_full_chain_benchmark(
             engine_provider="milvus_mock",
+            engine_kwargs={"app_id": "test-app-id"},
             embedding_provider="mock",
             memory_count=50,
             query_count=10,

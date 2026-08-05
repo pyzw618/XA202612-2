@@ -17,7 +17,7 @@ def production_config(tmp_path):
     return AppConfig(
         runtime=RuntimeConfig(mode="production", allow_fallback=False),
         embedding=EmbeddingConfig(provider="kylin", dimension=768),
-        vector_engine=VectorEngineConfig(provider="milvus", dimension=768),
+        vector_engine=VectorEngineConfig(provider="milvus", app_id="test-app-id", dimension=768),
     )
 
 

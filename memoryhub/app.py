@@ -447,6 +447,7 @@ def create_app(
             vector_search_adapter = _VectorStoreSearchAdapter(vector_store, memory_lookup)
         elif engine_provider in ("milvus", "milvus_mock"):
             engine_kwargs = {
+                "app_id": config.vector_engine.app_id,
                 "host": config.vector_engine.host,
                 "port": config.vector_engine.port,
                 "collection": config.vector_engine.collection,
