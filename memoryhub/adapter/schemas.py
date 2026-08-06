@@ -40,6 +40,7 @@ class SourceType(str, Enum):
     TOOL_RESULT = "tool_result"
     USER_BEHAVIOR = "user_behavior"
     MANUAL_CONFIG = "manual_config"
+    CHAT = "chat"
 
 
 class QualityStatus(str, Enum):
@@ -1521,12 +1522,86 @@ class WriteEventRequest(BaseModel):
     events: list[MemoryEvent] = Field(default_factory=list)
 
 
+class EventProcessingSummary(BaseModel):
+    """事件写入后触发的记忆处理摘要。"""
+
+    preferences_written: list[str] = Field(default_factory=list)
+    knowledge_written: list[str] = Field(default_factory=list)
+    fact_proposal_ids: list[str] = Field(default_factory=list)
+    conflict_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class WriteEventResponse(BaseModel):
     """写入事件响应"""
 
     accepted: int = 0
     rejected: int = 0
     event_ids: list[str] = Field(default_factory=list)
+    processing: EventProcessingSummary | None = None
+
+
+class FactTripleInput(BaseModel):
+    subject_text: str
+    subject_type: str = "Other"
+    predicate_text: str
+    object_text: str
+    object_type: str = "Other"
+    evidence: str = ""
+    confidence: float = 0.8
+
+
+class FactProposeRequest(BaseModel):
+    text: str = ""
+    source_id: str = ""
+    project_id: str | None = None
+    scope_hint: Literal["global", "project"] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    triples: list[FactTripleInput] = Field(default_factory=list)
+
+
+class FactCommitRequest(BaseModel):
+    scope: Literal["global", "project"]
+    project_id: str | None = None
+    resolution: Literal["replace", "keep_old", "merge", "coexist", "escalate"] | None = None
+    force: bool = False
+
+
+class FactRejectRequest(BaseModel):
+    reason: str = ""
+
+
+class FactProposalResponse(BaseModel):
+    proposal_id: str
+    raw_triple: dict[str, Any]
+    admission: dict[str, Any]
+    source_id: str = ""
+    project_id_hint: str | None = None
+    scope_hint: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    status: str = "proposed"
+    result: dict[str, Any] = Field(default_factory=dict)
+    rejection_reason: str = ""
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class FactCommitResponse(BaseModel):
+    proposal_id: str
+    status: str
+    requires_decision: bool = False
+    relation: str = ""
+    resolution: str | None = None
+    reason: str = ""
+    fact: dict[str, Any] | None = None
+    existing_fact: dict[str, Any] | None = None
+
+
+class ForgetPreviewResponse(BaseModel):
+    instruction: str = ""
+    candidate_ids: list[str] = Field(default_factory=list)
+    candidates: list[dict[str, Any]] = Field(default_factory=list)
+    match_count: int = 0
 
 
 class FeedbackRequest(BaseModel):

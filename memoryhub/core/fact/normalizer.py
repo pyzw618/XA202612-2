@@ -43,10 +43,10 @@ KEYWORD_CONFIDENT_THRESHOLD = 0.85
 PREDICATE_KEYWORD_THRESHOLD = 0.45  # 谓词短，阈值放低
 
 
-def _build_llm_client(api_key: str = "") -> OpenAI:
+def _build_llm_client(api_key: str = "") -> Optional[OpenAI]:
     import os
     key = api_key or os.environ.get("DEEPSEEK_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
-    return OpenAI(api_key=key, base_url=DEEPSEEK_BASE_URL)
+    return OpenAI(api_key=key, base_url=DEEPSEEK_BASE_URL) if key else None
 
 
 # ─── 实体归一化 ───────────────────────────────────────────────────────
@@ -216,6 +216,8 @@ class EntityNormalizer:
 
     def _generate_aliases(self, name: str, entity_type: str) -> list[str]:
         """LLM 为知名实体生成常见别名，不确定时返回空列表"""
+        if self._llm is None:
+            return []
         try:
             resp = self._llm.chat.completions.create(
                 model=DEEPSEEK_MODEL,
@@ -252,7 +254,7 @@ class EntityNormalizer:
                     f"| 别名: {ent.aliases} | 相似度: {score:.3f}\n"
                 )
 
-        if not existing_str:
+        if not existing_str or self._llm is None:
             return None
 
         try:
@@ -428,7 +430,7 @@ class PredicateNormalizer:
                     f"| 别名: {pred.aliases} | 相似度: {score:.3f}\n"
                 )
 
-        if not existing_str:
+        if not existing_str or self._llm is None:
             return None
 
         try:

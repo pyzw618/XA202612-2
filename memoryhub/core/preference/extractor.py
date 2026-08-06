@@ -52,6 +52,65 @@ class PreferenceExtractor:
 
         candidates = []
 
+        # 规则 0：中文办公场景中的显式自然语言偏好。
+        # 这些结果完全由用户原话推导，不依赖前端预先提供结构化记忆。
+        if "中文" in text and any(word in text for word in ("使用", "用中文", "请用")):
+            candidates.append(PreferenceMemory(
+                user_id=event.user_id,
+                preference_type=PreferenceType.LANGUAGE_PREF,
+                text="项目材料默认使用中文。",
+                payload={"action": "set_language", "target": "project_material", "value": "zh-CN"},
+                scope=SceneScope(scene=event.scene, task_type=event.task_type),
+                is_global="以后" in text or "默认" in text,
+                confidence=0.96,
+                quality_score=event.quality.score,
+                extract_source="explicit_feedback",
+                level=MemoryLevel.LONG,
+                tags=["语言", "中文"],
+            ))
+        if any(word in text for word in ("尽量简洁", "保持简洁", "不要太啰嗦", "减少铺垫")):
+            candidates.append(PreferenceMemory(
+                user_id=event.user_id,
+                preference_type=PreferenceType.OUTPUT_STYLE,
+                text="普通回答保持简洁，减少铺垫。",
+                payload={"action": "set_verbosity", "target": "response", "value": "concise"},
+                scope=SceneScope(scene=event.scene, task_type=event.task_type),
+                is_global="以后" in text or "普通回答" in text,
+                confidence=0.95,
+                quality_score=event.quality.score,
+                extract_source="explicit_feedback",
+                level=MemoryLevel.LONG,
+                tags=["风格", "简洁"],
+            ))
+        if "先给结论" in text or "结论优先" in text:
+            candidates.append(PreferenceMemory(
+                user_id=event.user_id,
+                preference_type=PreferenceType.OUTPUT_STYLE,
+                text="项目材料先给结论，再列要点。",
+                payload={"action": "set_structure", "target": "project_material", "value": "conclusion_first"},
+                scope=SceneScope(scene=event.scene, task_type=event.task_type),
+                is_global="以后" in text,
+                confidence=0.96,
+                quality_score=event.quality.score,
+                extract_source="explicit_feedback",
+                level=MemoryLevel.LONG,
+                tags=["结构", "结论优先"],
+            ))
+        if "比赛方案" in text and any(word in text for word in ("正式", "详细")):
+            candidates.append(PreferenceMemory(
+                user_id=event.user_id,
+                preference_type=PreferenceType.SCENE_PREF,
+                text="比赛方案采用正式、详细的表达方式。",
+                payload={"action": "set_style", "target": "competition_proposal", "value": "formal_detailed"},
+                scope=SceneScope(scene="office", task_type="competition_proposal"),
+                is_global=False,
+                confidence=0.97,
+                quality_score=event.quality.score,
+                extract_source="explicit_feedback",
+                level=MemoryLevel.LONG,
+                tags=["比赛方案", "正式", "详细"],
+            ))
+
         # 规则 A：输出格式偏好（增强：中英文修饰词 + 全局判定）
         pattern_format = (
             r"(以后|默认|每次|常规|随时|始终|一律|总是|长期|全局|所有场景|任何场景|任何地方|在任何地方|跨场景"

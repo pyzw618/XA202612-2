@@ -52,6 +52,24 @@ CREATE INDEX IF NOT EXISTS idx_facts_sp ON facts(subject_id, predicate_id);
 CREATE INDEX IF NOT EXISTS idx_facts_status ON facts(status);
 CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(entity_type);
 CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(canonical_name);
+
+CREATE TABLE IF NOT EXISTS fact_proposals (
+    proposal_id      TEXT PRIMARY KEY,
+    raw_triple       TEXT NOT NULL,
+    admission        TEXT NOT NULL,
+    source_id        TEXT DEFAULT '',
+    project_id_hint  TEXT,
+    scope_hint       TEXT,
+    metadata         TEXT DEFAULT '{}',
+    status           TEXT NOT NULL DEFAULT 'proposed',
+    result           TEXT DEFAULT '{}',
+    rejection_reason TEXT DEFAULT '',
+    created_at       TEXT DEFAULT (datetime('now')),
+    updated_at       TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_fact_proposals_status
+ON fact_proposals(status, updated_at);
 """
 
 
@@ -324,6 +342,90 @@ class FactStore:
         params.append(limit)
         rows = self._conn.execute(query, params).fetchall()
         return [self._row_to_fact(r) for r in rows]
+
+    # ─── 事实候选 CRUD ──────────────────────────────────────────────
+
+    def save_proposal(self, proposal) -> str:
+        """持久化 propose 结果，供后续独立 HTTP commit 使用。"""
+        from dataclasses import asdict
+
+        self._conn.execute(
+            """INSERT OR REPLACE INTO fact_proposals
+               (proposal_id, raw_triple, admission, source_id, project_id_hint,
+                scope_hint, metadata, status, result, rejection_reason, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?,
+                       COALESCE((SELECT status FROM fact_proposals WHERE proposal_id = ?), 'proposed'),
+                       COALESCE((SELECT result FROM fact_proposals WHERE proposal_id = ?), '{}'),
+                       COALESCE((SELECT rejection_reason FROM fact_proposals WHERE proposal_id = ?), ''),
+                       datetime('now'))""",
+            (
+                proposal.candidate_id,
+                json.dumps(asdict(proposal.raw_triple), ensure_ascii=False),
+                json.dumps(asdict(proposal.admission), ensure_ascii=False),
+                proposal.source_id,
+                proposal.project_id_hint,
+                proposal.scope_hint,
+                json.dumps(proposal.metadata, ensure_ascii=False),
+                proposal.candidate_id,
+                proposal.candidate_id,
+                proposal.candidate_id,
+            ),
+        )
+        self._conn.commit()
+        return proposal.candidate_id
+
+    def get_proposal(self, proposal_id: str) -> Optional[dict]:
+        row = self._conn.execute(
+            "SELECT * FROM fact_proposals WHERE proposal_id = ?", (proposal_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "proposal_id": row["proposal_id"],
+            "raw_triple": json.loads(row["raw_triple"]),
+            "admission": json.loads(row["admission"]),
+            "source_id": row["source_id"] or "",
+            "project_id_hint": row["project_id_hint"],
+            "scope_hint": row["scope_hint"],
+            "metadata": json.loads(row["metadata"] or "{}"),
+            "status": row["status"],
+            "result": json.loads(row["result"] or "{}"),
+            "rejection_reason": row["rejection_reason"] or "",
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def list_proposals(self, status: Optional[str] = None, limit: int = 100) -> list[dict]:
+        query = "SELECT proposal_id FROM fact_proposals"
+        params: list = []
+        if status:
+            query += " WHERE status = ?"
+            params.append(status)
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(limit)
+        rows = self._conn.execute(query, params).fetchall()
+        return [self.get_proposal(row["proposal_id"]) for row in rows]
+
+    def update_proposal(
+        self,
+        proposal_id: str,
+        *,
+        status: str,
+        result: Optional[dict] = None,
+        rejection_reason: str = "",
+    ) -> None:
+        self._conn.execute(
+            """UPDATE fact_proposals
+               SET status = ?, result = ?, rejection_reason = ?, updated_at = datetime('now')
+               WHERE proposal_id = ?""",
+            (
+                status,
+                json.dumps(result or {}, ensure_ascii=False),
+                rejection_reason,
+                proposal_id,
+            ),
+        )
+        self._conn.commit()
 
     def _row_to_fact(self, row: sqlite3.Row) -> Fact:
         return Fact(

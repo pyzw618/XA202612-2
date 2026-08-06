@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hmac
 import re
+from dataclasses import asdict
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
@@ -17,9 +18,15 @@ from memoryhub.adapter.schemas import (
     ConflictRecord,
     EvalReport,
     FeedbackRequest,
+    FactCommitRequest,
+    FactCommitResponse,
+    FactProposalResponse,
+    FactProposeRequest,
+    FactRejectRequest,
     ForgetRecord,
     ForgetRequest,
     ForgetResponse,
+    ForgetPreviewResponse,
     KnowledgeMemory,
     MemoryStatus,
     PreferenceMemory,
@@ -347,11 +354,39 @@ async def write_events(req: WriteEventRequest, request: Request):
     if repo is None:
         raise HTTPException(status_code=503, detail="event repository not initialized")
     try:
-        accepted = repo.batch_save(req.events)
-        event_ids = [e.event_id for e in req.events]
-        return WriteEventResponse(accepted=accepted, rejected=len(req.events) - accepted, event_ids=event_ids)
+        processor = getattr(request.app.state, "event_processor", None)
+        existing_ids = {
+            event.event_id for event in req.events if repo.get_by_id(event.event_id) is not None
+        }
+        safe_events = req.events
+        safety_warnings: list[str] = []
+        if processor is not None:
+            safe_events, safety_warnings = processor.sanitize(req.events)
+        accepted = repo.batch_save(safe_events)
+        new_events = [event for event in safe_events if event.event_id not in existing_ids]
+        processing = processor.process(new_events) if processor is not None else None
+        if processing is not None:
+            processing.warnings = [*safety_warnings, *processing.warnings]
+        event_ids = [event.event_id for event in safe_events]
+        return WriteEventResponse(
+            accepted=accepted,
+            rejected=len(req.events) - accepted,
+            event_ids=event_ids,
+            processing=processing,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"failed to write events: {str(e)}") from None
+
+
+@router.get("/events/session/{session_id}", response_model=list)
+async def get_session_events(session_id: str, request: Request):
+    """按会话返回事件，并稳定按时间、turn_id 和工具 sequence 排序。"""
+    repo = getattr(request.app.state, "event_repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="event repository not initialized")
+    events = repo.get_by_session(session_id)
+    events.sort(key=lambda event: (event.occurred_at, event.turn_id, event.event_id))
+    return events
 
 
 # ============================================================
@@ -487,7 +522,167 @@ async def list_knowledge(
     repo = getattr(request.app.state, "know_repo", None)
     if repo is None:
         raise HTTPException(status_code=503, detail="knowledge repository not initialized")
-    return repo.list_all(status="active")
+    if knowledge_type and knowledge_type not in {"workflow", "template"}:
+        raise HTTPException(status_code=400, detail="knowledge_type must be workflow or template")
+    if scene:
+        items = repo.get_by_scope(user_id, scene, "")
+        return [
+            item for item in items
+            if not knowledge_type or getattr(item.knowledge_type, "value", item.knowledge_type) == knowledge_type
+        ]
+    return repo.get_by_type(user_id, knowledge_type)
+
+
+# ============================================================
+# 事实记忆 propose / commit
+# ============================================================
+
+
+def _fact_pipeline(request: Request):
+    pipeline = getattr(request.app.state, "fact_pipeline", None)
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="fact pipeline not initialized")
+    return pipeline
+
+
+def _fact_proposal_response(record: dict) -> FactProposalResponse:
+    return FactProposalResponse(**record)
+
+
+@router.post("/facts/propose", response_model=list[FactProposalResponse])
+async def propose_facts(body: FactProposeRequest, request: Request):
+    """纯分析并持久化事实候选，不修改事实表。"""
+    from memoryhub.core.fact.models import FactCandidate, RawTriple
+
+    pipeline = _fact_pipeline(request)
+    proposals = []
+    if body.triples:
+        for triple_input in body.triples:
+            triple = RawTriple(**triple_input.model_dump())
+            admission = pipeline.admission.evaluate(
+                triple,
+                project_id=body.project_id,
+                scope_hint=body.scope_hint,
+            )
+            proposals.append(
+                FactCandidate(
+                    candidate_id=FactCandidate.make_id(),
+                    raw_triple=triple,
+                    admission=admission,
+                    source_id=body.source_id,
+                    project_id_hint=body.project_id,
+                    scope_hint=body.scope_hint,
+                    metadata=body.metadata,
+                )
+            )
+    elif body.text.strip():
+        proposals = pipeline.propose(
+            body.text,
+            source_id=body.source_id,
+            project_id=body.project_id,
+            scope_hint=body.scope_hint,
+            metadata=body.metadata,
+        )
+    else:
+        raise HTTPException(status_code=422, detail="text or triples is required")
+
+    pipeline.persist_proposals(proposals)
+    return [
+        _fact_proposal_response(pipeline.store.get_proposal(item.candidate_id))
+        for item in proposals
+    ]
+
+
+@router.get("/facts/proposals/{proposal_id}", response_model=FactProposalResponse)
+async def get_fact_proposal(proposal_id: str, request: Request):
+    record = _fact_pipeline(request).store.get_proposal(proposal_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="fact proposal not found")
+    return _fact_proposal_response(record)
+
+
+@router.get("/facts")
+async def list_facts(
+    request: Request,
+    status: str = "active",
+    scope: str | None = None,
+    project_id: str | None = None,
+    limit: int = 100,
+):
+    try:
+        facts = _fact_pipeline(request).get_facts(
+            status=status,
+            scope=scope,
+            project_id=project_id,
+            limit=min(max(limit, 1), 500),
+        )
+        return [asdict(fact) for fact in facts]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@router.post("/facts/{proposal_id}/commit", response_model=FactCommitResponse)
+async def commit_fact(proposal_id: str, body: FactCommitRequest, request: Request):
+    pipeline = _fact_pipeline(request)
+    record = pipeline.store.get_proposal(proposal_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="fact proposal not found")
+    if record["status"] == "committed":
+        return FactCommitResponse(**record["result"])
+    if record["status"] == "rejected":
+        raise HTTPException(status_code=409, detail="fact proposal was rejected")
+
+    proposal = pipeline.load_proposal(proposal_id)
+    try:
+        result = pipeline.commit(
+            proposal,
+            scope=body.scope,
+            project_id=body.project_id,
+            resolution=body.resolution,
+            auto_resolve=False,
+            force=body.force,
+            apply_on_escalate=False,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    requires_decision = result.relation == "CONFLICT" and result.resolution == "escalate"
+    response = FactCommitResponse(
+        proposal_id=proposal_id,
+        status="awaiting_decision" if requires_decision else "committed",
+        requires_decision=requires_decision,
+        relation=result.relation,
+        resolution=result.resolution,
+        reason=result.reason,
+        fact=asdict(result.new_fact),
+        existing_fact=asdict(result.existing_fact) if result.existing_fact else None,
+    )
+    pipeline.store.update_proposal(
+        proposal_id,
+        status=response.status,
+        result=response.model_dump(mode="json"),
+    )
+    return response
+
+
+@router.post("/facts/{proposal_id}/reject", response_model=FactProposalResponse)
+async def reject_fact(
+    proposal_id: str,
+    body: FactRejectRequest,
+    request: Request,
+):
+    pipeline = _fact_pipeline(request)
+    record = pipeline.store.get_proposal(proposal_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="fact proposal not found")
+    if record["status"] == "committed":
+        raise HTTPException(status_code=409, detail="committed proposal cannot be rejected")
+    pipeline.store.update_proposal(
+        proposal_id,
+        status="rejected",
+        rejection_reason=body.reason,
+    )
+    return _fact_proposal_response(pipeline.store.get_proposal(proposal_id))
 
 
 @router.get("/knowledge/{memory_id}", response_model=KnowledgeMemory)
@@ -618,6 +813,32 @@ async def forget_memory(
         ForgetResponse: 遗忘结果，包含删除数量和审计记录 ID
     """
     return forgetter.execute(req)
+
+
+@router.post("/forget/preview", response_model=ForgetPreviewResponse)
+async def preview_forget(
+    req: ForgetRequest,
+    request: Request,
+    forgetter: MemoryForgetter = Depends(_get_forgetter),
+) -> ForgetPreviewResponse:
+    """只定位候选记忆，不修改存储。"""
+    intent = forgetter.parse_intent(req)
+    candidate_ids = forgetter.locate_memories(intent, req)
+    candidates: list[dict[str, Any]] = []
+    pref_repo = getattr(request.app.state, "pref_repo", None)
+    know_repo = getattr(request.app.state, "know_repo", None)
+    for memory_id in candidate_ids:
+        memory = pref_repo.get_by_id(memory_id) if pref_repo is not None else None
+        if memory is None and know_repo is not None:
+            memory = know_repo.get_by_id(memory_id)
+        if memory is not None:
+            candidates.append(memory.model_dump(mode="json"))
+    return ForgetPreviewResponse(
+        instruction=req.instruction,
+        candidate_ids=candidate_ids,
+        candidates=candidates,
+        match_count=len(candidate_ids),
+    )
 
 
 @router.get("/forget/history", response_model=list[ForgetRecord])

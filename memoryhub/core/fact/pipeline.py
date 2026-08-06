@@ -109,6 +109,27 @@ class FactMemoryPipeline:
         )
         return proposals
 
+    def persist_proposals(self, proposals: list[FactProposal]) -> list[str]:
+        """保存候选，保证 propose 与 commit 可以跨请求执行。"""
+        return [self.store.save_proposal(proposal) for proposal in proposals]
+
+    def load_proposal(self, proposal_id: str) -> Optional[FactProposal]:
+        """从持久化候选恢复 FactCandidate。"""
+        from .models import FactAdmissionDecision, RawTriple
+
+        record = self.store.get_proposal(proposal_id)
+        if record is None:
+            return None
+        return FactCandidate(
+            candidate_id=record["proposal_id"],
+            raw_triple=RawTriple(**record["raw_triple"]),
+            admission=FactAdmissionDecision(**record["admission"]),
+            source_id=record["source_id"],
+            project_id_hint=record["project_id_hint"],
+            scope_hint=record["scope_hint"],
+            metadata=record["metadata"],
+        )
+
     def commit(
         self,
         proposal: FactProposal,
@@ -117,6 +138,7 @@ class FactMemoryPipeline:
         resolution: Optional[str] = None,
         auto_resolve: bool = True,
         force: bool = False,
+        apply_on_escalate: bool = True,
     ) -> ConflictResult:
         """明确提交一个候选事实，并执行同作用域冲突检测与写入。"""
         if not proposal.admission.should_remember and not force:
@@ -160,6 +182,9 @@ class FactMemoryPipeline:
             else:
                 result.resolution = Resolution.ESCALATE.value
                 result.reason = f"[等待主Agent裁决] {result.reason}"
+
+        if result.relation == "CONFLICT" and result.resolution == Resolution.ESCALATE.value and not apply_on_escalate:
+            return result
 
         self._apply(result)
         return result

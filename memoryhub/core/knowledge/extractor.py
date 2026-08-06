@@ -70,6 +70,35 @@ class KnowledgeExtractor:
             knowledge_items.append(template)
         return knowledge_items
 
+    def extract_template_instruction(self, event: MemoryEvent) -> KnowledgeMemory | None:
+        """从用户明确给出的章节结构中形成模板，不要求前端提供模板对象。"""
+        if event.source_type not in (SourceType.USER_BEHAVIOR, SourceType.MANUAL_CONFIG):
+            return None
+        text = event.text.strip()
+        if "比赛方案" not in text or "部分" not in text:
+            return None
+        quoted = re.search(r"[“\"]([^”\"]+)[”\"]", text)
+        if quoted is None:
+            return None
+        sections = [item.strip() for item in re.split(r"[、,，]", quoted.group(1)) if item.strip()]
+        if len(sections) < 2:
+            return None
+        body = "\n\n".join(f"# {section}\n{{{{{index + 1}}}}}" for index, section in enumerate(sections))
+        return KnowledgeMemory(
+            user_id=event.user_id,
+            knowledge_type=KnowledgeType.TEMPLATE,
+            name="比赛方案模板",
+            content="根据用户明确指定的章节结构生成。",
+            template_body=body,
+            scope=SceneScope(scene="office", task_type="competition_proposal"),
+            confidence=0.96,
+            success_count=0,
+            total_count=1,
+            status=MemoryStatus.ACTIVE,
+            level=MemoryLevel.LONG,
+            evidences=self._build_evidences([event]),
+        )
+
     def extract_workflow(self, events: list[MemoryEvent | dict]) -> KnowledgeMemory | None:
         """
         从事件序列中提取工作流知识。
@@ -175,6 +204,9 @@ class KnowledgeExtractor:
 
         rule_goal = "任务"
         for event in events:
+            if isinstance(event, MemoryEvent) and event.text:
+                rule_goal = event.text.strip()
+                break
             content = self._event_content(event)
             for key in ("result", "text"):
                 value = content.get(key)
@@ -210,6 +242,11 @@ class KnowledgeExtractor:
                             seen.add(value)
         # 第二优先级：零散工具调用事件补充
         for event in events:
+            if isinstance(event, MemoryEvent):
+                for call in event.tool_calls:
+                    if call.tool_name not in seen:
+                        tools.append(call.tool_name)
+                        seen.add(call.tool_name)
             if self._get_event_type(event) == "tool_call":
                 tool_name = self._event_content(event).get("tool_name", "").strip()
                 if tool_name and tool_name not in seen:
@@ -229,6 +266,17 @@ class KnowledgeExtractor:
                 for step in raw_steps:
                     value = self._normalize_step(str(step).strip())
                     if value and value not in seen and len(value) >= 2:
+                        steps.append(value)
+                        seen.add(value)
+            if isinstance(event, MemoryEvent):
+                step_labels = {
+                    "file_search": "检索项目资料",
+                    "calendar_query": "读取日程",
+                    "report_writer": "生成报告",
+                }
+                for call in event.tool_calls:
+                    value = step_labels.get(call.tool_name, f"调用 {call.tool_name}")
+                    if value not in seen:
                         steps.append(value)
                         seen.add(value)
 
@@ -253,7 +301,11 @@ class KnowledgeExtractor:
         return step.strip(' 。，、：:.')
 
     def _extract_result(self, events: list[MemoryEvent | dict]) -> str:
-        for event in events:
+        for event in reversed(events):
+            if isinstance(event, MemoryEvent) and event.tool_calls:
+                result = event.tool_calls[-1].result
+                if result:
+                    return str(result).strip()
             result = self._event_content(event).get("result")
             if result:
                 return str(result).strip()
@@ -489,4 +541,3 @@ class KnowledgeExtractor:
         if event_type == "manual_config":
             return SourceType.MANUAL_CONFIG
         return SourceType.TOOL_RESULT
-

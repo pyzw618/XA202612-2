@@ -53,7 +53,8 @@ class HybridRetriever:
         self.cache = cache
         self.config = config or RetrievalConfig()
         self.embedding_fn = embedding_fn
-        self.memory_lookup = memory_lookup or {}
+        # 保留调用方传入的空字典引用；运行期写入记忆后检索器才能立即看到。
+        self.memory_lookup = memory_lookup if memory_lookup is not None else {}
 
     def search(self, request: SearchRequest) -> SearchResponse:
         """
@@ -193,6 +194,9 @@ class HybridRetriever:
         """按记忆类型、场景 scope 和置信度过滤结果"""
         filtered = []
         for result in results:
+            result_user_id = result.metadata.get("user_id")
+            if result_user_id and result_user_id != request.user_id:
+                continue
             if request.memory_types and result.memory_type:
                 if result.memory_type not in request.memory_types:
                     continue
