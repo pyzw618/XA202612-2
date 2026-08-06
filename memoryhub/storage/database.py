@@ -6,7 +6,6 @@
 
 import os
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -69,28 +68,7 @@ class Database:
             conn.exec_driver_sql("PRAGMA foreign_keys=ON")
 
         Base.metadata.create_all(self.engine)
-        self._migrate_event_schema()
         self.session_factory = sessionmaker(bind=self.engine)
-
-    def _migrate_event_schema(self) -> None:
-        """为早期 events 表补充会话回放所需字段。"""
-        migrations = {
-            "turn_id": "ALTER TABLE events ADD COLUMN turn_id VARCHAR(64)",
-            "tool_calls": "ALTER TABLE events ADD COLUMN tool_calls JSON",
-            "schema_version": "ALTER TABLE events ADD COLUMN schema_version VARCHAR(16) DEFAULT '1.1'",
-            "redactions": "ALTER TABLE events ADD COLUMN redactions JSON",
-        }
-        with self.engine.begin() as conn:
-            columns = {
-                row[1] for row in conn.exec_driver_sql("PRAGMA table_info(events)").fetchall()
-            }
-            for column, statement in migrations.items():
-                if column not in columns:
-                    conn.exec_driver_sql(statement)
-            conn.exec_driver_sql(
-                "CREATE INDEX IF NOT EXISTS idx_events_session_turn ON events(session_id, turn_id, occurred_at)"
-            )
-            conn.exec_driver_sql("PRAGMA optimize")
 
     @contextmanager
     def session(self) -> Session:
@@ -189,51 +167,41 @@ class EventRepository:
     def save(self, event: MemoryEvent) -> None:
         """保存事件"""
         with self.db.session() as s:
-            event_data = event.model_dump(mode="json")
             row = EventRow(
                 event_id=event.event_id,
                 source_type=event.source_type.value if hasattr(event.source_type, "value") else str(event.source_type),
                 event_type=event.event_type,
                 user_id=event.user_id,
                 session_id=event.session_id,
-                turn_id=event.turn_id,
                 scene=event.scene,
                 task_type=event.task_type,
-                occurred_at=_parse_event_time(event.occurred_at),
+                occurred_at=event.occurred_at,
                 text=event.text,
-                payload=event_data["payload"],
-                tool_calls=event_data["tool_calls"],
-                schema_version=event.schema_version,
+                payload=event.payload,
                 source_hash=event.source_hash,
-                redactions=event_data["redactions"],
-                quality=event_data["quality"],
+                quality=event.quality.model_dump() if event.quality else {},
             )
-            s.merge(row)
+            s.add(row)
 
     def batch_save(self, events: list[MemoryEvent]) -> int:
         """批量保存事件，返回成功数量"""
         with self.db.session() as s:
             for event in events:
-                event_data = event.model_dump(mode="json")
                 row = EventRow(
                     event_id=event.event_id,
                     source_type=event.source_type.value if hasattr(event.source_type, "value") else str(event.source_type),
                     event_type=event.event_type,
                     user_id=event.user_id,
                     session_id=event.session_id,
-                    turn_id=event.turn_id,
                     scene=event.scene,
                     task_type=event.task_type,
-                    occurred_at=_parse_event_time(event.occurred_at),
+                    occurred_at=event.occurred_at,
                     text=event.text,
-                    payload=event_data["payload"],
-                    tool_calls=event_data["tool_calls"],
-                    schema_version=event.schema_version,
+                    payload=event.payload,
                     source_hash=event.source_hash,
-                    redactions=event_data["redactions"],
-                    quality=event_data["quality"],
+                    quality=event.quality.model_dump() if event.quality else {},
                 )
-                s.merge(row)
+                s.add(row)
             return len(events)
 
     def get_by_id(self, event_id: str) -> Optional[MemoryEvent]:
@@ -242,17 +210,24 @@ class EventRepository:
             row = s.query(EventRow).filter(EventRow.event_id == event_id).first()
             if row is None:
                 return None
-            return _event_row_to_pydantic(row)
+            return MemoryEvent(
+                event_id=row.event_id,
+                source_type=SourceType(row.source_type) if row.source_type else SourceType.TOOL_RESULT,
+                event_type=row.event_type or "",
+                user_id=row.user_id or "",
+                session_id=row.session_id or "",
+                scene=row.scene or "",
+                task_type=row.task_type or "",
+                text=row.text or "",
+                payload=row.payload or {},
+                occurred_at=row.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ") if row.occurred_at else "",
+                source_hash=row.source_hash or "0" * 64,
+            )
 
     def get_by_session(self, session_id: str) -> list[MemoryEvent]:
         """按会话 ID 查询事件列表"""
         with self.db.session() as s:
-            rows = (
-                s.query(EventRow)
-                .filter(EventRow.session_id == session_id)
-                .order_by(EventRow.occurred_at.asc(), EventRow.turn_id.asc())
-                .all()
-            )
+            rows = s.query(EventRow).filter(EventRow.session_id == session_id).all()
             return [_event_row_to_pydantic(r) for r in rows]
 
     def get_by_task_type(self, user_id: str, task_type: str) -> list[MemoryEvent]:
@@ -288,8 +263,6 @@ def _event_row_to_pydantic(row: EventRow) -> MemoryEvent:
             completeness=quality_data.get("completeness", 0.0),
             validity=quality_data.get("validity", 0.0),
             consistency=quality_data.get("consistency", 0.0),
-            freshness=quality_data.get("freshness", 0.0),
-            issues=quality_data.get("issues", []),
         )
     else:
         quality = quality_data
@@ -299,33 +272,14 @@ def _event_row_to_pydantic(row: EventRow) -> MemoryEvent:
         event_type=row.event_type or "",
         user_id=row.user_id or "",
         session_id=row.session_id or "",
-        turn_id=row.turn_id or "",
         scene=row.scene or "",
         task_type=row.task_type or "",
         occurred_at=row.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ") if row.occurred_at else "",
         text=row.text or "",
         payload=row.payload or {},
-        tool_calls=row.tool_calls or [],
-        schema_version=row.schema_version or "1.0",
         source_hash=row.source_hash or "0" * 64,
-        redactions=row.redactions or [],
         quality=quality,
     )
-
-
-def _parse_event_time(value):
-    """把 MemoryEvent 的 ISO 字符串转换为 SQLAlchemy DateTime。"""
-    from datetime import datetime, timezone
-
-    if isinstance(value, datetime):
-        return value
-    if not value:
-        return datetime.now(timezone.utc).replace(tzinfo=None)
-    normalized = str(value).replace("Z", "+00:00")
-    parsed = datetime.fromisoformat(normalized)
-    if parsed.tzinfo is not None:
-        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
-    return parsed
 
 
 # ============================================================
@@ -346,7 +300,7 @@ class PreferenceRepository:
                 memory_id=memory.memory_id,
                 user_id=memory.user_id,
                 preference_type=memory.preference_type.value if hasattr(memory.preference_type, "value") else str(memory.preference_type),
-                content=memory.text,
+                content=memory.content,
                 scope_scene=memory.scope.scene,
                 scope_task_type=memory.scope.task_type,
                 scope_app=memory.scope.app,
@@ -355,7 +309,7 @@ class PreferenceRepository:
                 level=memory.level.value if hasattr(memory.level, "value") else memory.level,
                 version=memory.version,
                 parent_id=memory.parent_id or None,
-                evidences=[e.model_dump(mode="json") for e in memory.evidences] if memory.evidences else [],
+                evidences=[e.model_dump() for e in memory.evidences] if memory.evidences else [],
             )
             s.merge(row)
 
@@ -480,7 +434,7 @@ class KnowledgeRepository:
                 level=memory.level.value if hasattr(memory.level, "value") else memory.level,
                 version=memory.version,
                 parent_id=memory.parent_id or None,
-                evidences=[e.model_dump(mode="json") for e in memory.evidences] if memory.evidences else [],
+                evidences=[e.model_dump() for e in memory.evidences] if memory.evidences else [],
             )
             s.merge(row)
 
@@ -507,15 +461,17 @@ class KnowledgeRepository:
     def get_by_scope(self, user_id: str, scene: str, task_type: str) -> list[KnowledgeMemory]:
         """按 scope 查询"""
         with self.db.session() as s:
-            query = s.query(KnowledgeRow).filter(
-                KnowledgeRow.user_id == user_id,
-                KnowledgeRow.status == "active",
+            rows = (
+                s.query(KnowledgeRow)
+                .filter(
+                    KnowledgeRow.user_id == user_id,
+                    KnowledgeRow.scope_scene == scene,
+                    KnowledgeRow.scope_task_type == task_type,
+                    KnowledgeRow.status == "active",
+                )
+                .order_by(KnowledgeRow.confidence.desc())
+                .all()
             )
-            if scene:
-                query = query.filter(KnowledgeRow.scope_scene == scene)
-            if task_type:
-                query = query.filter(KnowledgeRow.scope_task_type == task_type)
-            rows = query.order_by(KnowledgeRow.confidence.desc()).all()
             return [_know_row_to_pydantic(r) for r in rows]
 
     def list_all(self, status: str = "active") -> list[KnowledgeMemory]:
@@ -549,12 +505,6 @@ class KnowledgeRepository:
             if success:
                 updates["success_count"] = KnowledgeRow.success_count + 1
             s.query(KnowledgeRow).filter(KnowledgeRow.memory_id == memory_id).update(updates)
-
-    def update_status(self, memory_id: str, status: str) -> None:
-        with self.db.session() as s:
-            s.query(KnowledgeRow).filter(KnowledgeRow.memory_id == memory_id).update(
-                {"status": status, "updated_at": datetime.now()}
-            )
 
 
 # ============================================================

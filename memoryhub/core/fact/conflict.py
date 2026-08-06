@@ -32,7 +32,7 @@ class ConflictDetector:
     def __init__(self, store: FactStore, api_key: str = ""):
         self.store = store
         key = api_key or os.environ.get("DEEPSEEK_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
-        self._llm = OpenAI(api_key=key, base_url=DEEPSEEK_BASE_URL) if key else None
+        self._llm = OpenAI(api_key=key, base_url=DEEPSEEK_BASE_URL)
 
     # ─── 阶段 1: 代码检测（不调 LLM）─────────────────────────────────
 
@@ -124,11 +124,6 @@ class ConflictDetector:
             new_observed_at=new.observed_at,
             new_confidence=new.confidence,
         )
-
-        if self._llm is None:
-            result.resolution = Resolution.ESCALATE.value
-            result.reason = f"[未配置裁决模型，升级人工] {result.reason}"
-            return result
 
         try:
             resp = self._llm.chat.completions.create(

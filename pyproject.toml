@@ -13,7 +13,6 @@ dependencies = [
     "rank-bm25>=0.2",
     "jieba>=0.42",
     "httpx>=0.27",
-    "openai>=1.0",
     "python-dotenv>=1.0",
     "cryptography>=42",
 ]

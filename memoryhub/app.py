@@ -19,7 +19,6 @@ from pydantic import BaseModel
 from memoryhub.adapter import schemas as adapter_schemas
 from memoryhub.adapter import user_rule_schemas
 from memoryhub.adapter.api import router as memory_router
-from memoryhub.adapter.agent_api import router as agent_router
 from memoryhub.adapter.schemas import KnowledgeMemory, PreferenceMemory, SearchResult
 from memoryhub.config import AppConfig, load_config
 from memoryhub.core.safety.user_rules import (
@@ -29,7 +28,7 @@ from memoryhub.core.safety.user_rules import (
 
 def _memory_text(memory: PreferenceMemory | KnowledgeMemory) -> str:
     """用于建索引的记忆文本：知识记忆拼上名称，偏好记忆用正文"""
-    if isinstance(memory, KnowledgeMemory):
+    if memory.memory_type == "knowledge":
         return f"{memory.name} {memory.content}".strip()
     return memory.text
 
@@ -38,7 +37,6 @@ def _memory_metadata(memory: PreferenceMemory | KnowledgeMemory) -> dict:
     """检索结果随行的元数据（融合过滤依赖 memory_type/confidence/scope）"""
     return {
         "memory_type": memory.memory_type,
-        "user_id": memory.user_id,
         "content": _memory_text(memory),
         "confidence": memory.confidence,
         "scope": memory.scope.model_dump(),
@@ -61,9 +59,7 @@ class _VectorStoreSearchAdapter:
         results: list[SearchResult] = []
         for memory_id, score in hits:
             memory = self._lookup.get(memory_id)
-            if memory is None:
-                continue
-            metadata = _memory_metadata(memory)
+            metadata = _memory_metadata(memory) if memory is not None else {}
             results.append(
                 SearchResult(
                     memory_id=memory_id,
@@ -196,7 +192,6 @@ def create_app(
 
     # 注册路由
     app.include_router(memory_router)
-    app.include_router(agent_router)
 
     # 注册生命周期
     @app.on_event("startup")
@@ -252,7 +247,6 @@ def create_app(
         from memoryhub.storage.database import (
             ConflictRepository,
             Database,
-            EventRepository,
             ForgetRepository,
             KnowledgeRepository,
             PreferenceRepository,
@@ -264,7 +258,6 @@ def create_app(
         db.init_schema()
         pref_repo = PreferenceRepository(db)
         know_repo = KnowledgeRepository(db)
-        event_repo = EventRepository(db)
         conflict_repo = ConflictRepository(db)
         forget_repo = ForgetRepository(db)
 
@@ -307,7 +300,6 @@ def create_app(
         )
 
         app.state.db = db
-        app.state.event_repo = event_repo
         app.state.pref_repo = pref_repo
         app.state.know_repo = know_repo
         app.state.conflict_repo = conflict_repo
@@ -321,41 +313,6 @@ def create_app(
             config=config.retrieval,
             embedding_fn=embedding_client.embed,
             memory_lookup=memory_lookup,
-        )
-
-        # 事件写入后的统一抽取管线。新增记忆会同步更新本地检索索引。
-        from pathlib import Path
-
-        from memoryhub.core.fact import FactMemoryPipeline
-        from memoryhub.core.processing import EventProcessingCoordinator
-
-        fact_db_path = str(Path(config.storage.db_path).with_name("facts.db"))
-        fact_pipeline = FactMemoryPipeline(db_path=fact_db_path)
-
-        def index_memory(memory):
-            memory_lookup[memory.memory_id] = memory
-            vector_store.add(memory.memory_id, embedding_client.embed(_memory_text(memory)))
-            keyword_search.build_index(
-                [
-                    (
-                        item.memory_id,
-                        _memory_text(item),
-                        json.dumps(_memory_metadata(item), ensure_ascii=False),
-                    )
-                    for item in memory_lookup.values()
-                ]
-            )
-            cache.clear()
-
-        app.state.fact_pipeline = fact_pipeline
-        app.state.llm_client = None
-        app.state.event_processor = EventProcessingCoordinator(
-            pref_repo=pref_repo,
-            know_repo=know_repo,
-            fact_pipeline=fact_pipeline,
-            llm_client=None,
-            on_memory_written=index_memory,
-            safety_config=config.safety,
         )
 
     @app.on_event("shutdown")
@@ -379,9 +336,6 @@ def create_app(
         db = getattr(app.state, "db", None)
         if db is not None:
             db.close()
-        fact_pipeline = getattr(app.state, "fact_pipeline", None)
-        if fact_pipeline is not None:
-            fact_pipeline.close()
 
     return app
 
