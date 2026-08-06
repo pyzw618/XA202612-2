@@ -1,100 +1,222 @@
-# Kylin-MemoryHub
+# Kylin MemoryHub 竞赛演示系统
 
-面向银河麒麟 OS Agent 的可插拔本地记忆中枢。
+当前开发分支：`feat/moyaohua-memoryhub-demo`
 
-## 项目结构
+Kylin MemoryHub 是一个面向 Agent 的本地记忆中枢。本分支在原有 Python 记忆核心之上增加了 React 对话工作台和 Agent 适配接口，用于演示一段多轮对话中记忆的形成、检索、引用、冲突处理和遗忘过程。
 
-```
-memoryhub/                  # 核心 Python 包
-├── app.py                  # FastAPI 应用入口
-├── config.py               # 配置管理
-├── adapter/                # OS Agent 接入适配层
-│   ├── api.py              # REST 路由定义
-│   ├── schemas.py          # 核心数据结构 (Pydantic)
-│   └── simulator.py        # OS Agent 模拟器
-├── core/                   # 记忆核心逻辑
-│   ├── ingestion/          # 多源数据接入 (清洗/标准化/质量评分)
-│   ├── preference/         # 偏好记忆 (抽取/置信度/版本管理)
-│   ├── knowledge/          # 知识记忆 (抽取/模板/工作流挖掘)
-│   ├── conflict/           # 冲突处理 (检测/解决)
-│   ├── safety/             # 安全过滤与精准遗忘
-│   └── lifecycle/          # 记忆生命周期管理
-├── retrieval/              # 混合检索引擎
-│   ├── hybrid.py           # 混合检索入口
-│   ├── vector_search.py    # FAISS 向量检索
-│   ├── keyword_search.py   # BM25 关键词检索
-│   ├── reranker.py         # 重排序
-│   └── cache.py            # LRU 缓存
-├── storage/                # 持久化存储层
-│   ├── database.py         # SQLite + SQLAlchemy
-│   ├── models.py           # ORM 模型
-│   ├── vector_store.py     # FAISS 索引管理
-│   └── evidence_store.py   # 证据链存储
-├── llm/                    # LLM 抽象层
-│   ├── base.py             # 抽象接口
-│   ├── openai_client.py    # OpenAI 兼容 API
-│   └── ollama_client.py    # Ollama 本地推理
-└── embedding/              # Embedding 抽象层
-    ├── base.py             # 抽象接口
-    ├── kylin_client.py     # 麒麟 SDK 封装
-    └── mock_client.py      # 开发用 Mock
+## 当前可以演示什么
 
-evaluation/                 # 评测模块
-├── metrics/
-│   ├── preference_eval.py  # 偏好提取评测
-│   ├── retrieval_eval.py   # 检索评测
-│   ├── conflict_eval.py    # 冲突处理评测
-│   └── latency_benchmark.py # 性能基准测试
+- 在同一个会话中逐轮执行 10 轮测试对话。
+- 从原始对话中抽取偏好、工作流、模板和事实候选。
+- 在后续轮次中真实查询后端，展示候选记忆和本轮实际引用的记忆。
+- 展示工具名、参数、状态、耗时和脱敏后的工具返回结果。
+- 对事实候选执行 `Propose / Commit / Reject` 两阶段处理。
+- 预览精准遗忘候选，确认后由 Agent 适配层执行软删除。
+- 导入 `conversation-replay/1.0` JSON，或者直接导入 `{ events: MemoryEvent[] }`。
 
-docs/
-├── ARCHITECTURE.md         # 项目整体架构可视化
-└── INTERFACE.md            # 数据结构与接口规范文档
-```
-
-## 快速开始
-
-```bash
-# 安装依赖
-pip install -e ".[dev]"
-
-# 启动服务
-uvicorn memoryhub.app:app --reload
-
-# 访问 API 文档
-# http://localhost:8000/docs
-```
-
-## 开发规范
-
-1. **数据结构**: 运行时记忆/安全契约在 `memoryhub/adapter/schemas.py`；
-   声明式规则与溯源模型在 `memoryhub/safety_rules/models.py`
-2. **接口规范**: 参见 `docs/INTERFACE.md`
-3. **规则库**: 内置版本、完整性摘要和来源矩阵见
-   `memoryhub/safety_rules/data/` 与 `docs/SAFETY_RULE_LIBRARY.md`
-4. **安全边界**: 规则加载/校验、递归扫描、策略决策、全值脱敏、同快照复检、
-   实例内结果认证、最小化 JSONL 审计链、REVIEW 加密隔离和强制写入 Gate 已实现。
-   普通 SQLite/向量/证据算法仍是脚手架；实现时只能注册为 Gate 的受保护 sink，
-   不得接收原始事件或裸文本
-
-## 安全写入链
-
-生产写入从 `SafetyWriteGate` 进入：先完成 `process → validate_result`，再成功追加
-脱敏审计记录，最后按动作路由。`ALLOW/MASK` 只向 SQLite、Embedding、向量、
-证据链等内容 sink 签发绑定审计记录的 `ApprovedWrite`，普通日志只接收最小化
-`SafeLogRecord`；`REVIEW` 原事件只以 AES-256-GCM 密文进入独立隔离区；`REJECT`
-不保留原文。审计或隔离失败时不会调用任何普通下游。
-
-安全配置与密钥要求见 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)，数据契约、
-轮转/保留和平台权限边界见 [`docs/INTERFACE.md`](docs/INTERFACE.md)，完整验收矩阵
-见 [`docs/SAFETY_ACCEPTANCE.md`](docs/SAFETY_ACCEPTANCE.md)。
+目前主 Agent 仍采用确定性规则编排，尚未接入真实大模型。对话回复和外部工具轨迹来自 JSON；记忆抽取、事件写入、检索和事实候选处理由后端真实执行。
 
 ## 技术栈
 
-| 组件 | 选型 |
-|------|------|
-| 服务框架 | FastAPI |
-| 结构化存储 | SQLite + SQLAlchemy |
-| 向量存储 | FAISS |
-| Embedding | 麒麟 SDK / Mock |
-| LLM | OpenAI 兼容 API / Ollama |
-| 前端 | Vue 3 + Element Plus |
+| 部分 | 技术 |
+| --- | --- |
+| 前端 | React 19、TypeScript、vinext/Vite |
+| 后端 | Python 3.11+、FastAPI、Pydantic |
+| 结构化存储 | SQLite、SQLAlchemy |
+| 检索 | BM25 + 向量检索 + 重排 |
+| 向量实现 | FAISS；开发环境默认使用 Mock Embedding |
+| Agent 接入 | `/api/agent/*` 适配接口 |
+
+## 项目结构
+
+```text
+XA202612-2/
+├─ frontend/                         # React 对话工作台
+│  ├─ app/page.tsx                   # 主页面与管理页面
+│  ├─ app/api.ts                     # 前端 API transport
+│  ├─ app/replay.ts                  # JSON 校验、重建与脱敏
+│  └─ public/examples/
+│     └─ memory-system-long-replay.json
+├─ memoryhub/
+│  ├─ app.py                         # FastAPI 应用入口
+│  ├─ adapter/api.py                 # 记忆读取与管理 API
+│  ├─ adapter/agent_api.py           # 回放、逐轮执行和用户裁决
+│  ├─ core/processing.py             # 统一事件处理协调器
+│  ├─ core/preference/               # 偏好记忆
+│  ├─ core/knowledge/                # 工作流与模板记忆
+│  ├─ core/fact/                     # 事实候选与冲突处理
+│  ├─ retrieval/                     # 混合检索
+│  └─ storage/                       # SQLite 和向量存储
+├─ tests/test_competition_api.py     # 竞赛演示链路测试
+├─ config.yaml                       # 本地运行配置
+└─ pyproject.toml                    # Python 项目配置
+```
+
+## 环境要求
+
+- Git
+- Python `>= 3.11`
+- Node.js `>= 22.13.0`
+- npm
+
+Windows 下建议使用 PowerShell，并始终在仓库根目录执行后端命令。
+
+## 1. 获取本分支
+
+```powershell
+git clone -b feat/moyaohua-memoryhub-demo https://github.com/pyzw618/XA202612-2.git
+cd XA202612-2
+```
+
+已经克隆过仓库时：
+
+```powershell
+git fetch origin
+git switch feat/moyaohua-memoryhub-demo
+git pull --ff-only
+```
+
+## 2. 启动后端
+
+### Windows PowerShell
+
+首次运行时创建虚拟环境并安装依赖：
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
+```
+
+如果 PowerShell 不允许执行激活脚本，可以不激活虚拟环境，直接使用：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+```
+
+启动 FastAPI：
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn memoryhub.app:app --reload --host 127.0.0.1 --port 8000
+```
+
+### macOS / Linux
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
+python -m uvicorn memoryhub.app:app --reload --host 127.0.0.1 --port 8000
+```
+
+后端启动后访问：
+
+- Swagger API 文档：<http://127.0.0.1:8000/docs>
+- OpenAPI JSON：<http://127.0.0.1:8000/openapi.json>
+
+开发演示默认使用 `config.yaml` 和 Mock Embedding，不需要配置大模型 API Key。运行数据会写入 `data/` 目录。
+
+## 3. 启动前端
+
+保持后端终端运行，再打开一个新的 PowerShell：
+
+```powershell
+cd frontend
+npm ci
+npm run dev
+```
+
+浏览器打开：<http://127.0.0.1:3000>
+
+前端默认连接 `http://127.0.0.1:8000`。如果后端地址不同，在启动前端前设置：
+
+```powershell
+$env:NEXT_PUBLIC_MEMORYHUB_API="http://127.0.0.1:8000"
+npm run dev
+```
+
+## 4. 运行内置演示
+
+1. 确认页面右上角的状态点显示后端已连接。
+2. 点击“加载演示”。系统会创建新的用户 ID、会话 ID 和事件 ID，避免读取以前运行留下的记忆。
+3. 点击“执行当前轮”，观察右侧本轮的记忆写入、候选记忆和实际引用。
+4. 点击“下一轮”，继续执行完整的 10 轮对话。
+5. 在事实候选出现后打开详情，体验 `Propose / Commit / Reject` 流程。
+
+内置 JSON 位于：
+
+```text
+frontend/public/examples/memory-system-long-replay.json
+```
+
+也可以点击“导入 JSON”选择自己的对话文件。导入后不会自动批量写库，只有逐轮点击“执行当前轮”时才会调用后端。
+
+## 5. 常用接口
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `POST` | `/api/agent/step` | 执行一轮对话并处理记忆 |
+| `POST` | `/api/agent/replay` | 校验或执行 JSON 回放 |
+| `POST` | `/api/agent/actions/{action_id}/decision` | 接收事实、冲突或遗忘裁决 |
+| `POST` | `/api/memory/events` | 写入标准化事件 |
+| `GET` | `/api/memory/events/session/{session_id}` | 读取一个会话的事件 |
+| `POST` | `/api/memory/search` | 查询候选记忆 |
+| `GET` | `/api/memory/preferences` | 查询偏好记忆 |
+| `GET` | `/api/memory/knowledge` | 查询工作流或模板 |
+| `POST` | `/api/memory/facts/propose` | 生成事实候选，不写入活动事实 |
+| `POST` | `/api/memory/facts/{proposal_id}/commit` | 幂等提交事实候选 |
+| `POST` | `/api/memory/forget/preview` | 预览精准遗忘结果 |
+| `POST` | `/api/memory/forget` | 确认执行软删除 |
+
+具体请求和响应结构以 Swagger 文档为准。
+
+## 6. 测试与检查
+
+后端测试：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+只测试本分支新增的竞赛链路：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_competition_api.py -q
+```
+
+前端检查：
+
+```powershell
+cd frontend
+npm run lint
+npm run build
+```
+
+## 当前完成度与限制
+
+已经打通：
+
+- 多轮会话逐步执行与事件幂等写入。
+- 偏好、工作流、模板、事实候选抽取。
+- 混合检索和实际引用标记。
+- 事实提议、提交、拒绝、冲突等待裁决。
+- 精准遗忘预览、软删除和历史记录。
+- 工具结果脱敏与前端展示。
+
+仍需继续开发：
+
+- 接入真实主 Agent 和大模型实时回复。
+- 将 JSON 中的外部工具轨迹替换为真实工具执行。
+- 完善 LLM 语义抽取和复杂事实理解。
+- 完成自动遗忘调度、真实评测执行和安全看板。
+- 增加生产环境鉴权、数据库迁移、并发与异常恢复。
+
+## 给接力同学的约定
+
+- 前端读取记忆可以直接调用 `/api/memory/*`。
+- 改变记忆状态的操作应先提交给 `/api/agent/actions/*/decision`，由 Agent 适配层调用 MemoryHub，不要在页面中直接写库。
+- 前端不要自行计算相关性、冲突关系或最终裁决，展示后端返回值即可。
+- 后续接入真实 Agent 时，优先替换 `memoryhub/adapter/agent_api.py` 中的确定性编排，并保持现有响应结构，前端无需整体重写。
+- 提交代码前至少运行后端竞赛链路测试，以及前端 lint/build。
