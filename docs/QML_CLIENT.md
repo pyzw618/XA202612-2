@@ -4,6 +4,8 @@ QML 客户端与 Electron 并行存在，只通过本地 HTTP 连接常驻 FastA
 
 ## Windows 启动
 
+现在也可以直接双击桌面的 `MemoryHub QML.lnk`。快捷方式会自动检查 `127.0.0.1:8010/api/health`，后端未运行时先启动后端，再打开 QML 客户端。
+
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -e ".[qml,dev]"
 
