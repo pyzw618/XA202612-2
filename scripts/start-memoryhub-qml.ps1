@@ -6,7 +6,7 @@ $python = Join-Path $repo ".venv\Scripts\python.exe"
 $backendUrl = "http://127.0.0.1:8010"
 
 if (-not (Test-Path -LiteralPath $python)) {
-    [System.Windows.MessageBox]::Show("没有找到项目虚拟环境，请先安装依赖。`n$python", "MemoryHub") | Out-Null
+    [System.Windows.MessageBox]::Show("Python environment not found. Please install project dependencies first.", "MemoryHub") | Out-Null
     exit 1
 }
 
@@ -38,7 +38,7 @@ if (-not $ready) {
 }
 
 if (-not $ready) {
-    [System.Windows.MessageBox]::Show("MemoryHub 后端启动失败，请检查端口 8010 或查看终端日志。", "MemoryHub") | Out-Null
+    [System.Windows.MessageBox]::Show("MemoryHub backend failed to start on port 8010.", "MemoryHub") | Out-Null
     exit 1
 }
 
