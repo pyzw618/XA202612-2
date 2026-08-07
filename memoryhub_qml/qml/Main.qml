@@ -16,6 +16,21 @@ ApplicationWindow {
     font.family: Qt.platform.os === "windows" ? "Microsoft YaHei UI" : "Noto Sans CJK SC"
     property bool compact: width < 1280
 
+    component MenuButton: Button {
+        required property string sectionId
+        required property string sectionText
+        Layout.fillWidth: true
+        implicitHeight: 34
+        text: sectionText
+        checkable: true
+        checked: controller.activeSection === sectionId
+        font.pixelSize: 12
+        leftPadding: 12
+        background: Rectangle { radius: 8; color: parent.checked ? "#2563EB" : "transparent" }
+        contentItem: Label { text: parent.text; color: parent.checked ? "white" : "#CBD5E1"; verticalAlignment: Text.AlignVCenter; leftPadding: 4; font.pixelSize: 12 }
+        onClicked: controller.selectSection(sectionId)
+    }
+
     FileDialog {
         id: importDialog
         title: "导入 conversation-replay/1.0 JSON"
@@ -93,6 +108,31 @@ ApplicationWindow {
             Layout.preferredWidth: 250; Layout.fillHeight: true; radius: 16; color: "#111B2E"
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 14; spacing: 12
+                Label { text: "MEMORY CONSOLE"; color: "#64748B"; font.bold: true; font.pixelSize: 10; font.letterSpacing: 1.3 }
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 300
+                    clip: true
+                    ColumnLayout {
+                        width: parent.width
+                        spacing: 3
+                        Label { text: "工作台"; color: "#64748B"; font.pixelSize: 10; topPadding: 5; bottomPadding: 3 }
+                        MenuButton { sectionId: "agent"; sectionText: "▣  Agent 对话" }
+                        MenuButton { sectionId: "ingestion"; sectionText: "▤  数据接入记录" }
+                        MenuButton { sectionId: "retrieval"; sectionText: "⌕  检索记录" }
+                        Label { text: "记忆管理"; color: "#64748B"; font.pixelSize: 10; topPadding: 10; bottomPadding: 3 }
+                        MenuButton { sectionId: "preferences"; sectionText: "☷  偏好记忆" }
+                        MenuButton { sectionId: "facts"; sectionText: "◇  事实记忆" }
+                        MenuButton { sectionId: "knowledge"; sectionText: "▧  知识记忆" }
+                        MenuButton { sectionId: "conflicts"; sectionText: "⚠  冲突处理" }
+                        MenuButton { sectionId: "forget"; sectionText: "⌫  遗忘管理" }
+                        Label { text: "系统能力"; color: "#64748B"; font.pixelSize: 10; topPadding: 10; bottomPadding: 3 }
+                        MenuButton { sectionId: "safety"; sectionText: "◇  安全规则" }
+                        MenuButton { sectionId: "evaluation"; sectionText: "▥  评测报告" }
+                        MenuButton { sectionId: "settings"; sectionText: "⚙  系统设置" }
+                    }
+                }
+                Rectangle { Layout.fillWidth: true; height: 1; color: "#26344D" }
                 Label { text: "会话进度"; color: "#CBD5E1"; font.bold: true; font.pixelSize: 13 }
                 Rectangle { Layout.fillWidth: true; height: 64; radius: 12; color: "#18253D"; Column { anchors.centerIn: parent; spacing: 4; Label { text: "第 " + (controller.currentIndex + 1) + " / " + controller.totalTurns + " 轮"; color: "white"; font.bold: true } Label { text: controller.currentExecuted ? "本轮已执行" : "等待执行"; color: controller.currentExecuted ? "#6EE7B7" : "#94A3B8"; font.pixelSize: 11 } } }
                 ListView {

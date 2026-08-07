@@ -40,6 +40,7 @@ class MemoryHubController(QObject):
         self._pending: dict[str, tuple[str, int | None]] = {}
         self._started_at = time.perf_counter()
         self._startup_ms = 0
+        self._active_section = "agent"
 
         self.turn_model = TurnListModel(self)
         self.message_model = MessageListModel(self)
@@ -141,6 +142,10 @@ class MemoryHubController(QObject):
     @Property(bool, notify=stateChanged)
     def canGoNext(self) -> bool:
         return self.currentExecuted and self._index + 1 < self.totalTurns and not self._busy
+
+    @Property(str, notify=stateChanged)
+    def activeSection(self) -> str:
+        return self._active_section
 
     @Slot()
     def start(self) -> None:
@@ -259,6 +264,25 @@ class MemoryHubController(QObject):
     @Slot()
     def openApiDocs(self) -> None:
         QDesktopServices.openUrl(QUrl(f"{self.api.base_url}/docs"))
+
+    @Slot(str)
+    def selectSection(self, section: str) -> None:
+        self._active_section = section
+        if section != "agent":
+            labels = {
+                "ingestion": "数据接入记录",
+                "retrieval": "检索记录",
+                "preferences": "偏好记忆",
+                "facts": "事实记忆",
+                "knowledge": "知识记忆",
+                "conflicts": "冲突处理",
+                "forget": "遗忘管理",
+                "safety": "安全规则",
+                "evaluation": "评测报告",
+                "settings": "系统设置",
+            }
+            self._set_notice(f"已切换到{labels.get(section, '功能模块')}；详细管理页将继续复用当前后端接口。")
+        self.stateChanged.emit()
 
     def _on_success(self, token: str, operation: str, body: Any) -> None:
         pending_operation, index = self._pending.pop(token, (operation, None))
