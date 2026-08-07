@@ -137,6 +137,63 @@ $env:NEXT_PUBLIC_MEMORYHUB_API="http://127.0.0.1:8000"
 npm run dev
 ```
 
+## Electron 桌面客户端
+
+Electron 只负责展示和管理，不拥有 MemoryHub 后端进程。关闭桌面窗口只会关闭客户端，Agent 使用的本地记忆服务仍然继续运行。
+
+```text
+OS Agent ───────────────┐
+                       ├──> MemoryHub 常驻服务（FastAPI / SQLite / FAISS）
+Electron 桌面客户端 ────┘
+```
+
+### Windows：独立启动后端服务
+
+在仓库根目录运行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-memoryhub-service.ps1
+```
+
+这个脚本会把后端作为独立隐藏进程启动。随后启动或关闭 Electron，都不会影响后端。
+
+需要明确停止后端时运行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-memoryhub-service.ps1
+```
+
+### 启动 Electron 开发版
+
+```powershell
+cd frontend
+npm ci
+npm run desktop:dev
+```
+
+如果首次安装 Electron 运行时下载较慢，可以仅对当前终端设置镜像后重新安装：
+
+```powershell
+$env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
+npm ci
+```
+
+如果 Web 前端已经运行在 `127.0.0.1:3000`，也可以只打开桌面窗口：
+
+```powershell
+npm run desktop:open
+```
+
+### 构建桌面安装包
+
+```powershell
+cd frontend
+npm run desktop:build  # 生成未打包目录，便于测试
+npm run desktop:dist   # 生成 Windows 安装包
+```
+
+Linux/银河麒麟安装包必须在对应 Linux 和 CPU 架构环境中构建。`packaging/linux/memoryhub.service` 提供了后端常驻 systemd 用户服务模板。
+
 ## 4. 运行内置演示
 
 1. 确认页面右上角的状态点显示后端已连接。

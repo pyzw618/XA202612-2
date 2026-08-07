@@ -169,6 +169,25 @@ export default function Home() {
   const [busy, setBusy] = useState(false); const [sideOpen, setSideOpen] = useState(false); const [executedTurns, setExecutedTurns] = useState<Set<number>>(new Set());
   const currentLabel = labels[view];
   useEffect(() => { const timer = toast ? window.setTimeout(() => setToast(""), 3200) : undefined; return () => timer && clearTimeout(timer); }, [toast]);
+  useEffect(() => {
+    let active = true;
+    const checkBackend = async () => {
+      try {
+        if (window.memoryHubDesktop) {
+          const status = await window.memoryHubDesktop.checkBackend();
+          if (active) setOnline(status.online);
+        } else {
+          await memoryApi.health();
+          if (active) setOnline(true);
+        }
+      } catch {
+        if (active) setOnline(false);
+      }
+    };
+    void checkBackend();
+    const timer = window.setInterval(checkBackend, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
   useEffect(() => { if (view === "preferences") memoryApi.preferences().then((data) => { setRows(data as Row[]); setOnline(true); }).catch(() => setRows(fallbackData.preferences)); if (view === "facts") memoryApi.facts().then((data) => { setRows(data as Row[]); setOnline(true); }).catch(() => setRows(fallbackData.facts)); if (view === "conflicts") memoryApi.conflicts().then((data) => { setRows(data as Row[]); setOnline(true); }).catch(() => setRows(fallbackData.conflicts)); }, [view]);
   useEffect(() => { if (view === "knowledge") memoryApi.knowledge(kind).then((data) => { setKnowledge(data as Row[]); setOnline(true); }).catch(() => setKnowledge(fallbackData[kind])); }, [view, kind]);
 

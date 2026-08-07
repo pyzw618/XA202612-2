@@ -17,6 +17,7 @@
 /.vite/
 /out/
 /dist/
+/desktop-dist/
 /.wrangler/
 /outputs/
 /work/

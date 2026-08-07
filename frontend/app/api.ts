@@ -25,6 +25,11 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const memoryApi = {
+  health: async () => {
+    const response = await fetch(`${API_BASE}/openapi.json`, { cache: "no-store" });
+    if (!response.ok) throw new ApiError("MemoryHub 后端未连接", response.status);
+    return true;
+  },
   step: (body: unknown) => api<Record<string, unknown>>("/api/agent/step", { method: "POST", body: JSON.stringify(body) }),
   replay: (body: unknown) => api<Record<string, unknown>>("/api/agent/replay", { method: "POST", body: JSON.stringify(body) }),
   decide: (id: string, body: unknown) => api<Record<string, unknown>>(`/api/agent/actions/${id}/decision`, { method: "POST", body: JSON.stringify(body) }),
