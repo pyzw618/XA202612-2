@@ -105,13 +105,13 @@ ApplicationWindow {
     RowLayout {
         anchors.fill: parent; anchors.margins: 18; spacing: 14
         Rectangle {
-            Layout.preferredWidth: 250; Layout.fillHeight: true; radius: 16; color: "#111B2E"
+            Layout.preferredWidth: 220; Layout.fillHeight: true; radius: 16; color: "#111B2E"
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 14; spacing: 12
                 Label { text: "MEMORY CONSOLE"; color: "#64748B"; font.bold: true; font.pixelSize: 10; font.letterSpacing: 1.3 }
                 ScrollView {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 300
+                    Layout.fillHeight: true
                     clip: true
                     ColumnLayout {
                         width: parent.width
@@ -136,6 +136,7 @@ ApplicationWindow {
                 Label { text: "会话进度"; color: "#CBD5E1"; font.bold: true; font.pixelSize: 13 }
                 Rectangle { Layout.fillWidth: true; height: 64; radius: 12; color: "#18253D"; Column { anchors.centerIn: parent; spacing: 4; Label { text: "第 " + (controller.currentIndex + 1) + " / " + controller.totalTurns + " 轮"; color: "white"; font.bold: true } Label { text: controller.currentExecuted ? "本轮已执行" : "等待执行"; color: controller.currentExecuted ? "#6EE7B7" : "#94A3B8"; font.pixelSize: 11 } } }
                 ListView {
+                    visible: false
                     Layout.fillWidth: true; Layout.fillHeight: true; model: controller.turnModel; spacing: 6; clip: true
                     delegate: Rectangle {
                         width: ListView.view.width; height: 54; radius: 10; color: model.selected ? "#2563EB" : "transparent"
@@ -144,6 +145,30 @@ ApplicationWindow {
                     }
                 }
                 Rectangle { Layout.fillWidth: true; height: 82; radius: 12; color: "#18253D"; ColumnLayout { anchors.fill: parent; anchors.margins: 10; Label { text: controller.statusText; color: controller.online ? "#6EE7B7" : "#FCA5A5"; font.bold: true } RowLayout { Button { text: "重试"; onClicked: controller.retryBackend() } Button { text: "API 文档"; onClicked: controller.openApiDocs() } } } }
+            }
+        }
+
+        Rectangle {
+            Layout.preferredWidth: 245; Layout.fillHeight: true; radius: 16; color: "#FFFFFF"; border.color: "#E2E8F0"
+            ColumnLayout {
+                anchors.fill: parent; anchors.margins: 14; spacing: 12
+                RowLayout {
+                    Layout.fillWidth: true
+                    ColumnLayout { Layout.fillWidth: true; spacing: 2; Label { text: "对话记录"; color: "#172033"; font.pixelSize: 16; font.bold: true } Label { text: "当前测试会话"; color: "#94A3B8"; font.pixelSize: 11 } }
+                    ToolButton { text: "⋯"; onClicked: controller.loadDemo() }
+                }
+                Rectangle { Layout.fillWidth: true; height: 1; color: "#E2E8F0" }
+                Rectangle { Layout.fillWidth: true; height: 72; radius: 12; color: "#EFF6FF"; border.color: "#BFDBFE"; ColumnLayout { anchors.fill: parent; anchors.margins: 12; spacing: 4; Label { text: controller.title; color: "#1D4ED8"; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true } Label { text: controller.totalTurns + " 轮对话  ·  " + (controller.online ? "在线" : "离线"); color: "#64748B"; font.pixelSize: 11 } } }
+                Label { text: "对话轮次"; color: "#64748B"; font.pixelSize: 11; font.bold: true }
+                ListView {
+                    Layout.fillWidth: true; Layout.fillHeight: true; model: controller.turnModel; spacing: 6; clip: true
+                    delegate: Rectangle {
+                        width: ListView.view.width; height: 58; radius: 10; color: model.selected ? "#2563EB" : "#F8FAFC"; border.color: model.selected ? "#2563EB" : "#E2E8F0"
+                        RowLayout { anchors.fill: parent; anchors.margins: 10; Rectangle { Layout.preferredWidth: 25; Layout.preferredHeight: 25; radius: 13; color: model.state === "done" ? "#10B981" : (model.selected ? "white" : "#E2E8F0"); Label { anchors.centerIn: parent; text: model.state === "done" ? "✓" : model.number; color: model.state === "done" ? "white" : (model.selected ? "#2563EB" : "#64748B"); font.bold: true; font.pixelSize: 11 } } ColumnLayout { Layout.fillWidth: true; spacing: 2; Label { text: "第 " + model.number + " 轮"; color: model.selected ? "white" : "#172033"; font.bold: true; font.pixelSize: 12 } Label { text: model.preview; color: model.selected ? "#DBEAFE" : "#64748B"; elide: Text.ElideRight; Layout.fillWidth: true; font.pixelSize: 10 } } }
+                        MouseArea { anchors.fill: parent; onClicked: controller.goToTurn(index) }
+                    }
+                }
+                Rectangle { Layout.fillWidth: true; height: 52; radius: 10; color: "#F8FAFC"; RowLayout { anchors.fill: parent; anchors.margins: 10; Rectangle { width: 8; height: 8; radius: 4; color: controller.online ? "#10B981" : "#EF4444" } Label { text: controller.online ? "服务已连接" : "服务离线"; color: "#64748B"; font.pixelSize: 11; Layout.fillWidth: true } Button { text: "重试"; onClicked: controller.retryBackend() } } }
             }
         }
 
