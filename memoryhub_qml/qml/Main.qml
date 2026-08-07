@@ -15,6 +15,7 @@ ApplicationWindow {
     color: "#F4F7FB"
     font.family: Qt.platform.os === "windows" ? "Microsoft YaHei UI" : "Noto Sans CJK SC"
     property bool compact: width < 1280
+    property bool showActivity: false
 
     component MenuButton: Button {
         required property string sectionId
@@ -50,7 +51,7 @@ ApplicationWindow {
             Rectangle { width: 108; height: 32; radius: 16; color: controller.online ? "#ECFDF5" : "#FEF2F2"; Row { anchors.centerIn: parent; spacing: 7; Rectangle { width: 8; height: 8; radius: 4; color: controller.online ? "#10B981" : "#EF4444" } Label { text: controller.online ? "后端已连接" : "后端离线"; color: controller.online ? "#047857" : "#B91C1C"; font.pixelSize: 12 } } }
             Button { text: "载入演示"; onClicked: controller.loadDemo() }
             Button { text: "导入 JSON"; highlighted: true; onClicked: importDialog.open() }
-            ToolButton { visible: window.compact; text: "记忆活动"; onClicked: activityDrawer.open() }
+            Button { text: "记忆活动"; onClicked: { window.showActivity = true; activityDrawer.open() } }
         }
     }
 
@@ -149,7 +150,7 @@ ApplicationWindow {
         }
 
         Rectangle {
-            Layout.preferredWidth: 245; Layout.fillHeight: true; radius: 16; color: "#FFFFFF"; border.color: "#E2E8F0"
+            Layout.preferredWidth: 270; Layout.fillHeight: true; radius: 16; color: "#FFFFFF"; border.color: "#E2E8F0"
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 14; spacing: 12
                 RowLayout {
@@ -201,7 +202,6 @@ ApplicationWindow {
                 }
             }
         }
-        ActivityPane { visible: !window.compact; Layout.preferredWidth: 380; Layout.fillHeight: true }
     }
 
     Rectangle {
