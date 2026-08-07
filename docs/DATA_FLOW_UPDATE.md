@@ -196,3 +196,180 @@ knowledge/ingestion/memory_write 变更文件 ruff check: passed
 - 当前语义等价判断使用规则化字符串和步骤集合相似度，尚未引入 embedding 聚类、冲突审计或离线阈值评测。
 - 无 session_id 的事件无法跨请求重建轨迹，继续按当前请求分组处理。
 - 跨 SQLite、Evidence、向量/BM25 的全局事务/补偿协议仍未实现；现有统一写服务和持久化重试提供最终一致性修复路径。
+
+## 2026-08-04 14:50 +08:00：dev_dataflow 分支数据流回归修复
+
+### 背景
+
+同伴提交（基线合并提交 `5c0a526`，当前审查基线 `095e19f`）补充了数据流相关实现，但没有同步变更说明。本次在 `dev_dataflow` 分支逐项复核代码和运行时装配，确认并修复了以下问题；对外接口、请求/响应结构和主数据流拓扑保持不变。
+
+### 修复内容
+
+1. **生产检索的 owner/status 隔离**：Milvus hybrid search 增加 `user_id`、`status=active` 过滤；回表阶段再次以 runtime lookup/SQLite owner 和状态 fail-closed 校验，防止底层过滤器未生效时跨用户或归档记忆泄漏。
+2. **Knowledge 遗忘的 owner 校验与级联状态**：移除重复且不安全的 `KnowledgeRepository.update_status` 实现；遗忘链路传递 `user_id`，并在向量索引级联删除成功后清除 preference/knowledge 的 `pending_index`。
+3. **active/inactive pending 补偿分流**：`pending_index=True` 的 active 记忆执行 upsert，archived/deleted 记忆执行 delete，避免已归档记忆被后台补偿重新写回检索索引。状态变更同步进入 pending。
+4. **删除失败的 tombstone 与重试边界**：向量删除失败时保留 inactive 状态、`pending_index` 和共享 lookup tombstone，使生产检索优先 fail-closed；删除成功后才移除 lookup 并清除 pending。
+5. **Knowledge 索引文本完整化**：统一使用 `MemoryWriteService.index_text()`，索引文本覆盖 name、content、steps、tools、template_body，避免只按标题/正文检索时漏掉知识步骤、工具和模板。
+6. **显式写入与主写入统一投影**：`MemorySyncService` 在应用装配中委托现有 `MemoryWriteService`，显式写入、主事件写入和 pending 补偿复用相同的 SQLite、向量/FAISS、BM25、lookup、cache 和 metadata 契约。
+7. **development/test 的 BM25/FAISS 装配修复**：提前创建并共享 `KeywordSearcher`，注入 FactIndexService、MemoryWriteService、HybridRetriever 和同步服务，避免显式写入只落 SQLite/FAISS 而不更新 BM25 或 lookup。
+8. **空 lookup 引用与 fallback metadata**：保留调用方传入的空字典引用；补齐 status metadata，使启动时的 lookup 投影和 API fallback 与生产写入契约一致。
+
+### 新增回归测试
+
+新增 `tests/test_data_flow_merge_regressions.py`，覆盖 8 个场景：Milvus owner/status fail-closed、共享空 lookup、Knowledge owner 遗忘和索引级联、主写入 pending 清除及完整 knowledge 文本、inactive pending delete 分支、development 显式写入同步 FAISS/BM25/lookup、missing/foreign 删除失败、向量删除失败时 pending 与 tombstone 保留。
+同时更新 `tests/test_milvus_hybrid_retriever.py` 的 fake search 契约，使测试明确传递 `user_id` 和 filters。
+
+### 验证结果
+
+未运行 `tests/test_knowledge/test_knowledge_api.py`，因为该测试会真实调用 LLM。其余本轮数据流组合回归结果：
+
+```text
+118 passed, 29 warnings
+python -m compileall -q memoryhub: passed
+```
+
+包含原生 sync/runtime 测试的集合仍有 4 个失败、7 个错误，均被 `embedding.mock_unavailable` 阻塞；仓库缺少 Kylin embedding/Milvus mock 的原生动态库构建产物，并非本轮 Python 修改引入的失败。
+
+### 保留边界
+
+本轮补齐的是 preference/knowledge 运行时投影的 owner 隔离、状态分流和最终一致性补偿；facts、Evidence、审计以及跨事件库/多索引的全局事务补偿协议仍未统一，抽取 retry 仍主要由显式 API 驱动。这些项目已在 `docs/DATA_FLOW_REVIEW.md` 的后续优先级中保留。
+
+## 2026-08-04 16:10 +08:00：剩余数据流问题集中修复
+
+### 修改策略
+
+按协作约定，本轮先集中完成剩余问题修改，再统一执行编译和测试；未运行会真实调用 LLM 的 `tests/test_knowledge/test_knowledge_api.py`。
+
+### 修改内容
+
+1. **facts 投影补偿闭环**
+   - facts 表增加 `pending_index`、`index_version` 及兼容迁移；新写入和状态变化先标记 pending。
+   - `FactIndexService` 统一 active upsert 与 inactive delete，覆盖 Milvus/FAISS、BM25、lookup 和 cache；成功后才清除 pending。
+   - 后台 `PendingIndexCompensationTask` 同时扫描 preference、knowledge 和 facts。
+   - 删除失败时保留 inactive fact tombstone 和 pending，防止旧投影重新可见。
+
+2. **facts 管理、Evidence 和冲突审计**
+   - 新增 `fact_evidence`、`fact_conflicts` 持久化表，事实提交时幂等记录来源 Evidence 和冲突裁决。
+   - 新增 facts 列表、详情、Evidence、冲突列表和 owner-scoped 删除 API。
+   - 显式遗忘级联删除事实 Evidence/冲突，并在投影成功后清除 facts pending。
+
+3. **抽取 retry 后台调度和指标**
+   - 新增可配置 `ExtractionRetryTask`，支持启动/停止、批量限制、周期扫描和运行指标。
+   - `claim_due` 改为带 due 条件的原子 UPDATE，多个 worker 不再无条件领取同一任务。
+   - lifespan 启停 worker，并增加只返回计数/稳定错误码的指标接口。
+
+4. **knowledge 合并配置、冲突审计和离线评测**
+   - 新增 `KnowledgeMergeConfig`，可配置 name/content/steps 权重、等价阈值和歧义阈值。
+   - 等价候选继续原位演进；位于歧义区间的知识分别保存并写入 owner-scoped `ConflictRecord`。
+   - 新增 `evaluation/knowledge_merge_cases.json` 和离线评测 helper。
+
+5. **冲突子系统清理**
+   - `core/conflict/detector.py` 和 `resolver.py` 的 `NotImplementedError` 已全部替换为确定性 owner/scope 检测、语义冲突判断、override/merge/coexist/pending 策略和可选持久化。
+   - `ConflictRepository.save` 改为按 `conflict_id` 幂等更新，避免重试产生主键冲突。
+
+6. **console、Simulator 和 lifespan**
+   - console 的 PreferenceMemory、mock 偏好数据和表格读取统一使用后端标准字段 `text`。
+   - Simulator 补齐 Schema 1.1 的 source_hash、quality、payload/tool_calls，并生成同 session 的 input → tool → completed 有序轨迹。
+   - FastAPI 从 `on_event` 迁移到 lifespan；后台抽取 retry、pending 补偿和资源释放统一由 lifespan 管理。
+
+7. **删除链路的 Evidence/conflict 补偿**
+   - preference/knowledge 的 `deleted` 状态在 pending 补偿成功时也会幂等删除 Evidence 和关联 conflict；归档状态仍保留 Evidence。
+   - facts 删除同步清理 fact Evidence/conflict 和孤立实体。
+
+### 新增测试
+
+新增 `tests/test_remaining_data_flow_regressions.py`，覆盖：
+
+- retry worker 指标；
+- facts 投影失败保留 pending 并成功补偿；
+- knowledge 歧义候选写入 owner-scoped conflict；
+- conflict owner/scope 边界；
+- Simulator 完整有序轨迹；
+- FastAPI lifespan 装配。
+
+### 统一验证
+
+```text
+python -m compileall -q memoryhub console: passed
+环境无关测试集合: 529 passed, 5 skipped, 1 deselected
+新增/数据流/facts/knowledge/retry/app 组合回归: 99 passed, 1 skipped
+git diff --check: passed
+```
+
+完整测试仍会被仓库缺失的 Kylin embedding 和 Milvus mock DLL 阻塞；最新完整尝试为 `527 passed, 5 skipped, 14 failed, 28 errors`，失败集中在 native mock/benchmark/milvus-mock 集合和依赖该 mock 的稳定超时用例，不是本轮 Python 数据流实现回归。
+
+### 剩余架构边界
+
+- 系统已有三类记忆的最终一致性投影补偿，但事件库、安全审计日志和各记忆库之间仍不是一个全局 ACID 事务；安全审计保持 append-only 和 fail-closed，不参与遗忘物理删除。
+- knowledge 当前仍使用规则化字符串/步骤集合相似度，尚未引入 embedding 聚类、多语言语义模型和大规模离线阈值标定。
+- retry 指标当前为进程内快照，尚未持久化到监控系统；SQLite 条件 claim 可保护共享数据库任务，但还未提供跨节点租约指标和告警。
+
+## 2026-08-04：补偿指标与收尾核验
+
+- 修复 `PendingIndexCompensationTask` 指标只统计 preference/knowledge、忽略 facts 失败的问题；现在会合并三类投影的成功/失败数量，并在 facts 投影异常时继续完成本轮统计。
+- 为补偿任务指标快照增加线程锁，避免后台 worker 与 metrics API 并发读取时出现不一致；补齐 `last_run_at`、`last_duration_ms` 和稳定错误标记。
+- 清理 API 中未使用的 `FactMemory` 导入，并更新抽取任务接口说明，使其反映已启用的后台 retry worker。
+- 新增回归测试覆盖 facts 投影失败计数；数据流相关组合回归更新为 `99 passed, 1 skipped`。
+
+## 2026-08-04：Knowledge 提取、置信度与版本更新优化
+
+### 提取流程
+
+- 对输入事件先做安全模型归一化、质量阈值过滤和 `event_id` 去重；重复事件保留质量更高的版本，避免重复证据污染知识统计。
+- 按 `user_id + session_id + task_type` 隔离轨迹，避免调用方误传多个会话时发生跨用户/跨任务知识串联。
+- 步骤去重改为规范化 key 去重，减少中英文标点、编号格式差异造成的重复步骤。
+- 保留规则优先、LLM 兜底的既有接口和数据流，不改变 `KnowledgeExtractor` 的公开方法。
+
+### 置信因子算法
+
+新增 `memoryhub/core/knowledge/confidence.py`，将置信度拆为事件质量、完成度、结构完整性、证据覆盖、结果明确度和工具链一致性六个因子；通过加权分数和最弱因子惩罚，避免单个高质量字段掩盖失败工具调用或证据不足。
+
+Knowledge 合并时不再使用简单的 confidence 平均值，而是结合既有/新增置信度、成功/总调用的 Beta 风格可靠性估计、支持次数和独立证据数量进行平滑更新。模板置信度也基于案例置信度、步骤泛化程度和证据量重新计算。
+
+### 版本更新
+
+- KnowledgeUpdater 对完全重复输入执行 no-op，不再无意义地写库、递增版本或触发索引同步。
+- 只有出现新增证据或语义字段变化时才递增 version。
+- KnowledgeRepository 新增 `knowledge_versions` 不可变快照表；当当前版本演进时先保存旧版本，支持通过 `get_version_history()` 读取版本链。
+- 修复模板更新的自引用 `parent_id`，模板版本现在指向产生它的案例 ID，而不是指向自身。
+
+### 验证
+
+```text
+knowledge/data-flow/optimization 回归: 27 passed
+新增 Knowledge 优化测试: 4 passed
+python -m compileall -q memoryhub: passed
+ruff check 新增 confidence/test 代码: passed
+```
+## 2026-08-04：补齐 Knowledge 结构化 LLM 兜底
+
+### 现状核验
+
+原 Knowledge 流程已经存在三处 LLM 兜底：
+
+- 目标过长或缺失时调用 `_llm_summarize_goal()`；
+- 结构化步骤不足两条时调用 `_llm_extract_steps()`；
+- 模板步骤过多时由 `TemplateBuilder` 调用 LLM 做泛化和去重。
+
+但原流程存在一个缺口：当轨迹缺少 result、goal 或多个结构化字段时，`extract_from_trajectory()` 可能在进入统一提取前直接返回空结果，无法使用 LLM 补全。
+
+### 本次修改
+
+- `KnowledgeExtractor` 新增统一的结构化 LLM enrichment 兜底。
+- 当轨迹缺少目标、步骤不足或缺少结果时，调用一次 `generate_json()`，请求补全：
+  - `goal`
+  - `steps`
+  - `tools`
+  - `result`
+- LLM 返回内容只写入当前安全事件的 payload 副本，不修改原始事件，不改变事件库数据流。
+- `extract_from_trajectory()`、`extract_workflow()`、`extract_case()` 统一经过该兜底路径。
+- LLM 调用异常返回稳定错误码 `knowledge.enrichment_llm_failed`，非法 JSON 返回 `knowledge.enrichment_invalid`，可继续进入既有 extraction retry/dead-letter 链路。
+- LLM 仅在轨迹确实缺少结构化信息时触发，完整结构化轨迹不会额外调用 LLM。
+
+### 验证
+
+```text
+Knowledge LLM fallback/data-flow 回归: 13 passed
+新增 LLM enrichment 回归: 1 passed
+ruff check extractor/test: passed
+```

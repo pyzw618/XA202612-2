@@ -73,7 +73,9 @@ def _is_unavailable_error(exc: Exception) -> bool:
 def _memory_text(memory) -> str:
     """用于建索引的记忆文本：知识记忆拼上名称，偏好记忆用正文"""
     if memory.memory_type == "knowledge":
-        return f"{memory.name} {memory.content}".strip()
+        from memoryhub.core.memory_write import MemoryWriteService
+
+        return MemoryWriteService.index_text(memory)
     if memory.memory_type == "fact":
         return memory.content
     return memory.text
@@ -86,6 +88,9 @@ def _memory_metadata(memory) -> dict:
         "user_id": memory.user_id,
         "content": _memory_text(memory),
         "confidence": memory.confidence,
+        "status": (
+            memory.status.value if hasattr(memory.status, "value") else str(memory.status)
+        ),
         "scope": (
             {"scope": memory.scope, "project_id": memory.project_id or ""}
             if memory.memory_type == "fact" else memory.scope.model_dump()
@@ -154,7 +159,7 @@ class MilvusHybridRetriever:
         self.embedding_fn = embedding_fn
         self.config = config or RetrievalConfig()
         self.runtime_config = runtime_config or RuntimeConfig()
-        self.memory_lookup = memory_lookup or {}
+        self.memory_lookup = memory_lookup if memory_lookup is not None else {}
         self.cache = cache
         self.index_version = index_version
         self.reranker = reranker
@@ -237,7 +242,15 @@ class MilvusHybridRetriever:
         try:
             fetch_k = max(search_request.top_k * self.config.candidate_multiplier, 1)
             assert dense_vector is not None
-            hits = self.engine.hybrid_search(dense_vector, sparse_terms, fetch_k)
+            engine_filters: dict[str, Any] = {
+                "user_id": search_request.user_id,
+                "status": "active",
+            }
+            if len(search_request.memory_types) == 1:
+                engine_filters["memory_type"] = search_request.memory_types[0]
+            hits = self.engine.hybrid_search(
+                dense_vector, sparse_terms, fetch_k, filters=engine_filters
+            )
             timings["hybrid_search_ms"] = (time.perf_counter() - t0) * 1000
         except Exception as exc:
             timings["hybrid_search_ms"] = (time.perf_counter() - t0) * 1000
@@ -442,6 +455,16 @@ class MilvusHybridRetriever:
         """按记忆类型、置信度和场景 scope 过滤结果（与 HybridRetriever 一致）"""
         filtered = []
         for result in results:
+            memory = self.memory_lookup.get(result.memory_id)
+            result_user_id = getattr(memory, "user_id", "") or result.metadata.get(
+                "user_id"
+            )
+            if not result_user_id or result_user_id != request.user_id:
+                continue
+            status = getattr(memory, "status", "") or result.metadata.get("status")
+            status = status.value if hasattr(status, "value") else str(status)
+            if status and status != "active":
+                continue
             if request.memory_types and result.memory_type:
                 if result.memory_type not in request.memory_types:
                     continue

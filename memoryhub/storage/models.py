@@ -7,7 +7,15 @@ SQLAlchemy ORM 模型定义
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON, Boolean, Column, DateTime, Float, Integer, String, Text, UniqueConstraint,
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase
 
@@ -111,6 +119,21 @@ class KnowledgeRow(Base):
     access_count_30d = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class KnowledgeVersionRow(Base):
+    """Immutable snapshot of a knowledge version before in-place evolution."""
+    __tablename__ = "knowledge_versions"
+    __table_args__ = (
+        UniqueConstraint("memory_id", "version", name="uq_knowledge_versions_memory_version"),
+    )
+
+    snapshot_id = Column(String(96), primary_key=True)
+    memory_id = Column(String(32), nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    version = Column(Integer, nullable=False)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
 
 
 class ConflictRow(Base):

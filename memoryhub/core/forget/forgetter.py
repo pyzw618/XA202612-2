@@ -7,6 +7,7 @@
 """
 
 import re
+import time
 import uuid
 from datetime import datetime
 
@@ -268,19 +269,22 @@ class MemoryForgetter:
         deleted = 0
         self._last_deleted_ids = []
         for memory_id in memory_ids:
-            deleted_this = False
+            pref_deleted = False
+            know_deleted = False
+            fact_deleted = False
             if self.pref_repo is not None:
-                deleted_this = self.pref_repo.update_status(
+                pref_deleted = self.pref_repo.update_status(
                     memory_id, "deleted", user_id=user_id
-                ) or deleted_this
+                )
             if self.know_repo is not None:
-                deleted_this = self.know_repo.update_status(
-                    memory_id, "deleted"
-                ) or deleted_this
-            if self.fact_store is not None:
-                deleted_this = self.fact_store.update_fact_status(
+                know_deleted = self.know_repo.update_status(
                     memory_id, "deleted", user_id=user_id
-                ) or deleted_this
+                )
+            if self.fact_store is not None:
+                fact_deleted = self.fact_store.update_fact_status(
+                    memory_id, "deleted", user_id=user_id
+                )
+            deleted_this = pref_deleted or know_deleted or fact_deleted
             if not deleted_this:
                 continue
             deleted += 1
@@ -297,8 +301,17 @@ class MemoryForgetter:
                     self.evidence_store.delete(memory_id)
                 if self.conflict_repo is not None:
                     self.conflict_repo.delete_for_memories([memory_id])
+                if fact_deleted and hasattr(self.fact_store, "delete_fact_artifacts"):
+                    self.fact_store.delete_fact_artifacts([memory_id], user_id)
                 if self.cache is not None:
                     self.cache.invalidate(memory_id)
+                projection_version = time.time_ns()
+                if pref_deleted and hasattr(self.pref_repo, "mark_indexed"):
+                    self.pref_repo.mark_indexed([memory_id], projection_version)
+                if know_deleted and hasattr(self.know_repo, "mark_indexed"):
+                    self.know_repo.mark_indexed([memory_id], projection_version)
+                if fact_deleted and hasattr(self.fact_store, "mark_indexed"):
+                    self.fact_store.mark_indexed(memory_id, projection_version, user_id)
         if deleted and self.fact_store is not None:
             self.fact_store.prune_orphan_entities(user_id)
         if deleted and cascade:

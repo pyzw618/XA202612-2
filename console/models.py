@@ -92,7 +92,7 @@ class PreferenceMemory:
     user_id: str = ""
     memory_type: str = "preference"
     preference_type: str = ""
-    content: str = ""
+    text: str = ""
     scope: SceneScope = field(default_factory=SceneScope)
     confidence: float = 0.0
     status: str = "active"

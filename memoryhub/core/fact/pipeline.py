@@ -185,6 +185,11 @@ class FactMemoryPipeline:
                 result.reason = f"[等待主Agent裁决] {result.reason}"
 
         self._apply(result)
+        self.store.save_fact_conflict(result)
+        if self.store.get_fact(
+            result.new_fact.fact_id, user_id=result.new_fact.user_id
+        ) is not None:
+            self.store.save_fact_evidence(result.new_fact)
         if getattr(self, "index_service", None) is not None:
             self.index_service.sync_result(result)
         return result

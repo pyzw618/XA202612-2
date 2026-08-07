@@ -219,7 +219,7 @@ class PreferencesPage(BasePage):
             self._set_cell(row, 0, type_text, item["memory_id"])
 
             # 内容
-            self._set_cell(row, 1, item.get("text", item.get("content", "")))
+            self._set_cell(row, 1, item.get("text", ""))
 
             # 置信度（带颜色）
             conf = item.get("confidence", 0)

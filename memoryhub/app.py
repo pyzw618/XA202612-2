@@ -10,6 +10,7 @@ import logging
 import os
 import re
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -58,6 +59,9 @@ def _memory_metadata(memory) -> dict:
         "user_id": memory.user_id,
         "content": _memory_text(memory),
         "confidence": memory.confidence,
+        "status": (
+            memory.status.value if hasattr(memory.status, "value") else str(memory.status)
+        ),
         "scope": scope,
         **fact_fields,
     }
@@ -193,10 +197,19 @@ def create_app(
     ):
         raise ValueError("user_rule_identity_resolver must be callable")
 
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        await startup()
+        try:
+            yield
+        finally:
+            await shutdown()
+
     app = FastAPI(
         title="Kylin-MemoryHub",
         description="面向麒麟 OS Agent 的可插拔本地记忆中枢",
         version="0.1.0",
+        lifespan=lifespan,
     )
     # Runtime services are application-scoped; tests and embedding applications can
     # inject one explicitly, while the normal server path constructs it at startup.
@@ -210,6 +223,7 @@ def create_app(
     app.state.event_ingestion_service = event_ingestion_service
     app.state.extraction_task_repo = None
     app.state.extraction_retry_service = None
+    app.state.extraction_retry_task = None
     app.state.memory_write_service = None
     app.state.fact_pipeline = fact_pipeline
     app.state.fact_store = getattr(fact_pipeline, "store", None)
@@ -244,7 +258,6 @@ def create_app(
     app.include_router(memory_router)
 
     # 注册生命周期
-    @app.on_event("startup")
     async def startup():
         """应用启动时初始化各组件"""
         # ---- 安全模块：用户自定义规则服务 ----
@@ -470,6 +483,19 @@ def create_app(
         )
 
         keyword_search = None
+        if not (config.runtime.is_production or vector_engine is not None):
+            keyword_search = KeywordSearcher()
+            if memories:
+                keyword_search.build_index(
+                    [
+                        (
+                            memory.memory_id,
+                            _memory_text(memory),
+                            json.dumps(_memory_metadata(memory), ensure_ascii=False),
+                        )
+                        for memory in memories
+                    ]
+                )
 
         app.state.db = db
         app.state.pref_repo = pref_repo
@@ -499,6 +525,7 @@ def create_app(
         app.state.fact_pipeline.index_service = app.state.fact_index_service
         for fact in facts:
             app.state.fact_index_service.sync_fact(fact)
+        app.state.fact_index_service.sync_pending()
 
         app.state.memory_write_service = MemoryWriteService(
             pref_repo=pref_repo,
@@ -510,6 +537,7 @@ def create_app(
             search_cache=cache,
             embedding_client=embedding_client,
             evidence_store=app.state.evidence_store,
+            conflict_repo=conflict_repo,
         )
         pref_repo.write_service = app.state.memory_write_service
         know_repo.write_service = app.state.memory_write_service
@@ -528,6 +556,8 @@ def create_app(
             preference_updater=preference_updater,
             knowledge_extractor=knowledge_extractor,
             fact_ingestion_adapter=fact_ingestion_adapter,
+            knowledge_merge_config=config.knowledge_merge,
+            conflict_repo=conflict_repo,
         )
         if (
             app.state.event_ingestion_service is None
@@ -555,6 +585,15 @@ def create_app(
             event_repo=event_repo,
             executor=retry_executor,
         )
+        from memoryhub.core.ingestion.retry_task import ExtractionRetryTask
+
+        app.state.extraction_retry_task = ExtractionRetryTask(
+            app.state.extraction_retry_service,
+            interval_seconds=config.extraction_retry.interval_seconds,
+            batch_size=config.extraction_retry.batch_size,
+            enabled=config.extraction_retry.enabled,
+        )
+        app.state.extraction_retry_task.start()
 
         if config.runtime.is_production or vector_engine is not None:
             # 生产路径：仅装配 MilvusHybridRetriever，不构建 KeywordSearcher / HybridRetriever
@@ -575,18 +614,7 @@ def create_app(
                 "HybridRetriever is only allowed in development/test "
                 "or explicit diagnostic scenarios"
             )
-            keyword_search = KeywordSearcher()
-            if memories:
-                keyword_search.build_index(
-                    [
-                        (
-                            m.memory_id,
-                            _memory_text(m),
-                            json.dumps(_memory_metadata(m), ensure_ascii=False),
-                        )
-                        for m in memories
-                    ]
-                )
+            assert keyword_search is not None
             retriever = HybridRetriever(
                 vector_search=vector_search_adapter,
                 keyword_search=keyword_search,
@@ -598,7 +626,7 @@ def create_app(
                 fact_store=fact_store,
             )
 
-        # 写入同步服务：SQLite 事实源 ↔ Milvus 检索投影
+        # 写入同步服务：SQLite 事实源 ↔ 当前运行时检索投影
         sync_service = MemorySyncService(
             pref_repo=pref_repo,
             know_repo=know_repo,
@@ -608,6 +636,7 @@ def create_app(
             retriever=retriever if isinstance(retriever, MilvusHybridRetriever) else None,
             index_version=index_version,
             config=config,
+            memory_write_service=app.state.memory_write_service,
         )
 
         # 启动时仅同步 pending_index 记录，禁止全量重建
@@ -617,7 +646,8 @@ def create_app(
         compensation_task = PendingIndexCompensationTask(
             sync_service=sync_service,
             interval_seconds=30.0,
-            enabled=vector_engine is not None,
+            enabled=vector_engine is not None or keyword_search is not None,
+            fact_index_service=app.state.fact_index_service,
         )
         compensation_task.start()
 
@@ -632,7 +662,6 @@ def create_app(
         app.state.sync_service = sync_service
         app.state.compensation_task = compensation_task
 
-    @app.on_event("shutdown")
     async def shutdown():
         """应用关闭时释放资源"""
         # 关闭安全模块
@@ -646,6 +675,15 @@ def create_app(
             finally:
                 app.state.user_rule_service = None
                 app.state.owns_user_rule_service = False
+        # 停止抽取重试任务
+        extraction_retry_task = getattr(app.state, "extraction_retry_task", None)
+        if extraction_retry_task is not None:
+            try:
+                extraction_retry_task.stop()
+            except Exception:
+                logger.exception("failed to stop extraction retry task")
+            app.state.extraction_retry_task = None
+
         # 停止 pending_index 补偿任务
         compensation_task = getattr(app.state, "compensation_task", None)
         if compensation_task is not None:

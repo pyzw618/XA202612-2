@@ -1,109 +1,99 @@
-"""
-冲突解决模块
+"""Conflict resolution primitives shared by preference and knowledge flows."""
 
-对检测到的冲突进行自动或手动解决。
-"""
+from __future__ import annotations
 
-from memoryhub.adapter.schemas import (
-    ConflictRecord,
-    ConflictDecision,
-    PreferenceMemory,
-    KnowledgeMemory,
-)
+from copy import deepcopy
+from datetime import datetime, timezone
+
+from memoryhub.adapter.schemas import ConflictDecision, ConflictRecord, MemoryStatus
 
 
 class ConflictResolver:
-    """
-    冲突解决器
+    """Apply deterministic conflict decisions; persistence is optional and owner-scoped."""
 
-    使用方式:
-        resolver = ConflictResolver(llm_client=llm)
-        result = resolver.resolve(conflict, old_memory, new_memory)
-    """
-
-    def __init__(self, llm_client=None):
+    def __init__(self, llm_client=None, *, conflict_repo=None, write_service=None) -> None:
         self.llm_client = llm_client
+        self.conflict_repo = conflict_repo
+        self.write_service = write_service
 
-    def resolve(
-        self, conflict: ConflictRecord, old_memory, new_memory
-    ) -> ConflictRecord:
-        """
-        解决冲突
-
-        数据流:
-            ConflictRecord + 旧记忆 + 新记忆 → resolve
-              → 判断解决策略
-              → 执行对应操作
-              → 更新 ConflictRecord.decision
-
-        参数:
-            conflict: 冲突记录
-            old_memory: 旧记忆（PreferenceMemory 或 KnowledgeMemory）
-            new_memory: 新记忆
-
-        返回:
-            更新后的 ConflictRecord（含 decision 和 reason）
-
-        决策逻辑:
-            1. 用户显式反馈 → override
-            2. 新旧互补 → merge
-            3. 不同场景 → coexist
-            4. 无法自动判断 → pending（需用户确认）
-        """
-        raise NotImplementedError
+    def resolve(self, conflict: ConflictRecord, old_memory, new_memory) -> ConflictRecord:
+        decision = self.auto_resolve(conflict)
+        if decision == ConflictDecision.OVERRIDE:
+            result_id = self.apply_override(conflict.old_memory_id, new_memory)
+        elif decision == ConflictDecision.MERGE:
+            merged = self.apply_merge(old_memory, new_memory)
+            result_id = getattr(merged, "memory_id", "")
+            if result_id and self.write_service is not None:
+                self.write_service.upsert_memory(merged)
+        elif decision == ConflictDecision.COEXIST:
+            _, result_id = self.apply_coexist(old_memory, new_memory)
+        else:
+            result_id = ""
+        conflict.decision = decision
+        conflict.result_memory_id = result_id
+        conflict.resolved_at = None if decision == ConflictDecision.PENDING else datetime.now(timezone.utc)
+        conflict.reason = conflict.reason or f"automatic decision: {decision.value}"
+        if self.conflict_repo is not None:
+            self.conflict_repo.save(conflict)
+        return conflict
 
     def auto_resolve(self, conflict: ConflictRecord) -> ConflictDecision:
-        """
-        自动判断冲突解决策略
-
-        返回:
-            建议的 ConflictDecision
-
-        规则:
-            - 新记忆来源为 explicit_feedback → OVERRIDE
-            - 新旧内容互补（LLM 判断）→ MERGE
-            - scope 不同 → COEXIST
-            - 其他 → PENDING
-        """
-        raise NotImplementedError
+        if conflict.decision != ConflictDecision.PENDING:
+            return conflict.decision
+        if "explicit_feedback" in (conflict.reason or ""):
+            return ConflictDecision.OVERRIDE
+        if conflict.memory_type == "knowledge" and conflict.conflict_field == "semantic_equivalence":
+            return ConflictDecision.MERGE
+        if "scope" not in (conflict.conflict_field or "") and conflict.old_content and conflict.new_content:
+            return ConflictDecision.OVERRIDE
+        return ConflictDecision.PENDING
 
     def apply_override(self, old_id: str, new_memory) -> str:
-        """
-        执行覆盖操作：新记忆替代旧记忆
-
-        返回:
-            新记忆的 ID
-        """
-        raise NotImplementedError
+        if self.write_service is not None and old_id:
+            repo = (
+                getattr(self.write_service, "pref_repo", None)
+                if getattr(new_memory, "memory_type", "") == "preference"
+                else getattr(self.write_service, "know_repo", None)
+            )
+            old = repo.get_by_id(old_id) if repo is not None else None
+            if old is not None:
+                old.status = MemoryStatus.ARCHIVED
+                self.write_service.upsert_memory(old)
+        if self.write_service is not None:
+            self.write_service.upsert_memory(new_memory)
+        return new_memory.memory_id
 
     def apply_merge(self, old_memory, new_memory):
-        """
-        执行合并操作：将新旧记忆合并
-
-        返回:
-            合并后的记忆
-        """
-        raise NotImplementedError
+        merged = deepcopy(new_memory)
+        merged.memory_id = new_memory.memory_id
+        merged.parent_id = old_memory.memory_id
+        merged.root_id = getattr(old_memory, "root_id", "") or old_memory.memory_id
+        merged.version = max(1, getattr(old_memory, "version", 1)) + 1
+        if hasattr(old_memory, "evidences"):
+            merged.evidences = [*getattr(old_memory, "evidences", []), *getattr(new_memory, "evidences", [])]
+        merged.status = MemoryStatus.ACTIVE
+        merged.updated_at = datetime.now(timezone.utc)
+        return merged
 
     def apply_coexist(self, old_memory, new_memory) -> tuple[str, str]:
-        """
-        执行并存操作：新旧记忆按不同 scope 同时保留
+        if self.write_service is not None:
+            self.write_service.upsert_memory(old_memory)
+            self.write_service.upsert_memory(new_memory)
+        return old_memory.memory_id, new_memory.memory_id
 
-        返回:
-            (old_id, new_id)
-        """
-        raise NotImplementedError
-
-    def manual_resolve(self, conflict_id: str, decision: ConflictDecision, reason: str) -> ConflictRecord:
-        """
-        手动解决冲突（用户确认后调用）
-
-        参数:
-            conflict_id: 冲突 ID
-            decision: 用户选择的决策
-            reason: 原因说明
-
-        返回:
-            更新后的 ConflictRecord
-        """
-        raise NotImplementedError
+    def manual_resolve(
+        self, conflict_id: str, decision: ConflictDecision, reason: str
+    ) -> ConflictRecord:
+        if self.conflict_repo is None:
+            raise RuntimeError("conflict repository is not configured")
+        pending = next(
+            (item for item in self.conflict_repo.list_all(status="pending") if item.conflict_id == conflict_id),
+            None,
+        )
+        if pending is None:
+            raise KeyError(conflict_id)
+        pending.decision = decision
+        pending.reason = reason
+        pending.resolved_at = datetime.now(timezone.utc)
+        self.conflict_repo.save(pending)
+        return pending

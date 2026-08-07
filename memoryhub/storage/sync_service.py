@@ -74,6 +74,7 @@ class MemorySyncService:
         retriever: MilvusHybridRetriever | None = None,
         index_version: int = 1,
         config: AppConfig | None = None,
+        memory_write_service=None,
     ):
         """
         参数:
@@ -94,6 +95,7 @@ class MemorySyncService:
         self.retriever = retriever
         self.index_version = index_version
         self.config = config
+        self.memory_write_service = memory_write_service
 
     # ---- 公开接口 ----
 
@@ -112,6 +114,18 @@ class MemorySyncService:
             (sqlite_success, memory_id)
         """
         memory_id = memory.memory_id
+        if self.memory_write_service is not None:
+            try:
+                self.memory_write_service.upsert_memory(memory)
+                self.index_version = time.time_ns()
+                self._mark_indexed([memory_id], version=self.index_version)
+                self._bump_retriever_version()
+                self._invalidate_cache_for(memory_id)
+                return True, memory_id
+            except Exception:
+                logger.exception("unified memory write failed for %s", memory_id)
+                return False, memory_id
+
         try:
             self._save_to_sqlite(memory)
         except Exception:
@@ -140,101 +154,67 @@ class MemorySyncService:
         self._invalidate_cache_for(memory_id)
         return True, memory_id
 
-    def delete_memory(self, memory_id: str) -> bool:
-        """
-        删除/遗忘单条记忆。
-
-        流程:
-            1. 先在 SQLite 中标记 status='deleted'
-            2. 从 Milvus 删除向量记录
-            3. 失效检索缓存
-        """
-        sqlite_ok = self._mark_deleted_in_sqlite(memory_id)
+    def delete_memory(self, memory_id: str, user_id: str = "") -> bool:
+        """Soft-delete an owned memory and synchronize deletion to runtime indexes."""
+        sqlite_ok = self._mark_deleted_in_sqlite(memory_id, user_id=user_id)
         if not sqlite_ok:
             logger.warning("sqlite soft-delete failed for memory %s", memory_id)
             return False
-
-        if self.vector_engine is not None:
-            try:
-                self.vector_engine.delete(memory_id)
-            except Exception:
-                logger.exception("vector engine delete failed for memory %s", memory_id)
-                # SQLite 已标记删除，向量删除失败会在下次补偿或启动时重试
-                # （Milvus 侧可由Milvus根据主键幂等删除，重复删除无害）
-
-        self._invalidate_cache_for(memory_id)
-        return True
+        memory = self.pref_repo.get_by_id(memory_id) or self.know_repo.get_by_id(memory_id)
+        try:
+            if self.memory_write_service is not None and memory is not None:
+                self.memory_write_service.sync_memory(memory)
+            elif not self._delete_from_vector_engine(memory_id):
+                return False
+            self.index_version = time.time_ns()
+            self._mark_indexed([memory_id], version=self.index_version)
+            self._bump_retriever_version()
+            self._invalidate_cache_for(memory_id)
+            return True
+        except Exception:
+            logger.exception(
+                "runtime index delete failed for memory %s; leaving pending_index=True",
+                memory_id,
+            )
+            return False
 
     def sync_pending(self) -> SyncResult:
-        """
-        扫描 SQLite 中的 pending_index 记录，补偿同步到 Milvus。
-
-        返回:
-            SyncResult，包含成功、失败的 memory_id 列表
-        """
+        """Synchronize pending records: active memories are upserted, inactive ones deleted."""
         start = time.perf_counter()
         result = SyncResult()
-
         pending = [*self.pref_repo.list_pending(), *self.know_repo.list_pending()]
         if not pending:
             result.duration_ms = (time.perf_counter() - start) * 1000
             return result
 
-        # 新写入导致索引版本变化；同步成功后统一使用该版本号
-        self.index_version += 1
-        current_version = self.index_version
-
-        # 批量 upsert 以提高效率
-        batch_items = []
-        memory_map: dict[str, PreferenceMemory | KnowledgeMemory] = {}
+        current_version = time.time_ns()
         for memory in pending:
-            text = self._memory_text(memory)
+            memory_id = memory.memory_id
+            status = memory.status.value if hasattr(memory.status, "value") else str(memory.status)
             try:
-                vector = self.embedding_client.embed(text)
+                if self.memory_write_service is not None:
+                    self.memory_write_service.sync_memory(memory)
+                    synchronized = True
+                elif status == "active":
+                    synchronized = self._upsert_to_vector_engine(memory)
+                else:
+                    synchronized = self._delete_from_vector_engine(memory_id)
+                if not synchronized:
+                    result.failed.append(memory_id)
+                    continue
+                self._mark_indexed([memory_id], version=current_version)
+                self._invalidate_cache_for(memory_id)
+                result.succeeded.append(memory_id)
             except Exception:
-                logger.exception("embedding failed for pending memory %s", memory.memory_id)
-                result.failed.append(memory.memory_id)
-                continue
-            batch_items.append(
-                (
-                    memory.memory_id,
-                    text,
-                    vector,
-                    self._memory_metadata(memory),
-                )
-            )
-            memory_map[memory.memory_id] = memory
+                logger.exception("pending projection sync failed for memory %s", memory_id)
+                result.failed.append(memory_id)
 
-        if not batch_items:
-            result.duration_ms = (time.perf_counter() - start) * 1000
-            return result
-
-        failed_ids: list[str] = []
-        if self.vector_engine is not None:
-            try:
-                failed_ids = self.vector_engine.upsert_batch(batch_items)
-            except Exception:
-                logger.exception("vector engine upsert_batch failed")
-                failed_ids = [item[0] for item in batch_items]
-        else:
-            failed_ids = [item[0] for item in batch_items]
-
-        succeeded_ids = [m_id for m_id in memory_map if m_id not in failed_ids]
-        if succeeded_ids:
-            self._mark_indexed(succeeded_ids, version=current_version)
-            for m_id in succeeded_ids:
-                self._invalidate_cache_for(m_id)
-                result.succeeded.append(m_id)
-
-        for m_id in failed_ids:
-            result.failed.append(m_id)
-
-        # 更新 retriever 的索引版本号，使旧版本缓存自然失效
-        self._bump_retriever_version()
-
+        if result.succeeded:
+            self.index_version = current_version
+            self._bump_retriever_version()
         result.duration_ms = (time.perf_counter() - start) * 1000
         logger.info(
-            "pending_index sync completed: succeeded=%d failed=%d duration_ms=%.2f",
+            "pending projection sync completed: succeeded=%d failed=%d duration_ms=%.2f",
             len(result.succeeded),
             len(result.failed),
             result.duration_ms,
@@ -303,14 +283,29 @@ class MemorySyncService:
             # 这里保留 pending_index=True，让补偿任务下次重试
             raise
 
-    def _mark_deleted_in_sqlite(self, memory_id: str) -> bool:
-        """在 SQLite 中软删除记忆。"""
+    def _mark_deleted_in_sqlite(self, memory_id: str, user_id: str = "") -> bool:
+        """Mark an owned memory deleted and pending runtime-index deletion."""
         try:
-            self.pref_repo.update_status(memory_id, "deleted")
-            self.know_repo.update_status(memory_id, "deleted")
-            return True
+            pref_deleted = self.pref_repo.update_status(
+                memory_id, "deleted", user_id=user_id
+            )
+            know_deleted = self.know_repo.update_status(
+                memory_id, "deleted", user_id=user_id
+            )
+            return pref_deleted or know_deleted
         except Exception:
             logger.exception("sqlite soft-delete failed for memory %s", memory_id)
+            return False
+
+    def _delete_from_vector_engine(self, memory_id: str) -> bool:
+        """Delete a vector projection; failure leaves the SQLite record pending."""
+        if self.vector_engine is None:
+            return False
+        try:
+            self.vector_engine.delete(memory_id)
+            return True
+        except Exception:
+            logger.exception("vector engine delete failed for memory %s", memory_id)
             return False
 
     def _invalidate_cache_for(self, memory_id: str) -> None:
@@ -331,17 +326,14 @@ class MemorySyncService:
 
     @staticmethod
     def _memory_text(memory: PreferenceMemory | KnowledgeMemory) -> str:
-        """用于建索引的记忆文本。"""
-        if memory.memory_type == "knowledge":
-            return f"{memory.name} {memory.content}".strip()
-        return memory.text
+        """Build index text with the same contract as the main write path."""
+        from memoryhub.core.memory_write import MemoryWriteService
+
+        return MemoryWriteService.index_text(memory)
 
     @staticmethod
     def _memory_metadata(memory: PreferenceMemory | KnowledgeMemory) -> dict:
-        """检索过滤所需的元数据。"""
-        return {
-            "memory_type": memory.memory_type,
-            "content": MemorySyncService._memory_text(memory),
-            "confidence": memory.confidence,
-            "scope": memory.scope.model_dump(),
-        }
+        """Build owner- and lifecycle-aware retrieval metadata."""
+        from memoryhub.core.memory_write import MemoryWriteService
+
+        return MemoryWriteService.index_metadata(memory)

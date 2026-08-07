@@ -25,6 +25,10 @@ from memoryhub.adapter.schemas import (
     SourceType,
     ToolCallStatus,
 )
+from memoryhub.core.knowledge.confidence import (
+    KnowledgeConfidenceCalculator,
+    KnowledgeConfidenceFactors,
+)
 from memoryhub.core.knowledge.template_builder import TemplateBuilder
 
 
@@ -58,12 +62,12 @@ class KnowledgeExtractor:
     def __init__(self, llm_client=None, template_builder: TemplateBuilder | None = None):
         self.llm_client = llm_client
         self.template_builder = template_builder or TemplateBuilder(llm_client=llm_client)
+        self.confidence_calculator = KnowledgeConfidenceCalculator()
         self._min_steps_rule = 2
 
     def extract_from_trajectory(self, events: list[MemoryEvent | dict]) -> list[KnowledgeMemory]:
-        prepared = self._prepare_events(events)
-        trajectory = self._select_trajectory_events(prepared)
-        if not trajectory or not self._trajectory_complete(trajectory):
+        trajectory = self._prepare_trajectory(events)
+        if not trajectory:
             return []
 
         knowledge_items: list[KnowledgeMemory] = []
@@ -78,16 +82,12 @@ class KnowledgeExtractor:
         return knowledge_items
 
     def extract_workflow(self, events: list[MemoryEvent | dict]) -> KnowledgeMemory | None:
-        trajectory = self._select_trajectory_events(self._prepare_events(events))
-        if not trajectory or not self._trajectory_complete(trajectory):
-            return None
-        return self._build_workflow(trajectory)
+        trajectory = self._prepare_trajectory(events)
+        return self._build_workflow(trajectory) if trajectory else None
 
     def extract_case(self, events: list[MemoryEvent | dict]) -> KnowledgeMemory | None:
-        trajectory = self._select_trajectory_events(self._prepare_events(events))
-        if not trajectory or not self._trajectory_complete(trajectory):
-            return None
-        return self._build_case(trajectory)
+        trajectory = self._prepare_trajectory(events)
+        return self._build_case(trajectory) if trajectory else None
 
     def extract_template(self, events: list[MemoryEvent | dict]) -> KnowledgeMemory | None:
         case = self.extract_case(events)
@@ -102,9 +102,15 @@ class KnowledgeExtractor:
         tools = self._extract_tool_chain(events)
         first_event = events[0]
         goal = self._identify_task_goal(events)
-        avg_quality = sum(self._event_quality_score(event) for event in events) / len(events)
-        structure = min(1.0, 0.55 + 0.1 * len(steps) + 0.05 * len(tools))
-        confidence = round(min(0.95, avg_quality * structure), 4)
+        evidences = self._build_evidences(events)
+        confidence = self._knowledge_confidence(
+            events,
+            steps=steps,
+            tools=tools,
+            result=self._extract_result(events),
+            evidences=evidences,
+            kind="workflow",
+        )
         return KnowledgeMemory(
             user_id=self._get_event_field(first_event, "user_id", "default"),
             knowledge_type=KnowledgeType.WORKFLOW,
@@ -118,7 +124,7 @@ class KnowledgeExtractor:
             total_count=1,
             status=MemoryStatus.ACTIVE,
             level=MemoryLevel.MID,
-            evidences=self._build_evidences(events),
+            evidences=evidences,
         )
 
     def _build_case(self, events: list[MemoryEvent | dict]) -> KnowledgeMemory | None:
@@ -129,9 +135,15 @@ class KnowledgeExtractor:
             return None
         first_event = events[0]
         goal = self._identify_task_goal(events)
-        avg_quality = sum(self._event_quality_score(event) for event in events) / len(events)
-        completeness = min(1.0, 0.6 + 0.08 * len(steps) + 0.04 * len(tools))
-        confidence = round(min(0.95, avg_quality * completeness), 4)
+        evidences = self._build_evidences(events)
+        confidence = self._knowledge_confidence(
+            events,
+            steps=steps,
+            tools=tools,
+            result=result,
+            evidences=evidences,
+            kind="case",
+        )
         content = (
             f"任务目标：「{goal}」；执行步骤："
             f"{', '.join(steps) if steps else '无'}；最终结果：{result}。"
@@ -149,22 +161,61 @@ class KnowledgeExtractor:
             total_count=1,
             status=MemoryStatus.ACTIVE,
             level=MemoryLevel.MID,
-            evidences=self._build_evidences(events),
+            evidences=evidences,
         )
 
+    def _prepare_trajectory(
+        self, events: list[MemoryEvent | dict]
+    ) -> list[MemoryEvent | dict]:
+        prepared = self._prepare_events(events)
+        trajectory = self._select_trajectory_events(prepared)
+        if not trajectory:
+            return []
+        if self._should_llm_enrich(trajectory):
+            trajectory = self._llm_enrich_trajectory(trajectory)
+        return trajectory if self._trajectory_complete(trajectory) else []
+
     def _prepare_events(self, events: list[MemoryEvent | dict]) -> list[MemoryEvent | dict]:
-        normalized = [self._coerce_event(event) for event in events]
-        valid = [
-            event
-            for event in normalized
-            if event is not None and self._event_quality_score(event) >= 0.3
-        ]
-        return sorted(valid, key=self._event_sort_key)
+        deduplicated: dict[str, MemoryEvent | dict] = {}
+        anonymous: list[MemoryEvent | dict] = []
+        for raw_event in events:
+            event = self._coerce_event(raw_event)
+            if event is None or self._event_quality_score(event) < 0.3:
+                continue
+            event_id = self._get_event_field(event, "event_id", "")
+            if not event_id:
+                anonymous.append(event)
+                continue
+            current = deduplicated.get(event_id)
+            if (
+                current is None
+                or self._event_quality_score(event) > self._event_quality_score(current)
+            ):
+                deduplicated[event_id] = event
+        return sorted([*deduplicated.values(), *anonymous], key=self._event_sort_key)
 
     def _select_trajectory_events(
         self, events: list[MemoryEvent | dict]
     ) -> list[MemoryEvent | dict]:
-        return [event for event in events if self._is_knowledge_signal(event)]
+        signals = [event for event in events if self._is_knowledge_signal(event)]
+        if not signals:
+            return []
+        groups: dict[tuple[str, str, str], list[MemoryEvent | dict]] = {}
+        for event in signals:
+            key = (
+                self._get_event_field(event, "user_id", "default"),
+                self._get_event_field(event, "session_id", ""),
+                self._get_event_field(event, "task_type", ""),
+            )
+            groups.setdefault(key, []).append(event)
+        return max(
+            groups.values(),
+            key=lambda group: (
+                len(group),
+                sum(self._event_quality_score(event) for event in group),
+                self._event_sort_key(group[-1]),
+            ),
+        )
 
     def _is_knowledge_signal(self, event: MemoryEvent | dict) -> bool:
         event_type = self._get_event_type(event)
@@ -281,9 +332,10 @@ class KnowledgeExtractor:
     @staticmethod
     def _append_unique(target: list[str], seen: set[str], value: str) -> None:
         cleaned = value.strip()
-        if cleaned and len(cleaned) >= 2 and cleaned not in seen:
+        key = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", "", cleaned.lower())
+        if cleaned and len(cleaned) >= 2 and key and key not in seen:
             target.append(cleaned)
-            seen.add(cleaned)
+            seen.add(key)
 
     @staticmethod
     def _normalize_step(step: str) -> str:
@@ -310,6 +362,56 @@ class KnowledgeExtractor:
         if isinstance(value, str):
             return value.strip()
         return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)[:500]
+
+    def _knowledge_confidence(
+        self,
+        events: list[MemoryEvent | dict],
+        *,
+        steps: list[str],
+        tools: list[str],
+        result: str,
+        evidences: list[Evidence],
+        kind: str,
+    ) -> float:
+        qualities = [self._event_quality_score(event) for event in events]
+        average_quality = sum(qualities) / len(qualities)
+        event_quality = 0.7 * average_quality + 0.3 * min(qualities)
+        explicit_completion = any(
+            self._contains_marker(
+                str(self._event_content(event).get(key, "")).lower(),
+                self._SUCCESS_MARKERS,
+            )
+            for event in events
+            for key in ("status", "state", "outcome", "result_status")
+        )
+        completion = 1.0 if explicit_completion else 0.82
+        expected_steps = 3 if kind == "workflow" else 2
+        structure = min(1.0, 0.35 + 0.14 * min(len(steps), expected_steps + 2) + 0.05 * len(tools))
+        unique_events = {item.event_id for item in evidences if item.event_id}
+        source_types = {str(item.source_type) for item in evidences}
+        evidence = min(1.0, 0.25 + 0.18 * len(unique_events) + 0.08 * len(source_types))
+        all_calls = [
+            call
+            for event in events
+            for call in self._iter_tool_calls(event, usable_only=False)
+        ]
+        usable_calls = [
+            call
+            for event in events
+            for call in self._iter_tool_calls(event, usable_only=True)
+        ]
+        consistency = len(usable_calls) / len(all_calls) if all_calls else 0.9
+        outcome = 1.0 if result else (0.78 if kind == "workflow" else 0.55)
+        return self.confidence_calculator.score(
+            KnowledgeConfidenceFactors(
+                event_quality=event_quality,
+                completion=completion,
+                structure=structure,
+                evidence=evidence,
+                outcome=outcome,
+                consistency=consistency,
+            )
+        )
 
     def _build_evidences(self, events: list[MemoryEvent | dict]) -> list[Evidence]:
         evidences: list[Evidence] = []
@@ -351,6 +453,75 @@ class KnowledgeExtractor:
                 )
             )
         return evidences
+
+    def _should_llm_enrich(self, events: list[MemoryEvent | dict]) -> bool:
+        """Use one structured LLM pass only when the trajectory is underspecified."""
+        if not self._llm_available():
+            return False
+        steps = self._extract_steps_from_payload(events)
+        has_goal = any(
+            self._event_content(event).get(key)
+            for event in events
+            for key in ("task_name", "goal", "title")
+        )
+        has_result = bool(self._extract_result(events))
+        return len(steps) < self._min_steps_rule or not has_goal or not has_result
+
+    def _extract_steps_from_payload(self, events: list[MemoryEvent | dict]) -> list[str]:
+        steps: list[str] = []
+        for event in events:
+            raw_steps = self._event_content(event).get("steps") or []
+            if isinstance(raw_steps, list):
+                steps.extend(str(step).strip() for step in raw_steps if str(step).strip())
+        return steps
+
+    def _llm_enrich_trajectory(
+        self, events: list[MemoryEvent | dict]
+    ) -> list[MemoryEvent | dict]:
+        summaries = [
+            f"{self._get_event_type(event)}: "
+            f"{json.dumps(self._event_content(event), ensure_ascii=False, default=str)[:240]}"
+            for event in events[:20]
+        ]
+        prompt = (
+            "Complete reusable knowledge from these gate-approved task events. "
+            "Return JSON only with goal, steps, tools, and result. "
+            "Use empty values when evidence is insufficient and do not invent facts.\n"
+            + "\n".join(summaries)
+        )
+        try:
+            result = self.llm_client.generate_json(
+                prompt=prompt,
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "goal": {"type": "string"},
+                        "steps": {"type": "array", "items": {"type": "string"}},
+                        "tools": {"type": "array", "items": {"type": "string"}},
+                        "result": {"type": "string"},
+                    },
+                },
+                system_prompt="You strictly structure task trajectories into reusable knowledge.",
+            )
+        except Exception:
+            raise KnowledgeExtractionError("knowledge.enrichment_llm_failed") from None
+        if not isinstance(result, dict):
+            raise KnowledgeExtractionError("knowledge.enrichment_invalid")
+        enriched = dict(self._event_content(events[0]))
+        if result.get("goal"):
+            enriched.setdefault("task_name", str(result["goal"]).strip())
+        for field in ("steps", "tools"):
+            values = result.get(field)
+            if isinstance(values, list) and values:
+                enriched[field] = [str(value).strip() for value in values if str(value).strip()]
+        if result.get("result"):
+            enriched["result"] = str(result["result"]).strip()
+        if isinstance(events[0], MemoryEvent):
+            updated = events[0].model_copy(update={"payload": enriched})
+        else:
+            updated = dict(events[0])
+            updated["payload"] = enriched
+        return [updated, *events[1:]]
 
     def _llm_summarize_goal(self, events: list[MemoryEvent | dict]) -> str | None:
         summaries = [
