@@ -198,6 +198,26 @@ def create_app(
     app.include_router(memory_router)
     app.include_router(agent_router)
 
+    @app.get("/api/health", tags=["system"])
+    async def health():
+        """Return a minimal readiness signal without exposing local configuration."""
+        required_services = ("event_repo", "retriever", "event_processor", "fact_pipeline")
+        missing = [name for name in required_services if getattr(app.state, name, None) is None]
+        if missing:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "unavailable",
+                    "service": "Kylin-MemoryHub",
+                    "version": app.version,
+                },
+            )
+        return {
+            "status": "ok",
+            "service": "Kylin-MemoryHub",
+            "version": app.version,
+        }
+
     # 注册生命周期
     @app.on_event("startup")
     async def startup():

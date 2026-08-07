@@ -12,7 +12,7 @@ let uiOrigin = developmentUrl;
 async function getBackendStatus() {
   const startedAt = Date.now();
   try {
-    const response = await fetch(`${backendUrl}/openapi.json`, {
+    const response = await fetch(`${backendUrl}/api/health`, {
       cache: "no-store",
       signal: AbortSignal.timeout(2500),
     });

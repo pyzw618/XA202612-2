@@ -114,6 +114,7 @@ python -m uvicorn memoryhub.app:app --reload --host 127.0.0.1 --port 8000
 后端启动后访问：
 
 - Swagger API 文档：<http://127.0.0.1:8000/docs>
+- 服务健康检查：<http://127.0.0.1:8000/api/health>
 - OpenAPI JSON：<http://127.0.0.1:8000/openapi.json>
 
 开发演示默认使用 `config.yaml` 和 Mock Embedding，不需要配置大模型 API Key。运行数据会写入 `data/` 目录。

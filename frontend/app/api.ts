@@ -26,7 +26,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const memoryApi = {
   health: async () => {
-    const response = await fetch(`${API_BASE}/openapi.json`, { cache: "no-store" });
+    const response = await fetch(`${API_BASE}/api/health`, { cache: "no-store" });
     if (!response.ok) throw new ApiError("MemoryHub 后端未连接", response.status);
     return true;
   },

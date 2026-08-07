@@ -61,6 +61,17 @@ def _event() -> dict:
     }
 
 
+def test_health_endpoint_is_minimal_and_ready(client):
+    test_client, _ = client
+    response = test_client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "service": "Kylin-MemoryHub",
+        "version": "0.1.0",
+    }
+
+
 def _propose(client: TestClient, object_text: str) -> str:
     response = client.post(
         "/api/memory/facts/propose",
