@@ -1,0 +1,104 @@
+{
+  "pipeline": {
+    "safety_action": "mask",
+    "finding_count": 2,
+    "findings": [
+      {
+        "rule_name": "phone",
+        "level": "medium",
+        "field_path": "/text",
+        "action": "mask"
+      },
+      {
+        "rule_name": "phone",
+        "level": "medium",
+        "field_path": "/tool_calls/1/result/events/0/owner_phone",
+        "action": "mask"
+      }
+    ]
+  },
+  "event": {
+    "event_id": "evt_real_ingestion_001",
+    "source_type": "tool_result",
+    "event_type": "agent_response",
+    "user_id": "demo-user",
+    "session_id": "session-weekly-report-001",
+    "turn_id": "turn-007",
+    "scene": "office",
+    "task_type": "office.weekly_report",
+    "occurred_at": "2026-08-08T08:30:00Z",
+    "text": "已根据项目资料生成周报。如需确认，请联系项目负责人 [REDACTED_PHONE]。",
+    "payload": {
+      "metadata": {
+        "device": "Kylin-V11",
+        "provider_trace_id": "trace-real-001"
+      },
+      "response_status": "completed",
+      "source_app": "os_agent"
+    },
+    "tool_calls": [
+      {
+        "call_id": "tool-call-001",
+        "tool_name": "file_search",
+        "arguments": {
+          "query": "MemoryHub 项目进展"
+        },
+        "result": {
+          "count": 1,
+          "files": [
+            "project_notes.md"
+          ]
+        },
+        "status": "success",
+        "sequence": 1,
+        "error": ""
+      },
+      {
+        "call_id": "tool-call-002",
+        "tool_name": "calendar_read",
+        "arguments": {
+          "range": "this_week"
+        },
+        "result": {
+          "events": [
+            {
+              "owner_phone": "[REDACTED_PHONE]",
+              "title": "Agent 接入联调"
+            }
+          ]
+        },
+        "status": "success",
+        "sequence": 2,
+        "error": ""
+      },
+      {
+        "call_id": "tool-call-003",
+        "tool_name": "report_writer",
+        "arguments": {
+          "filename": "weekly_report.md"
+        },
+        "result": {
+          "characters": 286,
+          "path": "outputs/weekly_report.md"
+        },
+        "status": "success",
+        "sequence": 3,
+        "error": ""
+      }
+    ],
+    "schema_version": "1.1",
+    "source_hash": "d8391375965bc995a2783999e04d39c9f0b1cde21b86fcf5ca127a0881456c7f",
+    "redactions": [
+      "phone"
+    ],
+    "quality": {
+      "score": 1.0,
+      "status": "accepted",
+      "completeness": 1.0,
+      "validity": 1.0,
+      "consistency": 1.0,
+      "freshness": 1.0,
+      "issues": []
+    }
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "event_id": "evt_real_ingestion_001",
+  "source": "os_agent",
+  "event_type": "agent_response",
+  "user_id": "  demo-user  ",
+  "task_id": "  session-weekly-report-001  ",
+  "turn_id": "  turn-007  ",
+  "scene": "  OFFICE  ",
+  "task_type": "  weekly_report  ",
+  "timestamp": "2026-08-08T16:30:00+08:00",
+  "content": {
+    "answer": "  已根据项目资料生成周报。如需确认，请联系项目负责人 13800138000。  ",
+    "response_status": "completed",
+    "tool_calls": [
+      {
+        "id": "tool-call-001",
+        "name": "file_search",
+        "input": {
+          "query": "  MemoryHub 项目进展  "
+        },
+        "output": {
+          "files": [
+            "project_notes.md"
+          ],
+          "count": 1
+        },
+        "status": "ok"
+      },
+      {
+        "id": "tool-call-002",
+        "name": "calendar_read",
+        "input": {
+          "range": "  this_week  "
+        },
+        "output": {
+          "events": [
+            {
+              "title": "Agent 接入联调",
+              "owner_phone": "13800138000"
+            }
+          ]
+        },
+        "status": "completed"
+      },
+      {
+        "id": "tool-call-003",
+        "name": "report_writer",
+        "input": {
+          "filename": "  weekly_report.md  "
+        },
+        "output": {
+          "path": "outputs/weekly_report.md",
+          "characters": 286
+        },
+        "status": "success"
+      }
+    ]
+  },
+  "metadata": {
+    "device": "  Kylin-V11  ",
+    "provider_trace_id": "  trace-real-001  ",
+    "unused": null
+  },
+  "debug": true,
+  "_debug_dump": "must be removed"
+}
