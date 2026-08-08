@@ -4,24 +4,35 @@ REST API 路由定义 — Memory Adapter 标准接口
 所有接口均通过 FastAPI 路由暴露，供 OS Agent 或前端调用。
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from memoryhub.adapter.schemas import (
+    ConflictRecord,
+    EvalReport,
+    FeedbackRequest,
+    ForgetRecord,
     ForgetRequest,
     ForgetResponse,
-    FeedbackRequest,
+    KnowledgeMemory,
+    MemoryContextResponse,
+    PreferenceMemory,
     SearchRequest,
     SearchResponse,
     WriteEventRequest,
     WriteEventResponse,
-    PreferenceMemory,
-    KnowledgeMemory,
-    ConflictRecord,
-    ForgetRecord,
-    EvalReport,
 )
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
+
+
+def _service(request: Request):
+    return request.app.state.memory_service
+
+
+@router.get("/health")
+async def health(request: Request):
+    """检查 API 和 SQLite 存储是否可用。"""
+    return _service(request).health()
 
 
 # ============================================================
@@ -29,7 +40,7 @@ router = APIRouter(prefix="/api/memory", tags=["memory"])
 # ============================================================
 
 @router.post("/events", response_model=WriteEventResponse)
-async def write_events(req: WriteEventRequest):
+async def write_events(req: WriteEventRequest, request: Request):
     """
     写入多源事件数据
 
@@ -44,7 +55,7 @@ async def write_events(req: WriteEventRequest):
         rejected: 被拒绝的事件数（质量/安全过滤）
         event_ids: 接受的事件 ID 列表
     """
-    raise NotImplementedError
+    return _service(request).write_events(req)
 
 
 # ============================================================
@@ -52,7 +63,7 @@ async def write_events(req: WriteEventRequest):
 # ============================================================
 
 @router.post("/search", response_model=SearchResponse)
-async def search_memory(req: SearchRequest):
+async def search_memory(req: SearchRequest, request: Request):
     """
     混合检索偏好与知识记忆
 
@@ -72,11 +83,11 @@ async def search_memory(req: SearchRequest):
         knowledge: 匹配的知识记忆列表
         latency_ms: 检索耗时
     """
-    raise NotImplementedError
+    return _service(request).search(req)
 
 
-@router.post("/context")
-async def get_memory_context(req: SearchRequest):
+@router.post("/context", response_model=MemoryContextResponse)
+async def get_memory_context(req: SearchRequest, request: Request):
     """
     获取可直接拼接进 Agent 上下文的记忆摘要
 
@@ -85,7 +96,8 @@ async def get_memory_context(req: SearchRequest):
     数据流: OS Agent → get_memory_context → search_memory
             → 格式化为上下文文本 → 返回
     """
-    raise NotImplementedError
+    context, search = _service(request).context(req)
+    return MemoryContextResponse(context=context, search=search)
 
 
 # ============================================================
@@ -94,12 +106,13 @@ async def get_memory_context(req: SearchRequest):
 
 @router.get("/preferences", response_model=list[PreferenceMemory])
 async def list_preferences(
+    request: Request,
     user_id: str = "default",
     scene: str = "",
     status: str = "active",
 ):
     """列出偏好记忆，支持按场景和状态过滤"""
-    raise NotImplementedError
+    return _service(request).list_preferences(user_id, scene, status)
 
 
 @router.get("/preferences/{memory_id}", response_model=PreferenceMemory)

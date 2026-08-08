@@ -1,10 +1,13 @@
 """全局配置管理"""
 
 import math
+import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
+
+from dotenv import load_dotenv
 
 from memoryhub.adapter.schemas import (
     SafetyPolicy,
@@ -309,4 +312,23 @@ class AppConfig:
 
 def load_config() -> AppConfig:
     """加载配置，优先从环境变量/配置文件读取"""
-    return AppConfig()
+    load_dotenv()
+    return AppConfig(
+        storage=StorageConfig(
+            db_path=os.getenv(
+                "MEMORYHUB_DB_PATH",
+                os.getenv("DB_PATH", "data/memoryhub.db"),
+            ),
+            vector_index_path=os.getenv(
+                "MEMORYHUB_VECTOR_INDEX_PATH",
+                os.getenv("VECTOR_INDEX_PATH", "data/vector_index"),
+            ),
+            evidence_path=os.getenv(
+                "MEMORYHUB_EVIDENCE_PATH",
+                os.getenv("EVIDENCE_PATH", "data/evidence"),
+            ),
+            cache_max_size=int(os.getenv("MEMORYHUB_CACHE_MAX_SIZE", "1000")),
+        ),
+        debug=os.getenv("MEMORYHUB_DEBUG", os.getenv("DEBUG", "false")).lower()
+        in {"1", "true", "yes"},
+    )

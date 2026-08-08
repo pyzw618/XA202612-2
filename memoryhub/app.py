@@ -5,6 +5,7 @@ FastAPI 应用入口
 """
 
 import re
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -14,8 +15,8 @@ from pydantic import BaseModel
 
 from memoryhub.adapter import schemas as adapter_schemas
 from memoryhub.adapter.api import router as memory_router
+from memoryhub.adapter.service import MemoryService
 from memoryhub.config import AppConfig, load_config
-
 
 _SAFE_ERROR_TYPE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 _SAFE_LOCATION_SEGMENTS = frozenset(
@@ -50,8 +51,6 @@ def _safe_validation_errors(exc: RequestValidationError) -> list[dict[str, objec
                 location.append("<field>")
         projected.append({"type": error_type, "loc": location})
     return projected
-
-
 def create_app(config: AppConfig | None = None) -> FastAPI:
     """
     创建 FastAPI 应用
@@ -72,10 +71,21 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     if config is None:
         config = load_config()
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        service = MemoryService(config.storage.db_path)
+        service.start()
+        app.state.memory_service = service
+        try:
+            yield
+        finally:
+            service.close()
+
     app = FastAPI(
         title="Kylin-MemoryHub",
         description="面向麒麟 OS Agent 的可插拔本地记忆中枢",
         version="0.1.0",
+        lifespan=lifespan,
     )
 
     @app.exception_handler(RequestValidationError)
@@ -99,19 +109,6 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     # 注册路由
     app.include_router(memory_router)
-
-    # 注册生命周期
-    @app.on_event("startup")
-    async def startup():
-        """应用启动时初始化各组件"""
-        # TODO: 初始化数据库、向量索引、LLM 客户端等
-        pass
-
-    @app.on_event("shutdown")
-    async def shutdown():
-        """应用关闭时释放资源"""
-        # TODO: 关闭数据库连接、保存向量索引等
-        pass
 
     return app
 

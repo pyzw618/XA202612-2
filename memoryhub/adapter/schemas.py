@@ -28,7 +28,6 @@ from pydantic import (
     model_validator,
 )
 
-
 # ============================================================
 # 1. 枚举类型
 # ============================================================
@@ -1486,6 +1485,13 @@ class SearchResponse(BaseModel):
     knowledge: list[KnowledgeMemory] = Field(default_factory=list)
     latency_ms: float = 0.0
     total_count: int = 0
+
+
+class MemoryContextResponse(BaseModel):
+    """可直接注入 Agent system prompt 的记忆上下文。"""
+
+    context: str = ""
+    search: SearchResponse = Field(default_factory=SearchResponse)
 
 
 # ============================================================

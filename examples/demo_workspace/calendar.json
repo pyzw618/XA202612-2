@@ -1,0 +1,15 @@
+{
+  "week": "2026-08-03/2026-08-09",
+  "events": [
+    {
+      "date": "2026-08-05",
+      "title": "MemoryHub 接口评审",
+      "result": "确认 events、search、context 最小闭环"
+    },
+    {
+      "date": "2026-08-07",
+      "title": "Agent 接入联调",
+      "result": "确定使用 LangGraph 与千问 OpenAI-compatible API"
+    }
+  ]
+}
