@@ -37,6 +37,9 @@ from memoryhub.safety_rules.paths import compile_target_paths
 from memoryhub.safety_rules.versions import normalized_version
 
 _MAX_RULE_RESOURCE_BYTES = 2 * 1024 * 1024
+# 合法规则集深度非常浅（文档 → 规则 → 模式 → 项，通常 <10 层）；
+# 深度上限用于拒绝深层嵌套的畸形/对抗性 JSON，避免后续解析栈耗尽。
+_MAX_JSON_NESTING_DEPTH = 100
 _COMPILER_SCHEMA_VERSION = "1.0"
 
 
@@ -109,7 +112,38 @@ def _reject_json_constant(value: str) -> NoReturn:
     raise RuleIntegrityError(f"non-finite JSON number is not allowed: {value}")
 
 
+def _json_nesting_depth(text: str) -> int:
+    """线性扫描文本计算最大括号嵌套深度（忽略字符串字面量内部）。"""
+    depth = 0
+    max_depth = 0
+    in_string = False
+    escaped = False
+    for ch in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "[{":
+            depth += 1
+            if depth > max_depth:
+                max_depth = depth
+        elif ch in "]}":
+            if depth > 0:
+                depth -= 1
+    return max_depth
+
+
 def _strict_json_loads(text: str, *, source: str) -> Any:
+    if _json_nesting_depth(text) > _MAX_JSON_NESTING_DEPTH:
+        raise RuleIntegrityError(
+            f"JSON nesting depth exceeds {_MAX_JSON_NESTING_DEPTH} in {source}"
+        )
     try:
         return json.loads(
             text,

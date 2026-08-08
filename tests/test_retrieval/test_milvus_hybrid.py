@@ -18,6 +18,7 @@ from memoryhub.adapter.schemas import (
     SearchRequest,
     SearchResponse,
 )
+from memoryhub.core.memory_write import MemoryWriteService
 from memoryhub.retrieval.milvus_hybrid import MilvusHybridRetriever, _memory_text
 from memoryhub.storage.vector_engine import build_sparse_vector, create_vector_engine
 
@@ -64,14 +65,22 @@ def memories():
 @pytest.fixture()
 def retriever(memories):
     engine = create_vector_engine(
-        provider="milvus_mock", app_id="test-app-id",
+        provider="milvus_mock",
+        app_id="test-app-id",
         collection="test_milvus_hybrid",
         dimension=DIM,
     )
     lookup = {m.memory_id: m for m in memories}
     for memory in memories:
         text = _memory_text(memory)
-        engine.insert(memory.memory_id, text, _bow_embedding(text))
+        # 与生产写入路径（MemorySyncService._upsert_to_vector_engine）一致：
+        # 携带 owner/生命周期标量字段，供引擎层 user_id/status 过滤
+        engine.insert(
+            memory.memory_id,
+            text,
+            _bow_embedding(text),
+            metadata=MemoryWriteService.index_metadata(memory),
+        )
     yield MilvusHybridRetriever(
         engine=engine,
         embedding_fn=_bow_embedding,
