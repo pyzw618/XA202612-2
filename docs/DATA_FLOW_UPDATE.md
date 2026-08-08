@@ -373,3 +373,63 @@ Knowledge LLM fallback/data-flow 回归: 13 passed
 新增 LLM enrichment 回归: 1 passed
 ruff check extractor/test: passed
 ```
+
+## 2026-08-08：安全事件持久化与规则解析器兼容修复
+
+### 背景
+
+本轮在接入 opencode（见 `opencode-integration/docs/INTEGRATION.md`）时，对
+`POST /api/memory/events` 的完整链路做了端到端验证，发现两个与数据流相关的缺陷：
+一条通过 SafetyWriteGate 的安全事件（`ALLOW/MASK`）在落库时必然报错；同时内置
+安全规则库在 Python 3.10 及更早版本上无法加载。两者均不修改对外接口与数据流拓扑。
+
+### 问题一：Gate 放行的安全事件无法持久化（`TypeError: Object of type _ImmutableMapping is not JSON serializable`）
+
+- **现象**：`POST /api/memory/events` 写入无敏感内容的事件时返回
+  `503 {"detail":"event ingestion failed"}`；根因是
+  `EventRepository.batch_save` → `_to_row` 抛 `TypeError`。
+- **根因**：`SafetyResult.sanitized_event` 是深度只读的 `_SafeMemoryEvent`
+  （`memoryhub/adapter/schemas.py`），其 `payload`/`redactions` 被冻结为
+  `_ImmutableMapping`/tuple；`EventRepository._to_row`
+  （`memoryhub/storage/database.py`）直接把 `event.payload` 交给 SQLAlchemy JSON 列
+  序列化。`json.dumps` 不能序列化非 `dict` 的 `Mapping` 子类，因此**每条**
+  `ALLOW/MASK` 的干净事件都失败；仓库现有 `/events` 相关测试只覆盖被拒绝的事件，
+  未触达该路径，缺陷未被发现。
+- **修改**：`EventRepository._to_row` 改为先 `event.model_dump(mode="json")` 投影回
+  普通 JSON dict/list 再构造 `EventRow`。这与 `schemas.py` 中“`model_dump()` 仍投影
+  为普通 JSON dict/list，保持持久化格式兼容”的既有契约一致，同时兼容普通
+  `MemoryEvent` 与 Gate 放行的 `_SafeMemoryEvent`。
+
+### 问题二：内置安全规则库在 Python 3.10 及更早版本无法加载
+
+- **现象**：`load_builtin_rule_set()` 抛
+  `RuleLibraryError: Python regex safety parser is unavailable`，
+  `memoryhub/app.py` 导入即失败。
+- **根因**：`memoryhub/safety_rules/regex_safety.py` 只从
+  `re._parser`/`re._constants` 导入解析器。该别名是 Python 3.11 才引入的；Python 3.10
+  及更早（含本机 Anaconda 环境）只有 `sre_parse`/`sre_constants`，两个别名导入失败后
+  `sre_parser=None`，规则解析门禁按 fail-closed 拒绝全部规则。
+- **修改**：`regex_safety.py` 增加兼容回退：优先 `re._parser`/`re._constants`
+  （3.11+），导入失败时回退到 `sre_parse`/`sre_constants`（3.10 及更早）；仅当两者
+  都不存在时才置 `None` 失败关闭，保留原有的 fail-closed 语义。
+
+### 验证
+
+```text
+# 修复后在本机 Python 3.10.20（无任何补丁）上：
+内置规则库原生加载: version=1.0, rules=14
+POST /api/memory/events（干净事件）: 200 {"accepted":1,"event_ids":[...]}
+safety/scanner/contract/ingestion 组合回归: 165 passed
+gate/pipeline/audit/dataflow/retry 组合回归: 140 passed, 4 skipped
+opencode-integration MCP 集成测试: 8 passed；plugin 单测: passed
+```
+
+仍失败项均为既有的环境依赖问题，与本次修改无关（已在历史记录中标注）：Kylin
+embedding/Milvus mock 原生 DLL 缺失导致的 `embedding.mock_unavailable` 与
+`embedding.unavailable` 类用例。
+
+### 保留说明
+
+`opencode-integration/scripts/memoryhub_compat.py` 中的运行期兼容补丁（`re._parser`
+shim 与 `EventRepository.save/batch_save` 归一化）在本次源码修复后不再必需，仅作为
+针对旧版本 checkout 的兜底保留；新代码应直接依赖本文件的源码修复。

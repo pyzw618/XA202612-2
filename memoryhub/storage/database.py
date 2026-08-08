@@ -256,23 +256,28 @@ class EventRepository:
 
     @classmethod
     def _to_row(cls, event: MemoryEvent) -> EventRow:
+        # 统一走 model_dump(mode="json")：Gate 放行的安全事件（_SafeMemoryEvent）
+        # 容器是深度只读的 _ImmutableMapping，直接访问 .payload 会给 SQLAlchemy
+        # JSON 列传入不可序列化对象（TypeError）；model_dump 会按契约投影回普通
+        # JSON dict/list，保证持久化格式兼容。
+        data = event.model_dump(mode="json")
         return EventRow(
-            event_id=event.event_id,
-            source_type=event.source_type.value,
-            event_type=event.event_type,
-            user_id=event.user_id,
-            session_id=event.session_id,
-            turn_id=event.turn_id,
-            scene=event.scene,
-            task_type=event.task_type,
-            occurred_at=cls._parse_occurred_at(event.occurred_at),
-            text=event.text,
-            payload=event.payload,
-            tool_calls=[call.model_dump(mode="json") for call in event.tool_calls],
-            schema_version=event.schema_version,
-            source_hash=event.source_hash,
-            redactions=event.redactions,
-            quality=event.quality.model_dump(mode="json"),
+            event_id=data["event_id"],
+            source_type=data["source_type"],
+            event_type=data["event_type"],
+            user_id=data["user_id"],
+            session_id=data["session_id"],
+            turn_id=data["turn_id"],
+            scene=data["scene"],
+            task_type=data["task_type"],
+            occurred_at=cls._parse_occurred_at(data["occurred_at"]),
+            text=data["text"],
+            payload=data["payload"],
+            tool_calls=data["tool_calls"],
+            schema_version=data["schema_version"],
+            source_hash=data["source_hash"],
+            redactions=data["redactions"],
+            quality=data["quality"],
         )
 
     def save(self, event: MemoryEvent) -> None:

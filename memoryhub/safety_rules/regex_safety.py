@@ -8,11 +8,18 @@ from typing import Any
 from memoryhub.safety_rules.errors import RuleLibraryError
 
 try:
-    from re import _constants as sre_constants  # type: ignore[attr-defined]
+    from re import _constants as sre_constants  # type: ignore[attr-defined]  # Python 3.11+
     from re import _parser as sre_parser  # type: ignore[attr-defined]
-except ImportError:  # pragma: no cover - 仅用于未来 Python 移除内部解析器时失败关闭
-    sre_constants = None
-    sre_parser = None
+except ImportError:  # Python 3.10 及更早：内部模块尚未改名，使用 sre_parse/sre_constants
+    try:
+        import sre_constants as _sre_constants  # type: ignore[import-not-found]
+        import sre_parse as _sre_parser  # type: ignore[import-not-found]
+    except ImportError:  # pragma: no cover - 仅用于未来 Python 同时移除两者时失败关闭
+        sre_constants = None
+        sre_parser = None
+    else:
+        sre_constants = _sre_constants
+        sre_parser = _sre_parser
 
 
 def _nested_tokens(subpattern: Any) -> list[Any]:
