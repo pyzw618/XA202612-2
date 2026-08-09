@@ -26,10 +26,14 @@ async function readIncomingBody(request) {
   return chunks.length ? Buffer.concat(chunks) : undefined;
 }
 
-function createAssetFetcher(clientDir) {
+function createAssetFetcher(clientDir, baseUrl = "http://127.0.0.1") {
   const root = path.resolve(clientDir);
   return async (request) => {
-    const url = new URL(request.url);
+    // Vinext may call the Cloudflare-style asset binding with either a
+    // Request object or a relative URL. Handle both forms so packaged
+    // Electron builds serve CSS and JS just like the dev server.
+    const requestUrl = typeof request === "string" ? request : request?.url;
+    const url = new URL(requestUrl || "/", baseUrl);
     let pathname;
     try {
       pathname = decodeURIComponent(url.pathname);
@@ -39,6 +43,9 @@ function createAssetFetcher(clientDir) {
 
     const relativePath = pathname.replace(/^\/+/, "");
     const filePath = path.resolve(root, relativePath);
+    if (process.env.MEMORYHUB_DEBUG_ASSETS === "1") {
+      console.log(`[MemoryHub assets] ${requestUrl} -> ${filePath}`);
+    }
     if (!filePath.startsWith(`${root}${path.sep}`)) {
       return new Response("Forbidden", { status: 403 });
     }
@@ -75,10 +82,19 @@ async function startUiServer({ distDir, host = "127.0.0.1", port = 0 }) {
   const clientDir = path.join(distDir, "client");
   const workerModule = await import(`${pathToFileURL(serverEntry).href}?desktop=${Date.now()}`);
   const worker = workerModule.default;
-  const fetchAsset = createAssetFetcher(clientDir);
+  const fetchAsset = createAssetFetcher(clientDir, `http://${host}:${port || 0}`);
 
   const server = http.createServer(async (request, response) => {
     try {
+      // Serve immutable build assets directly. The vinext worker can render
+      // the HTML, but packaged Electron builds must not rely on a platform
+      // asset binding for CSS/JS files.
+      const requestPath = new URL(request.url || "/", `http://${host}`).pathname;
+      if (requestPath.startsWith("/assets/") || requestPath === "/favicon.svg") {
+        const assetResponse = await fetchAsset(new Request(`http://${host}${requestPath}`));
+        await sendWebResponse(response, assetResponse);
+        return;
+      }
       const origin = `http://${host}:${server.address()?.port || port}`;
       const body = await readIncomingBody(request);
       const webRequest = new Request(new URL(request.url || "/", origin), {
@@ -123,3 +139,14 @@ async function startUiServer({ distDir, host = "127.0.0.1", port = 0 }) {
 }
 
 module.exports = { startUiServer };
+
+if (require.main === module) {
+  const distDir = path.resolve(process.argv[2] || "dist");
+  const port = Number(process.argv[3] || 0);
+  startUiServer({ distDir, port })
+    .then(({ url }) => console.log(url))
+    .catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    });
+}
