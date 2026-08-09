@@ -1,280 +1,308 @@
-# Kylin MemoryHub 竞赛演示系统
+# Kylin MemoryHub
 
-当前开发分支：`feat/moyaohua-memoryhub-demo`
+端侧 Agent 记忆系统的 React + Electron 演示项目。
 
-Kylin MemoryHub 是一个面向 Agent 的本地记忆中枢。本分支在原有 Python 记忆核心之上增加了 React 对话工作台和 Agent 适配接口，用于演示一段多轮对话中记忆的形成、检索、引用、冲突处理和遗忘过程。
+本项目由两个独立部分组成：
 
-## 当前可以演示什么
+- frontend：React 对话工作台和 Electron 桌面客户端。
+- memoryhub：Python/FastAPI 本地记忆服务，负责事件处理、偏好、知识、事实、检索、冲突和遗忘。
 
-- 在同一个会话中逐轮执行 10 轮测试对话。
-- 从原始对话中抽取偏好、工作流、模板和事实候选。
-- 在后续轮次中真实查询后端，展示候选记忆和本轮实际引用的记忆。
-- 展示工具名、参数、状态、耗时和脱敏后的工具返回结果。
-- 对事实候选执行 `Propose / Commit / Reject` 两阶段处理。
-- 预览精准遗忘候选，确认后由 Agent 适配层执行软删除。
-- 导入 `conversation-replay/1.0` JSON，或者直接导入 `{ events: MemoryEvent[] }`。
+Electron 只负责窗口和桌面交互，不拥有后端生命周期。关闭前端窗口后，后端服务可以继续运行。
 
-目前主 Agent 仍采用确定性规则编排，尚未接入真实大模型。对话回复和外部工具轨迹来自 JSON；记忆抽取、事件写入、检索和事实候选处理由后端真实执行。
+## 1. 环境要求
 
-## 技术栈
-
-| 部分 | 技术 |
-| --- | --- |
-| 前端 | React 19、TypeScript、vinext/Vite |
-| 后端 | Python 3.11+、FastAPI、Pydantic |
-| 结构化存储 | SQLite、SQLAlchemy |
-| 检索 | BM25 + 向量检索 + 重排 |
-| 向量实现 | FAISS；开发环境默认使用 Mock Embedding |
-| Agent 接入 | `/api/agent/*` 适配接口 |
-
-## 项目结构
-
-```text
-XA202612-2/
-├─ frontend/                         # React 对话工作台
-│  ├─ app/page.tsx                   # 主页面与管理页面
-│  ├─ app/api.ts                     # 前端 API transport
-│  ├─ app/replay.ts                  # JSON 校验、重建与脱敏
-│  └─ public/examples/
-│     └─ memory-system-long-replay.json
-├─ memoryhub/
-│  ├─ app.py                         # FastAPI 应用入口
-│  ├─ adapter/api.py                 # 记忆读取与管理 API
-│  ├─ adapter/agent_api.py           # 回放、逐轮执行和用户裁决
-│  ├─ core/processing.py             # 统一事件处理协调器
-│  ├─ core/preference/               # 偏好记忆
-│  ├─ core/knowledge/                # 工作流与模板记忆
-│  ├─ core/fact/                     # 事实候选与冲突处理
-│  ├─ retrieval/                     # 混合检索
-│  └─ storage/                       # SQLite 和向量存储
-├─ tests/test_competition_api.py     # 竞赛演示链路测试
-├─ config.yaml                       # 本地运行配置
-└─ pyproject.toml                    # Python 项目配置
-```
-
-## 环境要求
-
+- Windows 10/11 或银河麒麟 Linux
 - Git
-- Python `>= 3.11`
-- Node.js `>= 22.13.0`
+- Python 3.11+
+- Node.js 22+
 - npm
 
-Windows 下建议使用 PowerShell，并始终在仓库根目录执行后端命令。
+第一次使用时，请在仓库根目录执行命令。Windows 如果 PowerShell 禁止执行 npm 脚本，可以使用 npm.cmd。
 
-## 1. 获取本分支
+## 2. 获取代码
 
-```powershell
-git clone -b feat/moyaohua-memoryhub-demo https://github.com/pyzw618/XA202612-2.git
+~~~powershell
+git clone -b frontend-React-version https://github.com/pyzw618/XA202612-2.git
 cd XA202612-2
-```
+~~~
 
-已经克隆过仓库时：
+如果仓库还没有这个分支，先使用默认分支，再切换到实际存在的分支：
 
-```powershell
-git fetch origin
-git switch feat/moyaohua-memoryhub-demo
-git pull --ff-only
-```
+~~~powershell
+git branch -a
+git checkout <实际分支名>
+~~~
 
-## 2. 启动后端
+## 3. 安装后端环境
 
-### Windows PowerShell
+~~~powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+~~~
 
-首次运行时创建虚拟环境并安装依赖：
+如果项目中没有 requirements.txt，按照 pyproject.toml 安装：
 
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -e ".[dev]"
-```
+~~~powershell
+.\.venv\Scripts\python.exe -m pip install -e .
+~~~
 
-如果 PowerShell 不允许执行激活脚本，可以不激活虚拟环境，直接使用：
+## 4. 安装前端依赖
 
-```powershell
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-```
-
-启动 FastAPI：
-
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn memoryhub.app:app --reload --host 127.0.0.1 --port 8000
-```
-
-### macOS / Linux
-
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -e ".[dev]"
-python -m uvicorn memoryhub.app:app --reload --host 127.0.0.1 --port 8000
-```
-
-后端启动后访问：
-
-- Swagger API 文档：<http://127.0.0.1:8000/docs>
-- 服务健康检查：<http://127.0.0.1:8000/api/health>
-- OpenAPI JSON：<http://127.0.0.1:8000/openapi.json>
-
-开发演示默认使用 `config.yaml` 和 Mock Embedding，不需要配置大模型 API Key。运行数据会写入 `data/` 目录。
-
-## 3. 启动前端
-
-保持后端终端运行，再打开一个新的 PowerShell：
-
-```powershell
+~~~powershell
 cd frontend
-npm ci
-npm run dev
-```
+npm.cmd install
+cd ..
+~~~
 
-浏览器打开：<http://127.0.0.1:3000>
+## 5. 启动后端
 
-前端默认连接 `http://127.0.0.1:8000`。如果后端地址不同，在启动前端前设置：
+在仓库根目录打开第一个 PowerShell 窗口：
 
-```powershell
-$env:NEXT_PUBLIC_MEMORYHUB_API="http://127.0.0.1:8000"
-npm run dev
-```
+~~~powershell
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\start-memoryhub-service.ps1
+~~~
 
-## Electron 桌面客户端
+后端默认监听 http://127.0.0.1:8000。
 
-Electron 只负责展示和管理，不拥有 MemoryHub 后端进程。关闭桌面窗口只会关闭客户端，Agent 使用的本地记忆服务仍然继续运行。
+打开下面地址可以查看 FastAPI 接口文档：
 
-```text
-OS Agent ───────────────┐
-                       ├──> MemoryHub 常驻服务（FastAPI / SQLite / FAISS）
-Electron 桌面客户端 ────┘
-```
+~~~text
+http://127.0.0.1:8000/docs
+~~~
 
-### Windows：独立启动后端服务
+后端停止命令：
 
-在仓库根目录运行：
+~~~powershell
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\stop-memoryhub-service.ps1
+~~~
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-memoryhub-service.ps1
-```
+## 6. 启动 React 网页版
 
-这个脚本会把后端作为独立隐藏进程启动。随后启动或关闭 Electron，都不会影响后端。
+如果只调试网页，在第二个 PowerShell 窗口执行：
 
-需要明确停止后端时运行：
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\stop-memoryhub-service.ps1
-```
-
-### 启动 Electron 开发版
-
-```powershell
+~~~powershell
 cd frontend
-npm ci
-npm run desktop:dev
-```
+npm.cmd run dev
+~~~
 
-如果首次安装 Electron 运行时下载较慢，可以仅对当前终端设置镜像后重新安装：
+浏览器打开：
 
-```powershell
-$env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
-npm ci
-```
+~~~text
+http://127.0.0.1:3000
+~~~
 
-如果 Web 前端已经运行在 `127.0.0.1:3000`，也可以只打开桌面窗口：
+这里的 3000 是 React 开发服务器端口。它只负责提供页面资源，记忆数据仍由 8000 端口的后端处理。
 
-```powershell
-npm run desktop:open
-```
+## 7. 启动 Electron 桌面版
 
-### 构建桌面安装包
+开发阶段推荐使用：
 
-```powershell
+~~~powershell
 cd frontend
-npm run desktop:build  # 生成未打包目录，便于测试
-npm run desktop:dist   # 生成 Windows 安装包
-```
+npm.cmd run desktop:dev
+~~~
 
-Linux/银河麒麟安装包必须在对应 Linux 和 CPU 架构环境中构建。`packaging/linux/memoryhub.service` 提供了后端常驻 systemd 用户服务模板。
+这条命令会自动启动 React 开发服务，然后打开独立的 MemoryHub 桌面窗口。
 
-## 4. 运行内置演示
+桌面版和浏览器版使用相同的 React 页面和后端 API，区别在于 Electron 提供了独立窗口、桌面快捷方式、托盘和后续系统集成能力。
 
-1. 确认页面右上角的状态点显示后端已连接。
-2. 点击“加载演示”。系统会创建新的用户 ID、会话 ID 和事件 ID，避免读取以前运行留下的记忆。
-3. 点击“执行当前轮”，观察右侧本轮的记忆写入、候选记忆和实际引用。
-4. 点击“下一轮”，继续执行完整的 10 轮对话。
-5. 在事实候选出现后打开详情，体验 `Propose / Commit / Reject` 流程。
+## 8. 生成桌面程序和快捷方式
 
-内置 JSON 位于：
+先编译 React 并生成 Windows 桌面目录：
 
-```text
-frontend/public/examples/memory-system-long-replay.json
-```
+~~~powershell
+cd frontend
+npm.cmd run desktop:build
+~~~
 
-也可以点击“导入 JSON”选择自己的对话文件。导入后不会自动批量写库，只有逐轮点击“执行当前轮”时才会调用后端。
+正常情况下，程序位于：
 
-## 5. 常用接口
+~~~text
+frontend\desktop-dist\win-unpacked\MemoryHub.exe
+~~~
 
-| 方法 | 路径 | 用途 |
+然后回到仓库根目录，自动创建桌面快捷方式：
+
+~~~powershell
+cd ..
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\create-memoryhub-shortcut.ps1
+~~~
+
+脚本会在 Windows 桌面创建 MemoryHub.lnk。以后双击这个快捷方式即可打开桌面程序。
+
+如果需要安装包：
+
+~~~powershell
+cd frontend
+npm.cmd run desktop:dist
+~~~
+
+安装包会输出到 frontend\desktop-dist\。
+
+注意：桌面程序依赖本地后端。首次双击前，应先启动后端服务；关闭 Electron 不会自动删除或清空后端数据。
+
+## 9. 快捷方式打不开或显示默认 HTML 样式
+
+按下面顺序检查：
+
+1. 确认快捷方式目标是当前仓库中的 MemoryHub.exe。
+2. 关闭旧的 MemoryHub 窗口后重新打开。
+3. 重新执行 npm.cmd run desktop:build。
+4. 再执行 create-memoryhub-shortcut.ps1，让快捷方式指向最新程序。
+5. 检查 http://127.0.0.1:8000/docs 是否可以访问。
+
+如果页面内容存在但布局完全消失，通常是 CSS 静态资源没有进入打包目录；检查 dist\client\assets 是否包含 .css 文件。
+
+## 10. 使用内置回放案例
+
+主页面支持导入 JSON 对话。内置案例位于：
+
+~~~text
+frontend\public\examples\memory-system-long-replay.json
+~~~
+
+导入后可以逐轮执行，观察：
+
+- 多轮聊天记录
+- Agent 工具调用
+- 检索候选记忆
+- 本轮实际引用的记忆
+- 新写入的偏好、知识和事实候选
+- 事实 Propose / Commit / Reject
+- 精准遗忘预览和历史记录
+
+导入 JSON 本身不会自动批量写入数据库。只有点击执行某一轮时，才会调用后端处理流程。
+
+## 11. 前后端职责
+
+~~~text
+Electron
+  └─ React 页面
+       └─ HTTP JSON API
+            └─ FastAPI / Agent 适配层
+                 └─ 记忆处理、SQLite、BM25、向量索引
+~~~
+
+React 负责页面、状态和用户操作；Agent 负责决定何时调用工具；MemoryHub 负责真正的记忆读写、冲突处理和遗忘。前端不要直接修改核心记忆数据库。
+
+读取型接口可以由前端调用，例如记忆查询、知识列表和会话事件读取。改变记忆状态的操作应通过 Agent action decision 进入后端。
+
+## 12. PySide6 + QML 桌面客户端
+
+项目同时提供独立的 PySide6 + QML 客户端。它与 React 浏览器版、Electron 版共用同一个 FastAPI 后端，但客户端关闭不会停止后端服务。
+
+架构如下：
+
+~~~text
+QML 客户端 / React 浏览器 / Electron
+              │ HTTP JSON
+              ▼
+       FastAPI 本地后端
+       127.0.0.1:8010
+              │
+              ▼
+     SQLite / FAISS / BM25 / 记忆处理
+~~~
+
+### 启动方式
+
+桌面端推荐直接双击桌面的 `MemoryHub QML.lnk`。它会自动检查后端状态，后端未启动时先启动 FastAPI，再打开 QML 客户端。
+
+手动启动：
+
+~~~powershell
+# 终端 1：启动后端
+.\.venv\Scripts\python.exe -m uvicorn memoryhub.app:app --host 127.0.0.1 --port 8010
+
+# 终端 2：启动 QML 客户端
+$env:MEMORYHUB_BACKEND_URL="http://127.0.0.1:8010"
+.\.venv\Scripts\python.exe -m memoryhub_qml
+~~~
+
+QML 客户端支持：
+
+- 左侧功能菜单：偏好、事实、知识、冲突、遗忘、安全规则和评测等模块入口；
+- 对话记录：加载 10 轮演示会话并逐轮执行；
+- Agent 工具轨迹：显示工具参数、状态、耗时和脱敏结果；
+- 记忆活动：查看候选记忆、实际引用记忆、本轮写入和事实候选；
+- 事实 Propose / Commit / Reject 裁决，并将裁决交给 Agent 后端执行；
+- 导入 `conversation-replay/1.0` JSON 文件。
+
+QML 客户端代码位于：
+
+~~~text
+memoryhub_qml/__main__.py       客户端入口
+memoryhub_qml/controller.py     回放状态和 API 控制器
+memoryhub_qml/api.py            QNetworkAccessManager HTTP 封装
+memoryhub_qml/replay.py         JSON 回放校验和脱敏
+memoryhub_qml/models.py         QML 列表模型
+memoryhub_qml/qml/Main.qml      主窗口和三栏布局
+memoryhub_qml/qml/components/   工具卡、记忆卡、事实弹窗
+~~~
+
+后端地址可以通过 `MEMORYHUB_BACKEND_URL` 覆盖。银河麒麟部署时，客户端和后端仍然分开运行；QML 安装包需要在目标 Linux 和 CPU 架构上原生构建。
+
+## 13. 主要代码位置
+
+~~~text
+frontend/app/page.tsx             React 主页面
+frontend/app/api.ts               前端 API 封装
+frontend/app/replay.ts            回放 JSON 校验和重建
+frontend/electron/main.cjs        Electron 主进程
+frontend/electron/preload.cjs     安全 IPC 桥接
+frontend/electron/ui-server.cjs   打包版页面服务器
+
+memoryhub/app.py                  FastAPI 应用入口
+memoryhub/adapter/api.py          记忆查询和管理接口
+memoryhub/adapter/agent_api.py    Agent 回放和裁决接口
+memoryhub/core/processing.py      事件处理协调器
+memoryhub/retrieval/              混合检索
+memoryhub/storage/                SQLite 和索引存储
+~~~
+
+## 14. 常用接口
+
+| 方法 | 接口 | 作用 |
 | --- | --- | --- |
-| `POST` | `/api/agent/step` | 执行一轮对话并处理记忆 |
-| `POST` | `/api/agent/replay` | 校验或执行 JSON 回放 |
-| `POST` | `/api/agent/actions/{action_id}/decision` | 接收事实、冲突或遗忘裁决 |
-| `POST` | `/api/memory/events` | 写入标准化事件 |
-| `GET` | `/api/memory/events/session/{session_id}` | 读取一个会话的事件 |
-| `POST` | `/api/memory/search` | 查询候选记忆 |
-| `GET` | `/api/memory/preferences` | 查询偏好记忆 |
-| `GET` | `/api/memory/knowledge` | 查询工作流或模板 |
-| `POST` | `/api/memory/facts/propose` | 生成事实候选，不写入活动事实 |
-| `POST` | `/api/memory/facts/{proposal_id}/commit` | 幂等提交事实候选 |
-| `POST` | `/api/memory/forget/preview` | 预览精准遗忘结果 |
-| `POST` | `/api/memory/forget` | 确认执行软删除 |
+| POST | /api/agent/step | 执行一轮 Agent 对话 |
+| POST | /api/agent/replay | 执行 JSON 回放 |
+| POST | /api/memory/events | 写入标准事件 |
+| GET | /api/memory/events/session/{session_id} | 读取会话事件 |
+| POST | /api/memory/search | 检索记忆候选 |
+| POST | /api/memory/facts/propose | 生成事实候选 |
+| POST | /api/memory/facts/{proposal_id}/commit | 提交事实候选 |
+| POST | /api/memory/forget/preview | 预览精准遗忘 |
+| POST | /api/memory/forget | 执行软删除 |
 
-具体请求和响应结构以 Swagger 文档为准。
+详细参数以 Swagger 文档为准：http://127.0.0.1:8000/docs。
 
-## 6. 测试与检查
+## 15. 检查和测试
 
 后端测试：
 
-```powershell
+~~~powershell
 .\.venv\Scripts\python.exe -m pytest -q
-```
-
-只测试本分支新增的竞赛链路：
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_competition_api.py -q
-```
+~~~
 
 前端检查：
 
-```powershell
+~~~powershell
 cd frontend
-npm run lint
-npm run build
-```
+npm.cmd run lint
+npm.cmd run build
+~~~
 
-## 当前完成度与限制
+## 16. 提交代码前的约定
 
-已经打通：
+- 不要把数据库文件、向量索引、密钥和 .env 提交到 GitHub。
+- 不要把未脱敏的工具调用原文直接展示到前端。
+- 修改 API 响应时尽量保持已有字段兼容。
+- 涉及记忆状态变化时，优先通过 Agent action 接口完成。
+- 提交前至少运行后端测试以及前端 lint/build。
+- 如果修改了桌面启动流程，同时检查浏览器版和 Electron 版。
 
-- 多轮会话逐步执行与事件幂等写入。
-- 偏好、工作流、模板、事实候选抽取。
-- 混合检索和实际引用标记。
-- 事实提议、提交、拒绝、冲突等待裁决。
-- 精准遗忘预览、软删除和历史记录。
-- 工具结果脱敏与前端展示。
+## 17. 当前限制
 
-仍需继续开发：
-
-- 接入真实主 Agent 和大模型实时回复。
-- 将 JSON 中的外部工具轨迹替换为真实工具执行。
-- 完善 LLM 语义抽取和复杂事实理解。
-- 完成自动遗忘调度、真实评测执行和安全看板。
-- 增加生产环境鉴权、数据库迁移、并发与异常恢复。
-
-## 给接力同学的约定
-
-- 前端读取记忆可以直接调用 `/api/memory/*`。
-- 改变记忆状态的操作应先提交给 `/api/agent/actions/*/decision`，由 Agent 适配层调用 MemoryHub，不要在页面中直接写库。
-- 前端不要自行计算相关性、冲突关系或最终裁决，展示后端返回值即可。
-- 后续接入真实 Agent 时，优先替换 `memoryhub/adapter/agent_api.py` 中的确定性编排，并保持现有响应结构，前端无需整体重写。
-- 提交代码前至少运行后端竞赛链路测试，以及前端 lint/build。
+- 当前 Agent 默认以确定性规则编排，真实大模型接入沿用现有 Agent transport。
+- 自动遗忘调度、完整评测执行和部分安全看板仍在完善。
+- 银河麒麟版本需要在目标机器上重新安装 Python、Node 和 Linux Electron 构建依赖。
