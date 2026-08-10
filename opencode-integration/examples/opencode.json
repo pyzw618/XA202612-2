@@ -21,7 +21,7 @@
       "command": ["python", "-m", "memoryhub_mcp"],
       "cwd": "opencode-integration/mcp-server",
       "environment": {
-        "MEMORYHUB_API_URL": "http://127.0.0.1:8000",
+        "MEMORYHUB_API_URL": "http://127.0.0.1:8010",
         "MEMORYHUB_USER_ID": "opencode",
         "MEMORYHUB_TOP_K": "5"
       },
@@ -35,7 +35,7 @@
   // variables in the shell before starting opencode, or set them in your
   // shell profile:
   //
-  //   export MEMORYHUB_API_URL=http://127.0.0.1:8000
+  //   export MEMORYHUB_API_URL=http://127.0.0.1:8010
   //   export MEMORYHUB_USER_ID=opencode
   //   export MEMORYHUB_AUTO_RECORD=true
   //

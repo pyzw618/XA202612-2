@@ -14,7 +14,7 @@ class QwenAgentSettings:
     api_base: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     model: str = "qwen-plus"
     temperature: float = 0.1
-    memoryhub_url: str = "http://127.0.0.1:8000"
+    memoryhub_url: str = "http://127.0.0.1:8010"
 
     @classmethod
     def from_env(cls) -> "QwenAgentSettings":
@@ -29,7 +29,7 @@ class QwenAgentSettings:
             temperature=float(os.getenv("QWEN_TEMPERATURE", "0.1")),
             memoryhub_url=os.getenv(
                 "MEMORYHUB_URL",
-                "http://127.0.0.1:8000",
+                "http://127.0.0.1:8010",
             ).rstrip("/"),
         )
 

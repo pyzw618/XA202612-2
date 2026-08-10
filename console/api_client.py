@@ -2,7 +2,7 @@
 MemoryHub API 客户端
 
 封装所有对 MemoryHub 后端 REST API 的 HTTP 调用。
-后端地址默认 http://localhost:8000。
+后端地址默认 http://localhost:8010。
 """
 
 from typing import Optional
@@ -13,7 +13,7 @@ import httpx
 class MemoryHubClient:
     """MemoryHub REST API 客户端"""
 
-    def __init__(self, base_url: str = "http://localhost:8000"):
+    def __init__(self, base_url: str = "http://localhost:8010"):
         self.base_url = base_url.rstrip("/")
         self._client = httpx.Client(timeout=10.0)
 

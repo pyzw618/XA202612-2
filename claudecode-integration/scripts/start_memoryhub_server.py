@@ -1,7 +1,7 @@
 """Start a local MemoryHub REST service for the Claude Code integration.
 
 Local/development mode (default):
-    python scripts/start_memoryhub_server.py [--host 127.0.0.1] [--port 8000]
+    python scripts/start_memoryhub_server.py [--host 127.0.0.1] [--port 8010]
 
   - Embedding provider = mock, vector engine = faiss, user rules disabled
   - Safety keys auto-generated (see memoryhub_compat.ensure_safety_keys)
@@ -37,7 +37,7 @@ REPO_ROOT = HERE.parent.parent
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Start the MemoryHub REST service for Claude Code")
     parser.add_argument("--host", default="127.0.0.1", help="listen host (default 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8000, help="listen port (default 8000)")
+    parser.add_argument("--port", type=int, default=8010, help="listen port (default 8010)")
     parser.add_argument("--config", default="", help="path to a real config.yaml (production/Kylin)")
     parser.add_argument("--data-dir", default="", help="data directory for the dev-mode database/indexes")
     parser.add_argument("--reset-dev-data", action="store_true", help="delete the dev data dir before starting")

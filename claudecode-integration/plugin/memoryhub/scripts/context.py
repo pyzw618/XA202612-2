@@ -15,7 +15,7 @@ Safety
 Configuration (environment variables)
 -------------------------------------
 MEMORYHUB_CONTEXT_ON_PROMPT   default false — set to true to enable
-MEMORYHUB_API_URL             default http://127.0.0.1:8000
+MEMORYHUB_API_URL             default http://127.0.0.1:8010
 MEMORYHUB_USER_ID             default claudecode
 MEMORYHUB_TOP_K               default 3
 MEMORYHUB_CONTEXT_MAX_CHARS   default 6000 — cap the injected context text
@@ -39,7 +39,7 @@ def _env(name: str, default: str) -> str:
 @dataclass
 class ContextConfig:
     enabled: bool = field(default_factory=lambda: _env("MEMORYHUB_CONTEXT_ON_PROMPT", "false").lower() != "false")
-    api_url: str = field(default_factory=lambda: _env("MEMORYHUB_API_URL", "http://127.0.0.1:8000"))
+    api_url: str = field(default_factory=lambda: _env("MEMORYHUB_API_URL", "http://127.0.0.1:8010"))
     user_id: str = field(default_factory=lambda: _env("MEMORYHUB_USER_ID", "claudecode"))
     top_k: int = field(default_factory=lambda: int(_env("MEMORYHUB_TOP_K", "3")))
     max_chars: int = field(default_factory=lambda: int(_env("MEMORYHUB_CONTEXT_MAX_CHARS", "6000")))
