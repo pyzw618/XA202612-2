@@ -1,13 +1,16 @@
 """
-混合检索入口
+混合检索入口（development/test 降级路径）。
 
-组合向量检索、关键词检索、元数据过滤，返回融合结果。
+组合 FAISS 向量检索、BM25 关键词检索、元数据过滤，返回融合结果。
+生产环境请使用 MilvusHybridRetriever，本类仅在 development/test 模式或
+显式故障诊断场景下作为 fallback 保留。
 """
 
 import time
 from collections.abc import Callable
 
 from memoryhub.adapter.schemas import (
+    FactMemory,
     KnowledgeMemory,
     PreferenceMemory,
     SearchRequest,
@@ -19,11 +22,15 @@ from memoryhub.config import RetrievalConfig
 
 class HybridRetriever:
     """
-    混合检索器
+    混合检索器（development/test 的 FAISS + BM25 fallback）。
 
     使用方式:
         retriever = HybridRetriever(vector_search, keyword_search, reranker, cache)
         response = retriever.search(request)
+
+    注意:
+        本检索器仅用于 development/test 或显式诊断场景；生产环境请使用
+        MilvusHybridRetriever。
     """
 
     def __init__(
@@ -35,6 +42,7 @@ class HybridRetriever:
         config: RetrievalConfig | None = None,
         embedding_fn: Callable[[str], list[float]] | None = None,
         memory_lookup: dict | None = None,
+        fact_store=None,
     ):
         """
         参数:
@@ -53,8 +61,8 @@ class HybridRetriever:
         self.cache = cache
         self.config = config or RetrievalConfig()
         self.embedding_fn = embedding_fn
-        # 保留调用方传入的空字典引用；运行期写入记忆后检索器才能立即看到。
         self.memory_lookup = memory_lookup if memory_lookup is not None else {}
+        self.fact_store = fact_store
 
     def search(self, request: SearchRequest) -> SearchResponse:
         """
@@ -105,6 +113,7 @@ class HybridRetriever:
 
         merged = self._merge_results(vector_results, keyword_results, metadata_results)
         filtered = self._filter_by_context(merged, request)
+        filtered = self._suppress_shadowed_global_facts(filtered, request)
 
         if self.reranker is not None and self.config.rerank_enabled:
             filtered = self.reranker.rerank(filtered, request)
@@ -190,11 +199,14 @@ class HybridRetriever:
 
         return sorted(merged.values(), key=lambda r: r.score, reverse=True)
 
-    def _filter_by_context(self, results: list[SearchResult], request: SearchRequest) -> list[SearchResult]:
+    def _filter_by_context(
+        self, results: list[SearchResult], request: SearchRequest
+    ) -> list[SearchResult]:
         """按记忆类型、场景 scope 和置信度过滤结果"""
         filtered = []
         for result in results:
-            result_user_id = result.metadata.get("user_id")
+            memory = self.memory_lookup.get(result.memory_id)
+            result_user_id = result.metadata.get("user_id") or getattr(memory, "user_id", "")
             if result_user_id and result_user_id != request.user_id:
                 continue
             if request.memory_types and result.memory_type:
@@ -212,16 +224,20 @@ class HybridRetriever:
         """将检索结果格式化为 SearchResponse"""
         preferences: list[PreferenceMemory] = []
         knowledge: list[KnowledgeMemory] = []
+        facts: list[FactMemory] = []
         for result in results:
             memory = self.memory_lookup.get(result.memory_id)
             if isinstance(memory, PreferenceMemory):
                 preferences.append(memory)
             elif isinstance(memory, KnowledgeMemory):
                 knowledge.append(memory)
+            elif getattr(memory, "memory_type", "") == "fact":
+                facts.append(FactMemory.model_validate(memory))
         return SearchResponse(
             results=results,
             preferences=preferences,
             knowledge=knowledge,
+            facts=facts,
             latency_ms=round(latency_ms, 2),
             total_count=len(results),
         )
@@ -262,6 +278,32 @@ class HybridRetriever:
                 SearchResult(memory_id=result.memory_id, score=score, source="metadata")
             )
         return scored
+
+
+    def _suppress_shadowed_global_facts(
+        self, results: list[SearchResult], request: SearchRequest
+    ) -> list[SearchResult]:
+        if self.fact_store is None or not request.project_id:
+            return results
+        project_facts = self.fact_store.list_facts(
+            status="active", limit=100000, scope="project",
+            project_id=request.project_id, user_id=request.user_id,
+        )
+        shadowed = set()
+        for fact in project_facts:
+            predicate = self.fact_store.get_predicate(fact.predicate_id)
+            if predicate is None or predicate.single_value:
+                shadowed.add((fact.subject_id, fact.predicate_id))
+        if not shadowed:
+            return results
+        kept = []
+        for result in results:
+            scope = result.metadata.get("scope") or {}
+            key = (result.metadata.get("subject_id"), result.metadata.get("predicate_id"))
+            if result.memory_type == "fact" and scope.get("scope") == "global" and key in shadowed:
+                continue
+            kept.append(result)
+        return kept
 
     @staticmethod
     def _scope_conflict(result: SearchResult, request: SearchRequest) -> bool:

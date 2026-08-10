@@ -175,8 +175,11 @@ ApplicationWindow {
 
         Rectangle {
             Layout.fillWidth: true; Layout.fillHeight: true; radius: 16; color: "white"; border.color: "#E2E8F0"
-            ColumnLayout {
-                anchors.fill: parent; spacing: 0
+            StackLayout {
+                anchors.fill: parent
+                currentIndex: controller.sectionIndex
+                ColumnLayout {
+                    spacing: 0
                 Rectangle { Layout.fillWidth: true; height: 62; color: "transparent"; RowLayout { anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18; Label { text: "Agent 对话"; color: "#172033"; font.pixelSize: 17; font.bold: true; Layout.fillWidth: true } Label { text: "逐轮真实执行"; color: "#2563EB"; font.bold: true } } }
                 Rectangle { Layout.fillWidth: true; height: 1; color: "#E2E8F0" }
                 ScrollView {
@@ -201,7 +204,18 @@ ApplicationWindow {
                     RowLayout { Layout.fillWidth: true; Button { text: "上一轮"; enabled: controller.canGoPrevious; onClicked: controller.previousTurn() } Item { Layout.fillWidth: true } BusyIndicator { running: controller.busy; visible: running; implicitWidth: 28; implicitHeight: 28 } Button { text: controller.currentExecuted ? "重新执行（幂等）" : "执行本轮"; highlighted: true; enabled: !controller.busy && controller.online; onClicked: controller.executeCurrent() } Button { text: "下一轮"; enabled: controller.canGoNext; onClicked: controller.nextTurn() } }
                 }
             }
+
+            PreferencesView {}
+            KnowledgeView {}
+            FactsView {}
+            RetrievalView {}
+            ConflictsView {}
+            ForgetView {}
+            SafetyView {}
+            EvaluationView {}
+            Rectangle { color: "transparent"; Label { anchors.centerIn: parent; text: "系统设置（待实现）"; color: "#94A3B8" } }
         }
+    }
     }
 
     Rectangle {

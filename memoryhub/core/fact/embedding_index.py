@@ -22,7 +22,9 @@ _ST_DIM = 384
 
 try:
     from sentence_transformers import SentenceTransformer
-    _ST_MODEL = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+    _ST_MODEL = SentenceTransformer(
+        "paraphrase-multilingual-MiniLM-L12-v2", local_files_only=True
+    )
     _ST_DIM = _ST_MODEL.get_sentence_embedding_dimension()
     logger.info(f"sentence-transformers 已加载, dim={_ST_DIM}")
 except Exception:

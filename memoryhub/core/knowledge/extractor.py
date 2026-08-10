@@ -1,13 +1,18 @@
-﻿"""
-知识抽取模块
-从任务执行轨迹中提取工作流知识、历史案例、可复用模板。
-采用 规则结构化提取优先 + LLM 语义兜底 的双引擎架构。
+"""Knowledge extraction from admitted task trajectories.
+
+The public class and method signatures are intentionally stable.  The internal
+algorithm favors deterministic structured extraction, uses LLMs only when a
+trajectory is otherwise admissible but underspecified, and never treats an
+arbitrary accepted event as reusable knowledge.
 """
+
 from __future__ import annotations
 
-import math
+import hashlib
+import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Any
 
 from memoryhub.adapter.schemas import (
     Evidence,
@@ -18,111 +23,94 @@ from memoryhub.adapter.schemas import (
     MemoryStatus,
     SceneScope,
     SourceType,
+    ToolCallStatus,
+)
+from memoryhub.core.knowledge.confidence import (
+    KnowledgeConfidenceCalculator,
+    KnowledgeConfidenceFactors,
 )
 from memoryhub.core.knowledge.template_builder import TemplateBuilder
 
 
+class KnowledgeExtractionError(RuntimeError):
+    """Stable extraction failure that can be persisted by the retry pipeline."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
 class KnowledgeExtractor:
-    """
-    知识抽取器
-    使用方式:
-        extractor = KnowledgeExtractor(llm_client=llm)
-        knowledge = extractor.extract_from_trajectory(events)
-    """
+    """Extract workflows, cases, and templates from one completed trajectory."""
+
+    _FAILURE_MARKERS = (
+        "fail",
+        "failed",
+        "failure",
+        "error",
+        "cancel",
+        "timeout",
+        "失败",
+        "错误",
+        "取消",
+        "超时",
+    )
+    _PARTIAL_MARKERS = ("partial", "pending", "running", "in_progress", "进行中", "部分")
+    _SUCCESS_MARKERS = ("success", "succeeded", "done", "complete", "completed", "成功", "完成")
+    _USABLE_TOOL_STATUSES = {ToolCallStatus.SUCCESS.value, ToolCallStatus.PARTIAL.value}
+
     def __init__(self, llm_client=None, template_builder: TemplateBuilder | None = None):
-        """
-        参数:
-            llm_client: LLM 抽象客户端，用于语义辅助抽取，可选
-        """
         self.llm_client = llm_client
         self.template_builder = template_builder or TemplateBuilder(llm_client=llm_client)
-        # LLM 触发阈值
-        self._min_steps_rule = 2  # 规则提取步骤少于该值触发LLM
+        self.confidence_calculator = KnowledgeConfidenceCalculator()
+        self._min_steps_rule = 2
 
     def extract_from_trajectory(self, events: list[MemoryEvent | dict]) -> list[KnowledgeMemory]:
-        """
-        从任务执行轨迹中抽取知识。
-        支持两种输入：
-        1. 旧版结构化事件列表（含 content/quality_score）
-        2. 新版接入层输出（MemoryEvent / 原始字典）
-        """
-        if not events:
-            return []
-
-        normalized_events = [self._coerce_event(event) for event in events]
-        normalized_events = [event for event in normalized_events if event is not None]
-        if not normalized_events:
-            return []
-
-        valid_events = [e for e in normalized_events if self._event_quality_score(e) >= 0.3]
-        if not valid_events:
+        trajectory = self._prepare_trajectory(events)
+        if not trajectory:
             return []
 
         knowledge_items: list[KnowledgeMemory] = []
-        workflow = self.extract_workflow(valid_events)
+        workflow = self._build_workflow(trajectory)
         if workflow is not None:
             knowledge_items.append(workflow)
-        case = self.extract_case(valid_events)
+        case = self._build_case(trajectory)
         if case is not None:
             knowledge_items.append(case)
-        template = self.extract_template(valid_events)
-        if template is not None:
-            knowledge_items.append(template)
+            if len(case.steps) >= self._min_steps_rule:
+                knowledge_items.append(self.template_builder.build_from_case(case))
         return knowledge_items
 
-    def extract_template_instruction(self, event: MemoryEvent) -> KnowledgeMemory | None:
-        """从用户明确给出的章节结构中形成模板，不要求前端提供模板对象。"""
-        if event.source_type not in (SourceType.USER_BEHAVIOR, SourceType.MANUAL_CONFIG):
-            return None
-        text = event.text.strip()
-        if "比赛方案" not in text or "部分" not in text:
-            return None
-        quoted = re.search(r"[“\"]([^”\"]+)[”\"]", text)
-        if quoted is None:
-            return None
-        sections = [item.strip() for item in re.split(r"[、,，]", quoted.group(1)) if item.strip()]
-        if len(sections) < 2:
-            return None
-        body = "\n\n".join(f"# {section}\n{{{{{index + 1}}}}}" for index, section in enumerate(sections))
-        return KnowledgeMemory(
-            user_id=event.user_id,
-            knowledge_type=KnowledgeType.TEMPLATE,
-            name="比赛方案模板",
-            content="根据用户明确指定的章节结构生成。",
-            template_body=body,
-            scope=SceneScope(scene="office", task_type="competition_proposal"),
-            confidence=0.96,
-            success_count=0,
-            total_count=1,
-            status=MemoryStatus.ACTIVE,
-            level=MemoryLevel.LONG,
-            evidences=self._build_evidences([event]),
-        )
-
     def extract_workflow(self, events: list[MemoryEvent | dict]) -> KnowledgeMemory | None:
-        """
-        从事件序列中提取工作流知识。
-        """
-        if not events:
-            return None
-        steps = self._extract_steps(events)
-        tools = self._extract_tool_chain(events)
-        if not steps:
-            return None
+        trajectory = self._prepare_trajectory(events)
+        return self._build_workflow(trajectory) if trajectory else None
 
+    def extract_case(self, events: list[MemoryEvent | dict]) -> KnowledgeMemory | None:
+        trajectory = self._prepare_trajectory(events)
+        return self._build_case(trajectory) if trajectory else None
+
+    def extract_template(self, events: list[MemoryEvent | dict]) -> KnowledgeMemory | None:
+        case = self.extract_case(events)
+        if case is None or len(case.steps) < self._min_steps_rule:
+            return None
+        return self.template_builder.build_from_case(case)
+
+    def _build_workflow(self, events: list[MemoryEvent | dict]) -> KnowledgeMemory | None:
+        steps = self._extract_steps(events)
+        if len(steps) < self._min_steps_rule:
+            return None
+        tools = self._extract_tool_chain(events)
         first_event = events[0]
         goal = self._identify_task_goal(events)
-        scope = SceneScope(
-            scene=self._get_event_field(first_event, "scene", ""),
-            task_type=self._get_event_field(first_event, "task_type", ""),
-            app=self._get_event_field(first_event, "source", self._get_event_field(first_event, "source_type", "")),
+        evidences = self._build_evidences(events)
+        confidence = self._knowledge_confidence(
+            events,
+            steps=steps,
+            tools=tools,
+            result=self._extract_result(events),
+            evidences=evidences,
+            kind="workflow",
         )
-
-        # 多因子置信度计算：平均质量分 + 对数边际收益
-        avg_quality = sum(self._event_quality_score(event) for event in events) / len(events)
-        base_conf = 0.5 + 0.1 * math.log1p(len(steps)) + 0.05 * math.log1p(min(len(tools), 3))
-        confidence = round(min(0.95, base_conf * avg_quality), 4)
-
         return KnowledgeMemory(
             user_id=self._get_event_field(first_event, "user_id", "default"),
             knowledge_type=KnowledgeType.WORKFLOW,
@@ -130,414 +118,571 @@ class KnowledgeExtractor:
             content=f"围绕 '{goal}' 的标准执行流程",
             steps=steps,
             tools=tools,
-            scope=scope,
+            scope=self._scope(first_event),
             confidence=confidence,
-            success_count=max(1, len(events)),
-            total_count=max(1, len(events)),
+            success_count=1,
+            total_count=1,
             status=MemoryStatus.ACTIVE,
             level=MemoryLevel.MID,
-            evidences=self._build_evidences(events),
+            evidences=evidences,
         )
 
-    def extract_case(self, events: list[MemoryEvent | dict]) -> KnowledgeMemory | None:
-        """
-        从事件序列中提取历史案例。
-        """
-        if not events:
+    def _build_case(self, events: list[MemoryEvent | dict]) -> KnowledgeMemory | None:
+        steps = self._extract_steps(events)
+        tools = self._extract_tool_chain(events)
+        result = self._extract_result(events)
+        if not result or not (steps or tools):
             return None
         first_event = events[0]
         goal = self._identify_task_goal(events)
-        steps = self._extract_steps(events)
-        result = self._extract_result(events)
-
-        # 结构化案例描述
-        content = f"任务目标：「{goal}」；执行步骤：{', '.join(steps) if steps else '无'}；最终结果：{result or '未记录'}。"
-
-        # 多因子置信度计算
-        avg_quality = sum(self._event_quality_score(event) for event in events) / len(events)
-        base_conf = 0.6 + 0.05 * math.log1p(min(len(steps), 5))
-        confidence = round(min(0.95, base_conf * avg_quality), 4)
-
+        evidences = self._build_evidences(events)
+        confidence = self._knowledge_confidence(
+            events,
+            steps=steps,
+            tools=tools,
+            result=result,
+            evidences=evidences,
+            kind="case",
+        )
+        content = (
+            f"任务目标：「{goal}」；执行步骤："
+            f"{', '.join(steps) if steps else '无'}；最终结果：{result}。"
+        )
         return KnowledgeMemory(
             user_id=self._get_event_field(first_event, "user_id", "default"),
             knowledge_type=KnowledgeType.CASE,
             name=f"{goal}案例",
             content=content,
             steps=steps,
-            tools=self._extract_tool_chain(events),
-            scope=SceneScope(
-                scene=self._get_event_field(first_event, "scene", ""),
-                task_type=self._get_event_field(first_event, "task_type", ""),
-                app=self._get_event_field(first_event, "source", self._get_event_field(first_event, "source_type", "")),
-            ),
+            tools=tools,
+            scope=self._scope(first_event),
             confidence=confidence,
-            success_count=max(1, len(events)),
-            total_count=max(1, len(events)),
+            success_count=1,
+            total_count=1,
             status=MemoryStatus.ACTIVE,
             level=MemoryLevel.MID,
-            evidences=self._build_evidences(events),
+            evidences=evidences,
         )
 
-    def extract_template(self, events: list[MemoryEvent | dict]) -> KnowledgeMemory | None:
-        """
-        从事件序列中提取可复用模板。
-        """
-        case = self.extract_case(events)
-        if case is None:
-            return None
-        return self.template_builder.build_from_case(case)
+    def _prepare_trajectory(
+        self, events: list[MemoryEvent | dict]
+    ) -> list[MemoryEvent | dict]:
+        prepared = self._prepare_events(events)
+        trajectory = self._select_trajectory_events(prepared)
+        if not trajectory:
+            return []
+        if self._should_llm_enrich(trajectory):
+            trajectory = self._llm_enrich_trajectory(trajectory)
+        return trajectory if self._trajectory_complete(trajectory) else []
+
+    def _prepare_events(self, events: list[MemoryEvent | dict]) -> list[MemoryEvent | dict]:
+        deduplicated: dict[str, MemoryEvent | dict] = {}
+        anonymous: list[MemoryEvent | dict] = []
+        for raw_event in events:
+            event = self._coerce_event(raw_event)
+            if event is None or self._event_quality_score(event) < 0.3:
+                continue
+            event_id = self._get_event_field(event, "event_id", "")
+            if not event_id:
+                anonymous.append(event)
+                continue
+            current = deduplicated.get(event_id)
+            if (
+                current is None
+                or self._event_quality_score(event) > self._event_quality_score(current)
+            ):
+                deduplicated[event_id] = event
+        return sorted([*deduplicated.values(), *anonymous], key=self._event_sort_key)
+
+    def _select_trajectory_events(
+        self, events: list[MemoryEvent | dict]
+    ) -> list[MemoryEvent | dict]:
+        signals = [event for event in events if self._is_knowledge_signal(event)]
+        if not signals:
+            return []
+        groups: dict[tuple[str, str, str], list[MemoryEvent | dict]] = {}
+        for event in signals:
+            key = (
+                self._get_event_field(event, "user_id", "default"),
+                self._get_event_field(event, "session_id", ""),
+                self._get_event_field(event, "task_type", ""),
+            )
+            groups.setdefault(key, []).append(event)
+        return max(
+            groups.values(),
+            key=lambda group: (
+                len(group),
+                sum(self._event_quality_score(event) for event in group),
+                self._event_sort_key(group[-1]),
+            ),
+        )
+
+    def _is_knowledge_signal(self, event: MemoryEvent | dict) -> bool:
+        event_type = self._get_event_type(event)
+        content = self._event_content(event)
+        if event_type in {"task_trajectory", "tool_call"}:
+            return True
+        if any(
+            content.get(key) not in (None, "", [], {})
+            for key in ("task_name", "goal", "steps", "tools", "result", "output")
+        ):
+            return True
+        return bool(self._iter_tool_calls(event, usable_only=True))
+
+    def _trajectory_complete(self, events: list[MemoryEvent | dict]) -> bool:
+        statuses: list[str] = []
+        for event in events:
+            content = self._event_content(event)
+            for key in ("status", "state", "outcome", "result_status"):
+                value = content.get(key)
+                if value not in (None, ""):
+                    statuses.append(str(value).strip().lower())
+        last_status = statuses[-1] if statuses else ""
+        if self._contains_marker(last_status, self._FAILURE_MARKERS):
+            return False
+        if self._contains_marker(last_status, self._PARTIAL_MARKERS):
+            return False
+        if self._contains_marker(last_status, self._SUCCESS_MARKERS):
+            return True
+
+        result = self._extract_result(events)
+        lowered = result.lower()
+        if not result or self._contains_marker(lowered, self._FAILURE_MARKERS):
+            return False
+        if self._contains_marker(lowered, self._PARTIAL_MARKERS):
+            return False
+        return self._contains_marker(lowered, self._SUCCESS_MARKERS) or bool(
+            self._extract_steps(events) or self._extract_tool_chain(events)
+        )
+
+    @staticmethod
+    def _contains_marker(value: str, markers: tuple[str, ...]) -> bool:
+        return any(marker in value for marker in markers)
 
     def _llm_available(self) -> bool:
-        """兼容项目 BaseLLMClient 及轻量测试桩。"""
         if self.llm_client is None:
             return False
         checker = getattr(self.llm_client, "is_available", None)
-        return bool(checker()) if callable(checker) else callable(getattr(self.llm_client, "generate", None))
+        return (
+            bool(checker())
+            if callable(checker)
+            else callable(getattr(self.llm_client, "generate", None))
+        )
 
     def _identify_task_goal(self, events: list[MemoryEvent | dict]) -> str:
-        """识别任务目标：优先结构化字段，兜底LLM语义归纳"""
         for event in events:
-            if self._get_event_type(event) == "task_trajectory":
-                task_name = self._event_content(event).get("task_name")
-                if task_name:
-                    return str(task_name).strip()
-
-        rule_goal = "任务"
-        for event in events:
-            if isinstance(event, MemoryEvent) and event.text:
-                rule_goal = event.text.strip()
-                break
             content = self._event_content(event)
-            for key in ("result", "text"):
+            for key in ("task_name", "goal", "title"):
                 value = content.get(key)
                 if value:
-                    rule_goal = str(value).strip()
-                    break
-            if rule_goal != "任务":
-                break
+                    return self._clean_goal(str(value))
 
-        # 第三优先级：规则提取效果差，触发LLM语义归纳
-        need_llm = (rule_goal == "任务") or len(rule_goal) > 50
-        if need_llm and self._llm_available():
+        rule_goal = ""
+        for event in events:
+            content = self._event_content(event)
+            value = content.get("text") or self._get_event_field(event, "text", "")
+            if value:
+                rule_goal = str(value).strip()
+                break
+        if (not rule_goal or len(rule_goal) > 50) and self._llm_available():
             llm_goal = self._llm_summarize_goal(events)
             if llm_goal:
                 return llm_goal
+        return self._clean_goal(rule_goal or self._get_event_field(events[0], "task_type", "任务"))
 
-        # 最终兜底：规则结果截断
-        return rule_goal[:20] if len(rule_goal) > 20 else rule_goal
+    @staticmethod
+    def _clean_goal(value: str) -> str:
+        cleaned = re.sub(r"\s+", " ", value).strip(" 「」'\"。，、：:")
+        return cleaned[:20] if len(cleaned) > 20 else (cleaned or "任务")
 
     def _extract_tool_chain(self, events: list[MemoryEvent | dict]) -> list[str]:
-        """提取工具调用链：优先保留轨迹的完整时序，再补充零散调用"""
         tools: list[str] = []
         seen: set[str] = set()
-        # 第一优先级：任务轨迹中的完整工具链（保证时序）
         for event in events:
-            if self._get_event_type(event) == "task_trajectory":
-                raw_tools = self._event_content(event).get("tools") or []
-                if isinstance(raw_tools, list):
-                    for tool_name in raw_tools:
-                        value = str(tool_name).strip()
-                        if value and value not in seen:
-                            tools.append(value)
-                            seen.add(value)
-        # 第二优先级：零散工具调用事件补充
-        for event in events:
-            if isinstance(event, MemoryEvent):
-                for call in event.tool_calls:
-                    if call.tool_name not in seen:
-                        tools.append(call.tool_name)
-                        seen.add(call.tool_name)
+            content = self._event_content(event)
+            raw_tools = content.get("tools") or []
+            if isinstance(raw_tools, list):
+                for tool_name in raw_tools:
+                    self._append_unique(tools, seen, str(tool_name))
             if self._get_event_type(event) == "tool_call":
-                tool_name = self._event_content(event).get("tool_name", "").strip()
-                if tool_name and tool_name not in seen:
-                    tools.append(tool_name)
-                    seen.add(tool_name)
+                self._append_unique(tools, seen, str(content.get("tool_name", "")))
+            for call in self._iter_tool_calls(event, usable_only=True):
+                self._append_unique(tools, seen, str(self._call_field(call, "tool_name", "")))
         return tools
 
     def _extract_steps(self, events: list[MemoryEvent | dict]) -> list[str]:
-        """提取执行步骤：规则结构化提取优先，LLM语义归纳兜底"""
         steps: list[str] = []
         seen: set[str] = set()
-        # 规则主路径：从结构化 steps 字段提取
         for event in events:
-            content = self._event_content(event)
-            raw_steps = content.get("steps") or []
+            raw_steps = self._event_content(event).get("steps") or []
             if isinstance(raw_steps, list):
                 for step in raw_steps:
-                    value = self._normalize_step(str(step).strip())
-                    if value and value not in seen and len(value) >= 2:
-                        steps.append(value)
-                        seen.add(value)
-            if isinstance(event, MemoryEvent):
-                step_labels = {
-                    "file_search": "检索项目资料",
-                    "calendar_query": "读取日程",
-                    "report_writer": "生成报告",
-                }
-                for call in event.tool_calls:
-                    value = step_labels.get(call.tool_name, f"调用 {call.tool_name}")
-                    if value not in seen:
-                        steps.append(value)
-                        seen.add(value)
-
-        # 规则提取不足，触发LLM从事件序列中归纳步骤
+                    self._append_unique(steps, seen, self._normalize_step(str(step)))
+        if len(steps) < self._min_steps_rule:
+            for event in events:
+                for call in self._iter_tool_calls(event, usable_only=True):
+                    tool = str(self._call_field(call, "tool_name", "")).strip()
+                    if tool:
+                        self._append_unique(steps, seen, f"调用 {tool}")
         if len(steps) < self._min_steps_rule and self._llm_available():
-            llm_steps = self._llm_extract_steps(events)
-            for step in llm_steps:
-                value = self._normalize_step(step)
-                if value and value not in seen and len(value) >= 2:
-                    steps.append(value)
-                    seen.add(value)
-
+            for step in self._llm_extract_steps(events):
+                self._append_unique(steps, seen, self._normalize_step(step))
         return steps
 
-    def _normalize_step(self, step: str) -> str:
-        """步骤文本归一化：去除序号、多余空白与标点"""
-        # 去除中文序号前缀
-        step = re.sub(r'^\s*(第[一二三四五六七八九十\d]+[步、：:.]\s*)', '', step)
-        # 去除数字序号前缀
-        step = re.sub(r'^\s*\d+[.、\s]+', '', step)
-        # 清理首尾标点与空白
-        return step.strip(' 。，、：:.')
+    @staticmethod
+    def _append_unique(target: list[str], seen: set[str], value: str) -> None:
+        cleaned = value.strip()
+        key = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", "", cleaned.lower())
+        if cleaned and len(cleaned) >= 2 and key and key not in seen:
+            target.append(cleaned)
+            seen.add(key)
+
+    @staticmethod
+    def _normalize_step(step: str) -> str:
+        step = re.sub(
+            r"^\s*(?:\u7b2c[\u4e00-\u9fff\d]+[\u6b65\u3001\uff1a:.]\s*|\d+[.\u3001\s]+)", "", step
+        )
+        return step.strip(" \u3002\uff0c\u3001\uff1a:.")
 
     def _extract_result(self, events: list[MemoryEvent | dict]) -> str:
         for event in reversed(events):
-            if isinstance(event, MemoryEvent) and event.tool_calls:
-                result = event.tool_calls[-1].result
-                if result:
-                    return str(result).strip()
-            result = self._event_content(event).get("result")
-            if result:
-                return str(result).strip()
+            content = self._event_content(event)
+            for key in ("result", "output", "summary"):
+                value = content.get(key)
+                if value not in (None, "", [], {}):
+                    return self._stringify(value)
+            for call in reversed(self._iter_tool_calls(event, usable_only=True)):
+                value = self._call_field(call, "result", None)
+                if value not in (None, "", [], {}):
+                    return self._stringify(value)
         return ""
 
+    @staticmethod
+    def _stringify(value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)[:500]
+
+    def _knowledge_confidence(
+        self,
+        events: list[MemoryEvent | dict],
+        *,
+        steps: list[str],
+        tools: list[str],
+        result: str,
+        evidences: list[Evidence],
+        kind: str,
+    ) -> float:
+        qualities = [self._event_quality_score(event) for event in events]
+        average_quality = sum(qualities) / len(qualities)
+        event_quality = 0.7 * average_quality + 0.3 * min(qualities)
+        explicit_completion = any(
+            self._contains_marker(
+                str(self._event_content(event).get(key, "")).lower(),
+                self._SUCCESS_MARKERS,
+            )
+            for event in events
+            for key in ("status", "state", "outcome", "result_status")
+        )
+        completion = 1.0 if explicit_completion else 0.82
+        expected_steps = 3 if kind == "workflow" else 2
+        structure = min(1.0, 0.35 + 0.14 * min(len(steps), expected_steps + 2) + 0.05 * len(tools))
+        unique_events = {item.event_id for item in evidences if item.event_id}
+        source_types = {str(item.source_type) for item in evidences}
+        evidence = min(1.0, 0.25 + 0.18 * len(unique_events) + 0.08 * len(source_types))
+        all_calls = [
+            call
+            for event in events
+            for call in self._iter_tool_calls(event, usable_only=False)
+        ]
+        usable_calls = [
+            call
+            for event in events
+            for call in self._iter_tool_calls(event, usable_only=True)
+        ]
+        consistency = len(usable_calls) / len(all_calls) if all_calls else 0.9
+        outcome = 1.0 if result else (0.78 if kind == "workflow" else 0.55)
+        return self.confidence_calculator.score(
+            KnowledgeConfidenceFactors(
+                event_quality=event_quality,
+                completion=completion,
+                structure=structure,
+                evidence=evidence,
+                outcome=outcome,
+                consistency=consistency,
+            )
+        )
+
     def _build_evidences(self, events: list[MemoryEvent | dict]) -> list[Evidence]:
-        """构建证据链：按事件类型差异化权重，优化摘要信息密度"""
         evidences: list[Evidence] = []
-        type_weight = {
+        weights = {
             "task_trajectory": 0.95,
-            "tool_call": 0.8,
+            "tool_call": 0.85,
             "user_feedback": 0.9,
-            "user_behavior": 0.85,
             "manual_config": 0.9,
         }
         for event in events:
-            content = self._event_content(event)
+            event_id = self._get_event_field(event, "event_id", "")
             event_type = self._get_event_type(event)
-            summary = ""
+            content = self._event_content(event)
             if event_type == "task_trajectory":
-                summary = f"任务「{content.get('task_name', '未知')}」执行结果：{content.get('result', '未知')}".strip()
-            elif event_type == "tool_call":
-                summary = f"工具调用：{content.get('tool_name', '未知')}，状态：{content.get('status', '未知')}".strip()
-            elif event_type == "user_feedback":
-                summary = f"用户反馈：{content.get('text', '')}".strip()
-            else:
-                summary = str(content)[:100]
-
-            weight = type_weight.get(event_type, 0.8)
-            if summary:
-                evidences.append(
-                    Evidence(
-                        event_id=self._get_event_field(event, "event_id", ""),
-                        content=summary,
-                        source_type=self._evidence_source_type(event),
-                        timestamp=self._event_timestamp(event),
-                        weight=weight,
-                    )
+                summary = (
+                    f"任务「{content.get('task_name', self._identify_task_goal([event]))}」"
+                    f"执行结果：{content.get('result', self._extract_result([event]) or '未知')}"
                 )
+            elif self._iter_tool_calls(event, usable_only=True):
+                names = [
+                    str(self._call_field(call, "tool_name", ""))
+                    for call in self._iter_tool_calls(event, usable_only=True)
+                ]
+                summary = f"工具调用：{', '.join(name for name in names if name)}"
+            else:
+                summary = str(content)[:160]
+            if not summary:
+                continue
+            evidence_key = f"{event_id}|{event_type}|{summary}"
+            evidence_id = hashlib.sha256(evidence_key.encode("utf-8")).hexdigest()[:8]
+            evidences.append(
+                Evidence(
+                    evidence_id=evidence_id,
+                    event_id=event_id,
+                    content=summary[:200],
+                    source_type=self._evidence_source_type(event),
+                    timestamp=self._event_timestamp(event),
+                    weight=weights.get(event_type, 0.8),
+                )
+            )
         return evidences
 
-    # ==================== LLM 语义辅助方法（条件触发）====================
-    def _llm_summarize_goal(self, events: list[MemoryEvent | dict]) -> str | None:
-        """LLM 归纳任务目标：从事件序列中提炼核心任务主题"""
-        event_summaries = []
-        for event in events[:10]:
-            event_summaries.append(f"{self._get_event_type(event)}: {str(self._event_content(event))[:80]}")
-        prompt = f"""
-请从以下任务执行事件中，用不超过10个字的简洁短语概括核心任务目标。
-要求：
-1. 只返回目标短语，不要任何解释、标点、前缀
-2. 准确提炼任务核心，不要冗余描述
-3. 例如：生成项目周报、排查代码bug
+    def _should_llm_enrich(self, events: list[MemoryEvent | dict]) -> bool:
+        """Use one structured LLM pass only when the trajectory is underspecified."""
+        if not self._llm_available():
+            return False
+        steps = self._extract_steps_from_payload(events)
+        has_goal = any(
+            self._event_content(event).get(key)
+            for event in events
+            for key in ("task_name", "goal", "title")
+        )
+        has_result = bool(self._extract_result(events))
+        return len(steps) < self._min_steps_rule or not has_goal or not has_result
 
-事件列表：
-{chr(10).join(event_summaries)}
-"""
-        try:
-            result = self.llm_client.generate(
-                prompt=prompt,
-                system_prompt="你是任务分析专家，擅长从执行记录中提炼核心目标。"
-            )
-            goal = result.content.strip().strip('「」""\'\'。，')
-            if goal and 2 <= len(goal) <= 20:
-                return goal
-            return None
-        except Exception:
-            return None
+    def _extract_steps_from_payload(self, events: list[MemoryEvent | dict]) -> list[str]:
+        steps: list[str] = []
+        for event in events:
+            raw_steps = self._event_content(event).get("steps") or []
+            if isinstance(raw_steps, list):
+                steps.extend(str(step).strip() for step in raw_steps if str(step).strip())
+        return steps
 
-    def _llm_extract_steps(self, events: list[MemoryEvent | dict]) -> list[str]:
-        """LLM 从事件序列中归纳执行步骤：解决无结构化steps字段的抽取问题"""
-        event_summaries = []
-        for event in events[:20]:
-            content = self._event_content(event)
-            event_type = self._get_event_type(event)
-            if event_type == "tool_call":
-                event_summaries.append(f"调用工具：{content.get('tool_name', '')}，输入：{content.get('input', '')[:50]}")
-            elif event_type == "task_trajectory":
-                event_summaries.append(f"任务：{content.get('task_name', '')}，结果：{content.get('result', '')[:50]}")
-            else:
-                event_summaries.append(str(content)[:60])
-
-        prompt = f"""
-请从以下任务执行事件中，按执行顺序归纳出 3-6 条核心执行步骤。
-要求：
-1. 每条步骤简洁清晰，不超过15字，动宾结构
-2. 按实际执行先后顺序排列
-3. 过滤失败、重试、调试类的异常步骤
-4. 只返回 JSON 格式：{{"steps": ["步骤1", "步骤2", ...]}}
-5. 不要输出任何额外解释文字
-
-执行事件：
-{chr(10).join(event_summaries)}
-"""
+    def _llm_enrich_trajectory(
+        self, events: list[MemoryEvent | dict]
+    ) -> list[MemoryEvent | dict]:
+        summaries = [
+            f"{self._get_event_type(event)}: "
+            f"{json.dumps(self._event_content(event), ensure_ascii=False, default=str)[:240]}"
+            for event in events[:20]
+        ]
+        prompt = (
+            "Complete reusable knowledge from these gate-approved task events. "
+            "Return JSON only with goal, steps, tools, and result. "
+            "Use empty values when evidence is insufficient and do not invent facts.\n"
+            + "\n".join(summaries)
+        )
         try:
             result = self.llm_client.generate_json(
                 prompt=prompt,
-                schema={"type": "object", "properties": {"steps": {"type": "array", "items": {"type": "string"}}}},
-                system_prompt="你是流程分析专家，擅长从操作记录中提炼标准执行步骤。"
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "goal": {"type": "string"},
+                        "steps": {"type": "array", "items": {"type": "string"}},
+                        "tools": {"type": "array", "items": {"type": "string"}},
+                        "result": {"type": "string"},
+                    },
+                },
+                system_prompt="You strictly structure task trajectories into reusable knowledge.",
             )
-            steps = result.get("steps", [])
-            if isinstance(steps, list) and 2 <= len(steps) <= 8:
-                return [s.strip() for s in steps if s.strip()]
-            return []
         except Exception:
+            raise KnowledgeExtractionError("knowledge.enrichment_llm_failed") from None
+        if not isinstance(result, dict):
+            raise KnowledgeExtractionError("knowledge.enrichment_invalid")
+        enriched = dict(self._event_content(events[0]))
+        if result.get("goal"):
+            enriched.setdefault("task_name", str(result["goal"]).strip())
+        for field in ("steps", "tools"):
+            values = result.get(field)
+            if isinstance(values, list) and values:
+                enriched[field] = [str(value).strip() for value in values if str(value).strip()]
+        if result.get("result"):
+            enriched["result"] = str(result["result"]).strip()
+        if isinstance(events[0], MemoryEvent):
+            updated = events[0].model_copy(update={"payload": enriched})
+        else:
+            updated = dict(events[0])
+            updated["payload"] = enriched
+        return [updated, *events[1:]]
+
+    def _llm_summarize_goal(self, events: list[MemoryEvent | dict]) -> str | None:
+        summaries = [
+            f"{self._get_event_type(event)}: {str(self._event_content(event))[:80]}"
+            for event in events[:10]
+        ]
+        prompt = (
+            "请从以下任务执行事件中，用不超过10个字的短语概括核心任务目标。"
+            "只返回目标短语，不要解释。\n事件列表：\n" + "\n".join(summaries)
+        )
+        try:
+            result = self.llm_client.generate(
+                prompt=prompt,
+                system_prompt="你是任务分析专家，擅长从执行记录中提炼核心目标。",
+            )
+        except Exception:
+            raise KnowledgeExtractionError("knowledge.goal_llm_failed") from None
+        goal = str(getattr(result, "content", "")).strip().strip("「」'\"。，")
+        return goal if 2 <= len(goal) <= 20 else None
+
+    def _llm_extract_steps(self, events: list[MemoryEvent | dict]) -> list[str]:
+        summaries = []
+        for event in events[:20]:
+            content = self._event_content(event)
+            serialized = json.dumps(content, ensure_ascii=False, default=str)[:120]
+            summaries.append(f"{self._get_event_type(event)}: {serialized}")
+        prompt = (
+            "请按执行顺序归纳3-6条核心步骤，只返回JSON："
+            '{"steps":["步骤1","步骤2"]}。\n执行事件：\n' + "\n".join(summaries)
+        )
+        try:
+            result = self.llm_client.generate_json(
+                prompt=prompt,
+                schema={
+                    "type": "object",
+                    "properties": {"steps": {"type": "array", "items": {"type": "string"}}},
+                },
+                system_prompt="你是流程分析专家。",
+            )
+        except Exception:
+            raise KnowledgeExtractionError("knowledge.steps_llm_failed") from None
+        steps = result.get("steps", []) if isinstance(result, dict) else []
+        if not isinstance(steps, list):
             return []
+        return [str(step).strip() for step in steps[:8] if str(step).strip()]
 
     def _coerce_event(self, event: MemoryEvent | dict) -> MemoryEvent | dict | None:
-        """兼容旧版事件对象与新版接入层输入。"""
         if isinstance(event, MemoryEvent):
             return event
         if isinstance(event, dict):
             try:
                 return MemoryEvent.model_validate(event)
             except Exception:
-                # 接入层原始载荷可能暂不完全符合 1.1 约束；保留原始字典，
-                # 由后续兼容读取逻辑继续从 payload/steps/tools 中提取内容。
                 return event
         return None
 
     def _get_event_type(self, event: MemoryEvent | dict) -> str:
-        """统一返回事件类型字符串。"""
-        if isinstance(event, MemoryEvent):
-            event_type = getattr(event, "event_type", "")
-            if isinstance(event_type, str) and event_type:
-                return event_type.lower()
-            if getattr(event, "source_type", None) is SourceType.TOOL_RESULT:
-                return "tool_call"
-            return "task_trajectory"
-        if isinstance(event, dict):
-            event_type = str(event.get("event_type", "")).strip().lower()
-            if event_type in {"tool_call", "task_trajectory", "user_feedback", "user_behavior", "manual_config"}:
-                return event_type
-            source_type = str(event.get("source_type", "")).strip().lower()
-            if source_type in {"tool_result", "tool_call"}:
-                return "tool_call"
-            if source_type in {"manual_config"}:
-                return "manual_config"
-            if source_type in {"user_behavior"}:
-                return "user_behavior"
-            return "task_trajectory"
+        raw = self._get_event_field(event, "event_type", "").strip().lower()
+        if raw:
+            return raw
+        source = self._get_event_field(event, "source_type", "").strip().lower()
+        if source in {"tool_result", "tool_call"}:
+            return "tool_call"
+        if source == "manual_config":
+            return "manual_config"
+        if source == "user_behavior":
+            return "user_behavior"
         return "task_trajectory"
 
     def _event_content(self, event: MemoryEvent | dict) -> dict:
-        """从旧版/新版输入中提取内容字典。"""
         if isinstance(event, MemoryEvent):
-            content = getattr(event, "content", None)
-            if isinstance(content, dict):
-                return content
-            payload = getattr(event, "payload", {}) or {}
-            if isinstance(payload, dict):
-                return payload
-            return {}
+            content = dict(event.payload or {})
+            if event.text and not content.get("text"):
+                content["text"] = event.text
+            return content
         if isinstance(event, dict):
-            if isinstance(event.get("content"), dict):
-                return event.get("content")
-            if isinstance(event.get("payload"), dict):
-                return event.get("payload")
-            return {}
+            content = (
+                event.get("content")
+                if isinstance(event.get("content"), dict)
+                else event.get("payload")
+            )
+            result = dict(content) if isinstance(content, dict) else {}
+            if event.get("text") and not result.get("text"):
+                result["text"] = event.get("text")
+            return result
         return {}
 
     def _event_quality_score(self, event: MemoryEvent | dict) -> float:
-        """兼容旧版 quality_score 与新版 quality.score。"""
         if isinstance(event, MemoryEvent):
-            quality = getattr(event, "quality", None)
-            if quality is not None and hasattr(quality, "score"):
-                return float(quality.score)
-            return float(getattr(event, "quality_score", 0.5))
-        if isinstance(event, dict):
-            quality = event.get("quality")
-            if isinstance(quality, dict):
-                return float(quality.get("score", 0.5))
-            return float(event.get("quality_score", 0.5))
-        return 0.5
+            return float(getattr(event.quality, "score", 0.5))
+        quality = event.get("quality") if isinstance(event, dict) else None
+        if isinstance(quality, dict):
+            return float(quality.get("score", 0.5))
+        return float(event.get("quality_score", 0.5)) if isinstance(event, dict) else 0.5
 
     def _get_event_field(self, event: MemoryEvent | dict, field: str, default: str = "") -> str:
-        """统一读取 scene/task_type/source/user_id/event_id 等字段。"""
-        if isinstance(event, MemoryEvent):
-            value = getattr(event, field, None)
-            if value not in (None, ""):
-                return str(value)
-            if field == "source":
-                source_type = getattr(event, "source_type", None)
-                if source_type is not None:
-                    return str(source_type)
-            return default
-        if isinstance(event, dict):
-            value = event.get(field)
-            if value not in (None, ""):
-                return str(value)
-            if field == "source":
-                value = event.get("source_type")
-                if value not in (None, ""):
-                    return str(value)
-            return default
-        return default
+        value = getattr(event, field, None) if isinstance(event, MemoryEvent) else event.get(field)
+        if value in (None, "") and field == "source":
+            value = (
+                getattr(event, "source_type", None)
+                if isinstance(event, MemoryEvent)
+                else event.get("source_type")
+            )
+        raw = getattr(value, "value", value)
+        return str(raw) if raw not in (None, "") else default
 
-    def _event_timestamp(self, event: MemoryEvent | dict):
-        """统一获取时间戳，兼容旧版 datetime 和新版 ISO 字符串。"""
-        if isinstance(event, MemoryEvent):
-            value = getattr(event, "timestamp", None)
-            if isinstance(value, str):
-                try:
-                    return datetime.fromisoformat(value.replace("Z", "+00:00"))
-                except Exception:
-                    return datetime.now()
-            if value is not None:
-                return value
-            occurred_at = getattr(event, "occurred_at", None)
-            if isinstance(occurred_at, str):
-                try:
-                    return datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
-                except Exception:
-                    return datetime.now()
-            return datetime.now()
-        if isinstance(event, dict):
-            occurred_at = event.get("occurred_at") or event.get("timestamp")
-            if isinstance(occurred_at, str):
-                try:
-                    return datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
-                except Exception:
-                    return datetime.now()
-            return datetime.now()
-        return datetime.now()
+    def _event_sort_key(self, event: MemoryEvent | dict) -> tuple[datetime, str, str]:
+        return (
+            self._event_timestamp(event),
+            self._get_event_field(event, "turn_id", ""),
+            self._get_event_field(event, "event_id", ""),
+        )
+
+    def _event_timestamp(self, event: MemoryEvent | dict) -> datetime:
+        value = self._get_event_field(event, "occurred_at", "") or self._get_event_field(
+            event, "timestamp", ""
+        )
+        if value:
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                pass
+        return datetime.min.replace(tzinfo=timezone.utc)
 
     def _evidence_source_type(self, event: MemoryEvent | dict) -> SourceType:
-        """把事件类型映射为 Evidence.source_type 所需枚举。"""
-        event_type = self._get_event_type(event)
-        if event_type == "tool_call":
+        raw = self._get_event_field(event, "source_type", SourceType.TOOL_RESULT.value)
+        try:
+            return SourceType(raw)
+        except ValueError:
             return SourceType.TOOL_RESULT
-        if event_type == "user_behavior":
-            return SourceType.USER_BEHAVIOR
-        if event_type == "manual_config":
-            return SourceType.MANUAL_CONFIG
-        return SourceType.TOOL_RESULT
+
+    def _scope(self, event: MemoryEvent | dict) -> SceneScope:
+        return SceneScope(
+            scene=self._get_event_field(event, "scene", ""),
+            task_type=self._get_event_field(event, "task_type", ""),
+            app=self._get_event_field(event, "source", ""),
+        )
+
+    def _iter_tool_calls(self, event: MemoryEvent | dict, *, usable_only: bool) -> list[Any]:
+        calls = (
+            list(getattr(event, "tool_calls", []) or [])
+            if isinstance(event, MemoryEvent)
+            else list(event.get("tool_calls", []) or [])
+        )
+        calls.sort(key=lambda call: int(self._call_field(call, "sequence", 0) or 0))
+        if not usable_only:
+            return calls
+        result = []
+        for call in calls:
+            status = getattr(
+                self._call_field(call, "status", ""), "value", self._call_field(call, "status", "")
+            )
+            if str(status).strip().lower() in self._USABLE_TOOL_STATUSES:
+                result.append(call)
+        return result
+
+    @staticmethod
+    def _call_field(call: Any, field: str, default: Any) -> Any:
+        return (
+            getattr(call, field, default)
+            if not isinstance(call, dict)
+            else call.get(field, default)
+        )

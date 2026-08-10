@@ -8,7 +8,7 @@ import os
 import re
 from typing import Optional
 
-from openai import OpenAI
+from .llm import build_chat_client
 
 from .models import RawTriple, EntityType
 from .prompts import EXTRACTION_SYSTEM_PROMPT, EXTRACTION_USER_TEMPLATE
@@ -34,12 +34,14 @@ class TripleExtractor:
         api_key: str = "",
         model: str = DEEPSEEK_MODEL,
         base_url: str = DEEPSEEK_BASE_URL,
+        llm_client=None,
     ):
         self.model = model
-        api_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
         base_url = base_url or os.environ.get("DEEPSEEK_BASE_URL", DEEPSEEK_BASE_URL)
-
-        self._client = OpenAI(api_key=api_key, base_url=base_url) if api_key else None
+        self._client = build_chat_client(
+            api_key=api_key, llm_client=llm_client, base_url=base_url
+        )
+        self.last_error: Exception | None = None
 
     def extract(self, text: str, source_id: str = "") -> list[RawTriple]:
         """
@@ -52,23 +54,8 @@ class TripleExtractor:
         Returns:
             RawTriple 列表，提取失败返回空列表
         """
+        self.last_error = None
         if not text.strip():
-            return []
-        # 对竞赛演示中的高确定性更新句先做本地规则抽取；无需模型，也不依赖前端三元组。
-        contact = re.search(r"(?:项目)?联系人(?:已经)?(?:改成|变更为|是)\s*([\u4e00-\u9fa5A-Za-z·]{2,20})", text)
-        if contact:
-            name = contact.group(1).rstrip("，。,. ")
-            return [RawTriple(
-                subject_text="MemoryHub 项目",
-                subject_type=EntityType.OTHER.value,
-                predicate_text="联系人",
-                object_text=name,
-                object_type=EntityType.PERSON.value,
-                evidence=contact.group(0),
-                confidence=0.95,
-            )]
-        if self._client is None:
-            logger.info("未配置事实抽取模型，跳过自由文本三元组提取")
             return []
 
         user_message = EXTRACTION_USER_TEMPLATE.format(text=text)

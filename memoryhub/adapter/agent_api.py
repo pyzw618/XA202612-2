@@ -1,7 +1,7 @@
-"""竞赛演示用 Agent 适配层。
+"""竞赛演示用 Agent 适配层（临时重建，贴合 main 稳定后端）。
 
 前端只把回放和用户裁决交给这里；真正的 MemoryHub 写操作由本层执行。
-后续接入真实 Agent 时可保持同一前端 transport。
+本文件是便于前端联调重建的临时适配层，复用 memoryhub 的 app.state 服务。
 """
 
 from __future__ import annotations
@@ -23,11 +23,41 @@ from memoryhub.core.forget import MemoryForgetter
 router = APIRouter(prefix="/api/agent", tags=["agent-adapter"])
 
 
+@router.get("/health")
+async def health_check():
+    """临时健康检查：供前端探测后端在线状态。"""
+    return {"status": "ok"}
+
+
+@router.delete("/preferences")
+async def clear_preferences(request: Request, user_id: str = "default"):
+    """清空指定用户的偏好记忆（演示用：前端“清空演示数据”/载入演示时调用）。
+
+    只清 preferences 表，不影响知识/事实等其他记忆。
+    """
+    db = getattr(request.app.state, "db", None)
+    if db is None:
+        raise HTTPException(status_code=503, detail="backend database not initialized")
+    from memoryhub.storage.database import PreferenceRow
+
+    with db.session() as s:
+        deleted = (
+            s.query(PreferenceRow)
+            .filter(PreferenceRow.user_id == user_id)
+            .delete(synchronize_session=False)
+        )
+    return {"deleted": deleted, "user_id": user_id}
+
+# 进程内 fact 候选暂存区：proposal_id -> {"json": <dict>, "candidate": <FactCandidate>}
+# 便于前端 FactDialog 裁决（main 后端本身是自动 commit，无候选存储）
+_FACT_PENDING: dict[str, dict[str, Any]] = {}
+
+
 class ReplayRequest(BaseModel):
     schema_version: str = "conversation-replay/1.0"
     session_id: str = ""
     turns: list[dict[str, Any]] = Field(default_factory=list)
-    events: list[MemoryEvent] = Field(default_factory=list)
+    events: list[dict[str, Any]] = Field(default_factory=list)
     execute: bool = False
     used_memory_ids: list[str] = Field(default_factory=list)
 
@@ -50,15 +80,56 @@ class AgentStepRequest(BaseModel):
     retrieval_query: str = ""
     scene: str = "chat"
     task_type: str = "memory_demo"
-    events: list[MemoryEvent] = Field(default_factory=list)
+    # 用 dict 而非 MemoryEvent，以便在构造时归一化旧演示数据的 source_type 枚举
+    events: list[dict[str, Any]] = Field(default_factory=list)
+
+
+_SOURCE_TYPE_ALIASES = {
+    "chat": "user_behavior",
+    "user": "user_behavior",
+    "manual": "manual_config",
+}
+
+
+def _normalize_event(raw: dict[str, Any]) -> MemoryEvent:
+    """把演示事件 dict 归一化为 main 后端接受的 MemoryEvent。"""
+    data = dict(raw or {})
+    st = str(data.get("source_type") or "")
+    mapped = _SOURCE_TYPE_ALIASES.get(st, st)
+    if mapped:
+        data["source_type"] = mapped
+    if not data.get("user_id"):
+        data["user_id"] = "default"
+    if not data.get("occurred_at"):
+        data["occurred_at"] = ""
+    return MemoryEvent.model_validate(data)
 
 
 def _events_from_replay(body: ReplayRequest) -> list[MemoryEvent]:
-    events = list(body.events)
+    events = [_normalize_event(ev) for ev in body.events]
     for turn in body.turns:
         for raw_event in turn.get("events", []):
-            events.append(MemoryEvent.model_validate(raw_event))
+            events.append(_normalize_event(raw_event))
     return events
+
+
+def _candidate_to_json(proposal: Any) -> dict[str, Any]:
+    """把 FactCandidate 序列化为前端 FactCard 需要的结构。"""
+    raw = proposal.raw_triple
+    admission = proposal.admission
+    return {
+        "proposal_id": proposal.proposal_id,
+        "subject": getattr(raw, "subject_text", ""),
+        "predicate": getattr(raw, "predicate_text", ""),
+        "object": getattr(raw, "object_text", ""),
+        "evidence": getattr(raw, "evidence", ""),
+        "confidence": float(getattr(raw, "confidence", 0) or 0),
+        "admission_reason": admission.reason if hasattr(admission, "reason") else "",
+        "suggested_scope": proposal.scope_hint or "project",
+        "status": "proposed",
+        "source_id": proposal.source_id,
+        "metadata": dict(proposal.metadata or {}),
+    }
 
 
 @router.post("/replay")
@@ -105,14 +176,15 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
     if processor is None or repo is None or retriever is None:
         raise HTTPException(status_code=503, detail="agent runtime not initialized")
 
-    safe_events, warnings = processor.sanitize(body.events)
+    events = [_normalize_event(ev) for ev in body.events]
+    safe_events, warnings = processor.sanitize(events)
     new_events = [event for event in safe_events if repo.get_by_id(event.event_id) is None]
     repo.batch_save(safe_events)
     processing = processor.process(new_events)
     processing.warnings = [*warnings, *processing.warnings]
 
     user_id = safe_events[0].user_id if safe_events else "demo_user"
-    response = retriever.search(
+    search_response = retriever.search(
         SearchRequest(
             user_id=user_id,
             query=body.retrieval_query or body.user_message,
@@ -122,16 +194,19 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
         )
     )
     cards = []
-    for result in response.results:
-        memory = retriever.memory_lookup.get(result.memory_id)
+    for result in search_response.results:
+        memory = getattr(retriever, "memory_lookup", {}).get(result.memory_id)
         if memory is None:
             continue
         is_preference = getattr(memory, "memory_type", "") == "preference"
         title = getattr(memory, "text", "") if is_preference else getattr(memory, "name", "")
         summary = getattr(memory, "text", "") if is_preference else getattr(memory, "content", "")
-        scope = getattr(memory, "scope", SceneScope()).model_dump(mode="json")
+        scope = getattr(memory, "scope", SceneScope())
+        scope_json = scope.model_dump(mode="json") if hasattr(scope, "model_dump") else {"scope": str(scope)}
         level = getattr(getattr(memory, "level", ""), "value", getattr(memory, "level", ""))
-        knowledge_type = getattr(getattr(memory, "knowledge_type", ""), "value", getattr(memory, "knowledge_type", ""))
+        knowledge_type = getattr(
+            getattr(memory, "knowledge_type", ""), "value", getattr(memory, "knowledge_type", "")
+        )
         cards.append(
             {
                 "memory_id": result.memory_id,
@@ -142,7 +217,7 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
                 "relevance": result.score,
                 "source": result.source or "MemoryHub",
                 "level": level or "long",
-                "scope": scope,
+                "scope": scope_json,
                 "tags": list(getattr(memory, "tags", [])),
             }
         )
@@ -156,14 +231,16 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
     if processing.fact_proposal_ids:
         summary_lines.append(f"生成 {len(processing.fact_proposal_ids)} 条事实候选")
     summary_lines.append(f"实际检索到 {len(cards)} 条记忆，使用 {len(used_ids)} 条")
+
+    # fact 候选：把 processing 暂存的候选注册到进程内裁决暂存区
     fact_proposals = []
-    fact_pipeline = getattr(request.app.state, "fact_pipeline", None)
-    if fact_pipeline is not None:
-        fact_proposals = [
-            record
-            for proposal_id in processing.fact_proposal_ids
-            if (record := fact_pipeline.store.get_proposal(proposal_id)) is not None
-        ]
+    cached_candidates = getattr(processor, "_fact_candidates", None) or []
+    for proposal in cached_candidates:
+        if proposal.proposal_id in processing.fact_proposal_ids:
+            json_repr = _candidate_to_json(proposal)
+            _FACT_PENDING[proposal.proposal_id] = {"json": json_repr, "candidate": proposal}
+            fact_proposals.append(json_repr)
+
     generated_tool_calls = [
         {
             "call_id": f"{body.turn_id}_memory_search",
@@ -172,7 +249,7 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
             "result": {"candidate_ids": [card["memory_id"] for card in cards], "used_ids": used_ids},
             "status": "success",
             "sequence": 900,
-            "latency_ms": response.latency_ms,
+            "latency_ms": int(search_response.latency_ms),
         }
     ]
     if processing.preferences_written or processing.knowledge_written:
@@ -210,7 +287,7 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
         "fact_proposals": fact_proposals,
         "tool_calls": generated_tool_calls,
         "write_summary": summary_lines,
-        "retrieval_latency_ms": response.latency_ms,
+        "retrieval_latency_ms": int(search_response.latency_ms),
         "warnings": processing.warnings,
     }
 
@@ -223,35 +300,29 @@ async def decide_agent_action(
 ):
     """接收用户裁决，由 Agent 适配层执行相应 MemoryHub 操作。"""
     if body.action_type in {"fact_commit", "fact_reject"}:
+        staged = _FACT_PENDING.get(action_id)
         pipeline = getattr(request.app.state, "fact_pipeline", None)
         if pipeline is None:
             raise HTTPException(status_code=503, detail="fact pipeline not initialized")
-        record = pipeline.store.get_proposal(action_id)
-        if record is None:
+
+        # 从暂存区取回候选（含 FactCandidate 对象）
+        if staged is None:
             raise HTTPException(status_code=404, detail="fact proposal not found")
+        proposal = staged["candidate"]
 
         if body.action_type == "fact_reject":
-            if record["status"] == "committed":
-                raise HTTPException(status_code=409, detail="committed proposal cannot be rejected")
-            pipeline.store.update_proposal(
-                action_id,
-                status="rejected",
-                rejection_reason=body.payload.get("reason", body.decision),
-            )
+            staged["json"]["status"] = "rejected"
             return {"action_id": action_id, "status": "rejected"}
 
-        if record["status"] == "committed":
-            return record["result"]
-        proposal = pipeline.load_proposal(action_id)
         try:
             result = pipeline.commit(
                 proposal,
-                scope=body.payload.get("scope", "global"),
-                project_id=body.payload.get("project_id"),
+                scope=body.payload.get("scope") or proposal.scope_hint or "global",
+                project_id=body.payload.get("project_id") or proposal.project_id_hint,
                 resolution=body.payload.get("resolution") or None,
                 force=bool(body.payload.get("force", False)),
                 auto_resolve=False,
-                apply_on_escalate=False,
+                user_id=body.payload.get("user_id", "default"),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
@@ -263,14 +334,10 @@ async def decide_agent_action(
             "relation": result.relation,
             "resolution": result.resolution,
             "reason": result.reason,
-            "fact": asdict(result.new_fact),
-            "existing_fact": asdict(result.existing_fact) if result.existing_fact else None,
+            "fact": asdict(result.new_fact) if hasattr(result, "new_fact") else None,
+            "existing_fact": asdict(result.existing_fact) if getattr(result, "existing_fact", None) else None,
         }
-        pipeline.store.update_proposal(
-            action_id,
-            status=response["status"],
-            result=response,
-        )
+        _FACT_PENDING[action_id]["json"]["status"] = response["status"]
         return response
 
     if body.action_type == "conflict_resolve":

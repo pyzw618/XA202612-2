@@ -7,8 +7,9 @@ REST API 路由定义 — Memory Adapter 标准接口
 from __future__ import annotations
 
 import hmac
+import json
 import re
-from dataclasses import asdict
+from collections.abc import Mapping
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
@@ -17,16 +18,14 @@ from pydantic import BaseModel
 from memoryhub.adapter.schemas import (
     ConflictRecord,
     EvalReport,
+    ExtractionTask,
+    ExtractionTaskRunRequest,
+    ExtractionTaskRunResponse,
+    ExtractionTaskStatus,
     FeedbackRequest,
-    FactCommitRequest,
-    FactCommitResponse,
-    FactProposalResponse,
-    FactProposeRequest,
-    FactRejectRequest,
     ForgetRecord,
     ForgetRequest,
     ForgetResponse,
-    ForgetPreviewResponse,
     KnowledgeMemory,
     MemoryStatus,
     PreferenceMemory,
@@ -42,6 +41,8 @@ from memoryhub.adapter.user_rule_schemas import (
     UserRuleResponse,
 )
 from memoryhub.core.forget import MemoryForgetter
+from memoryhub.embedding import KylinEmbeddingError
+from memoryhub.storage.vector_engine import MilvusEngineError
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
@@ -81,6 +82,29 @@ MemoryHubUserHeader = Annotated[
 def _user_rule_http_error(code: str, status_code: int) -> HTTPException:
     """Build a stable error without retaining service exception context."""
     return HTTPException(status_code=status_code, detail={"code": code})
+
+
+def _retrieval_http_error(exc: Exception) -> HTTPException:
+    """把 Embedding/Milvus 超时或不可用异常映射为稳定的 HTTP 503/504。"""
+    code = getattr(exc, "code", "retrieval.error")
+    if not isinstance(code, str):
+        code = "retrieval.error"
+
+    is_timeout = isinstance(code, str) and (
+        code in {"embedding.timeout", "milvus.timeout"}
+        or code.startswith("embedding.timeout:")
+        or code.startswith("milvus.timeout:")
+    )
+    # 其余 embedding./milvus. 开头的稳定错误统一视为后端不可用
+    is_backend_error = isinstance(code, str) and (
+        code.startswith("embedding.") or code.startswith("milvus.")
+    )
+
+    if is_timeout:
+        return HTTPException(status_code=504, detail={"code": code})
+    if is_backend_error:
+        return HTTPException(status_code=503, detail={"code": code})
+    return HTTPException(status_code=500, detail={"code": code})
 
 
 def _user_rule_service(request: Request) -> Any:
@@ -334,6 +358,78 @@ def delete_user_rule(
 # ============================================================
 
 
+def _memory_index_text(memory: PreferenceMemory | KnowledgeMemory) -> str:
+    """Build index text using the same contract as application startup."""
+    if memory.memory_type == "knowledge":
+        from memoryhub.core.memory_write import MemoryWriteService
+
+        return MemoryWriteService.index_text(memory)
+    return memory.text
+
+
+def _memory_index_metadata(memory: PreferenceMemory | KnowledgeMemory) -> dict[str, Any]:
+    scope = memory.scope.model_dump() if hasattr(memory.scope, "model_dump") else {}
+    return {
+        "memory_type": memory.memory_type,
+        "user_id": memory.user_id,
+        "content": _memory_index_text(memory),
+        "confidence": memory.confidence,
+        "status": (
+            memory.status.value if hasattr(memory.status, "value") else str(memory.status)
+        ),
+        "scope": scope,
+    }
+
+
+def _sync_memory_index(request: Request, memory, *, remove: bool = False) -> None:
+    """Synchronize runtime lookup, vector index, BM25 index, and search cache."""
+    state = request.app.state
+    write_service = getattr(state, "memory_write_service", None)
+    if write_service is not None:
+        write_service.sync_memory(memory, remove=remove)
+        return
+    memory_id = memory.memory_id
+    vector_store = getattr(state, "vector_store", None)
+    vector_engine = getattr(state, "vector_engine", None)
+    keyword_search = getattr(state, "keyword_search", None)
+    memory_lookup = getattr(state, "memory_lookup", None)
+    cache = getattr(state, "search_cache", None)
+
+    if remove:
+        if vector_store is not None:
+            vector_store.delete(memory_id)
+            vector_store.save()
+        if vector_engine is not None:
+            vector_engine.delete(memory_id)
+        if keyword_search is not None:
+            keyword_search.delete(memory_id)
+        if memory_lookup is not None:
+            memory_lookup.pop(memory_id, None)
+    else:
+        text = _memory_index_text(memory)
+        metadata = _memory_index_metadata(memory)
+        embedding_client = getattr(state, "embedding_client", None)
+        if (vector_store is not None or vector_engine is not None) and embedding_client is None:
+            raise RuntimeError("embedding client not initialized")
+        if vector_store is not None:
+            vector_store.update(memory_id, embedding_client.embed(text))
+            vector_store.save()
+        if vector_engine is not None:
+            vector_engine.insert(
+                memory_id, text, embedding_client.embed(text), metadata=metadata
+            )
+        if keyword_search is not None:
+            keyword_search.update(
+                memory_id, text, json.dumps(metadata, ensure_ascii=False)
+            )
+        if memory_lookup is not None:
+            memory_lookup[memory_id] = memory
+
+    # A write can turn a prior cache miss into a hit, so clear all query entries.
+    if cache is not None:
+        cache.clear()
+
+
 @router.post("/events", response_model=WriteEventResponse)
 async def write_events(req: WriteEventRequest, request: Request):
     """
@@ -350,48 +446,173 @@ async def write_events(req: WriteEventRequest, request: Request):
         rejected: 被拒绝的事件数（质量/安全过滤）
         event_ids: 接受的事件 ID 列表
     """
-    repo = getattr(request.app.state, "event_repo", None)
-    if repo is None:
-        raise HTTPException(status_code=503, detail="event repository not initialized")
+    service = getattr(request.app.state, "event_ingestion_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="event ingestion service not initialized")
     try:
-        processor = getattr(request.app.state, "event_processor", None)
-        existing_ids = {
-            event.event_id for event in req.events if repo.get_by_id(event.event_id) is not None
-        }
-        safe_events = req.events
-        safety_warnings: list[str] = []
-        if processor is not None:
-            safe_events, safety_warnings = processor.sanitize(req.events)
-        accepted = repo.batch_save(safe_events)
-        new_events = [event for event in safe_events if event.event_id not in existing_ids]
-        processing = processor.process(new_events) if processor is not None else None
-        if processing is not None:
-            processing.warnings = [*safety_warnings, *processing.warnings]
-        event_ids = [event.event_id for event in safe_events]
+        result = service.ingest(req.events)
         return WriteEventResponse(
-            accepted=accepted,
-            rejected=len(req.events) - accepted,
-            event_ids=event_ids,
-            processing=processing,
+            accepted=result.accepted,
+            rejected=result.rejected,
+            event_ids=result.event_ids,
+            extraction_failures=result.extraction_failures,
+            retry_tasks_enqueued=result.retry_tasks_enqueued,
+            retry_queue_failures=result.retry_queue_failures,
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"failed to write events: {str(e)}") from None
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="event ingestion failed") from None
 
 
-@router.get("/events/session/{session_id}", response_model=list)
-async def get_session_events(session_id: str, request: Request):
-    """按会话返回事件，并稳定按时间、turn_id 和工具 sequence 排序。"""
-    repo = getattr(request.app.state, "event_repo", None)
+# ============================================================
+# 抽取任务与死信管理
+# ============================================================
+
+
+
+# ============================================================
+# Facts management
+# ============================================================
+
+@router.get("/facts")
+async def list_facts(request: Request, user_id: str = "default", status: str | None = "active", limit: int = Query(default=100, ge=1, le=500)):
+    store = getattr(request.app.state, "fact_store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="fact store not initialized")
+    return store.list_facts(status=status, user_id=user_id, limit=limit)
+
+@router.get("/facts/conflicts")
+async def list_fact_conflicts(request: Request, user_id: str = "default", limit: int = Query(default=100, ge=1, le=500)):
+    store = getattr(request.app.state, "fact_store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="fact store not initialized")
+    return store.list_fact_conflicts(user_id=user_id, limit=limit)
+
+@router.get("/facts/{fact_id}")
+async def get_fact(fact_id: str, request: Request, user_id: str = "default"):
+    store = getattr(request.app.state, "fact_store", None)
+    fact = store.get_fact(fact_id, user_id=user_id) if store is not None else None
+    if fact is None:
+        raise HTTPException(status_code=404, detail="fact not found")
+    return fact
+
+@router.get("/facts/{fact_id}/evidence")
+async def get_fact_evidence(fact_id: str, request: Request, user_id: str = "default"):
+    store = getattr(request.app.state, "fact_store", None)
+    fact = store.get_fact(fact_id, user_id=user_id) if store is not None else None
+    if fact is None:
+        raise HTTPException(status_code=404, detail="fact not found")
+    return store.list_fact_evidence(fact_id, user_id)
+
+@router.delete("/facts/{fact_id}")
+async def delete_fact(fact_id: str, request: Request, user_id: str = "default"):
+    store = getattr(request.app.state, "fact_store", None)
+    index_service = getattr(request.app.state, "fact_index_service", None)
+    fact = store.get_fact(fact_id, user_id=user_id) if store is not None else None
+    if fact is None:
+        raise HTTPException(status_code=404, detail="fact not found")
+    if not store.update_fact_status(fact_id, "deleted", user_id=user_id):
+        raise HTTPException(status_code=409, detail="fact delete failed")
+    fact.status = "deleted"
+    fact.pending_index = True
+    if index_service is not None:
+        try:
+            index_service.sync_fact(fact, remove=True)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="fact projection delete pending") from exc
+    store.delete_fact_artifacts([fact_id], user_id)
+    store.prune_orphan_entities(user_id)
+    return {"deleted": True, "fact_id": fact_id}
+@router.get("/extraction/tasks/metrics")
+async def extraction_retry_metrics(request: Request):
+    task = getattr(request.app.state, "extraction_retry_task", None)
+    if task is None:
+        raise HTTPException(status_code=503, detail="extraction retry task not initialized")
+    metrics = task.metrics
+    return {
+        "total_runs": metrics.total_runs,
+        "total_claimed": metrics.total_claimed,
+        "total_succeeded": metrics.total_succeeded,
+        "total_retried": metrics.total_retried,
+        "total_dead_lettered": metrics.total_dead_lettered,
+        "last_run_at": metrics.last_run_at,
+        "last_duration_ms": metrics.last_duration_ms,
+        "last_error_code": metrics.last_error_code,
+    }
+
+@router.get("/extraction/tasks", response_model=list[ExtractionTask])
+async def list_extraction_tasks(
+    request: Request,
+    user_id: str = "default",
+    status: ExtractionTaskStatus | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """按 owner 查看抽取重试、成功和死信状态。"""
+    repo = getattr(request.app.state, "extraction_task_repo", None)
     if repo is None:
-        raise HTTPException(status_code=503, detail="event repository not initialized")
-    events = repo.get_by_session(session_id)
-    events.sort(key=lambda event: (event.occurred_at, event.turn_id, event.event_id))
-    return events
+        raise HTTPException(status_code=503, detail="extraction task repository not initialized")
+    return repo.list(
+        user_id=user_id,
+        status=status.value if status is not None else None,
+        limit=limit,
+    )
+
+
+@router.post("/extraction/tasks/run", response_model=ExtractionTaskRunResponse)
+async def run_extraction_tasks(req: ExtractionTaskRunRequest, request: Request):
+    """显式执行当前用户到期任务；不启动测试外的隐式后台线程。"""
+    service = getattr(request.app.state, "extraction_retry_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="extraction retry service not initialized")
+    result = service.run_due(user_id=req.user_id, limit=req.limit)
+    return ExtractionTaskRunResponse(
+        claimed=result.claimed,
+        succeeded=result.succeeded,
+        retried=result.retried,
+        dead_lettered=result.dead_lettered,
+    )
+
+
+@router.post("/extraction/tasks/{task_id}/retry", response_model=ExtractionTask)
+async def retry_dead_extraction_task(
+    task_id: str, request: Request, user_id: str = "default"
+):
+    """由 owner 将一条死信重置为到期重试任务。"""
+    repo = getattr(request.app.state, "extraction_task_repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="extraction task repository not initialized")
+    task = repo.retry_dead(task_id, user_id=user_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="extraction task not found")
+    return task
 
 
 # ============================================================
 # 记忆检索
 # ============================================================
+
+
+def _record_search_access(request: Request, response: SearchResponse) -> None:
+    """Feed successful retrievals back into lifecycle access statistics."""
+    state = request.app.state
+    pref_repo = getattr(state, "pref_repo", None)
+    know_repo = getattr(state, "know_repo", None)
+    seen: set[str] = set()
+    for memory in [*response.preferences, *response.knowledge]:
+        if memory.memory_id in seen:
+            continue
+        seen.add(memory.memory_id)
+        repo = know_repo if memory.memory_type == "knowledge" else pref_repo
+        if repo is not None:
+            repo.record_access(memory.memory_id, user_id=memory.user_id)
+    fact_store = getattr(state, "fact_store", None)
+    if fact_store is not None:
+        for fact in response.facts:
+            if fact.fact_id in seen:
+                continue
+            seen.add(fact.fact_id)
+            fact_store.record_access(fact.fact_id, user_id=fact.user_id)
 
 
 @router.post("/search", response_model=SearchResponse)
@@ -419,7 +640,11 @@ async def search_memory(req: SearchRequest, request: Request):
     if retriever is None:
         raise HTTPException(status_code=503, detail="retrieval service not initialized")
     try:
-        return retriever.search(req)
+        response = retriever.search(req)
+        _record_search_access(request, response)
+        return response
+    except (KylinEmbeddingError, MilvusEngineError) as exc:
+        raise _retrieval_http_error(exc) from None
     except HTTPException:
         raise
     except ValueError:
@@ -444,12 +669,16 @@ async def get_memory_context(req: SearchRequest, request: Request):
         raise HTTPException(status_code=503, detail="retrieval service not initialized")
     try:
         response = retriever.search(req)
+    except (KylinEmbeddingError, MilvusEngineError) as exc:
+        raise _retrieval_http_error(exc) from None
     except HTTPException:
         raise
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid search request") from None
     except Exception:
         raise HTTPException(status_code=500, detail="internal retrieval error") from None
+
+    _record_search_access(request, response)
 
     # 格式化为可注入 prompt 的文本
     lines = []
@@ -481,19 +710,21 @@ async def list_preferences(
     if repo is None:
         raise HTTPException(status_code=503, detail="preference repository not initialized")
     if scene:
-        return repo.get_by_scope(user_id, scene, "")
-    return repo.get_active(user_id)
+        values = repo.get_by_scope(user_id, scene, "")
+    else:
+        values = repo.list_all(status=status, user_id=user_id)
+    return values
 
 
 @router.get("/preferences/{memory_id}", response_model=PreferenceMemory)
-async def get_preference(memory_id: str, request: Request):
+async def get_preference(memory_id: str, request: Request, user_id: str = "default"):
     """获取单条偏好记忆详情"""
     repo = getattr(request.app.state, "pref_repo", None)
     if repo is None:
         raise HTTPException(status_code=503, detail="preference repository not initialized")
     result = repo.get_by_id(memory_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"preference {memory_id} not found")
+    if result is None or result.user_id != user_id:
+        raise HTTPException(status_code=404, detail="preference not found")
     return result
 
 
@@ -522,178 +753,24 @@ async def list_knowledge(
     repo = getattr(request.app.state, "know_repo", None)
     if repo is None:
         raise HTTPException(status_code=503, detail="knowledge repository not initialized")
-    if knowledge_type and knowledge_type not in {"workflow", "template"}:
-        raise HTTPException(status_code=400, detail="knowledge_type must be workflow or template")
     if scene:
-        items = repo.get_by_scope(user_id, scene, "")
-        return [
-            item for item in items
-            if not knowledge_type or getattr(item.knowledge_type, "value", item.knowledge_type) == knowledge_type
-        ]
-    return repo.get_by_type(user_id, knowledge_type)
-
-
-# ============================================================
-# 事实记忆 propose / commit
-# ============================================================
-
-
-def _fact_pipeline(request: Request):
-    pipeline = getattr(request.app.state, "fact_pipeline", None)
-    if pipeline is None:
-        raise HTTPException(status_code=503, detail="fact pipeline not initialized")
-    return pipeline
-
-
-def _fact_proposal_response(record: dict) -> FactProposalResponse:
-    return FactProposalResponse(**record)
-
-
-@router.post("/facts/propose", response_model=list[FactProposalResponse])
-async def propose_facts(body: FactProposeRequest, request: Request):
-    """纯分析并持久化事实候选，不修改事实表。"""
-    from memoryhub.core.fact.models import FactCandidate, RawTriple
-
-    pipeline = _fact_pipeline(request)
-    proposals = []
-    if body.triples:
-        for triple_input in body.triples:
-            triple = RawTriple(**triple_input.model_dump())
-            admission = pipeline.admission.evaluate(
-                triple,
-                project_id=body.project_id,
-                scope_hint=body.scope_hint,
-            )
-            proposals.append(
-                FactCandidate(
-                    candidate_id=FactCandidate.make_id(),
-                    raw_triple=triple,
-                    admission=admission,
-                    source_id=body.source_id,
-                    project_id_hint=body.project_id,
-                    scope_hint=body.scope_hint,
-                    metadata=body.metadata,
-                )
-            )
-    elif body.text.strip():
-        proposals = pipeline.propose(
-            body.text,
-            source_id=body.source_id,
-            project_id=body.project_id,
-            scope_hint=body.scope_hint,
-            metadata=body.metadata,
-        )
+        values = repo.get_by_scope(user_id, scene, "")
+    elif knowledge_type:
+        values = repo.get_by_type(user_id, knowledge_type)
     else:
-        raise HTTPException(status_code=422, detail="text or triples is required")
-
-    pipeline.persist_proposals(proposals)
-    return [
-        _fact_proposal_response(pipeline.store.get_proposal(item.candidate_id))
-        for item in proposals
-    ]
-
-
-@router.get("/facts/proposals/{proposal_id}", response_model=FactProposalResponse)
-async def get_fact_proposal(proposal_id: str, request: Request):
-    record = _fact_pipeline(request).store.get_proposal(proposal_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="fact proposal not found")
-    return _fact_proposal_response(record)
-
-
-@router.get("/facts")
-async def list_facts(
-    request: Request,
-    status: str = "active",
-    scope: str | None = None,
-    project_id: str | None = None,
-    limit: int = 100,
-):
-    try:
-        facts = _fact_pipeline(request).get_facts(
-            status=status,
-            scope=scope,
-            project_id=project_id,
-            limit=min(max(limit, 1), 500),
-        )
-        return [asdict(fact) for fact in facts]
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
-
-
-@router.post("/facts/{proposal_id}/commit", response_model=FactCommitResponse)
-async def commit_fact(proposal_id: str, body: FactCommitRequest, request: Request):
-    pipeline = _fact_pipeline(request)
-    record = pipeline.store.get_proposal(proposal_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="fact proposal not found")
-    if record["status"] == "committed":
-        return FactCommitResponse(**record["result"])
-    if record["status"] == "rejected":
-        raise HTTPException(status_code=409, detail="fact proposal was rejected")
-
-    proposal = pipeline.load_proposal(proposal_id)
-    try:
-        result = pipeline.commit(
-            proposal,
-            scope=body.scope,
-            project_id=body.project_id,
-            resolution=body.resolution,
-            auto_resolve=False,
-            force=body.force,
-            apply_on_escalate=False,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
-
-    requires_decision = result.relation == "CONFLICT" and result.resolution == "escalate"
-    response = FactCommitResponse(
-        proposal_id=proposal_id,
-        status="awaiting_decision" if requires_decision else "committed",
-        requires_decision=requires_decision,
-        relation=result.relation,
-        resolution=result.resolution,
-        reason=result.reason,
-        fact=asdict(result.new_fact),
-        existing_fact=asdict(result.existing_fact) if result.existing_fact else None,
-    )
-    pipeline.store.update_proposal(
-        proposal_id,
-        status=response.status,
-        result=response.model_dump(mode="json"),
-    )
-    return response
-
-
-@router.post("/facts/{proposal_id}/reject", response_model=FactProposalResponse)
-async def reject_fact(
-    proposal_id: str,
-    body: FactRejectRequest,
-    request: Request,
-):
-    pipeline = _fact_pipeline(request)
-    record = pipeline.store.get_proposal(proposal_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="fact proposal not found")
-    if record["status"] == "committed":
-        raise HTTPException(status_code=409, detail="committed proposal cannot be rejected")
-    pipeline.store.update_proposal(
-        proposal_id,
-        status="rejected",
-        rejection_reason=body.reason,
-    )
-    return _fact_proposal_response(pipeline.store.get_proposal(proposal_id))
+        values = repo.list_all(status="active", user_id=user_id)
+    return values
 
 
 @router.get("/knowledge/{memory_id}", response_model=KnowledgeMemory)
-async def get_knowledge(memory_id: str, request: Request):
+async def get_knowledge(memory_id: str, request: Request, user_id: str = "default"):
     """获取单条知识记忆详情"""
     repo = getattr(request.app.state, "know_repo", None)
     if repo is None:
         raise HTTPException(status_code=503, detail="knowledge repository not initialized")
     result = repo.get_by_id(memory_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail=f"knowledge {memory_id} not found")
+    if result is None or result.user_id != user_id:
+        raise HTTPException(status_code=404, detail="knowledge not found")
     return result
 
 
@@ -703,18 +780,22 @@ async def get_knowledge(memory_id: str, request: Request):
 
 
 @router.get("/conflicts", response_model=list[ConflictRecord])
-async def list_conflicts(status: str = "pending", request: Request = None):
+async def list_conflicts(
+    status: str = "pending", user_id: str = "default", request: Request = None
+):
     """列出冲突记录，支持按状态过滤"""
     # 尝试访问冲突仓储，若不可用则返回空列表
     repo = getattr(request.app.state, "conflict_repo", None) if request else None
     if repo is not None:
-        return repo.list_all(status)
+        return repo.list_all(status, user_id=user_id)
     return []
 
 
 class ResolveConflictRequest(BaseModel):
+    user_id: str = "default"
     decision: str
     reason: str = ""
+    result_id: str = ""
 
 
 @router.post("/conflicts/{conflict_id}/resolve")
@@ -729,10 +810,23 @@ async def resolve_conflict(conflict_id: str, body: ResolveConflictRequest, reque
     if repo is None:
         raise HTTPException(status_code=503, detail="conflict repository not initialized")
     try:
-        result = repo.resolve(conflict_id, body.decision, body.reason)
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from None
+        resolved = repo.resolve(
+            conflict_id, body.decision, body.reason, body.result_id, user_id=body.user_id
+        )
+        if not resolved:
+            raise HTTPException(status_code=404, detail="conflict not found")
+        return {
+            "status": "resolved",
+            "conflict_id": conflict_id,
+            "decision": body.decision,
+            "result_id": body.result_id,
+        }
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="invalid conflict resolution"
+        ) from None
 
 
 # ============================================================
@@ -742,51 +836,113 @@ async def resolve_conflict(conflict_id: str, body: ResolveConflictRequest, reque
 
 @router.post("/feedback")
 async def submit_feedback(req: FeedbackRequest, request: Request):
-    """
-    提交用户反馈，触发偏好更新
-
-    数据流: 用户反馈 → submit_feedback → PreferenceExtractor.extract
-            → ConflictDetector.check → 更新/新增偏好
-
-    参数:
-        req.memory_id: 关联的记忆 ID
-        req.feedback_text: 反馈文本
-        req.action: "update" | "confirm" | "reject"
-    """
+    """Apply feedback to preference or knowledge without changing the API contract."""
     pref_repo = getattr(request.app.state, "pref_repo", None)
-    if pref_repo is None:
-        raise HTTPException(status_code=503, detail="preference repository not initialized")
-    # 根据反馈更新偏好记忆
-    memory = pref_repo.get_by_id(req.memory_id)
-    if memory is None:
-        raise HTTPException(status_code=404, detail=f"memory {req.memory_id} not found")
-    # 简单实现：更新文本并保存
+    know_repo = getattr(request.app.state, "know_repo", None)
+    if pref_repo is None and know_repo is None:
+        raise HTTPException(status_code=503, detail="memory repository not initialized")
+
+    memory = pref_repo.get_by_id(req.memory_id) if pref_repo is not None else None
+    repo = pref_repo
+    if memory is None and know_repo is not None:
+        memory = know_repo.get_by_id(req.memory_id)
+        repo = know_repo
+    if memory is None or memory.user_id != req.user_id:
+        raise HTTPException(status_code=404, detail="memory not found")
+
     if req.action == "update" and req.feedback_text:
-        memory.text = req.feedback_text
+        if memory.memory_type == "knowledge":
+            memory.content = req.feedback_text
+            memory.version = max(1, memory.version) + 1
+        else:
+            memory.text = req.feedback_text
     elif req.action == "reject":
         memory.status = MemoryStatus.ARCHIVED
-    # confirm 无需操作，仅记录
-    pref_repo.save(memory)
+    elif req.action == "confirm" and memory.memory_type == "knowledge":
+        memory.total_count += 1
+        memory.success_count += 1
+
+    write_service = getattr(request.app.state, "memory_write_service", None)
+    if write_service is not None:
+        write_service.upsert_memory(memory)
+    else:
+        repo.save(memory)
+        _sync_memory_index(
+            request, memory, remove=memory.status == MemoryStatus.ARCHIVED
+        )
     return {"status": "ok", "action": req.action}
+
+
+# ============================================================
+# 记忆写入（显式写入入口）
+# ============================================================
+
+def _get_sync_service(request: Request):
+    """从应用状态获取 MemorySyncService 实例。"""
+    service = getattr(request.app.state, "sync_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="memory sync service not initialized")
+    return service
+
+
+@router.post("/memories/preference")
+async def write_preference_memory(
+    req: PreferenceMemory,
+    request: Request,
+    sync_service=Depends(_get_sync_service),
+):
+    """
+    显式写入/更新偏好记忆，并同步到 Milvus。
+
+    数据流: PreferenceMemory → SQLite 事务写入 → Embedding → Milvus upsert
+            → 标记 index_version → 失效检索缓存
+    """
+    sqlite_ok, memory_id = sync_service.index_memory(req)
+    if not sqlite_ok:
+        raise HTTPException(status_code=503, detail="memory write failed")
+    return {"status": "ok", "memory_id": memory_id}
+
+
+@router.post("/memories/knowledge")
+async def write_knowledge_memory(
+    req: KnowledgeMemory,
+    request: Request,
+    sync_service=Depends(_get_sync_service),
+):
+    """
+    显式写入/更新知识记忆，并同步到 Milvus。
+
+    数据流: KnowledgeMemory → SQLite 事务写入 → Embedding → Milvus upsert
+            → 标记 index_version → 失效检索缓存
+    """
+    sqlite_ok, memory_id = sync_service.index_memory(req)
+    if not sqlite_ok:
+        raise HTTPException(status_code=503, detail="memory write failed")
+    return {"status": "ok", "memory_id": memory_id}
 
 
 # ============================================================
 # 精准遗忘
 # ============================================================
 
-def _get_forgetter(request: Request) -> MemoryForgetter:
-    """
-    从应用状态获取 MemoryForgetter 实例
 
-    注入真实的 db / vector_store / cache / repositories。
-    """
+def _get_forgetter(request: Request) -> MemoryForgetter:
+    """Build a forgetter with all currently initialized persistence and indexes."""
+    state = request.app.state
     return MemoryForgetter(
-        llm_client=getattr(request.app.state, "llm_client", None),
-        storage=getattr(request.app.state, "db", None),
-        vector_store=getattr(request.app.state, "vector_store", None),
-        cache=getattr(request.app.state, "retriever", None),
-        pref_repo=getattr(request.app.state, "pref_repo", None),
-        know_repo=getattr(request.app.state, "know_repo", None),
+        llm_client=getattr(state, "llm_client", None),
+        storage=getattr(state, "db", None),
+        vector_store=getattr(state, "vector_store", None),
+        vector_engine=getattr(state, "vector_engine", None),
+        cache=getattr(state, "search_cache", None),
+        pref_repo=getattr(state, "pref_repo", None),
+        know_repo=getattr(state, "know_repo", None),
+        keyword_search=getattr(state, "keyword_search", None),
+        memory_lookup=getattr(state, "memory_lookup", None),
+        evidence_store=getattr(state, "evidence_store", None),
+        conflict_repo=getattr(state, "conflict_repo", None),
+        fact_store=getattr(state, "fact_store", None),
+        fact_index_service=getattr(state, "fact_index_service", None),
     )
 
 
@@ -815,34 +971,10 @@ async def forget_memory(
     return forgetter.execute(req)
 
 
-@router.post("/forget/preview", response_model=ForgetPreviewResponse)
-async def preview_forget(
-    req: ForgetRequest,
-    request: Request,
-    forgetter: MemoryForgetter = Depends(_get_forgetter),
-) -> ForgetPreviewResponse:
-    """只定位候选记忆，不修改存储。"""
-    intent = forgetter.parse_intent(req)
-    candidate_ids = forgetter.locate_memories(intent, req)
-    candidates: list[dict[str, Any]] = []
-    pref_repo = getattr(request.app.state, "pref_repo", None)
-    know_repo = getattr(request.app.state, "know_repo", None)
-    for memory_id in candidate_ids:
-        memory = pref_repo.get_by_id(memory_id) if pref_repo is not None else None
-        if memory is None and know_repo is not None:
-            memory = know_repo.get_by_id(memory_id)
-        if memory is not None:
-            candidates.append(memory.model_dump(mode="json"))
-    return ForgetPreviewResponse(
-        instruction=req.instruction,
-        candidate_ids=candidate_ids,
-        candidates=candidates,
-        match_count=len(candidate_ids),
-    )
-
-
 @router.get("/forget/history", response_model=list[ForgetRecord])
-async def list_forget_history(user_id: str = "default", request: Request = None) -> list[ForgetRecord]:
+async def list_forget_history(
+    user_id: str = "default", request: Request = None
+) -> list[ForgetRecord]:
     """
     列出指定用户的遗忘操作历史
 

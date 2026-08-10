@@ -1,0 +1,55 @@
+{
+  "description": "MemoryHub auto-record: 累积 Claude Code 的工具调用轨迹并在每个回合结束时沉淀为 MemoryHub 记忆事件",
+  "hooks": {
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/record.py", "--accumulate"],
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/record.py", "--flush-turn"],
+            "async": true,
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/record.py", "--flush-all"],
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/context.py"],
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

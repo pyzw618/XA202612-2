@@ -14,7 +14,7 @@ import logging
 import os
 from typing import Optional
 
-from openai import OpenAI
+from .llm import build_chat_client
 
 from .models import ConflictResult, Fact, Resolution
 from .store import FactStore
@@ -29,10 +29,11 @@ DEEPSEEK_MODEL = "deepseek-chat"
 class ConflictDetector:
     """写时冲突检测 + LLM 裁决"""
 
-    def __init__(self, store: FactStore, api_key: str = ""):
+    def __init__(self, store: FactStore, api_key: str = "", llm_client=None):
         self.store = store
-        key = api_key or os.environ.get("DEEPSEEK_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
-        self._llm = OpenAI(api_key=key, base_url=DEEPSEEK_BASE_URL) if key else None
+        self._llm = build_chat_client(
+            api_key=api_key, llm_client=llm_client, base_url=DEEPSEEK_BASE_URL
+        )
 
     # ─── 阶段 1: 代码检测（不调 LLM）─────────────────────────────────
 
@@ -55,6 +56,7 @@ class ConflictDetector:
             fact.predicate_id,
             scope=fact.scope,
             project_id=fact.project_id,
+            user_id=fact.user_id,
         )
 
         if not existing:
@@ -124,11 +126,6 @@ class ConflictDetector:
             new_observed_at=new.observed_at,
             new_confidence=new.confidence,
         )
-
-        if self._llm is None:
-            result.resolution = Resolution.ESCALATE.value
-            result.reason = f"[未配置裁决模型，升级人工] {result.reason}"
-            return result
 
         try:
             resp = self._llm.chat.completions.create(

@@ -203,7 +203,10 @@ def freshen_session(session: dict[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(session)
     run_id = uuid.uuid4().hex[:10]
     session_id = f"{result['session_id']}_{run_id}"
-    user_id = f"qml_demo_{run_id}"
+    # 演示适配层：user_id 固定为 demo_user，避免每次载入/重启都生成新用户，
+    # 否则此前写入的偏好记忆会挂在旧用户下、偏好页查询不到。
+    # event_id/session_id 仍带随机 run_id，保证重复执行不触发事件去重。
+    user_id = "demo_user"
     result["session_id"] = session_id
     result["source"] = "sample"
     result["read_only"] = False

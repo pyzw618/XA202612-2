@@ -115,3 +115,141 @@ class FactProposalListModel(DictListModel):
             ),
             parent,
         )
+
+
+class PreferenceListModel(DictListModel):
+    def __init__(self, parent=None) -> None:
+        super().__init__(
+            (
+                "memoryId",
+                "preferenceType",
+                "content",
+                "confidence",
+                "scopeText",
+                "status",
+                "level",
+                "version",
+                "createdAt",
+                "updatedAt",
+                "evidenceCount",
+                "tagsText",
+                "evidenceJson",
+            ),
+            parent,
+        )
+
+
+class KnowledgeListModel(DictListModel):
+    def __init__(self, parent=None) -> None:
+        super().__init__(
+            (
+                "memoryId",
+                "knowledgeType",
+                "name",
+                "content",
+                "confidence",
+                "successRate",
+                "status",
+                "level",
+                "version",
+                "createdAt",
+                "scopeText",
+                "steps",
+                "tools",
+                "toolsText",
+                "evidenceCount",
+            ),
+            parent,
+        )
+
+
+class FactListModel(DictListModel):
+    def __init__(self, parent=None) -> None:
+        super().__init__(
+            (
+                "factId",
+                "subject",
+                "predicate",
+                "objectValue",
+                "sourceText",
+                "confidence",
+                "status",
+                "scope",
+                "projectId",
+                "createdAt",
+            ),
+            parent,
+        )
+
+
+class RetrievalListModel(DictListModel):
+    def __init__(self, parent=None) -> None:
+        super().__init__(
+            (
+                "memoryId",
+                "memoryType",
+                "content",
+                "score",
+                "source",
+            ),
+            parent,
+        )
+
+
+class ConflictListModel(DictListModel):
+    def __init__(self, parent=None) -> None:
+        super().__init__(
+            (
+                "conflictId",
+                "oldContent",
+                "newContent",
+                "memoryType",
+                "decision",
+                "reason",
+                "createdAt",
+            ),
+            parent,
+        )
+
+
+class ForgetListModel(DictListModel):
+    def __init__(self, parent=None) -> None:
+        super().__init__(
+            (
+                "recordId",
+                "instruction",
+                "deletedCount",
+                "createdAt",
+            ),
+            parent,
+        )
+
+
+class SafetyRuleListModel(DictListModel):
+    def __init__(self, parent=None) -> None:
+        super().__init__(
+            (
+                "ruleId",
+                "label",
+                "kind",
+                "effect",
+                "enabled",
+                "revision",
+                "createdAt",
+            ),
+            parent,
+        )
+
+
+class EvalListModel(DictListModel):
+    def __init__(self, parent=None) -> None:
+        super().__init__(
+            (
+                "taskName",
+                "totalSamples",
+                "accuracy",
+                "f1",
+                "avgLatencyMs",
+            ),
+            parent,
+        )

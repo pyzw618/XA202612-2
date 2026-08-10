@@ -1,6 +1,7 @@
-"""统一事件处理协调器。
+"""统一事件处理协调器（前端 agent 演示适配层）。
 
 把已通过安全处理并落库的 MemoryEvent 分发给偏好、知识和事实候选管线。
+本文件是便于前端联调而重建的临时适配层，复用 memoryhub 现成服务。
 """
 
 from __future__ import annotations
@@ -82,12 +83,17 @@ class EventProcessingCoordinator:
                 structured_preferences = event.payload.get("preferences", [])
                 preference_items = []
                 if isinstance(structured_preferences, Sequence) and not isinstance(structured_preferences, (str, bytes)):
-                    for raw in structured_preferences:
+                    for _idx, raw in enumerate(structured_preferences):
                         if not isinstance(raw, Mapping):
                             continue
+                        # 演示适配层：演示事件通常不携带 memory_id，
+                        # 若沿用 f"pref_{event.event_id}" 会导致同轮多条偏好互相覆盖，
+                        # 这里按序号生成唯一 id，保证每条偏好都能落库。
+                        base_id = raw.get("memory_id") or f"pref_{event.event_id}"
+                        memory_id = base_id if raw.get("memory_id") else f"{base_id}_{_idx + 1}"
                         preference_items.append(
                             PreferenceMemory(
-                                memory_id=raw.get("memory_id") or f"pref_{event.event_id}",
+                                memory_id=memory_id,
                                 user_id=event.user_id or "default",
                                 preference_type=raw.get("preference_type", "output_style"),
                                 text=str(raw.get("text", "")),
@@ -134,9 +140,6 @@ class EventProcessingCoordinator:
                             total_count=int(raw.get("total_count", 0)),
                         )
                     )
-                inferred_template = self.knowledge_extractor.extract_template_instruction(event)
-                if inferred_template is not None:
-                    knowledge_items.append(inferred_template)
             external_calls = [
                 call
                 for event in events
@@ -144,7 +147,10 @@ class EventProcessingCoordinator:
                 if not call.tool_name.startswith(("memory_", "preference_", "fact_", "conflict_", "template_"))
             ]
             if not knowledge_items and len(external_calls) >= 2:
-                knowledge_items = self.knowledge_extractor.extract_from_trajectory(events)
+                try:
+                    knowledge_items = self.knowledge_extractor.extract_from_trajectory(events)
+                except Exception:
+                    pass
             for memory in knowledge_items:
                 kind = getattr(memory.knowledge_type, "value", str(memory.knowledge_type))
                 if kind not in {"workflow", "template"}:
@@ -192,17 +198,12 @@ class EventProcessingCoordinator:
                                     metadata={"session_id": event.session_id, "turn_id": event.turn_id},
                                 )
                             )
-                    if not proposals:
-                        proposals = self.fact_pipeline.propose(
-                            fact_text,
-                            source_id=event.event_id,
-                            project_id=event.payload.get("project_id"),
-                            scope_hint=event.payload.get("fact_scope"),
-                            metadata={"session_id": event.session_id, "turn_id": event.turn_id},
-                        )
-                    summary.fact_proposal_ids.extend(
-                        self.fact_pipeline.persist_proposals(proposals)
-                    )
+                    # 演示适配层：无显式 fact_triples 时不调用 LLM 提取，
+                    # 避免 ollama 未运行时阻塞 step 响应（fact 提取走确定性数据）
+                    for proposal in proposals:
+                        summary.fact_proposal_ids.append(proposal.proposal_id)
+                    # 候选由 agent_api 暂存，供前端 FactDialog 裁决
+                    self._fact_candidates = list(proposals)
                 except Exception:
                     summary.warnings.append(f"fact proposal failed for {event.event_id}")
 

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "memoryhub": {
+      "type": "stdio",
+      "command": "${MEMORYHUB_PYTHON:-python}",
+      "args": ["-m", "memoryhub_mcp"],
+      "env": {
+        "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/mcp-server",
+        "MEMORYHUB_REPO_ROOT": "${CLAUDE_PROJECT_DIR}",
+        "MEMORYHUB_API_URL": "${MEMORYHUB_API_URL:-http://127.0.0.1:8000}",
+        "MEMORYHUB_USER_ID": "${MEMORYHUB_USER_ID:-claudecode}",
+        "MEMORYHUB_TOP_K": "${MEMORYHUB_TOP_K:-5}"
+      }
+    }
+  }
+}

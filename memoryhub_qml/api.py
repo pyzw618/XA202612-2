@@ -21,10 +21,16 @@ class MemoryHubApi(QObject):
         self.manager = QNetworkAccessManager(self)
 
     def health(self) -> str:
-        return self._send("health", "GET", "/api/health")
+        return self._send("health", "GET", "/api/agent/health")
+
+    def get(self, operation: str, path: str) -> str:
+        return self._send(operation, "GET", path)
 
     def post(self, operation: str, path: str, payload: dict[str, Any]) -> str:
         return self._send(operation, "POST", path, payload)
+
+    def delete(self, operation: str, path: str) -> str:
+        return self._send(operation, "DELETE", path)
 
     def _send(
         self, operation: str, method: str, path: str, payload: dict[str, Any] | None = None
@@ -35,6 +41,8 @@ class MemoryHubApi(QObject):
         request.setTransferTimeout(15_000)
         if method == "GET":
             reply = self.manager.get(request)
+        elif method == "DELETE":
+            reply = self.manager.deleteResource(request)
         else:
             body = QByteArray(json.dumps(payload or {}, ensure_ascii=False).encode("utf-8"))
             reply = self.manager.post(request, body)

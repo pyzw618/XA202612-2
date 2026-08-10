@@ -4,15 +4,15 @@ import QtQuick.Layouts
 
 Rectangle {
     id: root
-    required property string memoryType
-    required property string knowledgeType
-    required property string title
-    required property string summary
-    required property real relevance
-    required property string source
-    required property string scope
-    required property string tagsText
-    required property bool used
+    property string memoryType: ""
+    property string knowledgeType: ""
+    property string title: ""
+    property string summary: ""
+    property real relevance: 0
+    property string source: ""
+    property string scope: ""
+    property string tagsText: ""
+    property bool used: false
     implicitHeight: card.implicitHeight + 24
     radius: 12
     color: root.used ? "#EFF6FF" : "#FFFFFF"
@@ -34,3 +34,4 @@ Rectangle {
         Label { Layout.fillWidth: true; text: root.source + "  ·  " + root.scope + (root.tagsText ? "  ·  " + root.tagsText : ""); color: "#94A3B8"; font.pixelSize: 11; elide: Text.ElideRight }
     }
 }
+

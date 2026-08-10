@@ -12,7 +12,7 @@ if (-not (Test-Path -LiteralPath $python)) {
 
 $ready = $false
 try {
-    $health = Invoke-RestMethod -Uri "$backendUrl/api/health" -TimeoutSec 2
+    $health = Invoke-RestMethod -Uri "$backendUrl/api/agent/health" -TimeoutSec 2
     $ready = $health.status -eq "ok"
 } catch {
     $ready = $false
@@ -26,7 +26,7 @@ if (-not $ready) {
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Milliseconds 500
         try {
-            $health = Invoke-RestMethod -Uri "$backendUrl/api/health" -TimeoutSec 2
+            $health = Invoke-RestMethod -Uri "$backendUrl/api/agent/health" -TimeoutSec 2
             if ($health.status -eq "ok") {
                 $ready = $true
                 break

@@ -5,7 +5,9 @@
 """
 
 import logging
-from memoryhub.adapter.schemas import MemoryEvent, MemoryLevel, MemoryStatus
+from memoryhub.adapter.schemas import (
+    KnowledgeMemory, MemoryEvent, MemoryLevel, MemoryStatus, PreferenceMemory,
+)
 from memoryhub.core.forget.health import HealthCalculator
 
 logger = logging.getLogger(__name__)
@@ -93,9 +95,18 @@ class LifecycleManager:
         return stats
 
     def _save(self, memory):
-        repo = self.pref_repo or self.know_repo
+        if isinstance(memory, PreferenceMemory):
+            repo = self.pref_repo
+        elif isinstance(memory, KnowledgeMemory):
+            repo = self.know_repo
+        else:
+            repo = None
         if repo:
             try:
-                repo.save(memory)
+                write_service = getattr(repo, "write_service", None)
+                if write_service is not None:
+                    write_service.upsert_memory(memory)
+                else:
+                    repo.save(memory)
             except Exception as e:
-                logger.warning(f"生命周期保存失败: {e}")
+                logger.warning(f"????????: {e}")

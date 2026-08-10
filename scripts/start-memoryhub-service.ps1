@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$healthUrl = "http://${BindHost}:${Port}/api/health"
+$healthUrl = "http://${BindHost}:${Port}/api/agent/health"
 
 try {
     $response = Invoke-WebRequest -UseBasicParsing $healthUrl -TimeoutSec 2

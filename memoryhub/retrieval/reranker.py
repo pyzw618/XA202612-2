@@ -62,7 +62,13 @@ class Reranker:
                 + 0.10 * health
             )
 
-            result.score = final_score
+            # Keep SearchResult.score as the documented hybrid-fusion score.
+            # Reranking changes order only; expose its score separately for auditability.
+            result.metadata["rerank_score"] = final_score
+            result.metadata["relevance_score"] = relevance
+            result.metadata["scope_score"] = scope
+            result.metadata["freshness_score"] = freshness
+            result.metadata["health_score"] = health
             scored_results.append((final_score, result))
 
         scored_results.sort(key=lambda x: x[0], reverse=True)

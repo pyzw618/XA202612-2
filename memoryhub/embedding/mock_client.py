@@ -48,6 +48,10 @@ class MockEmbeddingClient(BaseEmbeddingClient):
     def is_available(self) -> bool:
         return True  # Mock 始终可用
 
+    def close(self) -> None:
+        """释放资源；Mock 客户端无需特殊清理。"""
+        pass
+
     # ---- 内部方法 ----
 
     def _deterministic_seed(self, text: str) -> int:

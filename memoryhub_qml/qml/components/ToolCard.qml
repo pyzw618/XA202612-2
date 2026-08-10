@@ -4,13 +4,13 @@ import QtQuick.Layouts
 
 Rectangle {
     id: root
-    required property string toolName
-    required property string status
-    required property int sequence
-    required property int latencyMs
-    required property string argumentsJson
-    required property string resultJson
-    required property string error
+    property string toolName: ""
+    property string status: ""
+    property int sequence: 0
+    property int latencyMs: 0
+    property string argumentsJson: ""
+    property string resultJson: ""
+    property string error: ""
     property bool expanded: false
     implicitHeight: content.implicitHeight + 24
     radius: 12

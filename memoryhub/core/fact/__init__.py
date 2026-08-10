@@ -28,6 +28,7 @@ from .normalizer import EntityNormalizer, PredicateNormalizer
 from .conflict import ConflictDetector
 from .pipeline import FactMemoryPipeline
 from .event_adapter import FactIngestionAdapter
+from .index_service import FactIndexService
 
 __all__ = [
     "Entity", "PredicateDef", "RawTriple", "Fact", "FactCandidate", "FactProposal",
@@ -40,4 +41,5 @@ __all__ = [
     "ConflictDetector",
     "FactMemoryPipeline",
     "FactIngestionAdapter",
+    "FactIndexService",
 ]
