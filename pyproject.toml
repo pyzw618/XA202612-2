@@ -13,16 +13,12 @@ dependencies = [
     "rank-bm25>=0.2",
     "jieba>=0.42",
     "httpx>=0.27",
+    "openai>=1.0",
     "python-dotenv>=1.0",
     "cryptography>=42",
 ]
 
 [project.optional-dependencies]
-agent = [
-    "langchain>=1.0,<2.0",
-    "langchain-openai>=1.0,<2.0",
-    "langgraph>=1.0,<2.0",
-]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -40,10 +36,6 @@ eval = [
 line-length = 100
 target-version = "py311"
 
-[tool.setuptools.packages.find]
-include = ["memoryhub*", "evaluation*", "integrations*"]
-exclude = ["idea*", "tests*", "docs*", "examples*"]
-
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
 
@@ -53,3 +45,8 @@ asyncio_mode = "auto"
 
 [tool.setuptools.package-data]
 "memoryhub.safety_rules.data" = ["*.json"]
+"memoryhub.core.fact" = ["predicate_ontology.json"]
+
+[tool.setuptools.packages.find]
+include = ["memoryhub*", "evaluation*"]
+exclude = ["idea*", "tests*", "docs*"]

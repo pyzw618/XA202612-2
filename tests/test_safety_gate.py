@@ -16,8 +16,8 @@ from memoryhub.adapter.schemas import (
     SensitiveRule,
     SourceType,
 )
-from memoryhub.core.safety.detector import SensitiveDetector
 from memoryhub.core.safety.audit_log import SafetyAuditLog
+from memoryhub.core.safety.detector import SensitiveDetector
 from memoryhub.core.safety.gate import (
     ApprovedWrite,
     GuardedCallbacks,
@@ -366,6 +366,59 @@ def test_gate_rejects_raw_text_before_audit(tmp_path) -> None:
     with pytest.raises(SafetyGateError, match=r"^gate\.memory_event_required$"):
         gate.dispatch("gate-secret-123")  # type: ignore[arg-type]
     assert audit.calls == []
+
+
+def test_gate_selects_one_user_scoped_detector_for_each_event(tmp_path) -> None:
+    allow_detector = SensitiveDetector(rules=[])
+    reject_detector = SensitiveDetector(rules=[_rule(SafetyAction.REJECT)])
+    selected: list[str] = []
+
+    def detector_provider(event: MemoryEvent) -> SensitiveDetector:
+        selected.append(event.user_id)
+        return reject_detector if event.user_id == "blocked-user" else allow_detector
+
+    audit = SafetyAuditLog(
+        tmp_path / "audit",
+        fingerprint_key=b"test-only-provider-audit-key-" + (b"a" * 32),
+    )
+    gate = SafetyWriteGate(
+        None,
+        audit,
+        detector_provider=detector_provider,
+    )
+
+    allowed = gate.route(
+        _event("ordinary content", event_id="evt_allowed", user_id="allowed-user")
+    )
+    rejected = gate.route(
+        _event("gate-secret-123", event_id="evt_rejected", user_id="blocked-user")
+    )
+
+    assert selected == ["allowed-user", "blocked-user"]
+    assert allowed.action is SafetyAction.ALLOW
+    assert allowed.approved is not None
+    assert rejected.action is SafetyAction.REJECT
+    assert rejected.approved is None
+
+
+def test_gate_fails_closed_when_detector_provider_is_unavailable(tmp_path) -> None:
+    audit = SafetyAuditLog(
+        tmp_path / "audit",
+        fingerprint_key=b"test-only-provider-audit-key-" + (b"a" * 32),
+    )
+
+    def unavailable(_event: MemoryEvent) -> SensitiveDetector:
+        raise RuntimeError("untrusted detector detail")
+
+    gate = SafetyWriteGate(None, audit, detector_provider=unavailable)
+
+    with pytest.raises(
+        SafetyGateError,
+        match=r"^gate\.detector_unavailable$",
+    ) as caught:
+        gate.route(_event("ordinary content"))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_gate_rejects_unsealed_audit_and_quarantine_adapters(tmp_path) -> None:

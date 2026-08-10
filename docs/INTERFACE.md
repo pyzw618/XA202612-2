@@ -45,6 +45,7 @@ class Evidence(BaseModel):
     source_type: SourceType # 接入来源大类
     timestamp: datetime     # 证据产生时间
     weight: float = 1.0     # 该证据的权重 [0, 1]
+    decision: ConflictDecision | None = None   # 冲突消解决策（如 OVERRIDE, MERGE, COEXIST, PENDING 或 None），在证据链数据结构中，新增冲突处理决策字段 decision，以便在证据层面追踪与冲突消解相关的决策状态
 ```
 
 ---
@@ -177,31 +178,45 @@ class ToolCallResult(BaseModel):
 
 ```python
 class PreferenceMemory(BaseModel):
-    memory_id: str          # 唯一 ID，格式: "pref_" + 8 位 UUID 片段
-    user_id: str            # 用户 ID
-    memory_type: str        # 固定值 "preference"
-    preference_type: PreferenceType  # 偏好类型（见枚举）
+    memory_id: str = Field(default_factory=lambda: f"pref_{uuid.uuid4().hex[:8]}")          # 唯一 ID，格式: "pref_" + 8 位 UUID 片段
+    user_id: str = "default"  # 用户 ID
+    memory_type: str = "preference"  # 固定值 "preference"
+    preference_type: PreferenceType = PreferenceType.OUTPUT_STYLE  # 偏好类型（见枚举）
 
-    # --- 偏好内容 ---
-    content: str            # 偏好描述文本，如 "项目周报默认使用 Markdown"
-    scope: SceneScope       # 生效场景
+    # --- 偏好内容 （与 MemoryEvent 对齐） ---
+    text: str = ""                         # 自然语言描述，对齐 MemoryEvent.text
+    payload: dict[str, Any] = Field(default_factory=dict) # 结构化表达，与 MemoryEvent 对齐，如 {"action": "set_format", "target": "weekly_report", "value": "markdown"}
+    scope: SceneScope = Field(default_factory=SceneScope)  # 生效场景
+    is_global: bool = False                # 是否为全局通用偏好（用于跨场景兜底）
 
-    # --- 置信度与状态 ---
-    confidence: float       # 置信度 [0, 1]
-    status: MemoryStatus    # 状态: active / archived / deleted / pending
-    level: MemoryLevel      # 记忆层级: short / mid / long
+    # --- 置信度、质量与状态 ---
+    confidence: float = 0.5       # [0, 1] 综合置信度
+    quality_score: float = 1.0    # [0, 1] 来源 MemoryEvent 的质量评分
+    extract_source: str = "implicit_inference" # 提取来源: explicit_feedback / implicit_inference
+    status: MemoryStatus = MemoryStatus.ACTIVE   # 记忆状态: active / archived / deleted / pending
+   level: MemoryLevel = MemoryLevel.MID      # 记忆层级: short / mid / long
 
     # --- 版本管理 ---
-    version: int            # 版本号，从 1 开始递增
-    parent_id: str          # 前一版本的 memory_id（版本链指针）
+    version: int = 1            # 版本号，从 1 开始递增
+    parent_id: str = ""         # 前一版本的 memory_id（版本链指针）
+    root_id: str = ""           # 初代版本的 memory_id（版本树根节点）
 
-    # --- 证据链 ---
-    evidences: list[Evidence]  # 支持该偏好的证据列表
+    # --- 证据链与检索扩展 ---
+    evidences: list[Evidence] = Field(default_factory=list)  # 支持该偏好的证据列表
+    tags: list[str] = Field(default_factory=list) # 偏好标签/关键词，用于辅助检索
+    extra_payload: dict[str, Any] = Field(default_factory=dict) # 偏好提取/交互过程中的元数据扩展
 
     # --- 时间戳 ---
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
 ```
+**全局偏好兜底规则**：当按 `SceneScope` 未能命中特定场景偏好时，自动降级匹配 `is_global = True` 的通用偏好作为默认配置。
+
+**版本溯源规则**：新版本继承旧版本的 `root_id`（若旧版本无 `root_id` 则指向旧版本 `memory_id`），实现整条版本树完整追溯至初代节点。
+
+**证据决策标记规则**：在偏好消解冲突时，需在关联的 `Evidence.decision` 中明确标记决策状态（如 `OVERRIDE`、`MERGE`、`COEXIST` 等），记录冲突处理逻辑。
+
+**提取来源标识规则**：根据偏好生成途径设置 `extract_source`，显式指令/反馈标记为 `explicit_feedback`，交互推断标记为 `implicit_inference`。
 
 **版本链规则**: 每次更新偏好时，旧版本 `status → archived`，新版本 `version = old.version + 1`，`parent_id = old.memory_id`。
 
@@ -426,34 +441,90 @@ score = 0.40 * completeness
 
 ```
 模块: memoryhub.core.preference
-负责: 偏好抽取、置信度计算、版本管理
+负责: 偏好抽取、置信度计算、偏好冲突检测与解决、版本链管理与归档
 ```
 
 #### PreferenceExtractor
 
 | 方法 | 签名 | 输入 | 输出 | 说明 |
-|---|---|---|---|---|
-| `extract` | `(event: MemoryEvent) -> list[PreferenceMemory]` | 单条事件 | 候选偏好列表 | 规则 + LLM 抽取 |
-| `_rule_extract` | `(event: MemoryEvent) -> list[PreferenceMemory]` | 事件 | 显式偏好列表 | 规则模板匹配 |
-| `_llm_extract` | `(event: MemoryEvent) -> list[PreferenceMemory]` | 事件 | 隐式偏好列表 | LLM 辅助抽取 |
+| --- | --- | --- | --- | --- |
+| `extract` | `(event: MemoryEvent) -> list[PreferenceMemory]` | 单条事件 | 候选偏好列表 | 结合规则与 LLM 抽取，自动补全证据链与 `tags`<br> |
+| `_rule_extract` | `(event: MemoryEvent) -> list[PreferenceMemory]` | 事件 | 显式偏好列表 | 正则与关键词匹配输出格式、硬性安全约束及 `is_global` 全局标记
+
+ |
+| `_llm_extract` | `(event: MemoryEvent) -> list[PreferenceMemory]` | 事件 | 隐式偏好列表 | 基于三代 GVR 循环提示词与校验机制，抽取高层隐式偏好
+
+ |
+| `_classify_type` | `(text: str) -> PreferenceType` | 文本类型字符串 | 偏好类型枚举 | 将 LLM 输出的字符串解析映射为标准的 `PreferenceType` 枚举
+
+ |
+| `_extract_tags_from_text` | `(text: str) -> list[str]` | 偏好描述文本 | 标签列表 | 基于分词与停用词过滤提取关键 Tag，辅助向量/混合检索
+
+ |
+| `_build_evidence` | `(event: MemoryEvent) -> Evidence` | 事件 | 初始证据对象 | 解析事件发生时间并构建带有来源类型和质量权重的 `Evidence`<br> |
 
 #### ConfidenceCalculator
 
 | 方法 | 签名 | 输入 | 输出 | 说明 |
-|---|---|---|---|---|
-| `calculate` | `(preference: PreferenceMemory) -> float` | 偏好 | 置信度 [0, 1] | 综合计算置信度 |
-| `update_confidence` | `(preference: PreferenceMemory, new_event: MemoryEvent) -> float` | 已有偏好、新事件 | 更新后置信度 | 增量更新 |
+| --- | --- | --- | --- | --- |
+| `calculate` | `(preference: PreferenceMemory) -> float` | 偏好 | 置信度 [0, 1] | 综合证据数量、来源权重、时间衰减、一致性及 `OVERRIDE` 扣分计算置信度
+
+ |
+| `update_confidence` | `(preference: PreferenceMemory, new_event: MemoryEvent | None) -> float` | 已有偏好、新事件 | 更新后置信度 | 直接基于已更新证据链的偏好记录重新执行综合置信度评估
+
+ |
+| `_factor_evidence_count` | `(evidence_count: int) -> float` | 证据数量 | 数量因子 | 对数平滑计算证据数量对置信度的增益
+
+ |
+| `_factor_source_type` | `(sources: list[SourceType]) -> float` | 来源类型列表 | 来源因子 | 根据用户行为、配置或工具输出确定最高来源权重
+
+ |
+| `_factor_time_decay` | `(timestamps: list[datetime]) -> float` | 时间戳列表 | 时间衰减因子 | 基于 14 天半衰期计算证据的指数衰减
+
+ |
+| `_factor_consistency` | `(preference: PreferenceMemory) -> float` | 偏好对象 | 一致性因子 | 根据历史证据中非 `OVERRIDE` 占比计算交互一致性得分
+
+ |
+
+#### ConflictDetector
+
+| 方法 | 签名 | 输入 | 输出 | 说明 |
+| --- | --- | --- | --- | --- |
+| `check_preference` | `(old_pref: PreferenceMemory, new_pref: PreferenceMemory) -> bool` | 新旧偏好 | 是否冲突 | 判断场景 Scope 是否重叠、偏好类型是否一致及语义是否矛盾
+
+ |
+| `_is_semantic_conflict` | `(old_pref, new_pref) -> bool` | 新旧偏好 | 是否语义冲突 | 结合 Payload 属性对比、LLM 语义判断及否定词规则评估矛盾性
+
+ |
+
+#### ConflictResolver
+
+| 方法 | 签名 | 输入 | 输出 | 说明 |
+| --- | --- | --- | --- | --- |
+| `auto_resolve` | `(old_pref, new_pref, detector) -> tuple[ConflictDecision, str]` | 新旧偏好、冲突检测器 | (决策结果, 决策原因) | 依据 Scope、显式反馈来源及置信度执行决策矩阵（OVERRIDE/MERGE/COEXIST/PENDING）
+
+ |
 
 #### PreferenceUpdater
 
 | 方法 | 签名 | 输入 | 输出 | 说明 |
-|---|---|---|---|---|
-| `add` | `(preference: PreferenceMemory) -> str` | 新偏好 | memory_id | 新增偏好 |
-| `update` | `(old_id: str, new_preference: PreferenceMemory) -> str` | 旧 ID、新内容 | 新版本 memory_id | 生成新版本 |
-| `merge` | `(pref_a, pref_b) -> PreferenceMemory` | 两条偏好 | 合并后偏好 | 合并策略 |
-| `get_version_chain` | `(memory_id: str) -> list[PreferenceMemory]` | 记忆 ID | 版本链列表 | 从早到晚排序 |
+| --- | --- | --- | --- | --- |
+| `add` | `(preference: PreferenceMemory) -> str` | 新偏好 | memory_id | 新增或冲突消解后更新/合并/共存/挂起偏好
+
+ |
+| `update` | `(old_id: str, new_preference: PreferenceMemory, conflict_rec: ConflictRecord | None) -> str` | 旧 ID、新偏好、冲突记录 | 新/回滚版本 memory_id | 生成新版本并维护版本链；若触发强冲突异常则执行版本回滚
+
+ |
+| `merge` | `(pref_a, pref_b) -> PreferenceMemory` | 两条偏好 | 合并后偏好 | 合并偏好文本、Payload、Tags 及证据链并生成合并新版本
+
+ |
+| `get_version_chain` | `(memory_id: str) -> list[PreferenceMemory]` | 记忆 ID | 版本链列表 | 根据 `parent_id` 追溯完整版本树并按时间升序排列
+
+ |
+| `archive` | `(memory_id: str) -> bool` | 记忆 ID | 是否成功 | 显式将某条偏好记录的状态更新为 `ARCHIVED`<br> |
 
 ---
+
 
 ### 3.3 Knowledge 模块 — 知识记忆
 
@@ -626,6 +697,30 @@ sanitize 能按路径整体替换而无需猜测虚构字符串 span。
 超限或 validator 异常会保留已确认结果，但 `scan_complete=false`，且 `issues`
 只含稳定代码。`scan_text()` 没有不完整报告通道，因此遇到同类限制时直接抛出
 `SafetyScanError`。
+
+#### 用户自定义敏感规则
+
+`memoryhub.core.safety.user_rules` 提供按用户隔离的规则管理服务。前端只操作安全
+DTO，不直接构造 `SensitiveRule`：
+
+| 类型 | 关键字段 | 约束 |
+|---|---|---|
+| `CreateUserRuleRequest` | `label`, `kind`, `effect`, `matcher`, `case_sensitive`, `enabled` | `matcher` 是 write-only `SecretStr`；`kind = literal \| advanced_regex`；`effect = mask_match \| drop_event` |
+| `UpdateUserRuleRequest` | `expected_revision` 加任一可更新字段 | 使用乐观并发；空更新无效，替换 matcher 时仍不回显原值 |
+| `UserRuleResponse` | `rule_id`, `label`, `kind`, `effect`, `case_sensitive`, `replacement`, `revision`, `enabled`, `deleted`、时间戳 | 不含 matcher、matcher 指纹、密文、nonce 或原始用户 ID，避免通过创建候选规则形成在线字典 oracle |
+| `SafetyRuleOverlay` | 不可变规则、带密钥摘要、revision、审计分类 | 与内置规则快照组合；不允许覆盖同名内置规则 |
+
+`mask_match` 将命中片段替换为固定 `[REDACTED_USER_DEFINED]`，并在同一 detector
+快照内复检；`drop_event` 映射为 `REJECT`，整条事件不进入普通内容 sink。规则仅作用于
+`/text`、`/payload/**`、`/tool_calls/*/{arguments,result,error}/**`，不扫描身份字段、
+工具名或安全诊断元数据。用户 MASK 的优先级低于全部内置规则，不能削弱内置
+`REVIEW/REJECT`；用户 `drop_event` 可以进一步收紧。
+
+`SafetyWriteGate.from_user_rule_config()` 会装配
+`UserRuleService.detector_provider()`，并在创建磁盘目录前校验三类安全密钥互不复用。
+Gate 为每条事件按 `MemoryEvent.user_id` 选择一次 detector，并在初扫、脱敏、复检、
+验证、审计和隔离全过程复用该实例；规则并发更新只影响后续事件。provider 缺失、
+解密失败或规则损坏均失败关闭，不会退化为仅使用内置规则。
 
 #### SensitiveDetector
 
@@ -922,18 +1017,17 @@ class XxxRepository:
 ## 4. 数据流转图
 
 ### 4.1 写入流（事件→记忆）
-
 ```
-OS Agent 工具调用完成
+OS Agent 工具调用完成 / 用户交互
        │
        ▼
 ┌─────────────────┐
-│  POST /events   │   WriteEventRequest.events: list[MemoryEvent]
+│   POST /events  │   WriteEventRequest.events: list[MemoryEvent]
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│  DataCleaner    │   raw_data → clean → deduplicate → validate
+│   DataCleaner   │   raw_data → clean → deduplicate → validate
 └────────┬────────┘
          │
          ▼
@@ -943,7 +1037,7 @@ OS Agent 工具调用完成
          │
          ▼
 ┌─────────────────┐
-│ QualityScorer   │   MemoryEvent → score → 生成 quality
+│ QualityScorer   │   MemoryEvent → score → 生成 quality (quality.score)
 └────────┬────────┘
          │
          ├── quality.status == review ──→ 进入复核队列，不直接抽取
@@ -958,60 +1052,86 @@ OS Agent 工具调用完成
 │ EventRepository │   MemoryEvent → 存入 SQLite events 表
 └────────┬────────┘
          │
-          ├── source_type == user_behavior
-         │         │
-         │         ▼
+         ├── source_type in [user_behavior, manual_config] or quality.score >= 0.6
+         │        │
+         │        ▼
          │  ┌──────────────────────┐
-         │  │PreferenceExtractor  │   MemoryEvent → extract → 候选偏好
+         │  │ PreferenceExtractor  │  MemoryEvent → extract (_rule_extract / _llm_extract)
+         │  └──────────┬───────────┘  ├── 生成 text + payload 结构化字段
+         │             │              ├── 填充 tags / 判定 is_global 属性
+         │             │              └── 自动注入初始 Evidence (包含 quality.score 权重)
+         │             ▼
+         │  ┌──────────────────────┐
+         │  │  PreferenceUpdater   │  调用 updater.add(preference)
          │  └──────────┬───────────┘
          │             │
          │             ▼
          │  ┌──────────────────────┐
-         │  │ConfidenceCalculator │   候选偏好 → calculate → confidence
+         │  │   ConflictDetector   │  Check (Scope重叠 && PreferenceType一致 && 语义矛盾)
          │  └──────────┬───────────┘
          │             │
-         │             ▼
-         │  ┌──────────────────────┐
-         │  │ ConflictDetector    │   新偏好 vs 已有偏好 → 有冲突?
-         │  └──────────┬───────────┘
+         │             ├── 1. 无冲突 ──→ 设置 status=ACTIVE, root_id=memory_id 直接保存
          │             │
-         │             ├── 有冲突 → ConflictResolver → ConflictRecord
-         │             │
-         │             ▼
-         │  ┌──────────────────────┐
-         │  │ PreferenceUpdater   │   add/update/merge → PreferenceMemory
-         │  └──────────┬───────────┘
-         │             │
-         │             ▼
-         │  ┌──────────────────────┐
-         │  │ PreferenceRepository│   存入 SQLite preferences 表
-         │  └──────────┬───────────┘
-         │             │
-         │             ▼
-         │  ┌──────────────────────┐
-         │  │ Embedding + VectorStore │ 文本→向量→存入 FAISS
-         │  └──────────────────────┘
+         │             └── 2. 有冲突 ──→ 触发 ConflictResolver.auto_resolve
+         │                                   │
+         │                                   ▼
+         │                          ┌──────────────────┐
+         │                          │ ConflictResolver │
+         │                          └────────┬─────────┘
+         │                                   │
+         │            ┌──────────────────────┼──────────────────────┬──────────────────────┐
+         │            │ (OVERRIDE)           │ (MERGE)              │ (COEXIST)            │ (PENDING)
+         │            ▼                      ▼                      ▼                      ▼
+         │     ┌──────────────┐       ┌──────────────┐       ┌──────────────┐       ┌──────────────┐
+         │     │  执行 update │       │  执行 merge  │       │ 保留为新偏好 │       │ 标记待确认   │
+         │     │  旧版archived│       │  旧版archived│       │ scope隔离共存│       │ status=     │
+         │     │  new.version=│       │  合并 payload│       │ status=ACTIVE│       │ PENDING      │
+         │     │  old.v + 1   │       │  与 tags 标签│       │ root_id=self │       │ 保留离线评估 │
+         │     │  root_id继承 │       │  root_id继承 │       └──────┬───────┘       └──────┬───────┘
+         │     └──────┬───────┘       └──────┬───────┘              │                      │
+         │            │                      │                      │                      │
+         │            └──────────────────────┴──────────┬───────────┴──────────────────────┘
+         │                                              │
+         │                                              ▼
+         │                                    ┌──────────────────┐
+         │                                    │ 证据链状态标记   │  更新 Evidence.decision 字段
+         │                                    └────────┬─────────┘  (OVERRIDE/MERGE/COEXIST等)
+         │                                             │
+         │                                             ▼
+         │                                    ┌──────────────────┐
+         │                                    │ConfidenceCalculator│     基于更新后的 Evidence 链
+         │                                    └────────┬─────────┘       计算 confidence
+         │                                             │
+         │                                             ▼
+         │                                    ┌──────────────────┐
+         │                                    │PreferenceRepository   │  存入 SQLite preferences 表
+         │                                    └────────┬─────────┘  并保存 ConflictRecord 审计日志
+         │                                             │
+         │                                             ▼
+         │                                    ┌──────────────────┐
+         │                                    │ Embedding Store  │  提取 text + tags → 向量化存入 FAISS
+         │                                    └──────────────────┘
          │
          ├── event_type == task_trajectory
-         │         │
-         │         ▼
+         │        │
+         │        ▼
          │  ┌──────────────────────┐
-         │  │KnowledgeExtractor   │   事件序列 → extract → 候选知识
+         │  │ KnowledgeExtractor   │   事件序列 → extract → 候选知识
          │  └──────────┬───────────┘
          │             │
          │             ▼
          │  ┌──────────────────────┐
-         │  │ConflictDetector     │   新知识 vs 已有知识
+         │  │   ConflictDetector   │   新知识 vs 已有知识
          │  └──────────┬───────────┘
          │             │
          │             ▼
          │  ┌──────────────────────┐
-         │  │KnowledgeRepository  │   存入 SQLite knowledge 表
+         │  │ KnowledgeRepository  │   存入 SQLite knowledge 表
          │  └──────────┬───────────┘
          │             │
          │             ▼
          │  ┌──────────────────────┐
-         │  │ Embedding + VectorStore │ 文本→向量→存入 FAISS
+         │  │ Embedding + Vector   │   文本 → 向量 → 存入 FAISS
          │  └──────────────────────┘
          │
          ▼
@@ -1298,6 +1418,50 @@ POST /api/memory/forget
 | POST | `/api/memory/evaluate/{task_name}` | 运行评测 |
 | GET | `/api/memory/evaluate/reports` | 列出评测报告 |
 
+### 5.5 用户自定义敏感规则
+
+所有接口要求 `X-MemoryHub-User` 请求头。该头必须由本地认证网关根据已认证主体写入并
+覆盖客户端同名输入；同时 `create_app(user_rule_identity_resolver=...)` 必须从认证
+会话解析主体，并确认它与请求头一致。未安装 resolver 时接口默认返回
+`503 user_rule.identity_unavailable`，身份不一致返回 `403 user_rule.identity_mismatch`。
+应用的通配 CORS 是开发配置，生产部署还必须改为明确 origin 白名单。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/memory/safety/user-rules` | 创建规则，返回 `201` |
+| GET | `/api/memory/safety/user-rules?include_deleted=false` | 列出当前用户规则 |
+| GET | `/api/memory/safety/user-rules/{rule_id}` | 获取单条安全元数据 |
+| PATCH | `/api/memory/safety/user-rules/{rule_id}` | 携带 `expected_revision` 更新 |
+| DELETE | `/api/memory/safety/user-rules/{rule_id}?expected_revision=1` | 乐观并发软删除，返回 `204` |
+
+例如，遮盖 `C++20`、`C++23` 这类版本串：
+
+```http
+POST /api/memory/safety/user-rules
+X-MemoryHub-User: user-001
+Content-Type: application/json
+
+{
+  "label": "C++ 版本信息",
+  "kind": "advanced_regex",
+  "effect": "mask_match",
+  "matcher": "C\\+\\+[0-9]{2}",
+  "case_sensitive": false,
+  "enabled": true
+}
+```
+
+该示例要求受信任部署显式设置 `allow_advanced_regex: true`；默认配置会拒绝高级正则。
+响应只返回规则 ID、版本、状态等安全元数据，不返回 matcher 或其确定性指纹。若希望只要
+出现字面量 `C++` 就跳过整条记忆事件，可使用 `kind: "literal"`、
+`effect: "drop_event"`、`matcher: "C++"`。当前没有自然语言分类器，“C++ 的版本
+信息”不会自动推导全部表达形式。`label` 会正常回显，前端不得把 matcher 或其他秘密
+复制到 label。
+
+规则只影响创建或启用后的新写入，不追溯处理既有记忆。错误响应仅包含稳定
+`detail.code`；身份不一致为 `403`，未找到为 `404`，revision 冲突为 `409`，无效
+规则为 `422`，认证 resolver、密钥或存储不可用为 `503`。
+
 ---
 
 ## 6. 存储层映射
@@ -1329,24 +1493,52 @@ POST /api/memory/forget
 
 #### preferences 表
 
+基于前面对 `MemoryEvent` `PreferenceMemory` 及 `Evidence` 数据结构的定义与扩展，对 `preferences` 数据库表结构列表完成的对应更新修改如下：
+
 | 字段 | 类型 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | memory_id | VARCHAR(32) PK | 记忆 ID |
 | user_id | VARCHAR(64) INDEX | 用户 ID |
 | memory_type | VARCHAR(16) | 固定 "preference" |
 | preference_type | VARCHAR(32) | 偏好类型 |
-| content | TEXT | 偏好描述 |
+| text | TEXT | 偏好描述（自然语言描述，对齐 MemoryEvent.text）|
+| payload | JSON | 结构化表达（如 `{"action": "set_format", "value": "markdown"}`）|
 | scope_scene | VARCHAR(64) INDEX | 场景 |
 | scope_task_type | VARCHAR(128) INDEX | 任务类型 |
 | scope_app | VARCHAR(64) | 来源应用 |
-| confidence | FLOAT | 置信度 |
-| status | VARCHAR(16) INDEX | 状态 |
-| level | VARCHAR(16) | 记忆层级 |
-| version | INT | 版本号 |
-| parent_id | VARCHAR(32) | 前一版本 ID |
-| evidences | JSON | 证据链 |
-| created_at | DATETIME | 创建时间 |
-| updated_at | DATETIME | 更新时间 |
+| is_global | BOOLEAN INDEX | 是否为全局通用偏好（用于跨场景兜底）|
+| confidence | FLOAT | 综合置信度 [0, 1]|
+| quality_score | FLOAT | 质量评分（来源于 MemoryEvent）|
+| extract_source | VARCHAR(32) | 提取来源（explicit_feedback / implicit_inference）|
+| status | VARCHAR(16) INDEX | 状态 (ACTIVE / ARCHIVED / PENDING / DELETED)|
+| level | VARCHAR(16) | 记忆层级 (SHORT / MID / LONG)|
+| version | INT | 版本号|
+| parent_id | VARCHAR(32) | 前一版本 ID（版本链指针）|
+| root_id | VARCHAR(32) INDEX | 初代版本 ID（版本树根节点）|
+| evidences | JSON | 证据链（含 event_id、weight、decision 等）|
+| tags | JSON | 偏好标签/关键词列表（辅助检索）|
+| extra_payload | JSON | 偏好提取/交互过程中的元数据扩展|
+| created_at | DATETIME | 创建时间|
+| updated_at | DATETIME | 更新时间|
+
+---
+
+### 主要更新说明：
+
+1. **字段演进与核心存储扩展**：
+* 原 `content` 字段更名为 **`text`**（对齐 `MemoryEvent.text`）。
+* 新增 **`payload`**（JSON 类型），存储结构化的键值偏好映射，（对齐 `MemoryEvent.payload`）。
+* 新增 **`is_global`** 字段，用于全局及跨场景偏好检索与兜底匹配。
+
+2. **评估与追踪字段补全**：
+* 新增 **`quality_score`** 与 **`extract_source`**，便于区分显式反馈/隐式推断并记录来源质量。
+
+3. **版本树结构扩展**：
+* 新增 **`root_id`** 索引字段，与 `parent_id` 配合实现从当前版本到初代版本树的溯源追踪。
+
+4. **检索与扩展支持**：
+* 新增 **`tags`** 标签列表与 **`extra_payload`** 扩展字段，增强多维向量/混合检索能力。
+
 
 #### knowledge 表
 
@@ -1389,6 +1581,13 @@ POST /api/memory/forget
 | target_memory_ids | JSON | 目标记忆 ID |
 | deleted_count | INT | 删除数量 |
 | created_at | DATETIME | 创建时间 |
+
+#### user_sensitive_rules / user_sensitive_rule_versions 表
+
+`user_sensitive_rules` 保存当前状态，`user_sensitive_rule_versions` 按
+`(user_ref, rule_id, revision)` 追加历史版本。两表都只保存 HMAC 用户引用、规则安全
+元数据、AES-256-GCM nonce/密文、带密钥 matcher 指纹和 key ID；不保存原始用户 ID
+或明文 matcher。删除是带新 revision 的软删除，历史表不覆盖旧版本。
 
 ### 6.2 FAISS 索引
 

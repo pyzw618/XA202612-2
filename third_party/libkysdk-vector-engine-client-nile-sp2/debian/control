@@ -1,0 +1,31 @@
+Source: libkysdk-vector-engine-client
+Section: libs
+Priority: optional
+Maintainer: hezhe <hezhe@kylinos.cn>
+Build-Depends: debhelper-compat (= 12),
+               cmake,
+               pkg-config,
+               libgrpc++-dev [amd64 arm64 riscv64],
+               libprotobuf-dev [amd64 arm64 riscv64],
+               protobuf-compiler-grpc [amd64 arm64 riscv64],
+               nlohmann-json3-dev,
+               libkylin-ai-proto-dev,
+               libsqlitecpp-dev,
+               libsqlcipher-dev
+
+Standards-Version: 4.4.1
+Homepage: https://gitlab2.kylin.com/kylinos-src/libkysdk-vector-engine-client
+Package: libkysdk-vector-engine-client
+Architecture: amd64 arm64
+Multi-Arch: same
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Description: Kylin AI Vector Database SDK
+    AI向量数据库SDK动态库
+
+Package: libkysdk-vector-engine-client-dev
+Section: libdevel
+Architecture: amd64 arm64
+Multi-Arch: same
+Depends: ${misc:Depends}, libkysdk-vector-engine-client (= ${binary:Version}), nlohmann-json3-dev
+Description: Development files for Kylin AI Vector Database SDK
+    AI向量数据库SDK开发文件

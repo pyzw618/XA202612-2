@@ -1,0 +1,235 @@
+"""Semantic consolidation and conflict auditing for knowledge memories."""
+
+from __future__ import annotations
+
+import hashlib
+import re
+from datetime import datetime, timezone
+from difflib import SequenceMatcher
+
+from memoryhub.adapter.schemas import (
+    ConflictRecord,
+    KnowledgeMemory,
+    MemoryStatus,
+)
+from memoryhub.config import KnowledgeMergeConfig
+from memoryhub.core.knowledge.confidence import KnowledgeConfidenceCalculator
+
+
+class KnowledgeUpdater:
+    """Merge equivalent knowledge and audit ambiguous semantic collisions."""
+
+    def __init__(
+        self,
+        *,
+        write_service,
+        merge_config: KnowledgeMergeConfig | None = None,
+        conflict_repo=None,
+    ) -> None:
+        self.write_service = write_service
+        self.know_repo = getattr(write_service, "know_repo", None)
+        self.config = merge_config or KnowledgeMergeConfig()
+        self.conflict_repo = conflict_repo
+        self.confidence_calculator = KnowledgeConfidenceCalculator()
+
+    def add(self, memory: KnowledgeMemory) -> str:
+        if self.know_repo is None:
+            self.write_service.upsert_memory(memory)
+            return memory.memory_id
+
+        exact = self.know_repo.get_by_id(memory.memory_id)
+        if exact is not None and exact.user_id == memory.user_id:
+            incoming_events = {e.event_id for e in memory.evidences if e.event_id}
+            existing_events = {e.event_id for e in exact.evidences if e.event_id}
+            has_new_evidence = bool(incoming_events - existing_events)
+            if not has_new_evidence and not self._has_semantic_delta(exact, memory):
+                return exact.memory_id
+            merged = self._merge(
+                exact,
+                memory,
+                add_support=has_new_evidence and not bool(incoming_events & existing_events),
+            )
+            self.write_service.upsert_memory(merged)
+            return merged.memory_id
+
+        existing, score = self._find_best_candidate(memory)
+        if existing is None or score < self.config.equivalent_threshold:
+            self.write_service.upsert_memory(memory)
+            if existing is not None and score >= self.config.conflict_threshold:
+                self._record_ambiguous_conflict(existing, memory, score)
+            return memory.memory_id
+
+        incoming_events = {e.event_id for e in memory.evidences if e.event_id}
+        existing_events = {e.event_id for e in existing.evidences if e.event_id}
+        if incoming_events and incoming_events.issubset(existing_events):
+            self.write_service.upsert_memory(existing)
+            return existing.memory_id
+
+        merged = self._merge(
+            existing,
+            memory,
+            add_support=not bool(incoming_events & existing_events),
+        )
+        self.write_service.upsert_memory(merged)
+        return merged.memory_id
+
+    def _find_equivalent(self, memory: KnowledgeMemory) -> KnowledgeMemory | None:
+        candidate, score = self._find_best_candidate(memory)
+        return candidate if score >= self.config.equivalent_threshold else None
+
+    def _find_best_candidate(
+        self, memory: KnowledgeMemory
+    ) -> tuple[KnowledgeMemory | None, float]:
+        candidates = self.know_repo.list_all(status="active", user_id=memory.user_id)
+        best = None
+        best_score = 0.0
+        for candidate in candidates:
+            if candidate.knowledge_type != memory.knowledge_type:
+                continue
+            if not self._scope_compatible(candidate, memory):
+                continue
+            score = self._similarity(candidate, memory)
+            if score > best_score:
+                best = candidate
+                best_score = score
+        return best, best_score
+
+    @staticmethod
+    def _scope_compatible(left: KnowledgeMemory, right: KnowledgeMemory) -> bool:
+        for field in ("scene", "task_type", "app"):
+            a = getattr(left.scope, field, "")
+            b = getattr(right.scope, field, "")
+            if a and b and a != b:
+                return False
+        return True
+
+    def _similarity(self, left: KnowledgeMemory, right: KnowledgeMemory) -> float:
+        left_steps = {self._normalize(item) for item in left.steps if self._normalize(item)}
+        right_steps = {self._normalize(item) for item in right.steps if self._normalize(item)}
+        union = left_steps | right_steps
+        step_score = len(left_steps & right_steps) / len(union) if union else 0.0
+        name_score = SequenceMatcher(
+            None, self._normalize(left.name), self._normalize(right.name)
+        ).ratio()
+        content_score = SequenceMatcher(
+            None, self._normalize(left.content), self._normalize(right.content)
+        ).ratio()
+        weights = (
+            self.config.name_weight,
+            self.config.content_weight,
+            self.config.steps_weight if union else 0.0,
+        )
+        total = sum(weights)
+        return (
+            name_score * weights[0]
+            + content_score * weights[1]
+            + step_score * weights[2]
+        ) / total
+
+    @staticmethod
+    def _normalize(value: str) -> str:
+        return re.sub(r"[^0-9a-zA-Z一-龥]+", "", str(value or "").lower())
+
+    def _record_ambiguous_conflict(
+        self,
+        existing: KnowledgeMemory,
+        incoming: KnowledgeMemory,
+        score: float,
+    ) -> None:
+        if self.conflict_repo is None:
+            return
+        digest = hashlib.sha256(
+            f"{existing.user_id}|{existing.memory_id}|{incoming.memory_id}".encode("utf-8")
+        ).hexdigest()[:24]
+        record = ConflictRecord(
+            conflict_id=f"conf_know_{digest}",
+            user_id=existing.user_id,
+            old_memory_id=existing.memory_id,
+            new_memory_id=incoming.memory_id,
+            memory_type="knowledge",
+            old_content=existing.content,
+            new_content=incoming.content,
+            conflict_field="semantic_equivalence",
+            reason=f"knowledge.semantic_similarity={score:.4f}",
+        )
+        self.conflict_repo.save(record)
+
+    def _has_semantic_delta(
+        self, existing: KnowledgeMemory, incoming: KnowledgeMemory
+    ) -> bool:
+        return self._semantic_fingerprint(existing) != self._semantic_fingerprint(incoming)
+
+    def _semantic_fingerprint(self, memory: KnowledgeMemory) -> tuple:
+        return (
+            self._normalize(memory.name),
+            self._normalize(memory.content),
+            tuple(self._normalize(step) for step in memory.steps if self._normalize(step)),
+            tuple(self._normalize(tool) for tool in memory.tools if self._normalize(tool)),
+            self._normalize(memory.template_body),
+            memory.status.value if hasattr(memory.status, "value") else str(memory.status),
+        )
+
+    def _merge(
+        self,
+        existing: KnowledgeMemory,
+        incoming: KnowledgeMemory,
+        *,
+        add_support: bool,
+    ) -> KnowledgeMemory:
+        merged = existing.model_copy(deep=True)
+        merged.steps = self._ordered_union(existing.steps, incoming.steps, limit=12)
+        merged.tools = self._ordered_union(existing.tools, incoming.tools, limit=20)
+        merged.evidences = self._merge_evidences(existing.evidences, incoming.evidences)
+        if len(incoming.content) > len(existing.content):
+            merged.content = incoming.content
+        if len(incoming.name) > len(existing.name):
+            merged.name = incoming.name
+        if incoming.template_body and len(incoming.template_body) >= len(existing.template_body):
+            merged.template_body = incoming.template_body
+        old_total = max(1, existing.total_count)
+        if add_support:
+            incoming_total = max(1, incoming.total_count)
+            merged.total_count = old_total + incoming_total
+            merged.success_count = min(
+                merged.total_count,
+                max(0, existing.success_count) + max(0, incoming.success_count),
+            )
+        else:
+            merged.total_count = existing.total_count
+            merged.success_count = existing.success_count
+        merged.confidence = self.confidence_calculator.merge_score(
+            existing_confidence=existing.confidence,
+            incoming_confidence=incoming.confidence,
+            success_count=merged.success_count,
+            total_count=merged.total_count,
+            evidence_count=len(merged.evidences),
+        )
+        merged.version = max(1, existing.version) + 1
+        merged.status = MemoryStatus.ACTIVE
+        merged.updated_at = datetime.now(timezone.utc)
+        return merged
+
+    @staticmethod
+    def _ordered_union(left: list[str], right: list[str], *, limit: int) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in [*left, *right]:
+            cleaned = str(value).strip()
+            key = KnowledgeUpdater._normalize(cleaned)
+            if cleaned and key and key not in seen:
+                result.append(cleaned)
+                seen.add(key)
+        return result[:limit]
+
+    @staticmethod
+    def _merge_evidences(left, right):
+        result = []
+        seen = set()
+        for evidence in [*left, *right]:
+            key = evidence.event_id or evidence.evidence_id
+            if key and key in seen:
+                continue
+            result.append(evidence)
+            if key:
+                seen.add(key)
+        return result

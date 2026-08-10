@@ -1,0 +1,5 @@
+Name: kysdk-vector-engine-client
+Description: Kylin AI Vector Database SDK
+Version: 1.0.0
+Libs: -lkysdk-vector-engine-client
+Cflags: -I/usr/include/kysdk-vector-engine-client

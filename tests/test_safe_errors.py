@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import time
 from typing import Any, Callable
 
 import pytest
@@ -9,10 +10,10 @@ from pydantic import ValidationError
 from memoryhub.adapter.schemas import MemoryEvent
 from memoryhub.embedding.kylin_client import (
     DEFAULT_DIM,
+    MAX_QUERY_CHARS,
     KylinEmbeddingClient,
     KylinEmbeddingError,
 )
-
 
 _CANARY = "TOP_SECRET_CANARY_7319"
 
@@ -204,3 +205,31 @@ def test_embedding_backend_message_is_never_exposed(caplog) -> None:
     assert _CANARY not in caplog.text
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+
+
+def test_embedding_long_input_is_truncated_to_512_characters() -> None:
+    """超长输入应被截断至 MAX_QUERY_CHARS。"""
+    long_input = _CANARY * 200  # 长度远超 512
+    truncated = KylinEmbeddingClient._normalize_input(long_input)
+    assert len(truncated) == MAX_QUERY_CHARS
+    assert truncated == long_input[:MAX_QUERY_CHARS]
+
+
+def test_embedding_timeout_returns_stable_error_code() -> None:
+    """query_timeout_ms 生效时，超时返回稳定错误码 embedding.timeout。"""
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+
+    client = KylinEmbeddingClient(use_mock=True, query_timeout_ms=1)
+
+    def slow_embed(_text: str) -> list[float]:
+        time.sleep(0.1)
+        return [0.0] * DEFAULT_DIM
+
+    client._call_embed = slow_embed  # type: ignore[method-assign]
+
+    with pytest.raises(KylinEmbeddingError, match=r"^embedding\.timeout") as caught:
+        client.embed("test")
+
+    assert caught.value.__cause__ is None
+    client.close()

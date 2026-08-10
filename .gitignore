@@ -209,10 +209,6 @@ tempCodeRunnerFile.py
 # PyPI configuration file
 .pypirc
 
-# Local MemoryHub state and generated Agent reports
-data/
-examples/demo_workspace/outputs/
-
 # Marimo
 marimo/_static/
 marimo/_lsp/
@@ -220,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+docs_group2
+
+# 本地生成的数据（向量索引、数据库等）
+data/
+# 评测本地产物（docs_group2/评测v2-检索评测方案.md §四：不入库）
+tests/eval_dataset.json
+evaluation/results/
+config.yaml

@@ -1,76 +1,120 @@
-"""
-数据标准化模块
+"""Normalize cleaned source dictionaries into complete Schema 1.1 events."""
 
-负责将不同来源的原始数据统一转化为 MemoryEvent 格式。
-"""
+from __future__ import annotations
 
-from memoryhub.adapter.schemas import MemoryEvent, SourceType
+import uuid
+from datetime import datetime, timezone
+
+from memoryhub.adapter.schemas import (
+    EventQuality,
+    MemoryEvent,
+    QualityStatus,
+    SourceType,
+    ToolCallResult,
+    ToolCallStatus,
+    canonical_sha256,
+)
+from memoryhub.core.ingestion.quality import QualityScorer
 
 
-class DataNormalizer:
-    """数据标准化器"""
+class EventNormalizer:
+    """Map legacy/source-specific dictionaries to the strict MemoryEvent contract."""
 
-    # 各数据源的字段映射表
-    FIELD_MAPPINGS: dict[str, dict] = {
-        "tool_result": {
-            "call_id": "tool_calls[].call_id",
-            "tool_name": "tool_calls[].tool_name",
-            "input": "tool_calls[].arguments",
-            "output": "tool_calls[].result",
-            "status": "tool_calls[].status",
-        },
-        "user_behavior": {
-            "action": "payload.action",
-            "target": "payload.target",
-            "value": "payload.value",
-        },
-        "manual_config": {
-            "key": "payload.key",
-            "value": "payload.value",
-        },
+    _TYPE_MAP = {
+        "tool": SourceType.TOOL_RESULT,
+        "tool_result": SourceType.TOOL_RESULT,
+        "chat": SourceType.USER_BEHAVIOR,
+        "feedback": SourceType.USER_BEHAVIOR,
+        "user_behavior": SourceType.USER_BEHAVIOR,
+        "manual_config": SourceType.MANUAL_CONFIG,
+        "system": SourceType.TOOL_RESULT,
     }
 
-    def normalize(self, raw_data: dict, source_type: str = "") -> MemoryEvent:
-        """
-        将原始数据标准化为 MemoryEvent
+    @classmethod
+    def _source_type(cls, value) -> SourceType:
+        if isinstance(value, SourceType):
+            return value
+        return cls._TYPE_MAP.get(str(value or "").lower(), SourceType.TOOL_RESULT)
 
-        数据流: 清洗后数据 → normalize → MemoryEvent → 质量评分
+    @staticmethod
+    def _provisional_quality(value) -> EventQuality:
+        if isinstance(value, EventQuality):
+            return value
+        if isinstance(value, dict):
+            return EventQuality.model_validate(value)
+        return EventQuality(
+            score=0.0,
+            status=QualityStatus.REVIEW,
+            completeness=0.0,
+            validity=0.0,
+            consistency=0.0,
+            freshness=0.0,
+        )
 
-        参数:
-            raw_data: 清洗后的原始数据字典
-            source_type: 来源大类；为空时根据原始字段推断
+    def normalize(self, cleaned: dict) -> MemoryEvent:
+        """Normalize one cleaned dictionary and compute missing hash/quality fields."""
+        occurred_at = cleaned.get("occurred_at") or datetime.now(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        source_hash = cleaned.get("source_hash") or canonical_sha256(cleaned)
+        provisional = self._provisional_quality(cleaned.get("quality"))
+        event = MemoryEvent(
+            event_id=cleaned.get("event_id", ""),
+            source_type=self._source_type(cleaned.get("source_type")),
+            event_type=cleaned.get("event_type", ""),
+            user_id=cleaned.get("user_id", "default"),
+            session_id=cleaned.get("session_id", ""),
+            turn_id=cleaned.get("turn_id", ""),
+            scene=cleaned.get("scene", ""),
+            task_type=cleaned.get("task_type", ""),
+            occurred_at=occurred_at,
+            text=cleaned.get("text", ""),
+            payload=cleaned.get("payload", {}),
+            tool_calls=cleaned.get("tool_calls", []),
+            schema_version=cleaned.get("schema_version", "1.1"),
+            source_hash=source_hash,
+            redactions=cleaned.get("redactions", []),
+            quality=provisional,
+        )
+        if cleaned.get("quality") is not None:
+            return event
+        quality = QualityScorer().score(event)
+        return MemoryEvent.model_validate(
+            {**event.model_dump(mode="json"), "quality": quality.model_dump(mode="json")}
+        )
 
-        返回:
-            标准化的 MemoryEvent 实例
+    def normalize_batch(self, cleaned_list: list[dict]) -> list[MemoryEvent]:
+        return [self.normalize(entry) for entry in cleaned_list]
 
-        处理逻辑:
-            1. 将来源别名归一为 source_type
-            2. 提取或推断 event_type
-            3. 构造标准 payload、tool_calls 和 text
-            4. 识别 scene 和 task_type
-            5. 将 occurred_at 统一为 UTC 并生成 source_hash
-        """
-        raise NotImplementedError
-
-    def _detect_source_type(self, raw_data: dict) -> SourceType:
-        """从原始数据中推断来源大类。"""
-        raise NotImplementedError
-
-    def _detect_event_type(self, raw_data: dict) -> str:
-        """从原始数据中推断来源内的具体事件类型。"""
-        raise NotImplementedError
-
-    def _detect_scene(self, raw_data: dict) -> tuple[str, str]:
-        """
-        识别场景和任务类型
-
-        返回:
-            (scene, task_type)，如 ("office", "office.weekly_report")
-        """
-        raise NotImplementedError
-
-    def batch_normalize(
-        self, raw_data_list: list[dict], source_type: str = ""
-    ) -> list[MemoryEvent]:
-        """批量标准化"""
-        raise NotImplementedError
+    def normalize_tool_result(self, tool_name: str, result: dict) -> MemoryEvent:
+        """Construct a valid Schema 1.1 tool-result event from one tool response."""
+        call_id = str(result.get("call_id") or f"call_{uuid.uuid4().hex[:12]}")
+        raw_status = str(result.get("status", "success")).lower()
+        status = ToolCallStatus(raw_status) if raw_status in ToolCallStatus._value2member_map_ else ToolCallStatus.ERROR
+        raw = {
+            "event_id": f"tool_{uuid.uuid4().hex[:12]}",
+            "source_type": SourceType.TOOL_RESULT,
+            "event_type": str(result.get("event_type") or tool_name),
+            "user_id": str(result.get("user_id") or "default"),
+            "session_id": str(result.get("session_id") or ""),
+            "turn_id": str(result.get("turn_id") or ""),
+            "scene": str(result.get("scene") or ""),
+            "task_type": str(result.get("task_type") or ""),
+            "occurred_at": str(result.get("occurred_at") or ""),
+            "text": str(result.get("output", result.get("result", ""))),
+            "payload": result,
+            "tool_calls": [
+                ToolCallResult(
+                    call_id=call_id,
+                    sequence=1,
+                    tool_name=tool_name,
+                    arguments=result.get("arguments", {}),
+                    result=result.get("result", result.get("output")),
+                    status=status,
+                    error=str(result.get("error") or ""),
+                ).model_dump(mode="json")
+            ],
+            "schema_version": "1.1",
+            "redactions": result.get("redactions", []),
+        }
+        return self.normalize(raw)

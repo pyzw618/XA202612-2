@@ -1,0 +1,10 @@
+{
+  "name": "memoryhub",
+  "description": "Kylin-MemoryHub 记忆引擎接入。提供 MCP 工具（记忆检索 / 写入 / 遗忘 / 管理）并把 Claude Code 会话的工具调用轨迹自动沉淀为 MemoryHub 记忆事件（偏好 / 知识 / 事实抽取）。",
+  "version": "1.0.0",
+  "author": {
+    "name": "Kylin MemoryHub Team"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/pyzw618/xa202612-2"
+}

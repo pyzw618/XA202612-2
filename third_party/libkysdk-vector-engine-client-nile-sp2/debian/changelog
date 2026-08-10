@@ -1,0 +1,62 @@
+libkysdk-vector-engine-client (1.2.0.0-ok0.5update1) nile; urgency=medium
+
+  * update changelog
+
+ -- hezhe <hezhe@kylinos.cn>  Tue, 09 Jun 2026 19:14:42 +0800
+
+libkysdk-vector-engine-client (1.2.0.0-ok0.5) nile; urgency=medium
+
+  * 支持RISC-V架构
+
+ -- liulili <liulili1010@hl-it.cn>  Mon, 27 Apr 2026 17:15:55 +0800
+
+libkysdk-vector-engine-client (1.2.0.0-ok0.4) nile; urgency=medium
+
+  * 新增数据库异常错误码
+
+ -- wangweinan <wangweinan@kylinos.cn>  Tue, 14 Oct 2025 17:57:54 +0800
+
+libkysdk-vector-engine-client (1.2.0.0-ok0.3) nile; urgency=medium
+
+  * 增加原仓库链接
+
+ -- wangweinan <wangweinan@kylinos.cn>  Wed, 28 May 2025 10:18:04 +0800
+
+libkysdk-vector-engine-client (1.2.0.0-ok0.2) nile; urgency=medium
+
+  * 增加开源协议
+
+ -- wangweinan <wangweinan@kylinos.cn>  Tue, 27 May 2025 17:48:11 +0800
+
+libkysdk-vector-engine-client (1.2.0.0-ok0.1) nile; urgency=medium
+
+  * rebuild in openkylin
+
+ -- wangweinan <wangweinan@kylinos.cn>  Mon, 26 May 2025 10:45:39 +0800
+
+libkysdk-vector-engine-client (1.2.0.0-0k0.3) v11-2603-preview; urgency=medium
+
+  * BUG: 无
+  * 需求: 无
+  * 其他改动说明: 配合服务端修改连接地址
+  * 其他改动影响域: 无
+
+ -- hezhe <hezhe@kylinos.cn>  Thu, 15 May 2025 10:27:55 +0800
+
+libkysdk-vector-engine-client (1.2.0.0-0k0.2) v11-2603-preview; urgency=medium
+
+  * BUG: 无
+  * 需求: 无
+  * 其他改动说明: v11版本解决arm依赖libgrpc++1报错问题
+  * 其他改动影响域: 无
+
+ -- hezhe <hezhe@kylinos.cn>  Thu, 24 Apr 2025 13:35:51 +0800
+
+libkysdk-vector-engine-client (1.2.0.0-0k0.1) v11-2603-preview; urgency=medium
+
+  * BUG: 无
+  * 需求: 无
+  * 其他改动说明: v11版本
+  * 其他改动影响域: 无
+
+ -- hezhe <hezhe@kylinos.cn>  Wed, 23 Apr 2025 15:30:26 +0800

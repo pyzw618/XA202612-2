@@ -1,7 +1,8 @@
-﻿# Kylin-MemoryHub 配置说明
+# Kylin-MemoryHub 配置说明
 
-> 当前 v0.1.0 的 `load_config()` 仍只返回代码默认值；环境变量和 YAML
-> 加载尚未实现。本文 YAML 表示目标配置契约，不能视为当前已生效。
+> 当前 v0.1.0 的 `load_config()` 仍只返回代码默认值；通用环境变量和 YAML
+> 加载尚未实现。例外是应用启动时会读取 `SafetyConfig.user_rules` 指定的
+> `MEMORYHUB_USER_RULE_KEY`。本文其余 YAML 表示目标配置契约，不能视为当前已生效。
 
 ## 快速开始
 
@@ -28,6 +29,16 @@ cp config.example.yaml config.yaml
 ---
 
 ## 配置项详解
+
+### 运行模式配置
+
+| 环境变量 | YAML 路径 | 默认值 | 说明 |
+|---------|----------|-------|------|
+| `MEMORYHUB_RUNTIME_MODE` | `runtime.mode` | `development` | 运行模式：`production` / `development` / `test` |
+| `MEMORYHUB_RUNTIME_ALLOW_FALLBACK` | `runtime.allow_fallback` | `true`（dev/test）/ `false`（production） | 是否允许 FAISS 等降级后端 |
+
+`production` 模式下禁止 `mock`、`kylin_mock`、`faiss`、`milvus_mock` 和静默降级；
+`development` / `test` 模式可在明确记录告警后启用 `allow_fallback`。
 
 ### LLM 配置
 
@@ -66,29 +77,31 @@ cp config.example.yaml config.yaml
 
 **支持的 Embedding 后端：**
 
-- **麒麟 SDK**（生产推荐）
+- **麒麟 SDK**（生产唯一允许）
   ```yaml
   embedding:
     provider: "kylin"
-    dimension: 1024
-    model_name: "kylin-embedding-v1"
+    dimension: 768
+    model_name: "ensemble-embd_gte-base_uint8-text"
   ```
 
-- **Mock**（开发测试）
+- **Mock / kylin_mock**（开发测试或诊断场景）
   ```yaml
   embedding:
     provider: "mock"
-    dimension: 1024
+    dimension: 768
   ```
+
+生产模式（`runtime.mode=production`）下禁止 `mock`、`kylin_mock` 和 `auto`。
 
 ### 检索配置
 
 | 环境变量 | YAML 路径 | 默认值 | 说明 |
 |---------|----------|-------|------|
 | `RETRIEVAL_TOP_K` | `retrieval.default_top_k` | `5` | 返回结果数 |
-| `VECTOR_WEIGHT` | `retrieval.vector_weight` | `0.6` | 向量检索权重 |
-| `KEYWORD_WEIGHT` | `retrieval.keyword_weight` | `0.3` | BM25 权重 |
-| `METADATA_WEIGHT` | `retrieval.metadata_weight` | `0.1` | 元数据权重 |
+| `VECTOR_WEIGHT` | `retrieval.vector_weight` | `0.6` | 向量检索权重（仅 HybridRetriever fallback 使用） |
+| `KEYWORD_WEIGHT` | `retrieval.keyword_weight` | `0.3` | BM25 权重（仅 HybridRetriever fallback 使用） |
+| `METADATA_WEIGHT` | `retrieval.metadata_weight` | `0.1` | 元数据权重（仅 HybridRetriever fallback 使用） |
 
 **权重调整建议：**
 
@@ -100,9 +113,18 @@ cp config.example.yaml config.yaml
 
 | 环境变量 | YAML 路径 | 默认值 | 说明 |
 |---------|----------|-------|------|
-| `DB_PATH` | `storage.db_path` | `data/memoryhub.db` | SQLite 路径 |
-| `VECTOR_INDEX_PATH` | `storage.vector_index_path` | `data/vector_index` | FAISS 索引路径 |
+| `DB_PATH` | `storage.db_path` | `data/memoryhub.db` | SQLite 路径（端侧唯一事实源） |
+| `VECTOR_INDEX_PATH` | `storage.vector_index_path` | `data/vector_index` | FAISS 索引路径（仅 development/test 使用） |
 | `EVIDENCE_PATH` | `storage.evidence_path` | `data/evidence` | 证据链路径 |
+
+### 向量引擎配置
+
+| 环境变量 | YAML 路径 | 默认值 | 说明 |
+|---------|----------|-------|------|
+| `MEMORYHUB_VECTOR_ENGINE_APP_ID` | `vector_engine.app_id` | - | Milvus/Milvus mock 必填的非空 SDK 应用标识 |
+
+`vector_engine.provider=milvus` 或 `milvus_mock` 时必须提供 `app_id`；该值由测试/部署平台提供，
+不是 collection 名或 user ID，也不应写入日志。`faiss` 不消费此字段。
 
 ### 安全配置
 
@@ -152,6 +174,16 @@ safety:
     strict_permissions: true
     fsync: true
     fail_closed: true
+
+  # 用户自定义敏感规则；matcher 只以 AES-256-GCM 密文持久化
+  user_rules:
+    enabled: true
+    encryption_key_env: "MEMORYHUB_USER_RULE_KEY"
+    key_id: "device-local-v1"
+    max_rules_per_user: 100
+    max_matcher_chars: 2048
+    allow_advanced_regex: false
+    detector_cache_size: 256
 
   # 递归扫描资源预算
   max_depth: 32
@@ -242,6 +274,8 @@ Pointer 在建立可信事件快照前超限时，`scan()` 直接抛出只含稳
 
 - `MEMORYHUB_AUDIT_HMAC_KEY` 用于输入 HMAC 指纹、持久审计记录认证和跨轮转链；
 - `MEMORYHUB_QUARANTINE_KEY` 是 REVIEW 隔离区的 32 字节 AES-256-GCM 密钥；
+- `MEMORYHUB_USER_RULE_KEY` 是用户规则 matcher 的 32 字节主密钥。实现会通过
+  HKDF 派生独立的加密与 HMAC 指纹子密钥；它仍不得与前两项复用；
 - 生产环境保持 `strict_permissions: true`、`fsync: true` 和
   `fail_closed: true`；审计写入或隔离写入失败时不得继续普通存储/Embedding；
 - 审计目录与隔离目录在银河麒麟上分别使用 `0700`，记录、锁和状态文件使用
@@ -256,8 +290,24 @@ Pointer 在建立可信事件快照前超限时，`scan()` 直接抛出只含稳
 `SafetyWriteGate.from_config(detector, config, audit_hmac_key=..., quarantine_key=...)`。
 两个 key 参数应由设备密钥/凭据适配器提供，代码不会从 YAML 读取密钥值。
 `from_config()` 会在创建任何目录前拒绝两个 key 使用相同材料。
+启用用户规则时改用
+`SafetyWriteGate.from_user_rule_config(service, config, audit_hmac_key=..., quarantine_key=...)`，
+它会额外拒绝用户规则主密钥与前两者复用。
 `strict_permissions`、`fsync` 和 `fail_closed` 是不可关闭的安全下限；配置为
 `false` 会在启动时拒绝。
+
+启用前端用户规则管理接口时，`MEMORYHUB_USER_RULE_KEY` 应保存 32 字节随机值的
+Base64 编码。服务启动阶段解码并校验长度；缺失或无效时，规则管理接口返回稳定
+`503`，写入链的用户规则 provider 失败关闭，不能退化为“没有自定义规则”。matcher
+不会由 GET/list 接口回显，数据库中只保存密文和带密钥指纹。`advanced_regex`
+默认关闭；启用后还会经过保守的正则回溯风险门禁，但 Python `re` 没有单次硬超时，
+因此只应对受信任的本地管理端开放；普通用户优先使用 `literal`。
+
+该密钥必须独立于审计 HMAC key 和 REVIEW 隔离 key，并由设备凭据设施注入，不能
+提交到 `.env`、YAML 或版本库。当前 `create_app()` 默认把规则表建在
+`storage.db_path`；只有配置、密钥和 `user_rule_identity_resolver` 都有效且应用进入
+startup 时才初始化，不会在模块 import 阶段创建数据库。resolver 必须从认证会话
+返回用户 ID，不能把客户端 header 原样当作认证结果。
 
 ---
 
@@ -289,9 +339,13 @@ embedding:
 debug: true
 ```
 
-### 场景 2：生产环境（OpenAI）
+### 场景 2：生产环境（OpenAI + 麒麟 SDK）
 
 ```yaml
+runtime:
+  mode: production
+  allow_fallback: false
+
 llm:
   provider: "openai"
   api_base: "https://api.openai.com/v1"
@@ -300,7 +354,13 @@ llm:
 
 embedding:
   provider: "kylin"
-  model_name: "kylin-embedding-v1"
+  dimension: 768
+  model_name: "ensemble-embd_gte-base_uint8-text"
+
+vector_engine:
+  provider: "milvus"
+  app_id: "<provided-by-deployment-platform>"
+  dimension: 768
 
 debug: false
 ```

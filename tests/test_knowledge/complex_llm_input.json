@@ -1,0 +1,184 @@
+[
+  {
+    "event_id": "a",
+    "source_type": "tool_result",
+    "event_type": "task_trajectory",
+    "user_id": "demo-user",
+    "session_id": "complex-session",
+    "turn_id": "turn-17",
+    "scene": "finance_ops",
+    "task_type": "finance.monthly_close",
+    "occurred_at": "2026-07-30T01:00:00Z",
+    "text": "月末关账已完成，但中间有一笔跨境费用需要复核",
+    "payload": {
+      "task_name": "月末关账与异常费用复核",
+      "result": "账套已提交，异常费用待确认"
+    },
+    "tool_calls": [],
+    "schema_version": "1.1",
+    "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "redactions": [],
+    "quality": {
+      "score": 0.94,
+      "status": "accepted",
+      "completeness": 0.95,
+      "validity": 1.0,
+      "consistency": 0.9,
+      "freshness": 0.9,
+      "issues": []
+    }
+  },
+  {
+    "event_id": "b",
+    "source_type": "tool_result",
+    "event_type": "tool_call",
+    "user_id": "demo-user",
+    "session_id": "complex-session",
+    "turn_id": "turn-17",
+    "scene": "finance_ops",
+    "task_type": "finance.monthly_close",
+    "occurred_at": "2026-07-30T01:02:00Z",
+    "text": "从报销系统导出本月费用，发现一笔金额和币种不一致",
+    "payload": {
+      "tool_name": "expense_export",
+      "input": "本月跨境费用",
+      "output": "EUR 12,480；发票记录为 USD 13,420",
+      "status": "success"
+    },
+    "tool_calls": [],
+    "schema_version": "1.1",
+    "source_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "redactions": [],
+    "quality": {
+      "score": 0.94,
+      "status": "accepted",
+      "completeness": 0.95,
+      "validity": 1.0,
+      "consistency": 0.9,
+      "freshness": 0.9,
+      "issues": []
+    }
+  },
+  {
+    "event_id": "c",
+    "source_type": "tool_result",
+    "event_type": "tool_call",
+    "user_id": "demo-user",
+    "session_id": "complex-session",
+    "turn_id": "turn-17",
+    "scene": "finance_ops",
+    "task_type": "finance.monthly_close",
+    "occurred_at": "2026-07-30T01:04:00Z",
+    "text": "先查汇率快照，再对照发票附件和采购合同，不直接改账",
+    "payload": {
+      "tool_name": "fx_snapshot",
+      "input": "2026-07-29 EUR/USD",
+      "output": "1.084",
+      "status": "success"
+    },
+    "tool_calls": [],
+    "schema_version": "1.1",
+    "source_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "redactions": [],
+    "quality": {
+      "score": 0.94,
+      "status": "accepted",
+      "completeness": 0.95,
+      "validity": 1.0,
+      "consistency": 0.9,
+      "freshness": 0.9,
+      "issues": []
+    }
+  },
+  {
+    "event_id": "d",
+    "source_type": "tool_result",
+    "event_type": "tool_call",
+    "user_id": "demo-user",
+    "session_id": "complex-session",
+    "turn_id": "turn-17",
+    "scene": "finance_ops",
+    "task_type": "finance.monthly_close",
+    "occurred_at": "2026-07-30T01:06:00Z",
+    "text": "系统提示供应商名称有两个近似匹配，人工打开原始附件确认税号",
+    "payload": {
+      "tool_name": "invoice_match",
+      "input": "供应商+税号+合同号",
+      "output": "候选 2 条，需人工确认",
+      "status": "success"
+    },
+    "tool_calls": [],
+    "schema_version": "1.1",
+    "source_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "redactions": [],
+    "quality": {
+      "score": 0.94,
+      "status": "accepted",
+      "completeness": 0.95,
+      "validity": 1.0,
+      "consistency": 0.9,
+      "freshness": 0.9,
+      "issues": []
+    }
+  },
+  {
+    "event_id": "e",
+    "source_type": "tool_result",
+    "event_type": "tool_call",
+    "user_id": "demo-user",
+    "session_id": "complex-session",
+    "turn_id": "turn-17",
+    "scene": "finance_ops",
+    "task_type": "finance.monthly_close",
+    "occurred_at": "2026-07-30T01:09:00Z",
+    "text": "确认后把差异放入待摊费用，不覆盖原始记录，并在备注中记录依据",
+    "payload": {
+      "tool_name": "ledger_post",
+      "input": "差异调整分录",
+      "output": "草稿已生成，等待复核",
+      "status": "success"
+    },
+    "tool_calls": [],
+    "schema_version": "1.1",
+    "source_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "redactions": [],
+    "quality": {
+      "score": 0.94,
+      "status": "accepted",
+      "completeness": 0.95,
+      "validity": 1.0,
+      "consistency": 0.9,
+      "freshness": 0.9,
+      "issues": []
+    }
+  },
+  {
+    "event_id": "f",
+    "source_type": "tool_result",
+    "event_type": "user_feedback",
+    "user_id": "demo-user",
+    "session_id": "complex-session",
+    "turn_id": "turn-17",
+    "scene": "finance_ops",
+    "task_type": "finance.monthly_close",
+    "occurred_at": "2026-07-30T01:12:00Z",
+    "text": "财务主管要求：遇到币种或供应商不一致时必须保留原始值并升级人工复核",
+    "payload": {
+      "text": "保留原值、记录依据、异常升级",
+      "feedback_type": "policy"
+    },
+    "tool_calls": [],
+    "schema_version": "1.1",
+    "source_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "redactions": [],
+    "quality": {
+      "score": 0.94,
+      "status": "accepted",
+      "completeness": 0.95,
+      "validity": 1.0,
+      "consistency": 0.9,
+      "freshness": 0.9,
+      "issues": []
+    }
+  }
+]

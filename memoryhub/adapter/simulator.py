@@ -1,78 +1,177 @@
-"""
-OS Agent 模拟器 — 用于独立演示和测试
+"""OS Agent simulator used for demonstrations and data-flow smoke tests."""
 
-模拟真实 OS Agent 的行为：接收用户任务、调用记忆模块、执行工具调用。
-"""
+from __future__ import annotations
 
-from memoryhub.adapter.schemas import MemoryEvent, SearchResponse, ToolCallResult
+import hashlib
+import uuid
+from datetime import datetime, timezone
+
+from memoryhub.adapter.schemas import (
+    EventQuality,
+    MemoryEvent,
+    QualityStatus,
+    SearchResponse,
+    SourceType,
+    ToolCallResult,
+)
 
 
-class AgentSimulator:
-    """
-    OS Agent 模拟器
+class OSAgentSimulator:
+    """Generate gate-compatible events and optionally drive a client adapter."""
 
-    使用方式:
-        simulator = AgentSimulator(memory_adapter)
-        result = simulator.run_task("帮我按上次的方式生成项目周报")
-    """
+    def __init__(self, client=None, *, user_id: str = "test_user") -> None:
+        self.client = client
+        self.user_id = user_id
 
-    def __init__(self, memory_adapter=None):
-        """
-        初始化模拟器
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        参数:
-            memory_adapter: MemoryAdapter 实例，用于调用记忆接口
-        """
-        self.memory_adapter = memory_adapter
-        self.session_id = ""
-        self.task_history: list[dict] = []
+    @staticmethod
+    def _event_contract(seed: str) -> dict:
+        return {
+            "source_hash": hashlib.sha256(seed.encode("utf-8")).hexdigest(),
+            "quality": EventQuality(
+                score=1.0,
+                status=QualityStatus.ACCEPTED,
+                completeness=1.0,
+                validity=1.0,
+                consistency=1.0,
+                freshness=1.0,
+            ),
+        }
 
-    def run_task(self, user_input: str) -> dict:
-        """
-        执行一次完整的模拟任务
-
-        数据流:
-            用户输入 → 识别任务类型 → 检索记忆 → 模拟工具调用
-            → 写入事件 → 返回结果
-
-        参数:
-            user_input: 用户自然语言输入
-
-        返回:
-            {
-                "task_type": str,
-                "memory_context": SearchResponse,
-                "tool_calls": list[ToolCallResult],
-                "output": str,
-                "events_generated": list[MemoryEvent]
-            }
-        """
-        raise NotImplementedError
-
-    def _identify_task_type(self, user_input: str) -> str:
-        """识别任务类型，返回 scene.task_type 标识"""
-        raise NotImplementedError
-
-    def _simulate_tool_calls(
-        self, task_type: str, memory_context: SearchResponse
-    ) -> list[ToolCallResult]:
-        """根据任务类型和记忆上下文，模拟工具调用序列"""
-        raise NotImplementedError
-
-    def _generate_events(
-        self, task_type: str, tool_calls: list[ToolCallResult], user_input: str
+    def simulate_task(
+        self,
+        task: str,
+        scene: str = "general",
+        task_type: str = "general",
+        user_id: str | None = None,
+        session_id: str | None = None,
     ) -> list[MemoryEvent]:
-        """将本次任务执行转化为 MemoryEvent 列表"""
-        raise NotImplementedError
+        owner = user_id or self.user_id
+        session = session_id or f"sim_session_{uuid.uuid4().hex[:10]}"
+        ts = self._now()
+        input_id = f"sim_input_{uuid.uuid4().hex[:8]}"
+        tool_id = f"sim_tool_{uuid.uuid4().hex[:8]}"
+        complete_id = f"sim_complete_{uuid.uuid4().hex[:8]}"
+        events = [
+            MemoryEvent(
+                event_id=input_id,
+                source_type=SourceType.USER_BEHAVIOR,
+                event_type="user_input",
+                user_id=owner,
+                session_id=session,
+                turn_id="1",
+                scene=scene,
+                task_type=task_type,
+                text=task,
+                payload={"task": task},
+                occurred_at=ts,
+                **self._event_contract(input_id),
+            ),
+            MemoryEvent(
+                event_id=tool_id,
+                source_type=SourceType.TOOL_RESULT,
+                event_type="file_search",
+                user_id=owner,
+                session_id=session,
+                turn_id="2",
+                scene=scene,
+                task_type=task_type,
+                text=f"Found files for task: {task}",
+                tool_calls=[ToolCallResult(
+                    call_id=f"sim_call_{uuid.uuid4().hex[:8]}",
+                    tool_name="file_search",
+                    arguments={"query": task},
+                    result={"files_found": ["report_week_27.md", "report_week_28.md"]},
+                    status="success",
+                    sequence=1,
+                )],
+                occurred_at=ts,
+                **self._event_contract(tool_id),
+            ),
+            MemoryEvent(
+                event_id=complete_id,
+                source_type=SourceType.TOOL_RESULT,
+                event_type="task_completed",
+                user_id=owner,
+                session_id=session,
+                turn_id="3",
+                scene=scene,
+                task_type=task_type,
+                text=f"Completed: {task}",
+                payload={"success": True},
+                tool_calls=[ToolCallResult(
+                    call_id=f"sim_complete_call_{uuid.uuid4().hex[:8]}",
+                    tool_name="task_runner",
+                    arguments={"task": task},
+                    result={"success": True},
+                    status="success",
+                    sequence=1,
+                )],
+                occurred_at=ts,
+                **self._event_contract(complete_id),
+            ),
+        ]
+        if self.client is not None:
+            writer = getattr(self.client, "write_events", None) or getattr(self.client, "write_event", None)
+            if callable(writer):
+                writer(events)
+        return events
 
-    def simulate_user_feedback(self, feedback_text: str) -> MemoryEvent:
-        """
-        模拟用户反馈
+    def simulate_conversation(
+        self,
+        turns: list[str],
+        scene: str = "chat",
+        task_type: str = "conversation",
+    ) -> list[MemoryEvent]:
+        session = f"sim_session_{uuid.uuid4().hex[:10]}"
+        events: list[MemoryEvent] = []
+        for turn_text in turns:
+            events.extend(self.simulate_task(
+                turn_text,
+                scene=scene,
+                task_type=task_type,
+                session_id=session,
+            ))
+        return events
 
-        参数:
-            feedback_text: 如 "以后都用 Markdown"
+    def simulate_search(self, query: str, scene: str = "general") -> SearchResponse:
+        if self.client is not None:
+            search = getattr(self.client, "search", None)
+            if callable(search):
+                return search(query=query, scene=scene, user_id=self.user_id)
+        return SearchResponse(preferences=[], knowledge=[], facts=[], latency_ms=0.0)
 
-        返回:
-            生成的 user_feedback 类型 MemoryEvent
-        """
-        raise NotImplementedError
+    def simulate_error(self, error_message: str = "Simulated error") -> MemoryEvent:
+        event_id = f"sim_error_{uuid.uuid4().hex[:8]}"
+        return MemoryEvent(
+            event_id=event_id,
+            source_type=SourceType.TOOL_RESULT,
+            event_type="error",
+            user_id=self.user_id,
+            text=error_message,
+            payload={"success": False, "error_code": "simulated.error"},
+            occurred_at=self._now(),
+            **self._event_contract(event_id),
+        )
+
+    def simulate_feedback(
+        self,
+        memory_id: str,
+        feedback_text: str,
+        action: str = "update",
+        user_id: str | None = None,
+    ) -> dict:
+        payload = {
+            "user_id": user_id or self.user_id,
+            "memory_id": memory_id,
+            "feedback_text": feedback_text,
+            "action": action,
+        }
+        if self.client is not None:
+            feedback = getattr(self.client, "feedback", None)
+            if callable(feedback):
+                feedback(**payload)
+        return payload

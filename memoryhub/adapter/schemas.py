@@ -162,6 +162,7 @@ class Evidence(BaseModel):
     source_type: SourceType = SourceType.TOOL_RESULT
     timestamp: datetime = Field(default_factory=datetime.now)
     weight: float = 1.0  # 该证据的权重
+    decision: ConflictDecision | None = None  # 如 OVERRIDE, MERGE, COEXIST, PENDING 或 None
 
 
 # ============================================================
@@ -1325,29 +1326,44 @@ class PreferenceMemory(BaseModel):
     """
     偏好记忆 — 记录用户的个性化偏好
 
-    数据流：MemoryEvent → PreferenceExtractor → PreferenceMemory → Storage
+    数据流：MemoryEvent (仅限制 source_type == 'user_behavior') 
+            → PreferenceExtractor 
+            → PreferenceMemory 
+            → Storage
     """
-
     memory_id: str = Field(default_factory=lambda: f"pref_{uuid.uuid4().hex[:8]}")
     user_id: str = "default"
     memory_type: str = "preference"
     preference_type: PreferenceType = PreferenceType.OUTPUT_STYLE
 
-    # --- 偏好内容 ---
-    content: str = ""  # 偏好描述，如 "项目周报默认使用 Markdown"
+    # --- 偏好核心内容（与 MemoryEvent 对齐） ---
+    text: str = ""                         # 自然语言描述，对齐 MemoryEvent.text
+    payload: dict[str, Any] = Field(default_factory=dict) # 结构化表达，如 {"action": "set_format", "target": "weekly_report", "value": "markdown"}
     scope: SceneScope = Field(default_factory=SceneScope)
+    is_global: bool = False                # 是否为全局通用偏好（用于跨场景兜底）
 
-    # --- 置信度与状态 ---
-    confidence: float = 0.0  # [0, 1] 置信度
+    # --- 置信度、质量与状态 ---
+    confidence: float = 0.5                # [0, 1] 综合置信度
+    quality_score: float = 1.0             # [0, 1] 来源 MemoryEvent 的质量评分
+    extract_source: str = "implicit_inference" # 提取来源: explicit_feedback / implicit_inference
     status: MemoryStatus = MemoryStatus.ACTIVE
-    level: MemoryLevel = MemoryLevel.LONG
+    level: MemoryLevel = MemoryLevel.MID
 
-    # --- 版本管理 ---
+    # --- 版本管理链条 ---
     version: int = 1
-    parent_id: str = ""  # 前一版本的 memory_id（用于版本链）
+    parent_id: str = ""                    # 前一版本的 memory_id（版本链指针）
+    root_id: str = ""                      # 初代版本的 memory_id（版本树根节点）
 
-    # --- 证据链 ---
+    # --- 证据链与检索扩展 ---
     evidences: list[Evidence] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list) # 偏好标签/关键词，用于辅助检索
+    extra_payload: dict[str, Any] = Field(default_factory=dict) # 偏好提取/交互过程中的元数据扩展
+
+    # --- 健康度（遗忘模块使用）---
+    health_score: float = 1.0  # [0, 1]，越低越容易被遗忘
+    stability: float = 1.0  # 记忆稳定性，影响时间衰减半衰期
+    last_accessed_at: datetime | None = Field(default=None)
+    access_count_30d: int = 0  # 近 30 天被检索/使用次数
 
     # --- 时间戳 ---
     created_at: datetime = Field(default_factory=datetime.now)
@@ -1393,6 +1409,12 @@ class KnowledgeMemory(BaseModel):
     # --- 证据链 ---
     evidences: list[Evidence] = Field(default_factory=list)
 
+    # --- 健康度（遗忘模块使用）---
+    health_score: float = 1.0  # [0, 1]，越低越容易被遗忘
+    stability: float = 1.0  # 记忆稳定性，影响时间衰减半衰期
+    last_accessed_at: datetime | None = Field(default=None)
+    access_count_30d: int = 0  # 近 30 天被检索/使用次数
+
     # --- 时间戳 ---
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
@@ -1411,9 +1433,10 @@ class ConflictRecord(BaseModel):
     """
 
     conflict_id: str = Field(default_factory=lambda: f"conf_{uuid.uuid4().hex[:8]}")
+    user_id: str = "default"
     old_memory_id: str = ""
     new_memory_id: str = ""
-    memory_type: str = ""  # "preference" | "knowledge"
+    memory_type: str = ""  # "preference" | "knowledge" | "fact"
 
     # --- 冲突内容 ---
     old_content: str = ""
@@ -1455,12 +1478,41 @@ class ForgetRecord(BaseModel):
 # ============================================================
 
 
+class FactMemory(BaseModel):
+    """Fact view returned by the main retrieval API."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    fact_id: str = ""
+    user_id: str = "default"
+    memory_type: Literal["fact"] = "fact"
+    subject_id: str = ""
+    predicate_id: str = ""
+    object_id: str = ""
+    object_value: str = ""
+    source_text: str = ""
+    source_id: str = ""
+    observed_at: str = ""
+    confidence: float = 0.0
+    status: str = "active"
+    version: int = 1
+    scope: Literal["global", "project"] = "global"
+    project_id: str | None = None
+    last_accessed_at: str | None = None
+    access_count_30d: int = 0
+
+    @property
+    def memory_id(self) -> str:
+        return self.fact_id
+
+
 class SearchRequest(BaseModel):
     """检索请求"""
 
     user_id: str = "default"
     query: str = ""
     context: SceneScope = Field(default_factory=SceneScope)
+    project_id: str = ""
     top_k: int = 5
     memory_types: list[str] = Field(default_factory=list)  # 过滤记忆类型
     min_confidence: float = 0.0
@@ -1470,7 +1522,7 @@ class SearchResult(BaseModel):
     """单条检索结果"""
 
     memory_id: str = ""
-    memory_type: str = ""  # "preference" | "knowledge"
+    memory_type: str = ""  # "preference" | "knowledge" | "fact"
     content: str = ""
     score: float = 0.0  # 综合得分
     source: str = ""  # 来源标记："vector" | "keyword" | "metadata"
@@ -1483,6 +1535,7 @@ class SearchResponse(BaseModel):
     results: list[SearchResult] = Field(default_factory=list)
     preferences: list[PreferenceMemory] = Field(default_factory=list)
     knowledge: list[KnowledgeMemory] = Field(default_factory=list)
+    facts: list[FactMemory] = Field(default_factory=list)
     latency_ms: float = 0.0
     total_count: int = 0
 
@@ -1499,6 +1552,58 @@ class MemoryContextResponse(BaseModel):
 # ============================================================
 
 
+class ExtractionTaskStatus(str, Enum):
+    """持久化抽取任务状态。"""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    RETRY = "retry"
+    SUCCEEDED = "succeeded"
+    DEAD_LETTER = "dead_letter"
+
+
+class ExtractionType(str, Enum):
+    """支持重试的抽取子系统。"""
+
+    PREFERENCE = "preference"
+    KNOWLEDGE = "knowledge"
+    FACT = "fact"
+
+
+class ExtractionTask(BaseModel):
+    """只保存安全事件引用和稳定错误码，不复制事件正文或异常文本。"""
+
+    task_id: str
+    event_id: str
+    event_ids: list[str] = Field(default_factory=list)
+    user_id: str
+    extractor_type: ExtractionType
+    status: ExtractionTaskStatus = ExtractionTaskStatus.PENDING
+    attempt_count: int = 0
+    max_attempts: int = 3
+    next_retry_at: datetime | None = None
+    lease_expires_at: datetime | None = None
+    last_error_code: str = ""
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+
+class ExtractionTaskRunRequest(BaseModel):
+    """执行当前用户到期抽取任务。"""
+
+    user_id: str = "default"
+    limit: int = Field(default=20, ge=1, le=200)
+
+
+class ExtractionTaskRunResponse(BaseModel):
+    """一次显式重试执行结果。"""
+
+    claimed: int = 0
+    succeeded: int = 0
+    retried: int = 0
+    dead_lettered: int = 0
+
+
 class WriteEventRequest(BaseModel):
     """写入事件请求"""
 
@@ -1511,6 +1616,9 @@ class WriteEventResponse(BaseModel):
     accepted: int = 0
     rejected: int = 0
     event_ids: list[str] = Field(default_factory=list)
+    extraction_failures: int = 0
+    retry_tasks_enqueued: int = 0
+    retry_queue_failures: int = 0
 
 
 class FeedbackRequest(BaseModel):
@@ -1519,7 +1627,7 @@ class FeedbackRequest(BaseModel):
     user_id: str = "default"
     memory_id: str = ""  # 要更新的记忆 ID
     feedback_text: str = ""  # 反馈内容
-    action: str = "update"  # "update" | "confirm" | "reject"
+    action: Literal["update", "confirm", "reject"] = "update"
 
 
 class ForgetRequest(BaseModel):
@@ -1527,7 +1635,10 @@ class ForgetRequest(BaseModel):
 
     user_id: str = "default"
     instruction: str = ""  # 自然语言遗忘指令
+    target_memory_ids: list[str] = Field(default_factory=list)  # 精确 ID 模式
     target_scope: SceneScope | None = None
+    target_project_id: str = ""
+    cascade: bool = True  # 是否级联删除关联数据
 
 
 class ForgetResponse(BaseModel):

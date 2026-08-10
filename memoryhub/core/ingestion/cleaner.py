@@ -10,50 +10,57 @@ from memoryhub.adapter.schemas import MemoryEvent, SensitiveLevel
 class DataCleaner:
     """数据清洗器"""
 
+    _required_fields = {"event_id", "source_type", "event_type"}
+
     def clean(self, raw_data: dict) -> dict:
         """
         清洗单条原始数据
 
         数据流: 原始数据 → clean → 清洗后数据 → normalize
-
-        参数:
-            raw_data: 原始数据字典
-
-        返回:
-            清洗后的数据字典，移除无效字段、规范化格式
-
-        处理逻辑:
-            1. 字段校验：检查必填字段是否存在
-            2. 类型校验：确保字段类型正确
-            3. 去除冗余空格和特殊字符
-            4. 补全缺失的可选字段默认值
         """
-        raise NotImplementedError
+        cleaned = {}
+
+        # 复制已知字段并去除首尾空白
+        for key, value in raw_data.items():
+            if isinstance(value, str):
+                cleaned[key] = value.strip()
+            else:
+                cleaned[key] = value
+
+        # 补全缺失的可选字段默认值
+        cleaned.setdefault("user_id", "default")
+        cleaned.setdefault("session_id", "")
+        cleaned.setdefault("scene", "")
+        cleaned.setdefault("task_type", "")
+        cleaned.setdefault("text", "")
+        cleaned.setdefault("payload", {})
+        cleaned.setdefault("occurred_at", "")
+
+        return cleaned
 
     def deduplicate(self, events: list[MemoryEvent]) -> list[MemoryEvent]:
         """
-        批量去重
-
-        参数:
-            events: 事件列表
-
-        返回:
-            去重后的事件列表
-
-        去重策略:
-            - 基于 event_id 去重
-            - 基于 source_hash 识别清洗后内容相同的重复事件
+        批量去重：基于 event_id 去重，保留首次出现的事件。
         """
-        raise NotImplementedError
+        seen: set[str] = set()
+        deduplicated: list[MemoryEvent] = []
+        for event in events:
+            if event.event_id not in seen:
+                seen.add(event.event_id)
+                deduplicated.append(event)
+        return deduplicated
 
     def validate_event(self, event: MemoryEvent) -> tuple[bool, str]:
         """
-        校验单条事件是否合法
-
-        参数:
-            event: MemoryEvent 实例
-
-        返回:
-            (is_valid, error_message)
+        校验单条事件是否合法。
+        返回 (is_valid, error_message)。
         """
-        raise NotImplementedError
+        if not event.event_id or not event.event_id.strip():
+            return False, "event_id is required"
+        if not event.event_type or not event.event_type.strip():
+            return False, "event_type is required"
+        try:
+            _ = event.source_type
+        except Exception:
+            return False, "invalid source_type"
+        return True, ""
