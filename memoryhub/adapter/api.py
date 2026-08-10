@@ -47,6 +47,19 @@ from memoryhub.storage.vector_engine import MilvusEngineError
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
 
+def _memory_service(request: Request) -> Any:
+    service = getattr(request.app.state, "memory_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="memory service not initialized")
+    return service
+
+
+@router.get("/health")
+async def health(request: Request):
+    """检查 API 和 SQLite 存储是否可用。"""
+    return _memory_service(request).health()
+
+
 _USER_RULE_CODE = re.compile(r"^user_rule\.[a-z0-9_.-]+$")
 _USER_RULE_RESPONSE_FIELDS = (
     "rule_id",
@@ -448,7 +461,18 @@ async def write_events(req: WriteEventRequest, request: Request):
     """
     service = getattr(request.app.state, "event_ingestion_service", None)
     if service is None:
-        raise HTTPException(status_code=503, detail="event ingestion service not initialized")
+        memory = _memory_service(request)
+        try:
+            result = memory.write_events(req)
+            return WriteEventResponse(
+                accepted=result.accepted,
+                rejected=result.rejected,
+                event_ids=result.event_ids,
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=503, detail="event ingestion failed") from None
     try:
         result = service.ingest(req.events)
         return WriteEventResponse(
@@ -638,9 +662,29 @@ async def search_memory(req: SearchRequest, request: Request):
     """
     retriever = getattr(request.app.state, "retriever", None)
     if retriever is None:
-        raise HTTPException(status_code=503, detail="retrieval service not initialized")
+        memory = getattr(request.app.state, "memory_service", None)
+        if memory is None:
+            raise HTTPException(
+                status_code=503, detail="retrieval service not initialized"
+            )
+        try:
+            response = memory.search(req)
+            _record_search_access(request, response)
+            return response
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(
+                status_code=500, detail="internal retrieval error"
+            ) from None
     try:
         response = retriever.search(req)
+        if response.total_count == 0:
+            memory = getattr(request.app.state, "memory_service", None)
+            if memory is not None:
+                fallback = memory.search(req)
+                if fallback.total_count:
+                    response = fallback
         _record_search_access(request, response)
         return response
     except (KylinEmbeddingError, MilvusEngineError) as exc:
@@ -665,10 +709,33 @@ async def get_memory_context(req: SearchRequest, request: Request):
             → 格式化为上下文文本 → 返回
     """
     retriever = getattr(request.app.state, "retriever", None)
+    memory = getattr(request.app.state, "memory_service", None)
+
+    def _format_context(context_text: str) -> dict[str, str]:
+        # 同时兼容本地集成（context）与 MCP 集成（context_text）两种消费方
+        return {"context": context_text, "context_text": context_text}
+
     if retriever is None:
-        raise HTTPException(status_code=503, detail="retrieval service not initialized")
+        if memory is None:
+            raise HTTPException(
+                status_code=503, detail="retrieval service not initialized"
+            )
+        try:
+            context_text, search = memory.context(req)
+            _record_search_access(request, search)
+            return _format_context(context_text)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(
+                status_code=500, detail="internal retrieval error"
+            ) from None
     try:
         response = retriever.search(req)
+        if response.total_count == 0 and memory is not None:
+            context_text, search = memory.context(req)
+            _record_search_access(request, search)
+            return _format_context(context_text)
     except (KylinEmbeddingError, MilvusEngineError) as exc:
         raise _retrieval_http_error(exc) from None
     except HTTPException:
@@ -690,7 +757,7 @@ async def get_memory_context(req: SearchRequest, request: Request):
         lines.append("## 相关知识")
         for k in response.knowledge:
             lines.append(f"- {k.name}: {k.content}")
-    return {"context_text": "\n".join(lines)}
+    return _format_context("\n".join(lines))
 
 
 # ============================================================

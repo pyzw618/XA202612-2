@@ -22,6 +22,7 @@ from memoryhub.adapter import schemas as adapter_schemas
 from memoryhub.adapter import user_rule_schemas
 from memoryhub.adapter.api import router as memory_router
 from memoryhub.adapter.schemas import KnowledgeMemory, PreferenceMemory, SearchResult
+from memoryhub.adapter.service import MemoryService
 from memoryhub.config import AppConfig, load_config, validate_production_runtime
 from memoryhub.core.safety.user_rules import (
     UserRuleError,
@@ -168,6 +169,7 @@ def create_app(
     safety_gate: object | None = None,
     event_ingestion_service: object | None = None,
     fact_pipeline: object | None = None,
+    memory_service: object | None = None,
 ) -> FastAPI:
     """
     创建 FastAPI 应用
@@ -229,6 +231,8 @@ def create_app(
     app.state.fact_store = getattr(fact_pipeline, "store", None)
     app.state.fact_index_service = None
     app.state.owns_fact_pipeline = False
+    app.state.memory_service = memory_service
+    app.state.owns_memory_service = False
 
     @app.exception_handler(RequestValidationError)
     async def safe_request_validation_error(
@@ -302,6 +306,12 @@ def create_app(
         # ---- 存储层与检索引擎 ----
         if app.state.user_rule_service_error == "user_rule.key_unavailable":
             return
+
+        # ---- 最小 Memory Service（REST adapter 的垂直切片） ----
+        if app.state.memory_service is None:
+            app.state.memory_service = MemoryService(config.storage.db_path)
+            app.state.memory_service.start()
+            app.state.owns_memory_service = True
 
         import json
 
@@ -692,6 +702,18 @@ def create_app(
             except Exception:
                 pass
             app.state.compensation_task = None
+
+        # 关闭最小 Memory Service
+        if app.state.owns_memory_service:
+            memory_service = getattr(app.state, "memory_service", None)
+            if memory_service is not None:
+                try:
+                    memory_service.close()
+                except Exception:
+                    logger.exception("failed to close memory service")
+                finally:
+                    app.state.memory_service = None
+                    app.state.owns_memory_service = False
 
         # 保存向量索引并关闭数据库
         if app.state.owns_fact_pipeline:

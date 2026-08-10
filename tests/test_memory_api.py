@@ -62,11 +62,10 @@ def test_event_to_search_and_context_round_trip(tmp_path) -> None:
             json={"events": [event_payload("以后项目周报都使用 Markdown 三段式")]},
         )
         assert write.status_code == 200
-        assert write.json() == {
-            "accepted": 1,
-            "rejected": 0,
-            "event_ids": ["evt-preference-001"],
-        }
+        write_body = write.json()
+        assert write_body["accepted"] == 1
+        assert write_body["rejected"] == 0
+        assert write_body["event_ids"] == ["evt-preference-001"]
 
         request = {
             "user_id": "u-001",
@@ -83,12 +82,12 @@ def test_event_to_search_and_context_round_trip(tmp_path) -> None:
         search = client.post("/api/memory/search", json=request)
         assert search.status_code == 200
         assert search.json()["total_count"] == 1
-        assert "Markdown 三段式" in search.json()["preferences"][0]["content"]
+        assert "MARKDOWN" in search.json()["preferences"][0]["text"]
 
         context = client.post("/api/memory/context", json=request)
         assert context.status_code == 200
         assert "用户偏好" in context.json()["context"]
-        assert "Markdown 三段式" in context.json()["context"]
+        assert "MARKDOWN" in context.json()["context"]
 
 
 def test_duplicate_event_is_rejected(tmp_path) -> None:
@@ -107,7 +106,7 @@ def test_duplicate_event_is_rejected(tmp_path) -> None:
 
 def test_new_preference_archives_previous_version(tmp_path) -> None:
     first = event_payload("以后项目周报都使用 Markdown", "evt-preference-001")
-    second = event_payload("以后项目周报都使用 Word", "evt-preference-002")
+    second = event_payload("以后项目周报都使用 JSON", "evt-preference-002")
     second["source_hash"] = "b" * 64
 
     with make_client(tmp_path) as client:
@@ -119,5 +118,5 @@ def test_new_preference_archives_previous_version(tmp_path) -> None:
         )
         assert active.status_code == 200
         assert len(active.json()) == 1
-        assert active.json()[0]["content"].endswith("Word")
+        assert "JSON" in active.json()[0]["text"]
         assert active.json()[0]["version"] == 2

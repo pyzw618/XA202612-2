@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime
 
 from sqlalchemy import func
 
 from memoryhub.adapter.schemas import (
     KnowledgeMemory,
-    MemoryEvent,
     MemoryStatus,
     PreferenceMemory,
     QualityStatus,
@@ -28,7 +26,7 @@ from memoryhub.storage.database import (
     KnowledgeRepository,
     PreferenceRepository,
 )
-from memoryhub.storage.models import EventRow, KnowledgeRow, PreferenceRow
+from memoryhub.storage.models import EventRow, PreferenceRow
 
 
 class MemoryService:
@@ -78,7 +76,7 @@ class MemoryService:
 
             seen_event_ids.add(event.event_id)
             seen_hashes.add(event.source_hash)
-            self.events.save(self._event_to_row(event))
+            self.events.save(event)
             accepted_ids.append(event.event_id)
 
             for preference in self.preference_extractor.extract(event):
@@ -92,28 +90,26 @@ class MemoryService:
 
     def search(self, request: SearchRequest) -> SearchResponse:
         started = time.perf_counter()
-        preference_rows = self.preferences.get_active(
+        preference_memories = self.preferences.get_active(
             request.user_id, request.context.scene
         )
-        knowledge_rows = self.knowledge.get_by_type(request.user_id)
+        knowledge_memories = self.knowledge.get_by_type(request.user_id)
 
         ranked: list[tuple[float, str, PreferenceMemory | KnowledgeMemory]] = []
-        for row in preference_rows:
-            preference = self._row_to_preference(row)
+        for preference in preference_memories:
             if preference.confidence < request.min_confidence:
                 continue
             if not self._scope_matches(preference.scope, request.context):
                 continue
             score = self._memory_score(
                 request.query,
-                preference.content,
+                preference.text,
                 preference.scope,
                 request.context,
             )
             ranked.append((score, "preference", preference))
 
-        for row in knowledge_rows:
-            knowledge = self._row_to_knowledge(row)
+        for knowledge in knowledge_memories:
             if knowledge.confidence < request.min_confidence:
                 continue
             if not self._scope_matches(knowledge.scope, request.context):
@@ -145,7 +141,7 @@ class MemoryService:
         for score, memory_type, memory in selected:
             if memory_type == "preference":
                 selected_preferences.append(memory)
-                content = memory.content
+                content = memory.text
             else:
                 selected_knowledge.append(memory)
                 content = memory.content or memory.name
@@ -181,7 +177,7 @@ class MemoryService:
         if response.preferences:
             lines.append("用户偏好：")
             lines.extend(
-                f"- {preference.content}" for preference in response.preferences
+                f"- {preference.text}" for preference in response.preferences
             )
         if response.knowledge:
             lines.append("可复用知识：")
@@ -197,17 +193,11 @@ class MemoryService:
         status: str = "active",
     ) -> list[PreferenceMemory]:
         if status == "active":
-            rows = self.preferences.get_active(user_id, scene)
-        else:
-            with self.db.session() as session:
-                query = session.query(PreferenceRow).filter(
-                    PreferenceRow.user_id == user_id,
-                    PreferenceRow.status == status,
-                )
-                if scene:
-                    query = query.filter(PreferenceRow.scope_scene == scene)
-                rows = list(query.order_by(PreferenceRow.updated_at.desc()).all())
-        return [self._row_to_preference(row) for row in rows]
+            return self.preferences.get_active(user_id, scene)
+        return [
+            memory
+            for memory in self.preferences.list_all(status=status, user_id=user_id)
+        ]
 
     def _save_preference_version(self, preference: PreferenceMemory) -> None:
         existing = self.preferences.get_by_scope(
@@ -216,21 +206,22 @@ class MemoryService:
             preference.scope.task_type,
         )
         same_type = [
-            row
-            for row in existing
-            if row.preference_type == preference.preference_type.value
+            memory
+            for memory in existing
+            if memory.preference_type == preference.preference_type
         ]
         if same_type:
-            latest = max(same_type, key=lambda row: row.version)
-            if latest.content.strip().lower() == preference.content.strip().lower():
+            latest = max(same_type, key=lambda memory: memory.version)
+            if latest.text.strip().lower() == preference.text.strip().lower():
                 return
-            for row in same_type:
+            for memory in same_type:
                 self.preferences.update_status(
-                    row.memory_id, MemoryStatus.ARCHIVED.value
+                    memory.memory_id, MemoryStatus.ARCHIVED.value
                 )
             preference.version = latest.version + 1
             preference.parent_id = latest.memory_id
-        self.preferences.save(self._preference_to_row(preference))
+            preference.root_id = latest.root_id or latest.memory_id
+        self.preferences.save(preference)
 
     @staticmethod
     def _scope_matches(memory_scope: SceneScope, request_scope: SceneScope) -> bool:
@@ -283,104 +274,3 @@ class MemoryService:
             "".join(chinese[index : index + 2]) for index in range(len(chinese) - 1)
         )
         return words
-
-    @staticmethod
-    def _event_to_row(event: MemoryEvent) -> EventRow:
-        occurred_at = datetime.strptime(event.occurred_at, "%Y-%m-%dT%H:%M:%SZ")
-        return EventRow(
-            event_id=event.event_id,
-            source_type=event.source_type.value,
-            event_type=event.event_type,
-            user_id=event.user_id,
-            session_id=event.session_id,
-            turn_id=event.turn_id,
-            scene=event.scene,
-            task_type=event.task_type,
-            occurred_at=occurred_at,
-            text=event.text,
-            payload=event.payload,
-            tool_calls=[call.model_dump(mode="json") for call in event.tool_calls],
-            schema_version=event.schema_version,
-            source_hash=event.source_hash,
-            redactions=event.redactions,
-            quality=event.quality.model_dump(mode="json"),
-        )
-
-    @staticmethod
-    def _preference_to_row(preference: PreferenceMemory) -> PreferenceRow:
-        return PreferenceRow(
-            memory_id=preference.memory_id,
-            user_id=preference.user_id,
-            memory_type=preference.memory_type,
-            preference_type=preference.preference_type.value,
-            content=preference.content,
-            scope_scene=preference.scope.scene,
-            scope_task_type=preference.scope.task_type,
-            scope_app=preference.scope.app,
-            confidence=preference.confidence,
-            status=preference.status.value,
-            level=preference.level.value,
-            version=preference.version,
-            parent_id=preference.parent_id,
-            evidences=[
-                evidence.model_dump(mode="json") for evidence in preference.evidences
-            ],
-            created_at=preference.created_at,
-            updated_at=preference.updated_at,
-        )
-
-    @staticmethod
-    def _row_to_preference(row: PreferenceRow) -> PreferenceMemory:
-        return PreferenceMemory.model_validate(
-            {
-                "memory_id": row.memory_id,
-                "user_id": row.user_id,
-                "memory_type": row.memory_type,
-                "preference_type": row.preference_type,
-                "content": row.content,
-                "scope": {
-                    "scene": row.scope_scene,
-                    "task_type": row.scope_task_type,
-                    "app": row.scope_app,
-                },
-                "confidence": row.confidence,
-                "status": row.status,
-                "level": row.level,
-                "version": row.version,
-                "parent_id": row.parent_id or "",
-                "evidences": row.evidences or [],
-                "created_at": row.created_at,
-                "updated_at": row.updated_at,
-            }
-        )
-
-    @staticmethod
-    def _row_to_knowledge(row: KnowledgeRow) -> KnowledgeMemory:
-        return KnowledgeMemory.model_validate(
-            {
-                "memory_id": row.memory_id,
-                "user_id": row.user_id,
-                "memory_type": row.memory_type,
-                "knowledge_type": row.knowledge_type,
-                "name": row.name,
-                "content": row.content,
-                "steps": row.steps or [],
-                "tools": row.tools or [],
-                "template_body": row.template_body or "",
-                "scope": {
-                    "scene": row.scope_scene,
-                    "task_type": row.scope_task_type,
-                    "app": row.scope_app,
-                },
-                "confidence": row.confidence,
-                "success_count": row.success_count,
-                "total_count": row.total_count,
-                "status": row.status,
-                "level": row.level,
-                "version": row.version,
-                "parent_id": row.parent_id or "",
-                "evidences": row.evidences or [],
-                "created_at": row.created_at,
-                "updated_at": row.updated_at,
-            }
-        )

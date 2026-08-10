@@ -450,17 +450,14 @@ class PreferenceRepository:
     def get_by_scope(self, user_id: str, scene: str, task_type: str) -> list[PreferenceMemory]:
         """按 scope 精确查询"""
         with self.db.session() as s:
-            rows = (
-                s.query(PreferenceRow)
-                .filter(
-                    PreferenceRow.user_id == user_id,
-                    PreferenceRow.scope_scene == scene,
-                    PreferenceRow.scope_task_type == task_type,
-                    PreferenceRow.status == "active",
-                )
-                .order_by(PreferenceRow.confidence.desc())
-                .all()
+            query = s.query(PreferenceRow).filter(
+                PreferenceRow.user_id == user_id,
+                PreferenceRow.scope_scene == scene,
+                PreferenceRow.status == "active",
             )
+            if task_type:
+                query = query.filter(PreferenceRow.scope_task_type == task_type)
+            rows = query.order_by(PreferenceRow.confidence.desc()).all()
             return [_pref_row_to_pydantic(r) for r in rows]
 
     def list_all(self, status: str = "active", user_id: str = "") -> list[PreferenceMemory]:
