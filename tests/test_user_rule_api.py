@@ -20,6 +20,12 @@ _USER_HEADER = {"X-MemoryHub-User": "user-a"}
 _MATCHER_CANARY = "C++20-private-matcher-canary"
 
 
+@pytest.fixture(autouse=True)
+def isolated_default_storage(tmp_path, monkeypatch):
+    """Keep default relative app paths out of repository-local runtime data."""
+    monkeypatch.chdir(tmp_path)
+
+
 def _service() -> UserRuleService:
     return UserRuleService(
         InMemoryUserRuleRepository(),
@@ -210,7 +216,7 @@ def test_user_rule_header_must_match_authenticated_identity() -> None:
     assert response.json() == {"detail": {"code": "user_rule.identity_mismatch"}}
 
 
-def test_default_app_reports_missing_rule_key_without_creating_database(
+def test_default_app_bootstraps_rule_key_and_encrypted_database(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -224,9 +230,10 @@ def test_default_app_reports_missing_rule_key_without_creating_database(
             headers=_USER_HEADER,
         )
 
-    assert response.status_code == 503
-    assert response.json() == {"detail": {"code": "user_rule.key_unavailable"}}
-    assert not database_path.exists()
+    assert response.status_code == 200
+    assert response.json() == []
+    assert database_path.is_file()
+    assert (tmp_path / "security" / "safety-keys.json").is_file()
 
 
 def test_default_app_builds_encrypted_sqlite_service_from_base64_key(

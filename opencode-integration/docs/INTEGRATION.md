@@ -152,8 +152,9 @@
 python opencode-integration/scripts/start_memoryhub_server.py --port 8000
 ```
 
-默认 dev 模式：embedding=mock、向量引擎=faiss、user_rules 关闭、安全密钥自动生成、
-数据落在 `opencode-integration/.memoryhub-data/`。启动即应用运行期兼容补丁（见第 6 节）。
+默认 dev 模式：embedding=mock、向量引擎=faiss、user_rules 关闭；安全密钥首次启动
+生成一次并持久保存，数据和密钥都落在 `opencode-integration/.memoryhub-data/`。
+以后重启自动复用，无需导出密钥。启动即应用运行期兼容补丁（见第 6 节）。
 
 生产/麒麟环境：用真实 `config.yaml` 起标准服务，只需把 `MEMORYHUB_API_URL` 指向它；
 本仓库提供的补丁仅用于修正两个影响事件落盘的已知问题（见第 6 节）。
@@ -228,11 +229,15 @@ node opencode-integration/tests/test_plugin_event_builder.mjs
      `memoryhub.safety_rules.regex_safety` 导入后 `sre_parser=None`，规则库加载失败。
    - 源码修复：`regex_safety.py` 增加 `sre_parse`/`sre_constants` 回退，
      麒麟标准 CPython（3.11+）走原生 `re._parser`。
-3. **安全密钥要求**（未变更）
+3. **安全密钥生命周期**（已修复）
    - 安全 Gate 要求 `MEMORYHUB_AUDIT_HMAC_KEY` 与 `MEMORYHUB_QUARANTINE_KEY`
      为 **32 字节 Base64**（各密钥不得复用）；启用 `user_rules` 还需
-     `MEMORYHUB_USER_RULE_KEY` 与认证身份 resolver。`ensure_safety_keys()` 在开发模式
-     自动生成临时密钥；生产请从密钥服务注入。
+     `MEMORYHUB_USER_RULE_KEY` 与认证身份 resolver。用户无需手工生成：REST 核心启动
+     链会首次生成三把独立密钥并写入数据目录的 `security/safety-keys.json`，以后重启
+     自动复用。已有环境变量会优先使用并默认导入该私有文件；旧数据存在但密钥丢失时
+     安全失败关闭，不会用新密钥覆盖历史。旧版部署使用的
+     `~/.config/memoryhub/safety.env`（权限 `0600`）会被安全解析并自动导入一次，
+     不再需要启动前手工 `source`。
 
 > 接入清单修订原则：今后 memoryhub 改 REST 或 schema，只需同步更新本文件
 > 「第 2.1 节」的接口映射表与 `memoryhub_mcp/tools.py`；MCP 工具返回文本与

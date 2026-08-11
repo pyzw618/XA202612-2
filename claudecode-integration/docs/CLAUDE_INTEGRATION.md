@@ -185,7 +185,8 @@ D:/Anaconda/envs/py12/python.exe claudecode-integration/scripts/start_memoryhub_
 
 - dev 模式：embedding=mock、向量引擎=faiss、user_rules 关闭；
 - 数据落在 `claudecode-integration/.memoryhub-data/`；
-- **稳定密钥**：`dev-safety-keys.json` 持久化 32 字节 Base64 密钥，跨重启复用；
+- **稳定密钥**：`security/safety-keys.json` 由 MemoryHub 核心首次创建并跨重启复用；
+  旧 `dev-safety-keys.json` 会自动安全导入；
   审计链 / 隔离区目录被收进 data_dir（`safety-audit/`、`review-quarantine/`），
   重启不再因密钥变化导致 `audit.head_invalid`（见已知问题 1）；
 - `--reset-dev-data` 一键清空 dev 数据目录后重启；
@@ -228,13 +229,12 @@ MCP initialize(instructions)/roots/list/tools/list/tools/call、配置 JSON 结�
 ## 6. 已知问题与注意事项
 
 1. **dev 模式 503（`event ingestion service not initialized` / `audit.head_invalid`）**
-   - 根因：dev 模式每 boot 自动生成随机安全密钥，而审计链 head 落在固定
-     `data/safety-audit/` 且与 db 路径无关；重启后新密钥使旧 head HMAC 校验失败，
-     安全 Gate 无法构建 → 事件端点 503。
-   - 修复（本目录 `start_memoryhub_server.py`）：dev 模式把密钥持久化到
-     `dev-safety-keys.json` 并在重启间复用；审计/隔离目录收进 data_dir；
-     提供 `--reset-dev-data`。已有脏数据时先 `--reset-dev-data` 或删除
-     `claudecode-integration/.memoryhub-data`。
+   - 旧根因：dev 模式每 boot 自动生成随机安全密钥，而审计链 head 落在固定
+     `data/safety-audit/`；重启后新密钥使旧 head HMAC 校验失败。
+   - 当前修复：MemoryHub 核心首次生成并持久保存密钥，审计/隔离目录与数据库统一
+     收进 data_dir；重启自动复用。旧 `dev-safety-keys.json` 自动导入到
+     `security/safety-keys.json`，无需删除已有数据。`--reset-dev-data` 仅用于用户
+     明确要求整体重置开发数据的场景。
 2. **开发环境无 LLM 时事件落库慢（约 16s）**
    - 事件在 `ingest` 内同步等待抽取（LLM 连接超时），无 LLM 时
      `extraction_failures=1` 且耗时约 16s。`record.py` 默认超时 60s；`Stop` 用

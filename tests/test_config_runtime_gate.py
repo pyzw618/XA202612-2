@@ -225,6 +225,26 @@ class TestValidateProductionRuntime:
 
 
 class TestLoadConfig:
+    def test_loads_safety_key_store_section(self, tmp_path: Path) -> None:
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            "safety:\n"
+            "  key_store:\n"
+            "    path: private/safety-keys.json\n"
+            "    auto_generate: true\n"
+            "    persist_external: false\n"
+            "  user_rules:\n"
+            "    enabled: false\n",
+            encoding="utf-8",
+        )
+
+        cfg = load_config(str(config_path))
+
+        assert cfg.safety.key_store.path == "private/safety-keys.json"
+        assert cfg.safety.key_store.auto_generate is True
+        assert cfg.safety.key_store.persist_external is False
+        assert cfg.safety.user_rules.enabled is False
+
     def test_loads_runtime_section(self, tmp_path: Path) -> None:
         config_path = tmp_path / "config.yaml"
         config_path.write_text(

@@ -46,6 +46,12 @@ from memoryhub.core.safety.gate import (
     SafetyGateError,
     SafetyWriteGate,
 )
+from memoryhub.core.safety.key_store import (
+    SafetyKeyResolution,
+    SafetyKeyStoreError,
+    provision_safety_keys,
+    resolve_safety_storage_paths,
+)
 from memoryhub.core.safety.memory_write import (
     GuardedMemoryWriteResult,
     MemoryWriteSafetyError,
@@ -142,6 +148,8 @@ __all__ = [
     "SafetySanitizationError",
     "SafetyScanError",
     "SafetyGateError",
+    "SafetyKeyResolution",
+    "SafetyKeyStoreError",
     "SafetyWriteGate",
     "SafeLogRecord",
     "SensitiveDetector",
@@ -166,6 +174,8 @@ __all__ = [
     "normalize_sensitive_text",
     "guard_memory_write",
     "path_matches",
+    "provision_safety_keys",
+    "resolve_safety_storage_paths",
     "resolve_masker",
     "resolve_validator",
 ]

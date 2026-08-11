@@ -23,27 +23,31 @@ MCP_DIR = REPO_ROOT / "mcp-server"
 
 os.environ["MEMORYHUB_AUDIT_HMAC_KEY"] = base64.b64encode(b"A" * 32).decode()
 os.environ["MEMORYHUB_QUARANTINE_KEY"] = base64.b64encode(b"B" * 32).decode()
+os.environ["MEMORYHUB_USER_RULE_KEY"] = base64.b64encode(b"C" * 32).decode()
 
 # Keep imports deterministic: compat first, then memoryhub.
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 sys.path.insert(0, str(MCP_DIR))
 
-from memoryhub_compat import apply_re_parser_shim, ensure_safety_keys, patch_event_repository  # noqa: E402
+from memoryhub_compat import apply_re_parser_shim, patch_event_repository  # noqa: E402
 
 apply_re_parser_shim()
-ensure_safety_keys()
 patch_event_repository()
 
 import pytest  # noqa: E402
 import uvicorn  # noqa: E402
-
-from memoryhub.app import create_app  # noqa: E402
-from memoryhub.config import AppConfig, EmbeddingConfig, SafetyConfig, StorageConfig  # noqa: E402
-
 from memoryhub_mcp.client import MemoryHubError  # noqa: E402
 from memoryhub_mcp.config import McpConfig  # noqa: E402
 from memoryhub_mcp.server import MemoryHubMcpServer  # noqa: E402
+
+from memoryhub.app import create_app  # noqa: E402
+from memoryhub.config import (  # noqa: E402
+    AppConfig,
+    EmbeddingConfig,
+    SafetyConfig,
+    StorageConfig,
+)
 
 
 @pytest.fixture(scope="module")
@@ -309,7 +313,8 @@ def test_contract_error_is_surfaced(running_server):
         },
     )
     assert response["result"]["isError"] is True
-    assert "contract" in response["result"]["content"][0]["text"].lower() or "invalid" in response["result"]["content"][0]["text"].lower()
+    error_text = response["result"]["content"][0]["text"].lower()
+    assert "contract" in error_text or "invalid" in error_text
 
 
 def test_stdio_framing_smoke(running_server):
@@ -333,14 +338,27 @@ def test_stdio_framing_smoke(running_server):
     )
     try:
         proc.stdin.write(
-            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}) + "\n"
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {"protocolVersion": "2025-06-18"},
+                }
+            )
+            + "\n"
         )
         proc.stdin.flush()
         line = proc.stdout.readline()
         initialize = json.loads(line)
         assert initialize["result"]["serverInfo"]["name"] == "memoryhub-mcp"
 
-        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}) + "\n")
+        proc.stdin.write(
+            json.dumps(
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+            )
+            + "\n"
+        )
         proc.stdin.flush()
         tools = json.loads(proc.stdout.readline())["result"]["tools"]
         assert len(tools) == 12
