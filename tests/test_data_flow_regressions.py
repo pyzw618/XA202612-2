@@ -1,23 +1,35 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
-from pathlib import Path
-
-from memoryhub.adapter.schemas import (
-    ConflictDecision, ConflictRecord, Evidence, EventQuality, FeedbackRequest, ForgetRequest,
-    KnowledgeMemory, MemoryEvent, MemoryLevel, PreferenceMemory, QualityStatus,
-    SearchRequest, ToolCallResult, ToolCallStatus,
-)
 from memoryhub.adapter.api import (
-    _record_search_access, get_preference, submit_feedback,
+    _record_search_access,
+    get_preference,
+    submit_feedback,
+)
+from memoryhub.adapter.schemas import (
+    ConflictDecision,
+    ConflictRecord,
+    EventQuality,
+    Evidence,
+    FeedbackRequest,
+    ForgetRequest,
+    KnowledgeMemory,
+    MemoryEvent,
+    MemoryLevel,
+    PreferenceMemory,
+    QualityStatus,
+    SearchRequest,
+    ToolCallResult,
+    ToolCallStatus,
 )
 from memoryhub.core.fact.index_service import FactIndexService
-from memoryhub.core.fact.models import Entity, Fact, PredicateDef
+from memoryhub.core.fact.models import Fact, PredicateDef
 from memoryhub.core.fact.store import FactStore
 from memoryhub.core.forget.auto_forget import AutoForgetEngine
 from memoryhub.core.forget.forgetter import MemoryForgetter
@@ -27,10 +39,17 @@ from memoryhub.core.lifecycle.manager import LifecycleManager
 from memoryhub.core.memory_write import MemoryWriteService
 from memoryhub.core.preference.extractor import PreferenceExtractor
 from memoryhub.core.preference.updater import ConflictDetector, PreferenceUpdater
+from memoryhub.core.safety.audit_log import SafetyAuditLog
+from memoryhub.core.safety.detector import SensitiveDetector
+from memoryhub.core.safety.gate import SafetyWriteGate
+from memoryhub.core.safety.quarantine import ReviewQuarantineStore
 from memoryhub.retrieval.hybrid import HybridRetriever
 from memoryhub.retrieval.keyword_search import KeywordSearcher
 from memoryhub.storage.database import (
-    ConflictRepository, Database, EventRepository, KnowledgeRepository,
+    ConflictRepository,
+    Database,
+    EventRepository,
+    KnowledgeRepository,
     PreferenceRepository,
 )
 from memoryhub.storage.evidence_store import EvidenceStore
@@ -40,6 +59,18 @@ def _db(tmp_path: Path) -> Database:
     db = Database(str(tmp_path / "data-flow.db"))
     db.init_schema()
     return db
+
+
+def _safety_gate(tmp_path: Path) -> SafetyWriteGate:
+    """Use the real mandatory write gate for direct API mutation tests."""
+    return SafetyWriteGate(
+        SensitiveDetector(),
+        SafetyAuditLog(tmp_path / "safety-audit", fingerprint_key=b"a" * 32),
+        quarantine=ReviewQuarantineStore(
+            tmp_path / "review-quarantine",
+            encryption_key=b"q" * 32,
+        ),
+    )
 
 
 def test_event_repository_round_trips_schema_11(tmp_path: Path) -> None:
@@ -146,6 +177,7 @@ def test_feedback_update_synchronizes_all_runtime_indexes(tmp_path: Path) -> Non
         memory_lookup=lookup,
         search_cache=cache,
         embedding_client=_FakeEmbedding(),
+        safety_gate=_safety_gate(tmp_path),
     )
 
     result = asyncio.run(

@@ -1,8 +1,8 @@
 # Kylin-MemoryHub 配置说明
 
-> 当前 v0.1.0 的 `load_config()` 仍只返回代码默认值；通用环境变量和 YAML
-> 加载尚未实现。例外是应用启动时会读取 `SafetyConfig.user_rules` 指定的
-> `MEMORYHUB_USER_RULE_KEY`。本文其余 YAML 表示目标配置契约，不能视为当前已生效。
+> `load_config()` 支持本文列出的主要 YAML 配置及运行时环境变量覆盖。安全密钥值
+> 不写入 YAML：单机部署默认由 MemoryHub 首次启动自动生成并持久化，外部环境变量
+> 仍具有最高优先级。
 
 ## 快速开始
 
@@ -149,7 +149,16 @@ safety:
   auto_mask: true
   reject_on_detect: false
 
-  # 安全处置审计；密钥值不得出现在 YAML 中
+  # 端侧密钥存储；空 path 自动放在数据库父目录的 security/ 下
+  key_store:
+    path: ""
+    auto_generate: true
+    persist_external: true
+    import_legacy_env: true
+    legacy_env_file: "~/.config/memoryhub/safety.env"
+    strict_permissions: true
+
+  # 安全处置审计；密钥值不会出现在 YAML 中
   audit:
     enabled: true
     directory: "data/safety-audit"
@@ -268,14 +277,25 @@ Pointer 在建立可信事件快照前超限时，`scan()` 直接抛出只含稳
 `process()` 会按 `policy.on_scan_error` 失败关闭，且不会把不完整扫描的事件
 暴露给普通持久化链。
 
-审计与隔离密钥必须来自独立的设备密钥、系统凭据存储或启动时注入的环境变量，
-不能写入仓库、YAML、命令行参数或普通日志。两个密钥应分离使用并具备独立
-`key_id`、轮换和撤销流程：
+默认情况下，MemoryHub 会生成三把独立的 32 字节密钥，并保存为
+`<storage.db_path 父目录>/security/safety-keys.json`。目录和文件在 POSIX/麒麟上
+分别使用 `0700` 和 `0600`，密钥值不会写入仓库、YAML、命令行或普通日志：
 
 - `MEMORYHUB_AUDIT_HMAC_KEY` 用于输入 HMAC 指纹、持久审计记录认证和跨轮转链；
 - `MEMORYHUB_QUARANTINE_KEY` 是 REVIEW 隔离区的 32 字节 AES-256-GCM 密钥；
 - `MEMORYHUB_USER_RULE_KEY` 是用户规则 matcher 的 32 字节主密钥。实现会通过
   HKDF 派生独立的加密与 HMAC 指纹子密钥；它仍不得与前两项复用；
+- 上述环境变量均为可选覆盖。`persist_external: true`（默认）会在首次启动时把
+  有效外部密钥导入本地私有文件，之后不再要求启动脚本重复注入；受管部署可同时
+  设置 `auto_generate: false` 和 `persist_external: false`，只使用外部密钥；
+- `MEMORYHUB_SAFETY_KEY_FILE` 可覆盖密钥文件位置，且必须使用绝对路径；
+- `audit.directory` 与 `quarantine.directory` 使用相对路径时，以
+  `storage.db_path` 的父目录为基准解析，不再依赖服务启动时的工作目录；
+- 升级旧版单机部署时，会以纯文本键值格式安全读取权限为 `0600` 的
+  `~/.config/memoryhub/safety.env` 并导入一次；不会执行其中的 shell 内容；
+- 备份 MemoryHub 数据时必须同时备份 `security/safety-keys.json`。已有审计链、
+  REVIEW 隔离记录或用户规则密文存在而对应密钥丢失时，服务拒绝启动写入链，
+  不会生成新密钥覆盖历史；
 - 生产环境保持 `strict_permissions: true`、`fsync: true` 和
   `fail_closed: true`；审计写入或隔离写入失败时不得继续普通存储/Embedding；
 - 审计目录与隔离目录在银河麒麟上分别使用 `0700`，记录、锁和状态文件使用
@@ -288,7 +308,7 @@ Pointer 在建立可信事件快照前超限时，`scan()` 直接抛出只含稳
 
 装配时使用同一个强类型 `SafetyConfig` 和同一个 `SensitiveDetector`：
 `SafetyWriteGate.from_config(detector, config, audit_hmac_key=..., quarantine_key=...)`。
-两个 key 参数应由设备密钥/凭据适配器提供，代码不会从 YAML 读取密钥值。
+两个 key 参数由应用启动层从端侧密钥存储或环境变量解析，代码不会从 YAML 读取密钥值。
 `from_config()` 会在创建任何目录前拒绝两个 key 使用相同材料。
 启用用户规则时改用
 `SafetyWriteGate.from_user_rule_config(service, config, audit_hmac_key=..., quarantine_key=...)`，
@@ -303,8 +323,9 @@ Base64 编码。服务启动阶段解码并校验长度；缺失或无效时，�
 默认关闭；启用后还会经过保守的正则回溯风险门禁，但 Python `re` 没有单次硬超时，
 因此只应对受信任的本地管理端开放；普通用户优先使用 `literal`。
 
-该密钥必须独立于审计 HMAC key 和 REVIEW 隔离 key，并由设备凭据设施注入，不能
-提交到 `.env`、YAML 或版本库。当前 `create_app()` 默认把规则表建在
+该密钥必须独立于审计 HMAC key 和 REVIEW 隔离 key；默认由同一端侧私有密钥文件
+管理，也可由设备凭据设施注入，不能提交到 `.env`、YAML 或版本库。当前
+`create_app()` 默认把规则表建在
 `storage.db_path`；只有配置、密钥和 `user_rule_identity_resolver` 都有效且应用进入
 startup 时才初始化，不会在模块 import 阶段创建数据库。resolver 必须从认证会话
 返回用户 ID，不能把客户端 header 原样当作认证结果。

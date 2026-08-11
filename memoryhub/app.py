@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from memoryhub.adapter import schemas as adapter_schemas
 from memoryhub.adapter import user_rule_schemas
 from memoryhub.adapter.api import router as memory_router
-from memoryhub.adapter.schemas import KnowledgeMemory, PreferenceMemory, SearchResult
+from memoryhub.adapter.schemas import SearchResult
 from memoryhub.adapter.service import MemoryService
 from memoryhub.config import AppConfig, load_config, validate_production_runtime
 from memoryhub.core.safety.user_rules import (
@@ -222,6 +222,8 @@ def create_app(
     app.state.owns_user_rule_service = False
     app.state.safety_gate = safety_gate
     app.state.safety_gate_error = ""
+    app.state.safety_key_store_path = ""
+    app.state.safety_key_sources = ()
     app.state.event_ingestion_service = event_ingestion_service
     app.state.extraction_task_repo = None
     app.state.extraction_retry_service = None
@@ -264,14 +266,42 @@ def create_app(
     # 注册生命周期
     async def startup():
         """应用启动时初始化各组件"""
+        # ---- 安全模块：端侧持久密钥 ----
+        # 测试/嵌入方显式注入完整 gate 时不触碰主机密钥存储；正常 REST
+        # 启动路径统一在这里完成首次生成、外部密钥导入和重启复用。
+        key_resolution = None
+        needs_managed_keys = app.state.safety_gate is None or (
+            app.state.user_rule_service is None
+            and config.safety.user_rules.enabled
+            and app.state.user_rule_identity_resolver is not None
+        )
+        if needs_managed_keys:
+            from memoryhub.core.safety.key_store import (
+                SafetyKeyStoreError,
+                provision_safety_keys,
+            )
+
+            try:
+                key_resolution = provision_safety_keys(config)
+            except SafetyKeyStoreError as exc:
+                app.state.safety_gate_error = exc.code
+                logger.error("memoryhub_safety_key_store_unavailable code=%s", exc.code)
+                raise RuntimeError(exc.code) from None
+            app.state.safety_key_store_path = str(key_resolution.key_file)
+            app.state.safety_key_sources = key_resolution.sources
+
         # ---- 安全模块：用户自定义规则服务 ----
         if app.state.user_rule_service is None and config.safety.user_rules.enabled:
             app.state.user_rule_service_error = ""
             if app.state.user_rule_identity_resolver is None:
                 app.state.user_rule_service_error = "user_rule.identity_unavailable"
             else:
-                key = _user_rule_master_key_from_env(
-                    config.safety.user_rules.encryption_key_env
+                key = (
+                    key_resolution.key("user_rule")
+                    if key_resolution is not None
+                    else _user_rule_master_key_from_env(
+                        config.safety.user_rules.encryption_key_env
+                    )
                 )
                 if key is None:
                     app.state.user_rule_service_error = "user_rule.key_unavailable"
@@ -316,7 +346,9 @@ def create_app(
         import json
 
         from memoryhub.core.fact import (
-            FactIngestionAdapter, FactIndexService, FactMemoryPipeline,
+            FactIndexService,
+            FactIngestionAdapter,
+            FactMemoryPipeline,
         )
         from memoryhub.core.ingestion.extraction import ExtractionExecutor
         from memoryhub.core.ingestion.quality import QualityScorer
@@ -340,23 +372,31 @@ def create_app(
             PendingIndexCompensationTask,
         )
         from memoryhub.storage.database import (
+            ConflictRepository,
             Database,
             EventRepository,
             ExtractionTaskRepository,
-            ConflictRepository,
             ForgetRepository,
             KnowledgeRepository,
             PreferenceRepository,
         )
+        from memoryhub.storage.evidence_store import EvidenceStore
         from memoryhub.storage.sync_service import MemorySyncService
         from memoryhub.storage.vector_engine import create_vector_engine
         from memoryhub.storage.vector_store import VectorStore
-        from memoryhub.storage.evidence_store import EvidenceStore
 
         if app.state.safety_gate is None:
-            audit_key = _user_rule_master_key_from_env(config.safety.audit.hmac_key_env)
-            quarantine_key = _user_rule_master_key_from_env(
-                config.safety.quarantine.encryption_key_env
+            audit_key = (
+                key_resolution.key("audit_hmac")
+                if key_resolution is not None
+                else _user_rule_master_key_from_env(config.safety.audit.hmac_key_env)
+            )
+            quarantine_key = (
+                key_resolution.key("quarantine")
+                if key_resolution is not None
+                else _user_rule_master_key_from_env(
+                    config.safety.quarantine.encryption_key_env
+                )
             )
             if audit_key is None or quarantine_key is None:
                 app.state.safety_gate_error = "gate.key_unavailable"

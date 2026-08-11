@@ -33,6 +33,33 @@ _DECISIONS = ["override", "merge", "coexist", "pending"]
 _FEEDBACK_ACTIONS = ["update", "confirm", "reject"]
 
 
+def _format_write_success(label: str, result: dict[str, Any]) -> str:
+    """Expose the complete, non-sensitive safety outcome of a memory write."""
+
+    return (
+        f"{label}已写入：status={result.get('status', 'unknown')} "
+        f"memory_id={result.get('memory_id', 'unknown')} "
+        f"safety_action={result.get('safety_action', 'unknown')} "
+        f"audit_id={result.get('audit_id', 'unknown')}"
+    )
+
+
+def _format_write_policy_outcome(label: str, exc: MemoryHubError) -> str | None:
+    """Return expected safety decisions as readable business outcomes for MCP clients."""
+
+    if exc.safety_action not in {"reject", "review"}:
+        return None
+    outcome_status = exc.outcome_status or (
+        "rejected" if exc.safety_action == "reject" else "review_required"
+    )
+    return (
+        f"{label}未写入：status={outcome_status} "
+        f"safety_action={exc.safety_action} "
+        f"audit_id={exc.audit_id or 'unknown'} "
+        f"code={exc.code} http_status={exc.status_code or 'unknown'}"
+    )
+
+
 def _str_list(value: Any, name: str) -> list[str]:
     if value is None:
         return []
@@ -426,8 +453,14 @@ class ToolRegistry:
             is_global=bool(args.get("is_global")),
             confidence=float(args.get("confidence") or 0.5),
         )
-        result = self.client.write_preference(memory)
-        return f"偏好已写入：memory_id={result.get('memory_id')}"
+        try:
+            result = self.client.write_preference(memory)
+        except MemoryHubError as exc:
+            outcome = _format_write_policy_outcome("偏好", exc)
+            if outcome is not None:
+                return outcome
+            raise
+        return _format_write_success("偏好", result)
 
     def _wrap_write_knowledge(self, args: dict) -> str:
         memory = build_knowledge(
@@ -443,8 +476,14 @@ class ToolRegistry:
             app=str(args.get("app") or "opencode"),
             confidence=float(args.get("confidence") or 0.0),
         )
-        result = self.client.write_knowledge(memory)
-        return f"知识已写入：memory_id={result.get('memory_id')}"
+        try:
+            result = self.client.write_knowledge(memory)
+        except MemoryHubError as exc:
+            outcome = _format_write_policy_outcome("知识", exc)
+            if outcome is not None:
+                return outcome
+            raise
+        return _format_write_success("知识", result)
 
     def _wrap_forget(self, args: dict) -> str:
         scope = {}
@@ -524,7 +563,16 @@ class ToolRegistry:
 def handle_tool_error(exc: Exception) -> str:
     """Turn an exception into a safe, useful tool error message."""
     if isinstance(exc, MemoryHubError):
-        return f"[memoryhub error {exc.code}] {exc.message}"
+        fields = [f"[memoryhub error {exc.code}]", exc.message]
+        if exc.status_code is not None:
+            fields.append(f"http_status={exc.status_code}")
+        if exc.outcome_status:
+            fields.append(f"status={exc.outcome_status}")
+        if exc.safety_action:
+            fields.append(f"safety_action={exc.safety_action}")
+        if exc.audit_id:
+            fields.append(f"audit_id={exc.audit_id}")
+        return " ".join(fields)
     if isinstance(exc, ContractError):
         return f"[invalid input] {exc}"
     return f"[memoryhub error] unexpected failure: {type(exc).__name__}"

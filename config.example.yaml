@@ -157,8 +157,18 @@ safety:
   auto_mask: true
   reject_on_detect: false
 
+  # 端侧密钥存储：默认首次启动自动生成，之后从固定文件复用。
+  # path 为空时使用 <storage.db_path 父目录>/security/safety-keys.json；
+  # 环境变量仍可覆盖，并默认导入本地文件，便于已有部署平滑迁移。
+  key_store:
+    path: ""
+    auto_generate: true
+    persist_external: true
+    import_legacy_env: true
+    legacy_env_file: "~/.config/memoryhub/safety.env"
+    strict_permissions: true
+
   # 安全处置审计：只写最小化投影，跨轮转文件保持 HMAC 哈希链。
-  # 密钥不得写入 YAML；由 hmac_key_env 指向的环境变量或设备密钥服务提供。
   # 审计与隔离密钥材料必须不同；retention_days 需配合系统定时清理任务。
   audit:
     enabled: true
@@ -174,7 +184,7 @@ safety:
     fail_closed: true
 
   # REVIEW 隔离区：原事件仅以 AES-256-GCM 密文保存；普通存储、检索、
-  # Embedding 和日志都不能读取隔离区。密钥同样不得写入配置文件。
+  # Embedding 和日志都不能读取隔离区。密钥值不会写入本 YAML。
   quarantine:
     enabled: true
     directory: "data/review-quarantine"

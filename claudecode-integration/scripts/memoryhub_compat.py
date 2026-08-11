@@ -18,15 +18,14 @@ applying it, and equally safe to drop.
    with ``TypeError: Object of type _ImmutableMapping is not JSON serializable``.
    ``EventRepository._to_row`` now projects via ``model_dump(mode="json")``, so
    this patch is only needed for unfixed versions.
-3. ``ensure_safety_keys`` — auto-generates the 32-byte Base64 keys the safety
-   gate requires, so the service boots without manual key setup.
+3. ``ensure_safety_keys`` — backwards-compatible wrapper around MemoryHub's
+   persistent core key store.
 """
 
 from __future__ import annotations
 
 import base64
 import os
-import secrets
 
 
 def apply_re_parser_shim() -> None:
@@ -67,18 +66,20 @@ def patch_event_repository() -> None:
     EventRepository.batch_save = patched_batch
 
 
-def _ensure_key(env_name: str) -> None:
-    if os.environ.get(env_name, "").strip():
-        return
-    os.environ[env_name] = base64.b64encode(secrets.token_bytes(32)).decode()
-    print(
-        f"[memoryhub] {env_name} 未设置，已自动生成临时 32 字节密钥。"
-        "生产环境请通过密钥服务注入真实密钥。",
-        flush=True,
-    )
+def ensure_safety_keys(config=None):
+    if config is None:
+        from memoryhub.config import AppConfig
 
+        config = AppConfig()
+    from memoryhub.core.safety.key_store import provision_safety_keys
 
-def ensure_safety_keys() -> None:
-    _ensure_key("MEMORYHUB_AUDIT_HMAC_KEY")
-    _ensure_key("MEMORYHUB_QUARANTINE_KEY")
-    _ensure_key("MEMORYHUB_USER_RULE_KEY")
+    resolution = provision_safety_keys(config)
+    env_names = {
+        "audit_hmac": config.safety.audit.hmac_key_env,
+        "quarantine": config.safety.quarantine.encryption_key_env,
+        "user_rule": config.safety.user_rules.encryption_key_env,
+    }
+    for name, env_name in env_names.items():
+        if not os.environ.get(env_name, "").strip():
+            os.environ[env_name] = base64.b64encode(resolution.key(name)).decode("ascii")
+    return resolution

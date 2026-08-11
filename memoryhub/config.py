@@ -165,8 +165,40 @@ class KnowledgeMergeConfig:
             raise ValueError("knowledge equivalent threshold must be within [0, 1]")
 
 @dataclass(frozen=True)
+class SafetyKeyStoreConfig:
+    """端侧安全密钥持久化配置；密钥值本身不进入业务配置。"""
+
+    # 空路径表示使用 ``<storage.db_path 父目录>/security/safety-keys.json``。
+    # 相对路径同样以 storage.db_path 的父目录为基准，避免依赖启动 cwd。
+    path: str = ""
+    auto_generate: bool = True
+    persist_external: bool = True
+    import_legacy_env: bool = True
+    legacy_env_file: str = "~/.config/memoryhub/safety.env"
+    strict_permissions: bool = True
+
+    def __post_init__(self) -> None:
+        for field_name in ("path", "legacy_env_file"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or "\x00" in value:
+                raise ValueError(
+                    f"key_store {field_name} must be a string without NUL bytes"
+                )
+        for field_name in (
+            "auto_generate",
+            "persist_external",
+            "import_legacy_env",
+            "strict_permissions",
+        ):
+            if type(getattr(self, field_name)) is not bool:
+                raise ValueError(f"key_store {field_name} must be a boolean")
+        if not self.strict_permissions:
+            raise ValueError("key_store strict_permissions cannot be disabled")
+
+
+@dataclass(frozen=True)
 class SafetyAuditConfig:
-    """安全处置审计日志配置；密钥只通过环境变量或设备密钥服务提供。"""
+    """安全处置审计日志配置。"""
 
     enabled: bool = True
     directory: str = "data/safety-audit"
@@ -276,7 +308,7 @@ class ReviewQuarantineConfig:
 
 @dataclass(frozen=True)
 class UserRuleConfig:
-    """用户自定义敏感规则配置；matcher 主密钥只允许从凭据边界注入。"""
+    """用户自定义敏感规则配置。"""
 
     enabled: bool = True
     encryption_key_env: str = "MEMORYHUB_USER_RULE_KEY"
@@ -328,6 +360,7 @@ class SafetyConfig:
     auto_mask: bool = True
     # 仅供旧调用方迁移；新代码应通过 policy 决定 ALLOW/MASK/REVIEW/REJECT。
     reject_on_detect: bool = False
+    key_store: SafetyKeyStoreConfig = field(default_factory=SafetyKeyStoreConfig)
     audit: SafetyAuditConfig = field(default_factory=SafetyAuditConfig)
     quarantine: ReviewQuarantineConfig = field(default_factory=ReviewQuarantineConfig)
     user_rules: UserRuleConfig = field(default_factory=UserRuleConfig)
@@ -341,6 +374,10 @@ class SafetyConfig:
 
     def __post_init__(self) -> None:
         """把 YAML 风格映射归一化为强类型契约，并校验规则名唯一。"""
+        if isinstance(self.key_store, Mapping):
+            self.key_store = SafetyKeyStoreConfig(**dict(self.key_store))
+        elif not isinstance(self.key_store, SafetyKeyStoreConfig):
+            raise ValueError("key_store must be a SafetyKeyStoreConfig or mapping")
         if isinstance(self.audit, Mapping):
             self.audit = SafetyAuditConfig(**dict(self.audit))
         elif not isinstance(self.audit, SafetyAuditConfig):
@@ -613,6 +650,8 @@ def load_config(config_path: str | None = None) -> AppConfig:
             config.knowledge_merge = KnowledgeMergeConfig(
                 **{**config.knowledge_merge.__dict__, **section("knowledge_merge")}
             )
+            if section("safety"):
+                config.safety = SafetyConfig(**dict(section("safety")))
         except TypeError as exc:
             raise ValueError(f"invalid configuration in {yaml_path}: {exc}") from exc
         if "debug" in data:

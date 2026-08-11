@@ -15,6 +15,7 @@ from memoryhub.config import (
     ReviewQuarantineConfig,
     SafetyAuditConfig,
     SafetyConfig,
+    SafetyKeyStoreConfig,
     UserRuleConfig,
 )
 from memoryhub.core.safety import SensitiveDetector
@@ -46,6 +47,9 @@ def _event() -> MemoryEvent:
 
 def test_safety_config_normalizes_persistence_mappings() -> None:
     config = SafetyConfig(
+        key_store={
+            "path": "runtime/security/keys.json",
+        },
         audit={
             "directory": "runtime/audit",
             "retention_days": 90,
@@ -60,6 +64,8 @@ def test_safety_config_normalizes_persistence_mappings() -> None:
         },
     )
 
+    assert isinstance(config.key_store, SafetyKeyStoreConfig)
+    assert config.key_store.path == "runtime/security/keys.json"
     assert isinstance(config.audit, SafetyAuditConfig)
     assert config.audit.directory == "runtime/audit"
     assert isinstance(config.quarantine, ReviewQuarantineConfig)
@@ -97,6 +103,11 @@ def test_audit_config_rejects_non_positive_limits(
         (ReviewQuarantineConfig, {"directory": 123}),
         (ReviewQuarantineConfig, {"encryption_key_env": "NOT AN ENV"}),
         (ReviewQuarantineConfig, {"key_id": 123}),
+        (SafetyKeyStoreConfig, {"path": 123}),
+        (SafetyKeyStoreConfig, {"auto_generate": "yes"}),
+        (SafetyKeyStoreConfig, {"persist_external": "yes"}),
+        (SafetyKeyStoreConfig, {"import_legacy_env": "yes"}),
+        (SafetyKeyStoreConfig, {"legacy_env_file": 123}),
         (UserRuleConfig, {"encryption_key_env": "NOT AN ENV"}),
         (UserRuleConfig, {"key_id": 123}),
         (UserRuleConfig, {"max_rules_per_user": 0}),
@@ -107,7 +118,10 @@ def test_audit_config_rejects_non_positive_limits(
 )
 def test_persistence_config_rejects_invalid_runtime_types(
     config_type: (
-        type[SafetyAuditConfig] | type[ReviewQuarantineConfig] | type[UserRuleConfig]
+        type[SafetyAuditConfig]
+        | type[ReviewQuarantineConfig]
+        | type[SafetyKeyStoreConfig]
+        | type[UserRuleConfig]
     ),
     kwargs: dict[str, object],
 ) -> None:
@@ -116,6 +130,7 @@ def test_persistence_config_rejects_invalid_runtime_types(
 
 
 def test_runtime_config_stores_secret_references_not_secret_values() -> None:
+    key_store_fields = {item.name for item in fields(SafetyKeyStoreConfig)}
     audit_fields = {item.name for item in fields(SafetyAuditConfig)}
     quarantine_fields = {item.name for item in fields(ReviewQuarantineConfig)}
     user_rule_fields = {item.name for item in fields(UserRuleConfig)}
@@ -127,6 +142,8 @@ def test_runtime_config_stores_secret_references_not_secret_values() -> None:
     assert "master_key" not in user_rule_fields
     assert "encryption_key" not in user_rule_fields
     assert "encryption_key_env" in user_rule_fields
+    assert "key" not in key_store_fields
+    assert "secret" not in key_store_fields
 
 
 @pytest.mark.parametrize(
