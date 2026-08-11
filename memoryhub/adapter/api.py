@@ -30,6 +30,7 @@ from memoryhub.adapter.schemas import (
     KnowledgeMemory,
     MemoryStatus,
     PreferenceMemory,
+    SafetyAction,
     SearchRequest,
     SearchResponse,
     WriteEventRequest,
@@ -43,6 +44,12 @@ from memoryhub.adapter.user_rule_schemas import (
 )
 from memoryhub.core.fact.models import FactCandidate, RawTriple
 from memoryhub.core.forget import MemoryForgetter
+from memoryhub.core.safety.gate import SafetyGateError
+from memoryhub.core.safety.memory_write import (
+    GuardedMemoryWriteResult,
+    MemoryWriteSafetyError,
+    guard_memory_write,
+)
 from memoryhub.embedding import KylinEmbeddingError
 from memoryhub.storage.vector_engine import MilvusEngineError
 
@@ -905,7 +912,7 @@ async def resolve_conflict(conflict_id: str, body: ResolveConflictRequest, reque
 
 @router.post("/feedback")
 async def submit_feedback(req: FeedbackRequest, request: Request):
-    """Apply feedback to preference or knowledge without changing the API contract."""
+    """Apply feedback; free-text updates must pass the mandatory safety write gate."""
     pref_repo = getattr(request.app.state, "pref_repo", None)
     know_repo = getattr(request.app.state, "know_repo", None)
     if pref_repo is None and know_repo is None:
@@ -919,7 +926,8 @@ async def submit_feedback(req: FeedbackRequest, request: Request):
     if memory is None or memory.user_id != req.user_id:
         raise HTTPException(status_code=404, detail="memory not found")
 
-    if req.action == "update" and req.feedback_text:
+    content_update = req.action == "update" and bool(req.feedback_text)
+    if content_update:
         if memory.memory_type == "knowledge":
             memory.content = req.feedback_text
             memory.version = max(1, memory.version) + 1
@@ -932,13 +940,34 @@ async def submit_feedback(req: FeedbackRequest, request: Request):
         memory.success_count += 1
 
     write_service = getattr(request.app.state, "memory_write_service", None)
-    if write_service is not None:
-        write_service.upsert_memory(memory)
-    else:
-        repo.save(memory)
-        _sync_memory_index(
-            request, memory, remove=memory.status == MemoryStatus.ARCHIVED
+
+    def persist(selected_memory):
+        if write_service is not None:
+            write_service.upsert_memory(selected_memory)
+        else:
+            repo.save(selected_memory)
+            _sync_memory_index(
+                request,
+                selected_memory,
+                remove=selected_memory.status == MemoryStatus.ARCHIVED,
+            )
+        return selected_memory.memory_id
+
+    if content_update:
+        result = _guarded_memory_write(
+            request,
+            memory,
+            persist,
+            operation="feedback_update",
         )
+        return {
+            "status": "ok",
+            "action": req.action,
+            "safety_action": result.action.value,
+            "audit_id": result.audit_id,
+        }
+
+    persist(memory)
     return {"status": "ok", "action": req.action}
 
 
@@ -954,6 +983,77 @@ def _get_sync_service(request: Request):
     return service
 
 
+def _get_safety_gate(request: Request):
+    """Return the mandatory write gate; explicit writes fail closed without it."""
+    gate = getattr(request.app.state, "safety_gate", None)
+    if gate is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="memory safety gate unavailable",
+        )
+    return gate
+
+
+def _guarded_memory_write(
+    request: Request,
+    memory: PreferenceMemory | KnowledgeMemory,
+    sink,
+    *,
+    operation: str,
+) -> GuardedMemoryWriteResult:
+    """Run one content mutation through SafetyWriteGate before invoking its sink."""
+    try:
+        result = guard_memory_write(
+            _get_safety_gate(request),
+            memory,
+            sink,
+            operation=operation,
+        )
+    except HTTPException:
+        raise
+    except (MemoryWriteSafetyError, SafetyGateError):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="memory safety gate failed",
+        ) from None
+
+    if result.action is SafetyAction.REVIEW:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "memory.safety.review_required",
+                "message": "Memory write requires safety review",
+                "status": "review_required",
+                "safety_action": result.action.value,
+                "audit_id": result.audit_id,
+            },
+        )
+    if result.action is SafetyAction.REJECT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "memory.safety.rejected",
+                "message": "Memory write rejected by safety policy",
+                "status": "rejected",
+                "safety_action": result.action.value,
+                "audit_id": result.audit_id,
+            },
+        )
+    if result.memory is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="memory safety gate failed",
+        )
+    return result
+
+
+def _write_through_sync_service(sync_service, memory):
+    sqlite_ok, memory_id = sync_service.index_memory(memory)
+    if not sqlite_ok:
+        raise RuntimeError("memory write failed")
+    return memory_id
+
+
 @router.post("/memories/preference")
 async def write_preference_memory(
     req: PreferenceMemory,
@@ -963,13 +1063,21 @@ async def write_preference_memory(
     """
     显式写入/更新偏好记忆，并同步到 Milvus。
 
-    数据流: PreferenceMemory → SQLite 事务写入 → Embedding → Milvus upsert
+    数据流: PreferenceMemory → SafetyWriteGate → 安全副本 → SQLite → Embedding → Milvus
             → 标记 index_version → 失效检索缓存
     """
-    sqlite_ok, memory_id = sync_service.index_memory(req)
-    if not sqlite_ok:
-        raise HTTPException(status_code=503, detail="memory write failed")
-    return {"status": "ok", "memory_id": memory_id}
+    result = _guarded_memory_write(
+        request,
+        req,
+        lambda safe_memory: _write_through_sync_service(sync_service, safe_memory),
+        operation="explicit_write",
+    )
+    return {
+        "status": "ok",
+        "memory_id": result.sink_result,
+        "safety_action": result.action.value,
+        "audit_id": result.audit_id,
+    }
 
 
 @router.post("/memories/knowledge")
@@ -981,13 +1089,21 @@ async def write_knowledge_memory(
     """
     显式写入/更新知识记忆，并同步到 Milvus。
 
-    数据流: KnowledgeMemory → SQLite 事务写入 → Embedding → Milvus upsert
+    数据流: KnowledgeMemory → SafetyWriteGate → 安全副本 → SQLite → Embedding → Milvus
             → 标记 index_version → 失效检索缓存
     """
-    sqlite_ok, memory_id = sync_service.index_memory(req)
-    if not sqlite_ok:
-        raise HTTPException(status_code=503, detail="memory write failed")
-    return {"status": "ok", "memory_id": memory_id}
+    result = _guarded_memory_write(
+        request,
+        req,
+        lambda safe_memory: _write_through_sync_service(sync_service, safe_memory),
+        operation="explicit_write",
+    )
+    return {
+        "status": "ok",
+        "memory_id": result.sink_result,
+        "safety_action": result.action.value,
+        "audit_id": result.audit_id,
+    }
 
 
 # ============================================================

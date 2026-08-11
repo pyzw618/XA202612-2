@@ -52,9 +52,9 @@ safety:
     retention_days: 180
     max_record_bytes: 65536
     lock_timeout_seconds: 5.0
-    strict_permissions: false
-    fsync: false
-    fail_closed: false
+    strict_permissions: true
+    fsync: true
+    fail_closed: true
   quarantine:
     enabled: false
     directory: "data/review-quarantine"
@@ -62,9 +62,9 @@ safety:
     key_id: "device-local-v1"
     retention_days: 30
     max_record_bytes: 4194304
-    strict_permissions: false
-    fsync: false
-    fail_closed: false
+    strict_permissions: true
+    fsync: true
+    fail_closed: true
   user_rules:
     enabled: true
     encryption_key_env: "MEMORYHUB_USER_RULE_KEY"

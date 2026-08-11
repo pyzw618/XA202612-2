@@ -251,12 +251,21 @@ def test_cache_invalidate_by_memory_id():
 # ---------- API 路由 ----------
 
 
-def test_search_api_returns_json():
+def test_search_api_returns_json(tmp_path):
     from fastapi.testclient import TestClient
 
     from memoryhub.app import create_app
+    from memoryhub.config import AppConfig, SafetyConfig, StorageConfig, UserRuleConfig
 
-    app = create_app()
+    config = AppConfig(
+        storage=StorageConfig(
+            db_path=str(tmp_path / "memoryhub.db"),
+            vector_index_path=str(tmp_path / "vector_index"),
+            evidence_path=str(tmp_path / "evidence"),
+        ),
+        safety=SafetyConfig(user_rules=UserRuleConfig(enabled=False)),
+    )
+    app = create_app(config)
     with TestClient(app) as client:
         # 用预置数据的检索器替换启动时装配的空检索器
         app.state.retriever = _build_retriever()

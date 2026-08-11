@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from memoryhub.app import create_app
-from memoryhub.config import AppConfig, StorageConfig
+from memoryhub.config import AppConfig, SafetyConfig, StorageConfig, UserRuleConfig
 
 
 @pytest.fixture()
@@ -25,7 +25,11 @@ def client(tmp_path) -> TestClient:
             db_path=str(tmp_path / "memoryhub.db"),
             vector_index_path=str(tmp_path / "vector_index"),
             evidence_path=str(tmp_path / "evidence"),
-        )
+        ),
+        # These API contract tests do not provide an authenticated identity
+        # resolver. Disable only user-defined rules so the real built-in safety
+        # gate is still provisioned and every explicit write remains gated.
+        safety=SafetyConfig(user_rules=UserRuleConfig(enabled=False)),
     )
     with TestClient(create_app(config)) as test_client:
         yield test_client

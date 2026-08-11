@@ -10,7 +10,6 @@ the project's Python (>= 3.10):
 from __future__ import annotations
 
 import base64
-import json
 import os
 import sys
 import threading
@@ -25,25 +24,29 @@ SCRIPTS_DIR = INTEGRATION / "scripts"
 
 os.environ["MEMORYHUB_AUDIT_HMAC_KEY"] = base64.b64encode(b"A" * 32).decode()
 os.environ["MEMORYHUB_QUARANTINE_KEY"] = base64.b64encode(b"B" * 32).decode()
+os.environ["MEMORYHUB_USER_RULE_KEY"] = base64.b64encode(b"C" * 32).decode()
 
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(SCRIPTS_DIR))
 sys.path.insert(0, str(MCP_DIR))
 
-from memoryhub_compat import apply_re_parser_shim, ensure_safety_keys, patch_event_repository  # noqa: E402
+from memoryhub_compat import apply_re_parser_shim, patch_event_repository  # noqa: E402
 
 apply_re_parser_shim()
-ensure_safety_keys()
 patch_event_repository()
 
 import pytest  # noqa: E402
 import uvicorn  # noqa: E402
+from memoryhub_mcp.config import McpConfig  # noqa: E402
+from memoryhub_mcp.server import SERVER_INSTRUCTIONS, MemoryHubMcpServer  # noqa: E402
 
 from memoryhub.app import create_app  # noqa: E402
-from memoryhub.config import AppConfig, EmbeddingConfig, SafetyConfig, StorageConfig  # noqa: E402
-
-from memoryhub_mcp.config import McpConfig  # noqa: E402
-from memoryhub_mcp.server import MemoryHubMcpServer, SERVER_INSTRUCTIONS  # noqa: E402
+from memoryhub.config import (  # noqa: E402
+    AppConfig,
+    EmbeddingConfig,
+    SafetyConfig,
+    StorageConfig,
+)
 
 
 @pytest.fixture(scope="module")
@@ -148,7 +151,11 @@ def test_write_preference_then_search(running_server):
     assert write["result"]["isError"] is False, write
     assert "memory_id=" in write["result"]["content"][0]["text"]
 
-    search = _call_tool(mcp, "memoryhub_search", {"query": "Markdown 周报", "user_id": "u1", "top_k": 5})
+    search = _call_tool(
+        mcp,
+        "memoryhub_search",
+        {"query": "Markdown 周报", "user_id": "u1", "top_k": 5},
+    )
     assert search["result"]["isError"] is False, search
     text = search["result"]["content"][0]["text"]
     assert "用户偏好" in text
@@ -182,8 +189,10 @@ def test_write_event_agent_response(running_server):
     assert response["result"]["isError"] is False, response
     text = response["result"]["content"][0]["text"]
     assert "accepted=1" in text
-    # 无 LLM，抽取进入重试队列，事件本身已接受
-    assert "extraction_failures=1" in text
+    # With fact extraction enabled, preference and fact extraction both enter
+    # the retry queue when no LLM is available; the event itself stays accepted.
+    assert "extraction_failures=2" in text
+    assert "retry_tasks_enqueued=2" in text
 
 
 def test_unknown_method_error(running_server):

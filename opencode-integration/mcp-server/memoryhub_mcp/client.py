@@ -20,10 +20,22 @@ except ImportError:  # pragma: no cover - keep import graph explicit
 class MemoryHubError(RuntimeError):
     """A failed or unexpected MemoryHub REST call."""
 
-    def __init__(self, code: str, message: str, status_code: int | None = None):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        status_code: int | None = None,
+        *,
+        outcome_status: str | None = None,
+        safety_action: str | None = None,
+        audit_id: str | None = None,
+    ):
         super().__init__(message)
         self.code = code
         self.status_code = status_code
+        self.outcome_status = outcome_status
+        self.safety_action = safety_action
+        self.audit_id = audit_id
 
 
 class MemoryHubClient:
@@ -66,13 +78,36 @@ class MemoryHubClient:
             raise MemoryHubError("memoryhub.client.error", f"HTTP error: {exc}", None) from exc
 
         if response.status_code >= 400:
-            detail = response.json().get("detail") if response.content else None
+            detail = None
+            if response.content:
+                try:
+                    payload = response.json()
+                except (json.JSONDecodeError, ValueError):
+                    payload = None
+                if isinstance(payload, dict):
+                    detail = payload.get("detail")
             code = "memoryhub.api.error"
             message = f"MemoryHub {path} failed with HTTP {response.status_code}"
+            outcome_status = None
+            safety_action = None
+            audit_id = None
             if isinstance(detail, dict) and isinstance(detail.get("code"), str):
                 code = detail["code"]
                 message = f"MemoryHub rejected {path}: {detail['code']}"
-            raise MemoryHubError(code, message, response.status_code)
+                if isinstance(detail.get("status"), str):
+                    outcome_status = detail["status"]
+                if isinstance(detail.get("safety_action"), str):
+                    safety_action = detail["safety_action"]
+                if isinstance(detail.get("audit_id"), str):
+                    audit_id = detail["audit_id"]
+            raise MemoryHubError(
+                code,
+                message,
+                response.status_code,
+                outcome_status=outcome_status,
+                safety_action=safety_action,
+                audit_id=audit_id,
+            )
 
         if not response.content:
             return None
