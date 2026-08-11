@@ -957,7 +957,7 @@
           },
           {
             "preference_type": "output_style",
-            "text": "普通回答保持简洁，减少铺垫。",
+            "text": "回答保持简洁 优先给结论 内容紧凑",
             "is_global": true,
             "confidence": 0.95,
             "tags": [
@@ -1066,23 +1066,12 @@
         "preferences": [
           {
             "preference_type": "output_style",
-            "text": "普通回答保持简洁，减少铺垫。",
+            "text": "回复时多用列表和要点，便于快速阅读。",
             "is_global": true,
-            "confidence": 0.95,
+            "confidence": 0.94,
             "tags": [
-              "风格",
-              "简洁"
-            ]
-          },
-          {
-            "preference_type": "scene_preference",
-            "text": "比赛方案采用正式、详细的表达方式。",
-            "is_global": false,
-            "confidence": 0.97,
-            "tags": [
-              "比赛方案",
-              "正式",
-              "详细"
+              "列表",
+              "要点"
             ]
           }
         ]
@@ -1282,7 +1271,19 @@
       "occurred_at": "2026-08-05T09:45:00Z",
       "text": "用这个模板写一份 MemoryHub 比赛方案提纲。",
       "payload": {
-        "raw_role": "user"
+        "raw_role": "user",
+        "preferences": [
+          {
+            "preference_type": "output_style",
+            "text": "回答保持简洁 优先给结论 内容紧凑 不要 详细",
+            "is_global": true,
+            "confidence": 0.93,
+            "tags": [
+              "详细",
+              "冲突测试"
+            ]
+          }
+        ]
       },
       "tool_calls": [],
       "schema_version": "1.1",

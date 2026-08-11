@@ -207,13 +207,14 @@ ApplicationWindow {
 
             PreferencesView {}
             KnowledgeView {}
-            FactsView {}
+            FactsView { factDialog: factDialog }
             RetrievalView {}
             ConflictsView {}
             ForgetView {}
             SafetyView {}
             EvaluationView {}
-            Rectangle { color: "transparent"; Label { anchors.centerIn: parent; text: "系统设置（待实现）"; color: "#94A3B8" } }
+            SettingsView {}
+            IngestionView {}
         }
     }
     }

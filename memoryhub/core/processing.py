@@ -17,6 +17,7 @@ from memoryhub.adapter.schemas import (
     SafetyAction,
     SceneScope,
 )
+from memoryhub.core.conflict.detector import ConflictDetector
 from memoryhub.core.knowledge.extractor import KnowledgeExtractor
 from memoryhub.core.preference.extractor import PreferenceExtractor
 from memoryhub.core.safety import SensitiveDetector
@@ -32,6 +33,7 @@ class EventProcessingCoordinator:
         llm_client=None,
         on_memory_written: Callable[[object], None] | None = None,
         safety_config=None,
+        conflict_repo=None,
     ):
         self.pref_repo = pref_repo
         self.know_repo = know_repo
@@ -39,6 +41,9 @@ class EventProcessingCoordinator:
         self.preference_extractor = PreferenceExtractor(llm_client=llm_client)
         self.knowledge_extractor = KnowledgeExtractor(llm_client=llm_client)
         self.on_memory_written = on_memory_written
+        # 演示适配层：确定性冲突检测（不依赖 LLM），让前端能测试冲突处理页
+        self.conflict_repo = conflict_repo
+        self.conflict_detector = ConflictDetector() if conflict_repo is not None else None
         detector_kwargs = {}
         if safety_config is not None:
             detector_kwargs = {
@@ -111,6 +116,7 @@ class EventProcessingCoordinator:
                 for memory in preference_items:
                     self.pref_repo.save(memory)
                     summary.preferences_written.append(memory.memory_id)
+                    self._detect_pref_conflict(memory, summary)
                     self._notify(memory)
             except Exception as exc:
                 summary.warnings.append(f"preference extraction failed for {event.event_id}: {exc}")
@@ -208,6 +214,19 @@ class EventProcessingCoordinator:
                     summary.warnings.append(f"fact proposal failed for {event.event_id}")
 
         return summary
+
+    def _detect_pref_conflict(self, memory, summary) -> None:
+        """写入偏好后做确定性冲突检测，冲突记录存进 conflict_repo 供前端冲突页测试。"""
+        if self.conflict_detector is None:
+            return
+        try:
+            existing = self.pref_repo.list_all(status="active", user_id=memory.user_id)
+            conflict = self.conflict_detector.check_preference(memory, existing)
+            if conflict is not None:
+                self.conflict_repo.save(conflict)
+                summary.conflict_ids.append(conflict.conflict_id)
+        except Exception:
+            pass
 
     def _notify(self, memory: object) -> None:
         if self.on_memory_written is not None:

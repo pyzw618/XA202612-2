@@ -34,6 +34,7 @@ async def clear_preferences(request: Request, user_id: str = "default"):
     """清空指定用户的偏好记忆（演示用：前端“清空演示数据”/载入演示时调用）。
 
     只清 preferences 表，不影响知识/事实等其他记忆。
+    同时清理向量索引中这些偏好的条目，避免检索返回已删除的“幽灵”结果。
     """
     db = getattr(request.app.state, "db", None)
     if db is None:
@@ -41,11 +42,26 @@ async def clear_preferences(request: Request, user_id: str = "default"):
     from memoryhub.storage.database import PreferenceRow
 
     with db.session() as s:
+        ids = [
+            row.memory_id
+            for row in s.query(PreferenceRow).filter(PreferenceRow.user_id == user_id).all()
+        ]
         deleted = (
             s.query(PreferenceRow)
             .filter(PreferenceRow.user_id == user_id)
             .delete(synchronize_session=False)
         )
+
+    # 同步清理向量索引：演示适配层会把偏好写入向量库，仅删当前偏好 ID
+    # 无法清掉历史轮次的“幽灵”，因此直接清空整个向量库（演示数据，安全）。
+    vector_store = getattr(request.app.state, "vector_store", None)
+    if vector_store is not None:
+        try:
+            all_ids = list(getattr(vector_store, "reverse_map", {}).keys())
+            if all_ids:
+                vector_store.batch_delete(all_ids)
+        except Exception:
+            pass
     return {"deleted": deleted, "user_id": user_id}
 
 # 进程内 fact 候选暂存区：proposal_id -> {"json": <dict>, "candidate": <FactCandidate>}

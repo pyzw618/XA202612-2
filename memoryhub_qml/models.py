@@ -155,6 +155,7 @@ class KnowledgeListModel(DictListModel):
                 "createdAt",
                 "scopeText",
                 "steps",
+                "stepsText",
                 "tools",
                 "toolsText",
                 "evidenceCount",
@@ -236,6 +237,22 @@ class SafetyRuleListModel(DictListModel):
                 "enabled",
                 "revision",
                 "createdAt",
+            ),
+            parent,
+        )
+
+
+class ExtractionListModel(DictListModel):
+    def __init__(self, parent=None) -> None:
+        super().__init__(
+            (
+                "taskId",
+                "eventId",
+                "extractorType",
+                "status",
+                "attemptCount",
+                "createdAt",
+                "lastErrorCode",
             ),
             parent,
         )

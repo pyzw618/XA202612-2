@@ -525,6 +525,7 @@ def create_app(
             # 演示适配层：不依赖 LLM，偏好/知识提取走纯规则路径，避免 ollama 未运行时阻塞
             llm_client=None,
             safety_config=config.safety,
+            conflict_repo=conflict_repo,
         )
         app.state.fact_index_service = FactIndexService(
             fact_store=fact_store,

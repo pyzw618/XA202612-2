@@ -6,6 +6,7 @@ import QtQuick.Layouts
 Rectangle {
     id: root
     color: "transparent"
+    property var factDialog: null
 
     ColumnLayout {
         anchors.fill: parent
@@ -39,10 +40,16 @@ Rectangle {
                             Label { text: model.subject; color: "#1D4ED8"; font.bold: true; font.pixelSize: 13 }
                             Label { text: model.predicate; color: "#64748B"; font.pixelSize: 12 }
                             Label { text: model.objectValue; Layout.fillWidth: true; color: "#172033"; font.bold: true; font.pixelSize: 13; elide: Text.ElideRight }
+                            Rectangle { Layout.preferredWidth: statusTxt.implicitWidth + 14; Layout.preferredHeight: 20; radius: 4; color: model.status === "pending" ? "#FFFBEB" : "#EFF6FF"
+                                Label { id: statusTxt; anchors.centerIn: parent; text: model.status === "pending" ? "待确认" : "已提交"; color: model.status === "pending" ? "#B45309" : "#1D4ED8"; font.pixelSize: 10; font.bold: true } }
                             Rectangle { Layout.preferredWidth: confTxt.implicitWidth + 14; Layout.preferredHeight: 20; radius: 4; color: "#EFF6FF"
                                 Label { id: confTxt; anchors.centerIn: parent; text: "置信度 " + confLabel(model.confidence); color: "#1D4ED8"; font.pixelSize: 10; font.bold: true } }
                         }
                         Label { id: srcLabel; Layout.fillWidth: true; text: "来源：" + (model.sourceText || "—") + "   ·   作用域 " + model.scope + "   ·   " + model.createdAt; color: "#64748B"; font.pixelSize: 11; elide: Text.ElideRight }
+                        RowLayout { Layout.fillWidth: true
+                            Item { Layout.fillWidth: true }
+                            Button { text: "提交 / 忽略"; visible: model.status === "pending"; onClicked: { if (root.factDialog) { root.factDialog.proposal = controller.factPageAt(index); root.factDialog.open() } } }
+                        }
                     }
                 }
                 Label { anchors.centerIn: parent; visible: parent.count === 0; text: controller.pageLoading ? "正在加载事实记忆…" : "暂无事实记忆"; color: "#94A3B8" }

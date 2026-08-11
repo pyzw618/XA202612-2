@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from .api import MemoryHubApi
 from .models import (
     ConflictListModel,
     EvalListModel,
+    ExtractionListModel,
     FactListModel,
     FactProposalListModel,
     ForgetListModel,
@@ -67,7 +69,15 @@ class MemoryHubController(QObject):
         self.forget_model = ForgetListModel(self)
         self.safety_model = SafetyRuleListModel(self)
         self.eval_model = EvalListModel(self)
+        self.extraction_model = ExtractionListModel(self)
         self._page_loading = False
+        self._search_raw: list[dict[str, Any]] = []
+        self._search_lookup: dict[str, str] = {}
+        self._search_loads = 0
+        self._drawer_memory_rows: list[dict[str, Any]] = []
+        self._drawer_memory_loads = 0
+        self._drawer_pref_ids: set[str] = set()
+        self._drawer_know_ids: set[str] = set()
 
         self.api.succeeded.connect(self._on_success)
         self.api.failed.connect(self._on_failure)
@@ -144,6 +154,10 @@ class MemoryHubController(QObject):
     @Property(QObject, constant=True)
     def evaluationModel(self) -> QObject:
         return self.eval_model
+
+    @Property(QObject, constant=True)
+    def extractionsModel(self) -> QObject:
+        return self.extraction_model
 
     @Property(bool, notify=stateChanged)
     def pageLoading(self) -> bool:
@@ -231,11 +245,16 @@ class MemoryHubController(QObject):
             "safety": 7,
             "evaluation": 8,
             "settings": 9,
+            "ingestion": 10,
         }.get(self._active_section, 0)
 
     @Property(str, notify=stateChanged)
     def currentUserId(self) -> str:
         return self._current_user_id
+
+    @Property(str, constant=True)
+    def backendUrl(self) -> str:
+        return self.api.base_url
 
     @Slot()
     def start(self) -> None:
@@ -334,6 +353,23 @@ class MemoryHubController(QObject):
     @Slot(int, result="QVariantMap")
     def factAt(self, index: int) -> dict[str, Any]:
         return self.fact_model.get(index)
+
+    @Slot(int, result="QVariantMap")
+    def factPageAt(self, index: int) -> dict[str, Any]:
+        """把事实页当前行的记录转成 FactDialog 需要的 proposal 结构。"""
+        row = self.fact_model_page.get(index)
+        if not row:
+            return {}
+        return {
+            "proposalId": str(row.get("factId") or ""),
+            "subject": str(row.get("subject") or ""),
+            "predicate": str(row.get("predicate") or ""),
+            "objectValue": str(row.get("objectValue") or ""),
+            "evidence": str(row.get("sourceText") or ""),
+            "confidence": float(row.get("confidence") or 0),
+            "admissionReason": "事实候选待用户裁决" if row.get("status") == "pending" else "",
+            "suggestedScope": str(row.get("scope") or "project"),
+        }
 
     @Slot(str, bool, str, str, str)
     def submitFactDecision(
@@ -439,6 +475,9 @@ class MemoryHubController(QObject):
             return
         self._page_loading = True
         self.stateChanged.emit()
+        self._search_raw = []
+        self._search_lookup = {}
+        self._search_loads = 0
         payload = {
             "user_id": self._current_user_id,
             "query": query,
@@ -448,6 +487,77 @@ class MemoryHubController(QObject):
         }
         token = self.api.post("search", "/api/memory/search", payload)
         self._pending[token] = ("search", None)
+
+    def _start_search_enrich(self) -> None:
+        """main 的 search 返回的 content 为空，需额外拉取记忆列表补可读内容。"""
+        uid = self._current_user_id
+        self._search_loads = 3
+        for op, path in [
+            ("search_enrich_prefs", f"/api/memory/preferences?user_id={uid}"),
+            ("search_enrich_know", f"/api/memory/knowledge?user_id={uid}"),
+            ("search_enrich_facts", f"/api/memory/facts?user_id={uid}"),
+        ]:
+            token = self.api.get(op, path)
+            self._pending[token] = (op, None)
+
+    def _maybe_finish_search(self) -> None:
+        if self._search_loads > 0:
+            return
+        self._page_loading = False
+        self.stateChanged.emit()
+        rows = []
+        for r in self._search_raw:
+            mid = str(r.get("memory_id") or "")
+            rows.append(
+                {
+                    "memoryId": mid,
+                    "memoryType": str(r.get("memory_type") or "") or self._infer_memory_type(mid),
+                    "content": self._search_lookup.get(mid) or str(r.get("content") or ""),
+                    "score": float(r.get("score") or 0),
+                    "source": str(r.get("source") or ""),
+                }
+            )
+        self.retrieval_model.set_items(rows)
+
+    @staticmethod
+    def _infer_memory_type(memory_id: str) -> str:
+        low = memory_id.lower()
+        if low.startswith("pref_"):
+            return "preference"
+        if low.startswith("know_"):
+            return "knowledge"
+        if low.startswith("fact_"):
+            return "fact"
+        return ""
+
+    def _refresh_drawer_memories(
+        self, written_prefs: set[str] | None = None, written_know: set[str] | None = None
+    ) -> None:
+        """执行一轮后拉取本轮写入的偏好/知识，填到抽屉“记忆”栏（只显示本轮，不混历史）。"""
+        uid = self._current_user_id
+        self._drawer_memory_rows = []
+        self._drawer_pref_ids = written_prefs or set()
+        self._drawer_know_ids = written_know or set()
+        self._drawer_memory_loads = 2
+        t1 = self.api.get("drawer_prefs", f"/api/memory/preferences?user_id={uid}")
+        self._pending[t1] = ("drawer_prefs", None)
+        t2 = self.api.get("drawer_know", f"/api/memory/knowledge?user_id={uid}")
+        self._pending[t2] = ("drawer_know", None)
+
+    def _maybe_finish_drawer(self) -> None:
+        if self._drawer_memory_loads > 0:
+            return
+        self.memory_model.set_items(self._drawer_memory_rows)
+
+    @staticmethod
+    def _scope_text(item: dict[str, Any]) -> str:
+        scope = item.get("scope")
+        if isinstance(scope, dict):
+            parts = [str(scope.get("scene") or ""), str(scope.get("task_type") or "")]
+            joined = " / ".join(p for p in parts if p)
+            if joined:
+                return joined
+        return "全局" if item.get("is_global") else "global"
 
     # ---- 冲突处理 ----
     @Slot()
@@ -510,6 +620,17 @@ class MemoryHubController(QObject):
         token = self.api.get("eval_reports", path)
         self._pending[token] = ("eval_reports", None)
 
+    # ---- 数据接入记录 ----
+    @Slot()
+    def loadExtractions(self) -> None:
+        if self._page_loading:
+            return
+        self._page_loading = True
+        self.stateChanged.emit()
+        path = f"/api/memory/extraction/tasks?user_id={self._current_user_id}"
+        token = self.api.get("extractions", path)
+        self._pending[token] = ("extractions", None)
+
     @Slot(str)
     def clearPreferences(self, user_id: str = "") -> None:
         """清空指定用户（默认当前会话用户）的偏好记忆。"""
@@ -560,11 +681,26 @@ class MemoryHubController(QObject):
         elif section == "evaluation":
             self.loadEvalReports()
             self._set_notice("已加载评测报告。")
+        elif section == "ingestion":
+            self.loadExtractions()
+            self._set_notice("已加载数据接入记录。")
         elif section != "agent":
             self._set_notice(f"已切换到{labels.get(section, '功能模块')}；详细管理页将继续复用当前后端接口。")
         self.stateChanged.emit()
 
     def _on_success(self, token: str, operation: str, body: Any) -> None:
+        # 包裹异常：行解析/渲染出错时只记录，不崩溃 Qt 槽，避免 controller 上下文变 null
+        try:
+            self._handle_success(token, operation, body)
+        except Exception as exc:  # noqa: BLE001
+            self._page_loading = False
+            self._preference_loading = False
+            self._knowledge_loading = False
+            self._busy = False
+            print(f"[controller] _on_success({operation}) error: {exc}", file=sys.stderr)
+            self.stateChanged.emit()
+
+    def _handle_success(self, token: str, operation: str, body: Any) -> None:
         pending_operation, index = self._pending.pop(token, (operation, None))
         if pending_operation == "health":
             self._online = True
@@ -588,6 +724,8 @@ class MemoryHubController(QObject):
             self._update_fact_status(proposal_id, status)
             self.factDecisionFinished.emit(proposal_id, status)
             self._set_notice("事实裁决已交给 Agent 处理。")
+            # 提交后刷新事实页，让刚 commit 的事实立即出现
+            self.loadFacts()
         elif pending_operation == "preferences" and isinstance(body, list):
             self._preference_loading = False
             self.preference_model.set_items(self._preference_rows(body))
@@ -597,11 +735,79 @@ class MemoryHubController(QObject):
             self.knowledge_model.set_items(self._knowledge_rows(self._knowledge_data))
         elif pending_operation == "facts" and isinstance(body, list):
             self._page_loading = False
-            self.fact_model_page.set_items(self._facts_rows(body))
+            # 事实页 = 已提交事实 + 当前会话未裁决的事实候选（合并展示）
+            committed = self._facts_rows(body)
+            pending = self._pending_fact_rows()
+            self.fact_model_page.set_items([*pending, *committed])
         elif pending_operation == "search" and isinstance(body, dict):
-            self._page_loading = False
-            self.retrieval_model.set_items(self._search_rows(body))
-            self._set_notice(f"检索完成：{body.get('total_count', 0)} 条候选，{len(body.get('results', []))} 条命中。")
+            self._search_raw = body.get("results") or []
+            self._set_notice(f"检索完成：{body.get('total_count', 0)} 条候选。")
+            self._start_search_enrich()
+        elif pending_operation == "search_enrich_prefs" and isinstance(body, list):
+            self._search_loads -= 1
+            for p in body:
+                self._search_lookup[str(p.get("memory_id") or "")] = str(
+                    p.get("text") or p.get("content") or ""
+                )
+            self._maybe_finish_search()
+        elif pending_operation == "search_enrich_know" and isinstance(body, list):
+            self._search_loads -= 1
+            for k in body:
+                self._search_lookup[str(k.get("memory_id") or "")] = str(
+                    k.get("name") or k.get("content") or ""
+                )
+            self._maybe_finish_search()
+        elif pending_operation == "search_enrich_facts" and isinstance(body, list):
+            self._search_loads -= 1
+            for f in body:
+                self._search_lookup[str(f.get("fact_id") or f.get("memory_id") or "")] = str(
+                    f.get("object_value") or ""
+                )
+            self._maybe_finish_search()
+        elif pending_operation == "drawer_prefs" and isinstance(body, list):
+            self._drawer_memory_loads -= 1
+            for p in body:
+                mid = str(p.get("memory_id") or "")
+                if self._drawer_pref_ids and mid not in self._drawer_pref_ids:
+                    continue
+                self._drawer_memory_rows.append(
+                    {
+                        "memoryId": str(p.get("memory_id") or ""),
+                        "memoryType": "preference",
+                        "knowledgeType": str(p.get("preference_type") or "preference"),
+                        "title": str(p.get("text") or "")[:20],
+                        "summary": str(p.get("text") or ""),
+                        "relevance": 0.0,
+                        "source": "MemoryHub",
+                        "level": str(p.get("level") or "long"),
+                        "scope": self._scope_text(p),
+                        "tagsText": " · ".join(str(t) for t in p.get("tags") or []),
+                        "used": False,
+                    }
+                )
+            self._maybe_finish_drawer()
+        elif pending_operation == "drawer_know" and isinstance(body, list):
+            self._drawer_memory_loads -= 1
+            for k in body:
+                mid = str(k.get("memory_id") or "")
+                if self._drawer_know_ids and mid not in self._drawer_know_ids:
+                    continue
+                self._drawer_memory_rows.append(
+                    {
+                        "memoryId": str(k.get("memory_id") or ""),
+                        "memoryType": "knowledge",
+                        "knowledgeType": str(k.get("knowledge_type") or "workflow"),
+                        "title": str(k.get("name") or ""),
+                        "summary": str(k.get("content") or ""),
+                        "relevance": 0.0,
+                        "source": "MemoryHub",
+                        "level": str(k.get("level") or "long"),
+                        "scope": self._scope_text(k),
+                        "tagsText": " · ".join(str(t) for t in k.get("tools") or []),
+                        "used": False,
+                    }
+                )
+            self._maybe_finish_drawer()
         elif pending_operation == "conflicts" and isinstance(body, list):
             self._page_loading = False
             self.conflict_model.set_items(self._conflict_rows(body))
@@ -622,6 +828,9 @@ class MemoryHubController(QObject):
         elif pending_operation == "eval_reports" and isinstance(body, list):
             self._page_loading = False
             self.eval_model.set_items(self._eval_rows(body))
+        elif pending_operation == "extractions" and isinstance(body, list):
+            self._page_loading = False
+            self.extraction_model.set_items(self._extraction_rows(body))
         elif pending_operation == "clear_preferences":
             deleted = int(body.get("deleted", 0)) if isinstance(body, dict) else 0
             if deleted:
@@ -649,8 +858,18 @@ class MemoryHubController(QObject):
             "forget",
             "safety_rules",
             "eval_reports",
+            "extractions",
         }:
             self._page_loading = False
+        if pending_operation.startswith("search_enrich"):
+            # 检索补全失败：不再等待，直接按已收集内容出结果
+            self._search_loads = 0
+            self._maybe_finish_search()
+            return
+        if pending_operation.startswith("drawer_"):
+            self._drawer_memory_loads = 0
+            self._maybe_finish_drawer()
+            return
         self._busy = False
         self._set_notice(f"请求失败：{message}")
         self.stateChanged.emit()
@@ -684,6 +903,11 @@ class MemoryHubController(QObject):
         self._write_summary = turn["write_summary"]
         self._last_latency_ms = turn["latency_ms"]
         self._refresh_models()
+        # 抽屉“记忆”栏展示本轮实际写入的偏好/知识（不混入历史记忆）
+        processing = body.get("processing") or {}
+        written_prefs = {str(x) for x in processing.get("preferences_written") or []}
+        written_know = {str(x) for x in processing.get("knowledge_written") or []}
+        self._refresh_drawer_memories(written_prefs, written_know)
 
     @staticmethod
     def _normalize_fact(raw: Any) -> dict[str, Any]:
@@ -812,7 +1036,7 @@ class MemoryHubController(QObject):
                 part for part in (str(scope.get("scene") or ""), str(scope.get("task_type") or "")) if part
             )
             if not scope_text:
-                scope_text = "全局" if p.get("is_global") else "global"
+                scope_text = "全局"
             rows.append(
                 {
                     "memoryId": str(p.get("memory_id") or ""),
@@ -847,7 +1071,7 @@ class MemoryHubController(QObject):
                 if part
             )
             if not scope_text:
-                scope_text = "全局" if k.get("is_global") else "global"
+                scope_text = "全局"
             s = int(k.get("success_count") or 0)
             t = int(k.get("total_count") or 0)
             rows.append(
@@ -864,6 +1088,7 @@ class MemoryHubController(QObject):
                     "createdAt": str(k.get("created_at") or "")[:10],
                     "scopeText": scope_text,
                     "steps": [str(x) for x in k.get("steps") or []],
+                    "stepsText": "\n".join(f"{i + 1}. {x}" for i, x in enumerate(k.get("steps") or [])),
                     "tools": [str(x) for x in k.get("tools") or []],
                     "toolsText": " · ".join(str(x) for x in k.get("tools") or []),
                     "evidenceCount": len(k.get("evidences") or []),
@@ -872,14 +1097,28 @@ class MemoryHubController(QObject):
         return rows
 
     @staticmethod
+    def _readable_entity(entity_id: Any) -> str:
+        """从事实的 entity id（如 entity:project:memoryhub_项目_63e01dbc）解析出可读名。"""
+        s = str(entity_id or "")
+        for prefix in ("entity:project:", "entity:person:", "entity:org:", "entity:", "pred:", "obj:"):
+            if s.startswith(prefix):
+                s = s[len(prefix):]
+                break
+        # 去掉末尾的 _<hash> 后缀（如 _63e01dbc）
+        parts = s.rsplit("_", 1)
+        if len(parts) == 2 and len(parts[1]) <= 12 and parts[1].isalnum():
+            s = parts[0]
+        return s
+
+    @staticmethod
     def _facts_rows(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         rows = []
         for f in facts:
             rows.append(
                 {
                     "factId": str(f.get("fact_id") or f.get("memory_id") or ""),
-                    "subject": str(f.get("subject_id") or ""),
-                    "predicate": str(f.get("predicate_id") or ""),
+                    "subject": MemoryHubController._readable_entity(f.get("subject_id")),
+                    "predicate": MemoryHubController._readable_entity(f.get("predicate_id")),
                     "objectValue": str(f.get("object_value") or ""),
                     "sourceText": str(f.get("source_text") or ""),
                     "confidence": float(f.get("confidence") or 0),
@@ -889,6 +1128,29 @@ class MemoryHubController(QObject):
                     "createdAt": str(f.get("created_at") or "")[:10],
                 }
             )
+        return rows
+
+    def _pending_fact_rows(self) -> list[dict[str, Any]]:
+        """把当前会话里仍未裁决的事实候选并成事实页行（status=pending）。"""
+        rows = []
+        for turn in self._session.get("turns") or []:
+            for prop in turn.get("fact_proposals") or []:
+                if str(prop.get("status") or "") not in {"proposed", "awaiting_decision"}:
+                    continue
+                rows.append(
+                    {
+                        "factId": str(prop.get("proposal_id") or ""),
+                        "subject": str(prop.get("subject") or ""),
+                        "predicate": str(prop.get("predicate") or ""),
+                        "objectValue": str(prop.get("object") or ""),
+                        "sourceText": str(prop.get("evidence") or ""),
+                        "confidence": float(prop.get("confidence") or 0),
+                        "status": "pending",
+                        "scope": str(prop.get("suggested_scope") or "project"),
+                        "projectId": "—",
+                        "createdAt": "",
+                    }
+                )
         return rows
 
     @staticmethod
@@ -913,8 +1175,8 @@ class MemoryHubController(QObject):
             rows.append(
                 {
                     "conflictId": str(c.get("conflict_id") or ""),
-                    "oldContent": str(c.get("old_content") or ""),
-                    "newContent": str(c.get("new_content") or ""),
+                    "oldContent": MemoryHubController._clean_conflict_text(c.get("old_content")),
+                    "newContent": MemoryHubController._clean_conflict_text(c.get("new_content")),
                     "memoryType": str(c.get("memory_type") or ""),
                     "decision": str(c.get("decision") or "pending"),
                     "reason": str(c.get("reason") or ""),
@@ -922,6 +1184,14 @@ class MemoryHubController(QObject):
                 }
             )
         return rows
+
+    @staticmethod
+    def _clean_conflict_text(value: Any) -> str:
+        """去掉后端在冲突内容末尾追加的 payload 序列化（空 payload 会变成 ' {}'）。"""
+        s = str(value or "")
+        if s.endswith(" {}"):
+            s = s[:-3]
+        return s
 
     @staticmethod
     def _forget_rows(recs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -965,6 +1235,23 @@ class MemoryHubController(QObject):
                     "accuracy": float(r.get("accuracy") or 0),
                     "f1": float(r.get("f1") or 0),
                     "avgLatencyMs": float(r.get("avg_latency_ms") or 0),
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _extraction_rows(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        rows = []
+        for t in tasks:
+            rows.append(
+                {
+                    "taskId": str(t.get("task_id") or ""),
+                    "eventId": str(t.get("event_id") or ""),
+                    "extractorType": str(t.get("extractor_type") or ""),
+                    "status": str(t.get("status") or "pending"),
+                    "attemptCount": int(t.get("attempt_count") or 0),
+                    "createdAt": str(t.get("created_at") or "")[:16],
+                    "lastErrorCode": str(t.get("last_error_code") or ""),
                 }
             )
         return rows
