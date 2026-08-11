@@ -46,6 +46,12 @@ from memoryhub.core.safety.gate import (
     SafetyGateError,
     SafetyWriteGate,
 )
+from memoryhub.core.safety.memory_write import (
+    GuardedMemoryWriteResult,
+    MemoryWriteSafetyError,
+    build_memory_write_event,
+    guard_memory_write,
+)
 from memoryhub.core.safety.quarantine import (
     QuarantineError,
     QuarantineReceipt,
@@ -94,8 +100,10 @@ __all__ = [
     "DetectorProvider",
     "GateOutcome",
     "GuardedCallbacks",
+    "GuardedMemoryWriteResult",
     "InMemoryUserRuleRepository",
     "MemoryForgetter",
+    "MemoryWriteSafetyError",
     "MaskerCapability",
     "QuarantineError",
     "QuarantineReceipt",
@@ -150,11 +158,13 @@ __all__ = [
     "UserRuleService",
     "UserRuleView",
     "build_user_rule_service",
+    "build_memory_write_event",
     "canonical_sha256",
     "list_builtin_rule_versions",
     "load_builtin_rule_set",
     "load_rule_set_file",
     "normalize_sensitive_text",
+    "guard_memory_write",
     "path_matches",
     "resolve_masker",
     "resolve_validator",
