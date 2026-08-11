@@ -182,6 +182,25 @@ def test_explicit_memory_api_blocks_review_and_reject_without_writes(
         response = client.post("/api/memory/memories/preference", json=payload)
 
     assert response.status_code == status_code
+    detail = response.json()["detail"]
+    expected = {
+        SafetyAction.REVIEW: (
+            "memory.safety.review_required",
+            "review_required",
+            "Memory write requires safety review",
+        ),
+        SafetyAction.REJECT: (
+            "memory.safety.rejected",
+            "rejected",
+            "Memory write rejected by safety policy",
+        ),
+    }[action]
+    assert detail["code"] == expected[0]
+    assert detail["status"] == expected[1]
+    assert detail["message"] == expected[2]
+    assert detail["safety_action"] == action.value
+    assert detail["audit_id"]
+    assert token not in response.text
     assert sync.memories == []
 
 

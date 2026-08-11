@@ -41,6 +41,7 @@ import uvicorn  # noqa: E402
 from memoryhub.app import create_app  # noqa: E402
 from memoryhub.config import AppConfig, EmbeddingConfig, SafetyConfig, StorageConfig  # noqa: E402
 
+from memoryhub_mcp.client import MemoryHubError  # noqa: E402
 from memoryhub_mcp.config import McpConfig  # noqa: E402
 from memoryhub_mcp.server import MemoryHubMcpServer  # noqa: E402
 
@@ -141,7 +142,11 @@ def test_write_event_then_search_preference(running_server):
         },
     )
     assert write["result"]["isError"] is False, write
-    assert "memory_id=" in write["result"]["content"][0]["text"]
+    write_text = write["result"]["content"][0]["text"]
+    assert "status=ok" in write_text
+    assert "memory_id=" in write_text
+    assert "safety_action=allow" in write_text
+    assert "audit_id=audit_" in write_text
 
     search = _call_tool(
         mcp,
@@ -152,6 +157,100 @@ def test_write_event_then_search_preference(running_server):
     text = search["result"]["content"][0]["text"]
     assert "用户偏好" in text
     assert "Markdown" in text
+
+
+def test_write_knowledge_surfaces_mask_safety_metadata(running_server):
+    mcp, _ = running_server
+    response = _call_tool(
+        mcp,
+        "memoryhub_write_knowledge",
+        {
+            "name": "MCP 脱敏字段测试",
+            "knowledge_type": "case",
+            "content": "手机号 13800138000，身份证号 11010519491231002X，邮箱 mcp-mask@example.com",
+            "scene": "safety_test",
+            "task_type": "qa",
+            "user_id": "mcp-mask-user",
+            "confidence": 0.95,
+        },
+    )
+
+    assert response["result"]["isError"] is False, response
+    text = response["result"]["content"][0]["text"]
+    assert "status=ok" in text
+    assert "memory_id=know_" in text
+    assert "safety_action=mask" in text
+    assert "audit_id=audit_" in text
+    assert "13800138000" not in text
+    assert "11010519491231002X" not in text
+    assert "mcp-mask@example.com" not in text
+
+
+def test_write_knowledge_reject_is_a_visible_business_outcome(running_server):
+    mcp, _ = running_server
+    secret = "sk-test-mcp-reject-secret-value"
+    response = _call_tool(
+        mcp,
+        "memoryhub_write_knowledge",
+        {
+            "name": "MCP 凭据拒绝测试",
+            "knowledge_type": "case",
+            "content": f"api_key={secret}",
+            "scene": "safety_test",
+            "task_type": "qa",
+            "user_id": "mcp-reject-user",
+            "confidence": 0.95,
+        },
+    )
+
+    assert response["result"]["isError"] is False, response
+    text = response["result"]["content"][0]["text"]
+    assert "知识未写入" in text
+    assert "status=rejected" in text
+    assert "safety_action=reject" in text
+    assert "audit_id=audit_" in text
+    assert "code=memory.safety.rejected" in text
+    assert "http_status=403" in text
+    assert secret not in text
+    assert "internal server error" not in text.lower()
+    assert mcp.client.list_knowledge(
+        "mcp-reject-user", scene="safety_test"
+    ) == []
+
+
+def test_write_knowledge_review_is_a_visible_business_outcome(running_server, monkeypatch):
+    mcp, _ = running_server
+
+    def require_review(_memory):
+        raise MemoryHubError(
+            "memory.safety.review_required",
+            "MemoryHub rejected /memories/knowledge: memory.safety.review_required",
+            409,
+            outcome_status="review_required",
+            safety_action="review",
+            audit_id="audit_review123",
+        )
+
+    monkeypatch.setattr(mcp.client, "write_knowledge", require_review)
+    response = _call_tool(
+        mcp,
+        "memoryhub_write_knowledge",
+        {
+            "name": "MCP 人工复核测试",
+            "knowledge_type": "case",
+            "content": "需要人工复核的测试内容",
+            "user_id": "mcp-review-user",
+        },
+    )
+
+    assert response["result"]["isError"] is False, response
+    text = response["result"]["content"][0]["text"]
+    assert "知识未写入" in text
+    assert "status=review_required" in text
+    assert "safety_action=review" in text
+    assert "audit_id=audit_review123" in text
+    assert "code=memory.safety.review_required" in text
+    assert "http_status=409" in text
 
 
 def test_write_event_agent_response(running_server):
@@ -220,6 +319,8 @@ def test_stdio_framing_smoke(running_server):
     env["MEMORYHUB_API_URL"] = api_url
     env["MEMORYHUB_USER_ID"] = "u1"
     env["MEMORYHUB_REPO_ROOT"] = str(REPO_ROOT)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     proc = subprocess.Popen(
         [sys.executable, "-m", "memoryhub_mcp"],
         cwd=str(MCP_DIR),

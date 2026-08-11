@@ -951,12 +951,24 @@ def _guarded_memory_write(
     if result.action is SafetyAction.REVIEW:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="memory write requires safety review",
+            detail={
+                "code": "memory.safety.review_required",
+                "message": "Memory write requires safety review",
+                "status": "review_required",
+                "safety_action": result.action.value,
+                "audit_id": result.audit_id,
+            },
         )
     if result.action is SafetyAction.REJECT:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="memory write rejected by safety policy",
+            detail={
+                "code": "memory.safety.rejected",
+                "message": "Memory write rejected by safety policy",
+                "status": "rejected",
+                "safety_action": result.action.value,
+                "audit_id": result.audit_id,
+            },
         )
     if result.memory is None:
         raise HTTPException(
