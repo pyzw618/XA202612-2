@@ -59,6 +59,7 @@ class EventIngestionService:
         result = EventIngestionResult()
         newly_saved: list[MemoryEvent] = []
         pending_by_id: dict[str, MemoryEvent] = {}
+        pending_hashes: set[str] = set()
 
         for event in events:
             existing = self.event_repo.get_by_id(event.event_id) or pending_by_id.get(
@@ -66,10 +67,24 @@ class EventIngestionService:
             )
             if existing is not None:
                 if existing.source_hash == event.source_hash:
+                    # 重复 event_id + 相同 source_hash：幂等确认，不重复持久化、不触发下游
                     result.accepted += 1
                     result.event_ids.append(event.event_id)
                 else:
+                    # 同一 event_id 但内容指纹不一致：视为冲突，拒绝
                     result.rejected += 1
+                continue
+
+            if event.source_hash in pending_hashes:
+                # 批内已出现相同 source_hash：幂等确认，不重复持久化、不触发下游
+                result.accepted += 1
+                result.event_ids.append(event.event_id)
+                continue
+            existing_hash = self.event_repo.get_by_source_hash(event.source_hash)
+            if existing_hash is not None:
+                # 相同 source_hash（不同 event_id）：幂等确认，不重复持久化、不触发下游
+                result.accepted += 1
+                result.event_ids.append(event.event_id)
                 continue
 
             quality = self.quality_scorer.score(event)
@@ -86,6 +101,7 @@ class EventIngestionService:
             safe_event = approved.safe_event
             newly_saved.append(safe_event)
             pending_by_id[safe_event.event_id] = safe_event
+            pending_hashes.add(safe_event.source_hash)
             result.accepted += 1
             result.event_ids.append(safe_event.event_id)
 

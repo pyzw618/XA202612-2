@@ -5,8 +5,14 @@
 """
 
 import logging
+from datetime import datetime, timezone
+
 from memoryhub.adapter.schemas import (
-    KnowledgeMemory, MemoryEvent, MemoryLevel, MemoryStatus, PreferenceMemory,
+    KnowledgeMemory,
+    MemoryEvent,
+    MemoryLevel,
+    MemoryStatus,
+    PreferenceMemory,
 )
 from memoryhub.core.forget.health import HealthCalculator
 
@@ -16,7 +22,10 @@ logger = logging.getLogger(__name__)
 class LifecycleManager:
     """记忆生命周期管理器"""
 
-    PROMOTE_THRESHOLDS = {"access_count": 5, "min_confidence": 0.5, "min_stability": 0.6}
+    PROMOTE_THRESHOLDS = {
+        "short_to_mid": {"min_occurrences": 2, "min_quality_score": 0.4},
+        "mid_to_long": {"min_occurrences": 5, "min_confidence": 0.7, "min_days": 3},
+    }
     DEMOTE_THRESHOLDS = {"max_stability": 0.2, "max_health": 0.4}
     HEALTH_ARCHIVE_THRESHOLD = 0.2
 
@@ -39,21 +48,33 @@ class LifecycleManager:
         return MemoryLevel.SHORT
 
     def should_promote(self, memory, access_count: int = 0) -> bool:
-        """检查记忆是否满足提升条件"""
-        thresholds = self.PROMOTE_THRESHOLDS
-        if access_count < thresholds["access_count"]:
+        """检查记忆是否满足提升条件（短→中、中→长两档阈值）"""
+        level = self._level(memory)
+        if level is MemoryLevel.LONG:
+            return False
+        if level is MemoryLevel.SHORT:
+            thresholds = self.PROMOTE_THRESHOLDS["short_to_mid"]
+            if access_count < thresholds["min_occurrences"]:
+                return False
+            if getattr(memory, "quality_score", 0.0) < thresholds["min_quality_score"]:
+                return False
+            return True
+        thresholds = self.PROMOTE_THRESHOLDS["mid_to_long"]
+        if access_count < thresholds["min_occurrences"]:
             return False
         if getattr(memory, "confidence", 0.0) < thresholds["min_confidence"]:
             return False
-        if getattr(memory, "stability", 0.0) < thresholds["min_stability"]:
+        if self._age_days(memory) < thresholds["min_days"]:
             return False
         return True
 
     def promote(self, memory):
         """将记忆提升到更高级别"""
-        current = memory.level
-        promotion_map = {"short": MemoryLevel.MID, "mid": MemoryLevel.LONG}
-        target = promotion_map.get(current.value if hasattr(current, "value") else str(current).lower())
+        promotion_map = {
+            MemoryLevel.SHORT: MemoryLevel.MID,
+            MemoryLevel.MID: MemoryLevel.LONG,
+        }
+        target = promotion_map.get(self._level(memory))
         if target:
             memory.level = target
             self._save(memory)
@@ -85,7 +106,9 @@ class LifecycleManager:
             if self.should_expire(memory):
                 self.expire(memory)
                 stats["expired"] += 1
-            elif self.should_promote(memory):
+            elif self.should_promote(
+                memory, access_count=getattr(memory, "access_count_30d", 0) or 0
+            ):
                 self.promote(memory)
                 stats["promoted"] += 1
             else:
@@ -109,4 +132,29 @@ class LifecycleManager:
                 else:
                     repo.save(memory)
             except Exception as e:
-                logger.warning(f"????????: {e}")
+                logger.warning("生命周期保存记忆 %s 失败: %s", getattr(memory, "memory_id", "?"), e)
+
+    def _level(self, memory) -> MemoryLevel:
+        level = getattr(memory, "level", None)
+        if isinstance(level, MemoryLevel):
+            return level
+        value = str(level or "").lower()
+        for candidate in MemoryLevel:
+            if candidate.value == value:
+                return candidate
+        return MemoryLevel.SHORT
+
+    def _age_days(self, memory) -> float:
+        created = getattr(memory, "created_at", None)
+        if not created:
+            return 0.0
+        if isinstance(created, str):
+            try:
+                created = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            except ValueError:
+                return 0.0
+        if created.tzinfo is not None:
+            now = datetime.now(timezone.utc)
+        else:
+            now = datetime.now()
+        return max(0.0, (now - created).total_seconds() / 86400.0)

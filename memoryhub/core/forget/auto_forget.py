@@ -3,7 +3,10 @@
 import logging
 
 from memoryhub.adapter.schemas import (
-    KnowledgeMemory, MemoryLevel, MemoryStatus, PreferenceMemory,
+    KnowledgeMemory,
+    MemoryLevel,
+    MemoryStatus,
+    PreferenceMemory,
 )
 from memoryhub.core.forget.health import HealthCalculator
 
@@ -56,7 +59,7 @@ class AutoForgetEngine:
                 stats["reviewed"] += 1
             else:
                 stats["kept"] += 1
-        logger.info("????????: %s", stats)
+        logger.info("自动遗忘扫描完成: %s", stats)
         return stats
 
     def _load_active_memories(self) -> list:
@@ -85,7 +88,7 @@ class AutoForgetEngine:
                     if current is not None:
                         self.fact_index_service.sync_fact(current)
             except Exception as exc:
-                logger.warning("???????? %s: %s", memory.fact_id, exc)
+                logger.warning("事实状态更新失败 %s: %s", memory.fact_id, exc)
             return
 
         repo = self._repo_for(memory)
@@ -101,7 +104,7 @@ class AutoForgetEngine:
                         memory.memory_id, status_value, user_id=memory.user_id
                     )
             except Exception as exc:
-                logger.warning("?????????? %s: %s", memory.memory_id, exc)
+                logger.warning("记忆状态更新失败 %s: %s", memory.memory_id, exc)
 
     def _update_level(self, memory, level: MemoryLevel, health: float):
         repo = self._repo_for(memory)
@@ -115,7 +118,7 @@ class AutoForgetEngine:
                 else:
                     repo.save(memory)
             except Exception as exc:
-                logger.warning("???????? %s: %s", memory.memory_id, exc)
+                logger.warning("等级更新失败 %s: %s", memory.memory_id, exc)
 
     @staticmethod
     def _demote_level(memory) -> MemoryLevel:

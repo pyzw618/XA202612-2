@@ -18,6 +18,11 @@ from memoryhub.adapter.schemas import (
     SceneScope,
 )
 
+try:
+    import jieba as _JIEBA
+except ImportError:  # pragma: no cover
+    _JIEBA = None
+
 
 class MemoryForgetter:
     """
@@ -94,7 +99,9 @@ class MemoryForgetter:
 
         deleted_count = 0
         if target_ids:
-            deleted_count = self.delete_memories(target_ids, cascade=request.cascade, user_id=request.user_id)
+            deleted_count = self.delete_memories(
+                target_ids, cascade=request.cascade, user_id=request.user_id
+            )
 
         deleted_ids = list(self._last_deleted_ids)
         record = self.create_audit_log(request, deleted_ids)
@@ -155,7 +162,10 @@ class MemoryForgetter:
         """根据指令关键词推断记忆类型"""
         text = instruction.lower()
         preference_hints = ["偏好", "喜欢", "习惯", "preference", "prefer"]
-        knowledge_hints = ["知识", "工作流", "流程", "模板", "案例", "knowledge", "workflow", "template"]
+        knowledge_hints = [
+            "知识", "工作流", "流程", "模板", "案例",
+            "knowledge", "workflow", "template",
+        ]
 
         for hint in preference_hints:
             if hint in text:
@@ -174,9 +184,20 @@ class MemoryForgetter:
             "forget", "delete", "remove", "clear", "about", "my", "the",
         }
 
-        # 去除标点并分词
+        # 去除标点
         cleaned = re.sub(r"[^\w\s]", " ", instruction)
-        tokens = [t for t in cleaned.split() if t]
+        cleaned = re.sub(r"[^\u4e00-\u9fff\w\s]", " ", cleaned)
+
+        # 中文用 jieba 分词，英文/数字按空白切分，避免"忘掉周报格式偏好"
+        # 整句被当成一个关键词导致永远匹配不上记忆内容（FOR-03 定位失败）。
+        tokens: list[str] = []
+        if _JIEBA is not None:
+            for word in _JIEBA.cut(cleaned):
+                word = word.strip()
+                if word:
+                    tokens.append(word)
+        else:
+            tokens = [t for t in cleaned.split() if t]
 
         # 过滤停用词和过短的词
         keywords = [t for t in tokens if t.lower() not in stop_words and len(t) >= 2]
@@ -205,20 +226,31 @@ class MemoryForgetter:
     def _locate_by_scope(
         self, scope, memory_type: str, user_id: str, project_id: str = ""
     ) -> list[str]:
-        """按 scope 批量定位记忆"""
+        """按 scope 批量定位记忆
+
+        对 target_scope 中显式给出的 scene/task_type/app 逐项匹配；
+        未给出的维度不参与过滤（空 scene 不会误伤带 scene 的记忆，
+        且 app 维度在此统一支持）。
+        """
         ids: list[str] = []
 
+        def _matches(mem_scope) -> bool:
+            for field in ("scene", "task_type", "app"):
+                expected = getattr(scope, field, "") or ""
+                actual = getattr(mem_scope, field, "") or ""
+                if expected and actual != expected:
+                    return False
+            return True
+
         if memory_type in ("preference", "all") and self.pref_repo is not None:
-            prefs = self.pref_repo.get_by_scope(
-                user_id, scope.scene or "", scope.task_type or ""
-            )
-            ids.extend(p.memory_id for p in prefs)
+            for p in self.pref_repo.list_all(status="active", user_id=user_id):
+                if _matches(p.scope):
+                    ids.append(p.memory_id)
 
         if memory_type in ("knowledge", "all") and self.know_repo is not None:
-            knows = self.know_repo.get_by_scope(
-                user_id, scope.scene or "", scope.task_type or ""
-            )
-            ids.extend(k.memory_id for k in knows)
+            for k in self.know_repo.list_all(status="active", user_id=user_id):
+                if _matches(k.scope):
+                    ids.append(k.memory_id)
 
         if memory_type in ("fact", "all") and self.fact_store is not None and project_id:
             facts = self.fact_store.list_facts(

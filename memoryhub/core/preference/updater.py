@@ -13,6 +13,7 @@ from memoryhub.adapter.schemas import (
     MemoryStatus,
     PreferenceMemory,
 )
+from memoryhub.core.preference.confidence import ConfidenceCalculator
 
 
 class ConflictDetector:
@@ -81,9 +82,10 @@ class ConflictResolver:
         """
         执行决策矩阵：
         1. scope 不同 -> COEXIST
-        2. 新记忆来源 = explicit_feedback -> OVERRIDE
-        3. 新旧内容互补/不冲突 -> MERGE
-        4. 隐式推理冲突且置信度较低 -> PENDING
+        2. 内容相同（支持性证据）-> MERGE
+        3. 新记忆来源 = explicit_feedback 且内容冲突 -> OVERRIDE
+        4. 新旧内容互补/不冲突 -> MERGE
+        5. 隐式推理冲突且置信度较低 -> PENDING
         """
         same_scope = (
             old_pref.scope.scene == new_pref.scope.scene
@@ -91,6 +93,9 @@ class ConflictResolver:
         )
         if not same_scope and not old_pref.is_global and not new_pref.is_global:
             return ConflictDecision.COEXIST, "Scopes differ; both preferences can coexist."
+
+        if self._is_same_content(old_pref, new_pref):
+            return ConflictDecision.MERGE, "Identical preference reinforced by new evidence."
 
         if new_pref.extract_source == "explicit_feedback":
             return ConflictDecision.OVERRIDE, "Explicit user feedback overrides implicit preference."
@@ -103,6 +108,17 @@ class ConflictResolver:
 
         return ConflictDecision.OVERRIDE, "Newer implicit preference overrides older record."
 
+    @staticmethod
+    def _is_same_content(
+        left: PreferenceMemory, right: PreferenceMemory
+    ) -> bool:
+        """判断两条偏好是否表达相同内容（用于识别支持性证据而非冲突）。"""
+        left_target = left.payload.get("target")
+        right_target = right.payload.get("target")
+        if left_target and right_target and left_target == right_target:
+            return left.payload.get("value") == right.payload.get("value")
+        return left.text.strip().lower() == right.text.strip().lower()
+
 
 class PreferenceUpdater:
     """偏好更新与持久化/中长期版本管理器"""
@@ -114,6 +130,7 @@ class PreferenceUpdater:
         pref_repo=None,
         conflict_repo=None,
         write_service=None,
+        confidence_calculator=None,
     ):
         self.detector = ConflictDetector(llm_client=llm_client)
         self.resolver = ConflictResolver()
@@ -121,6 +138,7 @@ class PreferenceUpdater:
         self.pref_repo = pref_repo
         self.conflict_repo = conflict_repo
         self.write_service = write_service
+        self.confidence_calculator = confidence_calculator or ConfidenceCalculator()
         self._mock_db: dict[str, PreferenceMemory] = {}
 
     def add(self, preference: PreferenceMemory) -> str:
@@ -133,6 +151,7 @@ class PreferenceUpdater:
             preference.root_id = preference.memory_id
             preference.created_at = datetime.now(timezone.utc)
             preference.updated_at = datetime.now(timezone.utc)
+            self.confidence_calculator.calculate(preference)
             self._save(preference)
             return preference.memory_id
 
@@ -169,6 +188,7 @@ class PreferenceUpdater:
             preference.root_id = preference.memory_id
             preference.created_at = datetime.now(timezone.utc)
             preference.updated_at = datetime.now(timezone.utc)
+            self.confidence_calculator.calculate(preference)
             self._save(preference)
             self._record_conflict(conflict_rec, preference.memory_id)
             return preference.memory_id
@@ -179,6 +199,7 @@ class PreferenceUpdater:
             preference.root_id = preference.memory_id
             preference.created_at = datetime.now(timezone.utc)
             preference.updated_at = datetime.now(timezone.utc)
+            self.confidence_calculator.calculate(preference)
             self._save(preference)
             self._record_conflict(conflict_rec, preference.memory_id)
             return preference.memory_id
@@ -203,6 +224,9 @@ class PreferenceUpdater:
         new_pref.root_id = old_pref.root_id or old_pref.memory_id
         new_pref.version = old_pref.version + 1
         new_pref.updated_at = datetime.now(timezone.utc)
+        # 继承旧证据链并保留新证据，交由置信度计算器基于完整证据链重算
+        new_pref.evidences = self._merge_evidences(old_pref.evidences, new_pref.evidences)
+        self.confidence_calculator.calculate(new_pref)
         self._save(new_pref)
         if conflict_rec is not None:
             self._record_conflict(conflict_rec, new_pref.memory_id)
@@ -216,11 +240,25 @@ class PreferenceUpdater:
         merged.root_id = pref_a.root_id or pref_a.memory_id
         merged.version = pref_a.version + 1
         merged.status = MemoryStatus.ACTIVE
-        merged.confidence = max(pref_a.confidence, pref_b.confidence)
-        merged.evidences = [*pref_a.evidences, *pref_b.evidences]
+        merged.evidences = self._merge_evidences(pref_a.evidences, pref_b.evidences)
         merged.created_at = datetime.now(timezone.utc)
         merged.updated_at = datetime.now(timezone.utc)
+        self.confidence_calculator.calculate(merged)
         return merged
+
+    @staticmethod
+    def _merge_evidences(left: list, right: list) -> list:
+        """合并两条证据链，按 event_id 去重并保持先后顺序。"""
+        result: list = []
+        seen: set[str] = set()
+        for evidence in [*left, *right]:
+            key = getattr(evidence, "event_id", "") or getattr(evidence, "evidence_id", "")
+            if key and key in seen:
+                continue
+            result.append(evidence)
+            if key:
+                seen.add(key)
+        return result
 
     def archive(self, memory_id: str):
         """归档偏好"""

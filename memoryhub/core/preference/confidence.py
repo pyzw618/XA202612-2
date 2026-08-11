@@ -35,9 +35,16 @@ class ConfidenceCalculator:
     }
 
     def calculate(self, preference: PreferenceMemory) -> float:
-        """计算综合置信度"""
+        """基于完整证据链计算综合置信度。
+
+        公式：raw = f_source * f_time * f_consistency * (1 + 0.15 * f_count)
+        置信度 = Sigmoid(3 * (raw - 0.5)) - override_penalty，并裁剪到 [0, 1]。
+
+        无证据时按抽取来源给出可解释的初始化基线，而不是直接归零。
+        """
         if not preference.evidences:
-            return 0.0
+            preference.confidence = self._baseline_confidence(preference)
+            return preference.confidence
 
         timestamps = [e.timestamp for e in preference.evidences]
         sources = [e.source_type for e in preference.evidences]
@@ -62,6 +69,45 @@ class ConfidenceCalculator:
         preference.confidence = max(0.0, min(1.0, final_confidence))
 
         return preference.confidence
+
+    def update_confidence(
+        self,
+        preference: PreferenceMemory,
+        new_event: MemoryEvent | None = None,
+    ) -> float:
+        """增量更新偏好置信度。
+
+        当传入 new_event 时，先追加一条对应证据（若 event_id 尚未在证据链中），
+        再基于完整证据链重算置信度，从而保证"新增证据"必然反映到置信度变化。
+
+        未传 new_event 时等价于按当前证据链全量重算。
+        """
+        if new_event is not None:
+            existing_ids = {e.event_id for e in preference.evidences}
+            if new_event.event_id not in existing_ids:
+                preference.evidences.append(
+                    Evidence(
+                        event_id=new_event.event_id,
+                        content=(
+                            f"[{new_event.event_type.upper()}] "
+                            f"Source:{new_event.source_type.value} "
+                            f"Quality:{getattr(new_event.quality, 'score', 0.0):.2f}"
+                        ),
+                        source_type=new_event.source_type,
+                        timestamp=parse_occurred_at(new_event.occurred_at),
+                        weight=getattr(new_event.quality, "score", 1.0),
+                        decision=None,
+                    )
+                )
+        return self.calculate(preference)
+
+    def _baseline_confidence(self, preference: PreferenceMemory) -> float:
+        """无证据时的置信度基线：显式反馈置信度高，隐式推断置信度低。"""
+        if preference.extract_source == "explicit_feedback":
+            return 0.8
+        if preference.extract_source == "implicit_inference":
+            return 0.5
+        return 0.5
 
     def _factor_evidence_count(self, evidence_count: int) -> float:
         if evidence_count <= 0:
@@ -105,11 +151,3 @@ class ConfidenceCalculator:
         consistency_ratio = positive_count / total_count
 
         return 1.2 if consistency_ratio >= 0.8 else (0.5 + 0.5 * consistency_ratio)
-
-    def update_confidence(self, preference: PreferenceMemory, new_event: MemoryEvent | None = None) -> float:
-        """
-        更新偏好置信度接口：
-        证据链及 ConflictDecision 决策已由 Extractor 和 Updater 完成注入，
-        此处直接基于最新的 preference.evidences 执行综合评估。
-        """
-        return self.calculate(preference)

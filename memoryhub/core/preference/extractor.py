@@ -16,13 +16,15 @@ from memoryhub.adapter.schemas import (
     SceneScope,
     SourceType,
 )
+from memoryhub.core.preference.confidence import ConfidenceCalculator
 
 
 class PreferenceExtractor:
     """偏好抽取器"""
 
-    def __init__(self, llm_client=None):
+    def __init__(self, llm_client=None, confidence_calculator=None):
         self.llm_client = llm_client
+        self.confidence_calculator = confidence_calculator or ConfidenceCalculator()
 
     def extract(self, event: MemoryEvent) -> list[PreferenceMemory]:
         """从单条事件中抽取候选偏好"""
@@ -38,6 +40,8 @@ class PreferenceExtractor:
                 pref.evidences.append(self._build_evidence(event))
             if not pref.tags:
                 pref.tags = self._extract_tags_from_text(pref.text)
+            # 4. 用统一公式基于完整证据链初始化置信度（替代硬编码值）
+            self.confidence_calculator.calculate(pref)
 
         return candidates
 

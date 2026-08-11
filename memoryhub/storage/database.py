@@ -295,6 +295,17 @@ class EventRepository:
             row = session.query(EventRow).filter(EventRow.event_id == event_id).first()
             return _event_row_to_pydantic(row) if row is not None else None
 
+    def get_by_source_hash(self, source_hash: str) -> Optional[MemoryEvent]:
+        """按来源内容指纹去重查询；用于相同 source_hash 不重复进入记忆链路。"""
+        with self.db.session() as session:
+            row = (
+                session.query(EventRow)
+                .filter(EventRow.source_hash == source_hash)
+                .order_by(EventRow.occurred_at.asc())
+                .first()
+            )
+            return _event_row_to_pydantic(row) if row is not None else None
+
     def get_by_session(self, session_id: str) -> list[MemoryEvent]:
         with self.db.session() as session:
             rows = session.query(EventRow).filter(EventRow.session_id == session_id).all()
@@ -436,14 +447,17 @@ class PreferenceRepository:
             return _pref_row_to_pydantic(row)
 
     def get_active(self, user_id: str, scene: str = "") -> list[PreferenceMemory]:
-        """查询活跃偏好，支持场景过滤"""
+        """查询活跃偏好，支持场景过滤；无场景偏好时降级命中 is_global=true 偏好。"""
         with self.db.session() as s:
             q = s.query(PreferenceRow).filter(
                 PreferenceRow.user_id == user_id,
                 PreferenceRow.status == "active",
             )
             if scene:
-                q = q.filter(PreferenceRow.scope_scene == scene)
+                q = q.filter(
+                    (PreferenceRow.scope_scene == scene)
+                    | (PreferenceRow.scope_scene == "*")
+                )
             rows = q.order_by(PreferenceRow.confidence.desc()).all()
             return [_pref_row_to_pydantic(r) for r in rows]
 
@@ -656,7 +670,7 @@ class KnowledgeRepository:
             return [_know_row_to_pydantic(r) for r in rows]
 
     def get_by_scope(self, user_id: str, scene: str, task_type: str) -> list[KnowledgeMemory]:
-        """? scope ????????????????"""
+        """按场景和任务类型查询"""
         with self.db.session() as s:
             query = s.query(KnowledgeRow).filter(
                 KnowledgeRow.user_id == user_id,
@@ -693,7 +707,7 @@ class KnowledgeRepository:
     def search_by_name(
         self, keyword: str, user_id: str = ""
     ) -> list[KnowledgeMemory]:
-        """???????????? owner?"""
+        """按名称模糊搜索（可选限定用户）"""
         with self.db.session() as s:
             query = s.query(KnowledgeRow).filter(
                 KnowledgeRow.name.contains(keyword),
@@ -720,7 +734,7 @@ class KnowledgeRepository:
     def increment_usage(
         self, memory_id: str, success: bool, user_id: str = ""
     ) -> None:
-        """??????????? owner?"""
+        """记录使用情况并可选更新成功率（支持限定用户）"""
         with self.db.session() as s:
             updates = {
                 "total_count": KnowledgeRow.total_count + 1,

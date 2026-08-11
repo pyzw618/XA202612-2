@@ -228,12 +228,14 @@ class MemoryService:
         if (
             memory_scope.scene
             and request_scope.scene
+            and memory_scope.scene != "*"
             and memory_scope.scene != request_scope.scene
         ):
             return False
         if (
             memory_scope.task_type
             and request_scope.task_type
+            and memory_scope.task_type != "*"
             and memory_scope.task_type != request_scope.task_type
         ):
             return False

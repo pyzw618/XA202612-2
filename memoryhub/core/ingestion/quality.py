@@ -11,6 +11,7 @@ class QualityScorer:
     """数据质量评分器"""
 
     MIN_QUALITY_SCORE = 0.2  # 低于此分数的事件将被拒绝
+    REVIEW_QUALITY_SCORE = 0.5  # 低于此分数的事件进入人工复核
 
     def score(self, event: MemoryEvent) -> EventQuality:
         """对事件进行质量评分"""
@@ -21,7 +22,13 @@ class QualityScorer:
 
         overall = 0.30 * completeness + 0.30 * validity + 0.20 * consistency + 0.20 * freshness
 
-        status = QualityStatus.ACCEPTED if overall >= self.MIN_QUALITY_SCORE else QualityStatus.REJECTED
+        if overall < self.MIN_QUALITY_SCORE or (not event.text and not event.payload):
+            # 无任何可抽取内容（无文本且无结构化载荷）直接拒绝，避免污染长期记忆
+            status = QualityStatus.REJECTED
+        elif overall < self.REVIEW_QUALITY_SCORE:
+            status = QualityStatus.REVIEW
+        else:
+            status = QualityStatus.ACCEPTED
 
         return EventQuality(
             score=overall,
@@ -59,10 +66,12 @@ class QualityScorer:
 
     def _score_validity(self, event: MemoryEvent) -> float:
         """数据有效性评分"""
-        score = 0.6  # 基础分
+        score = 0.0
         if len(event.text) >= 5:
-            score += 0.2
-        if len(event.event_type) >= 1:
+            score += 0.5
+        if event.event_type:
+            score += 0.3
+        if event.payload or event.scene:
             score += 0.2
         return min(score, 1.0)
 

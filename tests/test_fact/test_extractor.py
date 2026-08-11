@@ -86,6 +86,58 @@ class TestTripleExtractorParsing:
         assert results == []
 
 
+class TestTripleExtractorRuleFallback:
+    """无 LLM 时确定性规则降级抽取（FCT-01 客观事实仍需可写入）"""
+
+    @pytest.fixture
+    def extractor(self):
+        return TripleExtractor()
+
+    def test_chinese_attribute(self, extractor):
+        results = extractor.extract("项目A的负责人是张三。", source_id="r1")
+        assert len(results) == 1
+        r = results[0]
+        assert (r.subject_text, r.predicate_text, r.object_text) == ("项目A", "负责人", "张三")
+        assert r.object_type == "Person"
+
+    def test_chinese_location(self, extractor):
+        results = extractor.extract("苹果公司总部位于深圳。", source_id="r2")
+        assert (results[0].subject_text, results[0].predicate_text, results[0].object_text) == (
+            "苹果公司总部", "位于", "深圳")
+        assert results[0].object_type == "Location"
+
+    def test_chinese_founding_date(self, extractor):
+        results = extractor.extract("华为公司成立于1987年。", source_id="r3")
+        assert (results[0].predicate_text, results[0].object_text) == ("成立于", "1987年")
+        assert results[0].object_type == "Date"
+
+    def test_english_role_swaps_subject(self, extractor):
+        results = extractor.extract("Tim Cook is the CEO of Apple.", source_id="r4")
+        assert (results[0].subject_text, results[0].predicate_text, results[0].object_text) == (
+            "Apple", "ceo", "Tim Cook")
+        assert results[0].object_type == "Person"
+
+    def test_english_location_and_date(self, extractor):
+        results = extractor.extract(
+            "Acme Inc is located in Berlin. OpenAI was founded in 2015.", source_id="r5")
+        by_pred = {r.predicate_text: r for r in results}
+        assert by_pred["located in"].object_text == "Berlin"
+        assert by_pred["founded in"].object_text == "2015"
+
+    def test_confidence_is_conservative(self, extractor):
+        results = extractor.extract("项目A的负责人是张三。", source_id="r6")
+        assert results[0].confidence == 0.7
+
+    def test_no_match_sets_last_error(self, extractor):
+        results = extractor.extract("这个文本没有任何客观断言结构。", source_id="r7")
+        assert results == []
+        assert extractor.last_error is not None
+
+    def test_empty_text_no_error(self, extractor):
+        assert extractor.extract("", source_id="r8") == []
+        assert extractor.last_error is None
+
+
 class TestTripleExtractorIntegration:
     """需要 API key 的集成测试，默认跳过"""
 
