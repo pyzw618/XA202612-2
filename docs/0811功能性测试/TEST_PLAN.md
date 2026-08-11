@@ -31,8 +31,8 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 | 操作系统 | 银河麒麟 OS(生产目标);开发环境可用 Windows/Linux |
 | Python | >= 3.11(当前环境 3.12) |
 | 依赖 | `pip install -r requirements.txt`(含 faiss-cpu、rank-bm25、jieba、fastapi、sqlalchemy、cryptography) |
-| 服务启动 | `uvicorn memoryhub.app:app --host 127.0.0.1 --port 8010` |
-| 接口文档 | `http://127.0.0.1:8010/docs` |
+| 服务启动 | `uvicorn memoryhub.app:app --host 127.0.0.1 --port 8000` |
+| 接口文档 | `http://127.0.0.1:8000/docs` |
 | LLM | 可选(Ollama 本地 / OpenAI 兼容 API),无 key 时系统应可启动 |
 | Embedding | 开发用 mock;麒麟 SDK 需真实 `.so` 与 Milvus gRPC(端口 19530) |
 
@@ -295,7 +295,7 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 ## 13. 执行清单(建议顺序)
 
 1. 运行回归基线:`pytest tests -q`(目标 590 passed, 2 skipped);
-2. 启动服务(port 8010),冒烟:health + events + search;
+2. 启动服务(port 8000),冒烟:health + events + search;
 3. 按 6.1 安全专项 → 6.2 事件 → 6.3~6.9 核心模块 → 7 API 契约;
 4. 前端 8 项(8 章)→ 端到端 7 项(9 章);
 5. 性能与评测(10 章);

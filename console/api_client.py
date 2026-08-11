@@ -2,7 +2,7 @@
 MemoryHub API 客户端
 
 封装所有对 MemoryHub 后端 REST API 的 HTTP 调用。
-后端地址默认 http://localhost:8010。
+后端地址默认 http://localhost:8000。
 """
 
 from typing import Optional
@@ -13,29 +13,64 @@ import httpx
 class MemoryHubClient:
     """MemoryHub REST API 客户端"""
 
-    def __init__(self, base_url: str = "http://localhost:8010"):
+    def __init__(self, base_url: str = "http://localhost:8000"):
         self.base_url = base_url.rstrip("/")
         self._client = httpx.Client(timeout=10.0)
 
-    def _get(self, path: str, params: dict | None = None) -> dict | list[dict]:
+    def _get(
+        self, path: str, params: dict | None = None, headers: dict | None = None
+    ) -> dict | list[dict]:
         """GET 请求，自动处理错误。"""
         url = f"{self.base_url}/api/memory{path}"
         try:
-            resp = self._client.get(url, params=params)
+            resp = self._client.get(url, params=params, headers=headers)
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPError as e:
             return {"error": str(e), "status_code": getattr(e, "response", None) and e.response.status_code}
 
-    def _post(self, path: str, json_data: dict) -> dict:
+    def _post(
+        self, path: str, json_data: dict, headers: dict | None = None
+    ) -> dict:
         """POST 请求，自动处理错误。"""
         url = f"{self.base_url}/api/memory{path}"
         try:
-            resp = self._client.post(url, json=json_data)
+            resp = self._client.post(url, json=json_data, headers=headers)
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPError as e:
             return {"error": str(e), "status_code": getattr(e, "response", None) and e.response.status_code}
+
+    def _patch(
+        self, path: str, json_data: dict, headers: dict | None = None
+    ) -> dict:
+        """PATCH 请求，自动处理错误。"""
+        url = f"{self.base_url}/api/memory{path}"
+        try:
+            resp = self._client.patch(url, json=json_data, headers=headers)
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPError as e:
+            return {"error": str(e), "status_code": getattr(e, "response", None) and e.response.status_code}
+
+    def _delete(
+        self, path: str, params: dict | None = None, headers: dict | None = None
+    ) -> dict:
+        """DELETE 请求，自动处理错误。"""
+        url = f"{self.base_url}/api/memory{path}"
+        try:
+            resp = self._client.delete(url, params=params, headers=headers)
+            resp.raise_for_status()
+            # 204 No Content
+            if resp.status_code == 204:
+                return {"success": True}
+            return resp.json()
+        except httpx.HTTPError as e:
+            return {"error": str(e), "status_code": getattr(e, "response", None) and e.response.status_code}
+
+    def _user_header(self, user_id: str) -> dict:
+        """构造 X-MemoryHub-User 请求头"""
+        return {"X-MemoryHub-User": user_id}
 
     # ============================================================
     # 核心接口（队长确认的 4 个）
@@ -228,6 +263,97 @@ class MemoryHubClient:
             "feedback_text": feedback_text,
             "action": action,
         })
+
+    # ============================================================
+    # 管理接口 — 用户安全规则 (CRUD)
+    # ============================================================
+
+    def list_user_rules(self, user_id: str = "default",
+                        include_deleted: bool = False) -> list[dict]:
+        """
+        GET /api/memory/safety/user-rules — 列出用户自定义敏感规则
+
+        需要 X-MemoryHub-User 请求头。
+        返回安全元数据（不含 matcher 密文）。
+        """
+        params = {"include_deleted": include_deleted}
+        return self._get("/safety/user-rules", params, self._user_header(user_id))  # type: ignore[return-value]
+
+    def get_user_rule(self, rule_id: str, user_id: str = "default") -> dict:
+        """
+        GET /api/memory/safety/user-rules/{rule_id} — 获取单条规则
+        """
+        return self._get(
+            f"/safety/user-rules/{rule_id}", None, self._user_header(user_id)
+        )  # type: ignore[return-value]
+
+    def create_user_rule(
+        self,
+        label: str,
+        kind: str,
+        effect: str,
+        matcher: str,
+        case_sensitive: bool = False,
+        enabled: bool = True,
+        user_id: str = "default",
+    ) -> dict:
+        """
+        POST /api/memory/safety/user-rules — 创建规则
+
+        参数:
+            label: 规则标签（如 "API Key"）
+            kind: "literal" | "advanced_regex"
+            effect: "mask_match" | "drop_event"
+            matcher: 匹配模式（密文，仅写入不回传）
+            case_sensitive: 是否区分大小写
+            enabled: 是否启用
+        """
+        body = {
+            "label": label,
+            "kind": kind,
+            "effect": effect,
+            "matcher": matcher,
+            "case_sensitive": case_sensitive,
+            "enabled": enabled,
+        }
+        return self._post("/safety/user-rules", body, self._user_header(user_id))
+
+    def update_user_rule(
+        self,
+        rule_id: str,
+        expected_revision: int,
+        user_id: str = "default",
+        **updates,
+    ) -> dict:
+        """
+        PATCH /api/memory/safety/user-rules/{rule_id} — 更新规则
+
+        参数:
+            rule_id: 规则 ID
+            expected_revision: 乐观锁版本号（必填）
+            **updates: 可选字段 label, kind, effect, matcher, case_sensitive, enabled
+        """
+        body = {"expected_revision": expected_revision}
+        body.update({k: v for k, v in updates.items() if v is not None})
+        return self._patch(
+            f"/safety/user-rules/{rule_id}", body, self._user_header(user_id)
+        )
+
+    def delete_user_rule(
+        self, rule_id: str, expected_revision: int, user_id: str = "default"
+    ) -> dict:
+        """
+        DELETE /api/memory/safety/user-rules/{rule_id} — 删除规则（软删除）
+
+        参数:
+            rule_id: 规则 ID
+            expected_revision: 乐观锁版本号（必填）
+        """
+        return self._delete(
+            f"/safety/user-rules/{rule_id}",
+            {"expected_revision": expected_revision},
+            self._user_header(user_id),
+        )
 
     def close(self):
         """关闭 HTTP 客户端"""

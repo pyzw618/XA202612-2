@@ -30,6 +30,7 @@ from console.pages.evaluation import EvaluationPage
 from console.pages.forget import ForgetPage
 from console.pages.knowledge import KnowledgePage
 from console.pages.preferences import PreferencesPage
+from console.pages.safety_rules import SafetyRulesPage
 from console.pages.search_test import SearchTestPage
 from console.widgets.sidebar import Sidebar
 
@@ -73,11 +74,12 @@ class MainWindow(QMainWindow):
         self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setMinimumSize(900, 560)
 
-        # 通过环境变量 MEMORYHUB_LIVE_BACKEND=1 切换实时 API，默认使用 Mock 数据
-        import os
-        self._use_live = os.environ.get("MEMORYHUB_LIVE_BACKEND", "").lower() in ("1", "true", "yes")
         self.client = MemoryHubClient()
-        self.mock = MockDataController() if not self._use_live else None
+        self.mock = MockDataController(client=self.client)
+
+        # 最大化状态必须在 _setup_ui 之前初始化（_apply_style 会读它）
+        self._maximized: bool = False
+        self._restore_geom: QRect | None = None
 
         self._setup_ui()
         self._setup_shadow()
@@ -86,11 +88,6 @@ class MainWindow(QMainWindow):
         self._resize_edge: int = _EDGE_NONE
         self._resize_start_geom: QRect | None = None
         self._hover_edge: int = _EDGE_NONE
-
-        # 手动管理最大化状态 — 避免 showMaximized() + WA_TranslucentBackground
-        # 在 Windows 上触发 UpdateLayeredWindowIndirect 失败
-        self._maximized: bool = False
-        self._restore_geom: QRect | None = None
 
         QApplication.instance().installEventFilter(self)
 
@@ -123,7 +120,7 @@ class MainWindow(QMainWindow):
         body.addWidget(self.sidebar)
 
         self.stack = QStackedWidget()
-        self.stack.setStyleSheet("background: #f5f6f8;")
+        self.stack.setStyleSheet("background: #f5f6fa;")
         body.addWidget(self.stack, 1)
 
         inner.addLayout(body, 1)
@@ -132,27 +129,27 @@ class MainWindow(QMainWindow):
         self.sidebar.select(0)
 
     def _apply_style(self):
-        if self._maximize:
+        if self._maximized:
             self._inner.setStyleSheet(
                 "#inner { background-color: #ffffff; border-radius: 0px; border: none; }"
             )
         else:
             self._inner.setStyleSheet(
                 f"#inner {{ background-color: #ffffff; border-radius: {CORNER_RADIUS}px;"
-                f" border: 1px solid rgba(0,0,0,0.08); }}"
+                f" border: 1px solid rgba(0,0,0,0.06); }}"
             )
 
     def _build_title_bar(self) -> QWidget:
         bar = QWidget()
         bar.setFixedHeight(TITLE_BAR_HEIGHT)
-        bar.setStyleSheet("background: #ffffff; border-bottom: 1px solid #e2e5ea;")
+        bar.setStyleSheet("background: #ffffff; border: none;")
 
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(16, 0, 8, 0)
 
-        title = QLabel("  Kylin-MemoryHub Console")
+        title = QLabel("  Kylin-MemoryHub")
         title.setFont(QFont("Microsoft YaHei", 11, QFont.Weight.DemiBold))
-        title.setStyleSheet("color: #1a1a2e; border: none;")
+        title.setStyleSheet("color: #374151; border: none;")
         layout.addWidget(title)
         layout.addStretch()
 
@@ -165,8 +162,8 @@ class MainWindow(QMainWindow):
             btn.setFixedSize(36, 28)
             btn.setFont(QFont("Microsoft YaHei", 10))
             btn.setStyleSheet("""
-                QPushButton { background: transparent; border: none; border-radius: 6px; color: #666; }
-                QPushButton:hover { background-color: #f0f0f0; color: #1a1a1a; }
+                QPushButton { background: transparent; border: none; border-radius: 6px; color: #9CA3AF; }
+                QPushButton:hover { background-color: #F3F4F6; color: #374151; }
             """)
             btn.clicked.connect(slot)
             layout.addWidget(btn)
@@ -189,6 +186,7 @@ class MainWindow(QMainWindow):
             ("检索测试", SearchTestPage),
             ("遗忘管理", ForgetPage),
             ("评测报告", EvaluationPage),
+            ("安全规则", SafetyRulesPage),
         ]
         for label, page_cls in pages:
             page = page_cls(self.client, self.mock)

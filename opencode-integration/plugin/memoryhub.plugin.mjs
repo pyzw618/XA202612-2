@@ -11,7 +11,7 @@
  * SDK and swallowed.
  *
  * Configuration (environment variables):
- *   MEMORYHUB_API_URL              default http://127.0.0.1:8010
+ *   MEMORYHUB_API_URL              default http://127.0.0.1:8000
  *   MEMORYHUB_USER_ID              default opencode
  *   MEMORYHUB_AUTO_RECORD          default true  (set to false to disable)
  *   MEMORYHUB_SCENE                default code
@@ -22,7 +22,7 @@
 import { createHash } from "node:crypto"
 
 const CONFIG = {
-  apiUrl: (process.env.MEMORYHUB_API_URL || "http://127.0.0.1:8010").replace(/\/$/, ""),
+  apiUrl: (process.env.MEMORYHUB_API_URL || "http://127.0.0.1:8000").replace(/\/$/, ""),
   userId: process.env.MEMORYHUB_USER_ID || "opencode",
   autoRecord: (process.env.MEMORYHUB_AUTO_RECORD || "true").toLowerCase() !== "false",
   scene: process.env.MEMORYHUB_SCENE || "code",

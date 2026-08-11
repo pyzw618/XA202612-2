@@ -2,7 +2,7 @@
 Dashboard 页面 — 记忆总览看板
 
 展示：
-- 4 个统计卡片（左侧色条）
+- 4 个统计卡片（顶部色条 + 微阴影）
 - 检索延迟信息
 """
 
@@ -27,7 +27,9 @@ class DashboardPage(BasePage):
         # 加载提示
         self._loading = QLabel("正在加载数据...")
         self._loading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._loading.setStyleSheet("color: #9ca3af; font-size: 14px; padding: 40px;")
+        self._loading.setStyleSheet(
+            "color: #9CA3AF; font-size: 14px; padding: 40px; background: transparent;"
+        )
         layout.addWidget(self._loading)
 
         # 卡片区域
@@ -35,12 +37,12 @@ class DashboardPage(BasePage):
         self._cards_container.setStyleSheet("background: transparent;")
         self._cards_container.hide()
         cards_layout = QHBoxLayout(self._cards_container)
-        cards_layout.setSpacing(16)
+        cards_layout.setSpacing(20)
 
-        self._card_total = StatCard("—", "记忆总数", "#4A90D9")
-        self._card_prefs = StatCard("—", "偏好记忆", "#E8734A")
-        self._card_know = StatCard("—", "知识记忆", "#34A853")
-        self._card_conflicts = StatCard("—", "待处理冲突", "#EA4335")
+        self._card_total = StatCard("—", "记忆总数", "#3B82F6")
+        self._card_prefs = StatCard("—", "偏好记忆", "#F59E0B")
+        self._card_know = StatCard("—", "知识记忆", "#10B981")
+        self._card_conflicts = StatCard("—", "待处理冲突", "#EF4444")
 
         cards_layout.addWidget(self._card_total)
         cards_layout.addWidget(self._card_prefs)
@@ -52,8 +54,7 @@ class DashboardPage(BasePage):
         # 延迟信息
         self._latency_label = QLabel()
         self._latency_label.setStyleSheet(
-            "color: #9ca3af; font-size: 11px; padding: 4px 0;"
-            " background: transparent;"
+            "color: #9CA3AF; font-size: 12px; padding: 8px 0; background: transparent;"
         )
         self._latency_label.hide()
         layout.addWidget(self._latency_label)
@@ -72,8 +73,8 @@ class DashboardPage(BasePage):
         self._card_conflicts.findChildren(QLabel)[0].setText(str(stats["conflict_count"]))
 
         self._latency_label.setText(
-            f"平均检索延迟: {stats['avg_latency_ms']}ms  |  "
-            f"活跃偏好: {stats['active_preferences']}  |  "
+            f"平均检索延迟: {stats['avg_latency_ms']}ms  ·  "
+            f"活跃偏好: {stats['active_preferences']}  ·  "
             f"已归档: {stats['archived_preferences']}"
         )
         self._cards_container.show()

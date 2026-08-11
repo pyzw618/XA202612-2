@@ -1689,3 +1689,13 @@ class EvalReport(BaseModel):
     avg_latency_ms: float = 0.0
     p95_latency_ms: float = 0.0
     details: list[EvalResult] = Field(default_factory=list)
+
+
+class EventProcessingSummary(BaseModel):
+    """事件写入后触发的记忆处理摘要（前端 agent 演示适配层使用）。"""
+
+    preferences_written: list[str] = Field(default_factory=list)
+    knowledge_written: list[str] = Field(default_factory=list)
+    fact_proposal_ids: list[str] = Field(default_factory=list)
+    conflict_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)

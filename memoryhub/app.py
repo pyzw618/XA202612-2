@@ -20,6 +20,8 @@ from pydantic import BaseModel
 
 from memoryhub.adapter import schemas as adapter_schemas
 from memoryhub.adapter import user_rule_schemas
+from memoryhub.adapter.agent_api import root_router as agent_root_router
+from memoryhub.adapter.agent_api import router as agent_router
 from memoryhub.adapter.api import router as memory_router
 from memoryhub.adapter.schemas import KnowledgeMemory, PreferenceMemory, SearchResult
 from memoryhub.adapter.service import MemoryService
@@ -260,6 +262,8 @@ def create_app(
 
     # 注册路由
     app.include_router(memory_router)
+    app.include_router(agent_router)
+    app.include_router(agent_root_router)
 
     # 注册生命周期
     async def startup():
@@ -551,6 +555,19 @@ def create_app(
         )
         pref_repo.write_service = app.state.memory_write_service
         know_repo.write_service = app.state.memory_write_service
+        # 前端 agent 演示适配层：事件处理协调器（依赖 memory_write_service 同步检索索引）
+        from memoryhub.core.processing import EventProcessingCoordinator
+
+        app.state.event_processor = EventProcessingCoordinator(
+            pref_repo=pref_repo,
+            know_repo=know_repo,
+            fact_pipeline=app.state.fact_pipeline,
+            # 演示适配层：不依赖 LLM，偏好/知识提取走纯规则路径，避免 ollama 未运行时阻塞
+            llm_client=None,
+            safety_config=config.safety,
+            conflict_repo=conflict_repo,
+            memory_write_service=app.state.memory_write_service,
+        )
         preference_extractor = PreferenceExtractor(llm_client=llm_client)
         preference_updater = PreferenceUpdater(
             llm_client=llm_client,

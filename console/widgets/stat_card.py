@@ -1,55 +1,58 @@
 """
 统计卡片组件 — 麒麟 UKUI 风格
 
-白底圆角卡片，左侧色条 + 微阴影，展示数值 + 标签。
+去线化设计：
+- 白色卡片 + 微阴影（无 border）
+- 大号数字 + 小号标签
+- 可选顶部色条（3px）
 """
 
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QFrame, QLabel, QVBoxLayout, QHBoxLayout, QWidget
+from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtWidgets import QFrame, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QGraphicsDropShadowEffect
 
 
 class StatCard(QFrame):
-    """统计卡片 — 左侧色条 + 数值 + 标签"""
+    """统计卡片 — 无边框 + 微阴影 + 顶部色条"""
 
-    def __init__(self, value: str, label: str, color: str = "#4A90D9"):
+    def __init__(self, value: str, label: str, color: str = "#3B82F6"):
         super().__init__()
-        self.setFixedSize(200, 120)
-        self.setStyleSheet("""
-            StatCard {
-                background-color: #ffffff;
-                border-radius: 10px;
-                border: 1px solid #e2e5ea;
-            }
-        """)
+        self.setFixedSize(210, 110)
 
-        # 外层水平布局
-        outer = QHBoxLayout(self)
+        # 外层
+        outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # 左侧色条
-        stripe = QWidget()
-        stripe.setFixedWidth(4)
-        stripe.setStyleSheet(
-            f"background: {color}; border-radius: 2px; border: none;"
-        )
-        outer.addWidget(stripe)
+        # 顶部色条
+        accent = QWidget()
+        accent.setFixedHeight(3)
+        accent.setStyleSheet(f"background: {color}; border-radius: 2px 2px 0 0;")
+        outer.addWidget(accent)
 
-        # 右侧内容
-        content = QWidget()
-        content.setStyleSheet("background: transparent;")
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(16, 16, 20, 16)
-        content_layout.setSpacing(4)
+        # 卡片主体
+        card = QWidget()
+        card.setStyleSheet("""
+            background: #ffffff;
+            border-radius: 0 0 10px 10px;
+        """)
+        shadow = QGraphicsDropShadowEffect(card)
+        shadow.setBlurRadius(12)
+        shadow.setOffset(0, 2)
+        shadow.setColor(QColor(0, 0, 0, 16))
+        card.setGraphicsEffect(shadow)
+
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 16, 20, 16)
+        card_layout.setSpacing(6)
 
         value_label = QLabel(str(value))
-        value_label.setFont(QFont("Microsoft YaHei", 26, QFont.Weight.Bold))
-        value_label.setStyleSheet(f"color: {color}; border: none;")
-        content_layout.addWidget(value_label)
+        value_label.setFont(QFont("Microsoft YaHei", 28, QFont.Weight.Bold))
+        value_label.setStyleSheet(f"color: {color};")
+        card_layout.addWidget(value_label)
 
         text_label = QLabel(label)
-        text_label.setFont(QFont("Microsoft YaHei", 10))
-        text_label.setStyleSheet("color: #6b7280; border: none;")
-        content_layout.addWidget(text_label)
+        text_label.setFont(QFont("Microsoft YaHei", 11))
+        text_label.setStyleSheet("color: #6B7280;")
+        card_layout.addWidget(text_label)
 
-        outer.addWidget(content, 1)
+        outer.addWidget(card, 1)

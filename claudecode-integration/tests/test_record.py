@@ -69,7 +69,7 @@ def test_to_tool_call():
 
 def _cfg(tmp_path):
     return record.HookConfig(
-        api_url="http://127.0.0.1:8010",
+        api_url="http://127.0.0.1:8000",
         user_id="tester",
         auto_record=True,
         scene="code",

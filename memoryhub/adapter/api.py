@@ -13,8 +13,9 @@ from collections.abc import Mapping
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from memoryhub.adapter import agent_api as _agent_api
 from memoryhub.adapter.schemas import (
     ConflictRecord,
     EvalReport,
@@ -40,6 +41,7 @@ from memoryhub.adapter.user_rule_schemas import (
     UserRuleErrorResponse,
     UserRuleResponse,
 )
+from memoryhub.core.fact.models import FactCandidate, RawTriple
 from memoryhub.core.forget import MemoryForgetter
 from memoryhub.embedding import KylinEmbeddingError
 from memoryhub.storage.vector_engine import MilvusEngineError
@@ -1011,6 +1013,91 @@ def _get_forgetter(request: Request) -> MemoryForgetter:
         fact_store=getattr(state, "fact_store", None),
         fact_index_service=getattr(state, "fact_index_service", None),
     )
+
+
+class ForgetPreviewResponse(BaseModel):
+    """精准遗忘预览结果：只定位候选，不执行删除。"""
+
+    user_id: str = "default"
+    instruction: str = ""
+    candidate_ids: list[str] = Field(default_factory=list)
+    deleted_count: int = 0
+    memory_type: str = "all"
+    target_topic: str = ""
+
+
+class FactProposeRequest(BaseModel):
+    """手工提交事实候选（前端 demo / 竞争测试使用）。"""
+
+    source_id: str = ""
+    scope_hint: str = "global"
+    project_id: str | None = None
+    triples: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@router.post("/forget/preview", response_model=ForgetPreviewResponse)
+async def preview_forget(
+    req: ForgetRequest,
+    request: Request,
+    forgetter: MemoryForgetter = Depends(_get_forgetter),
+) -> ForgetPreviewResponse:
+    """预览精准遗忘：只定位候选记忆，不执行任何删除。"""
+    intent = forgetter.parse_intent(req)
+    candidate_ids = forgetter.locate_memories(intent, req)
+    return ForgetPreviewResponse(
+        user_id=req.user_id,
+        instruction=req.instruction,
+        candidate_ids=candidate_ids,
+        deleted_count=0,
+        memory_type=str(intent.get("memory_type", "all")),
+        target_topic=str(intent.get("target_topic", "")),
+    )
+
+
+@router.get("/events/session/{session_id}")
+async def list_session_events(session_id: str, request: Request):
+    """列出指定会话的全部事件（供前端回放/会话历史使用）。"""
+    repo = getattr(request.app.state, "event_repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="event repository not initialized")
+    events = repo.get_by_session(session_id)
+    return [event.model_dump(mode="json") for event in events]
+
+
+@router.post("/facts/propose")
+async def propose_facts(req: FactProposeRequest, request: Request):
+    """提交手工三元组并生成事实候选，注册到 Agent 裁决暂存区。
+
+    返回候选列表，前端通过 `/api/agent/actions/{proposal_id}/decision`
+    进行 commit / reject 裁决。
+    """
+    pipeline = getattr(request.app.state, "fact_pipeline", None)
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="fact pipeline not initialized")
+    proposals = []
+    for raw in req.triples:
+        triple_data = dict(raw)
+        triple_data.setdefault("subject_type", "entity")
+        triple_data.setdefault("object_type", "entity")
+        triple = RawTriple(**triple_data)
+        admission = pipeline.admission.evaluate(
+            triple, project_id=req.project_id, scope_hint=req.scope_hint
+        )
+        proposal = FactCandidate(
+            candidate_id=FactCandidate.make_id(),
+            raw_triple=triple,
+            admission=admission,
+            source_id=req.source_id,
+            project_id_hint=req.project_id,
+            scope_hint=req.scope_hint,
+            metadata={},
+        )
+        _agent_api._FACT_PENDING[proposal.proposal_id] = {
+            "json": _agent_api._candidate_to_json(proposal),
+            "candidate": proposal,
+        }
+        proposals.append(_agent_api._FACT_PENDING[proposal.proposal_id]["json"])
+    return proposals
 
 
 @router.post("/forget", response_model=ForgetResponse)

@@ -268,10 +268,11 @@ class HybridRetriever:
                     if not expected:
                         continue
                     actual = scope.get(field, "")
-                    if actual and actual != expected:
+                    # "*" 表示全局/通配作用域，对任意具体场景都不构成冲突
+                    if actual and actual != "*" and actual != expected:
                         conflict = True
                         break
-                    if actual == expected:
+                    if actual == expected or actual == "*":
                         matched = True
                 score = 0.0 if conflict else (1.0 if matched else 0.5)
             scored.append(
@@ -314,7 +315,8 @@ class HybridRetriever:
         for field in ("scene", "task_type", "app"):
             expected = getattr(request.context, field, "")
             actual = scope.get(field, "")
-            if expected and actual and actual != expected:
+            # "*" 为全局/通配作用域，不与任何具体场景冲突
+            if expected and actual and actual != "*" and actual != expected:
                 return True
         return False
 

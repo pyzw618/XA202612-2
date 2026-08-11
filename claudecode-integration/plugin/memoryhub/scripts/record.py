@@ -28,7 +28,7 @@ Robustness
 
 Configuration (environment variables, see README / docs/CLAUDE_INTEGRATION.md)
 -----------------------------------------------------------------------------
-MEMORYHUB_API_URL            default http://127.0.0.1:8010
+MEMORYHUB_API_URL            default http://127.0.0.1:8000
 MEMORYHUB_USER_ID            default claudecode
 MEMORYHUB_AUTO_RECORD        default true  (set to false to disable recording)
 MEMORYHUB_SCENE              default code
@@ -65,7 +65,7 @@ def _env(name: str, default: str) -> str:
 
 @dataclass
 class HookConfig:
-    api_url: str = field(default_factory=lambda: _env("MEMORYHUB_API_URL", "http://127.0.0.1:8010"))
+    api_url: str = field(default_factory=lambda: _env("MEMORYHUB_API_URL", "http://127.0.0.1:8000"))
     user_id: str = field(default_factory=lambda: _env("MEMORYHUB_USER_ID", "claudecode"))
     auto_record: bool = field(default_factory=lambda: _env("MEMORYHUB_AUTO_RECORD", "true").lower() != "false")
     scene: str = field(default_factory=lambda: _env("MEMORYHUB_SCENE", "code"))

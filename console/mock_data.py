@@ -1,21 +1,26 @@
 """
-Mock 数据控制器
+数据控制器 — 支持 Mock / Live 双模式
 
-封装所有模拟数据，通过信号暴露给 UI 层。
-后端就绪后，替换为真实 API 调用即可，UI 层无需改动。
+环境变量 MEMORYHUB_LIVE_BACKEND=1 时走真实 API，否则使用 Mock 数据。
+UI 层（页面）无需感知切换，信号接口完全一致。
 
 使用方式:
-    controller = MockDataController()
-    controller.data_ready.connect(ui.on_data_loaded)
-    controller.load_dashboard_stats()
+    controller = MockDataController(client=MemoryHubClient())
+    controller.preferences_ready.connect(ui.on_data_loaded)
+    controller.load_preferences()
 """
 
+import os
 import random
 import time
 from datetime import datetime, timedelta
 from threading import Thread
+from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QObject, pyqtSignal
+
+if TYPE_CHECKING:
+    from console.api_client import MemoryHubClient
 
 
 def _simulate_latency(ms: int = 300):
@@ -23,8 +28,60 @@ def _simulate_latency(ms: int = 300):
     time.sleep(ms / 1000)
 
 
+def _is_error(data) -> bool:
+    """检查 API 返回是否为错误"""
+    return isinstance(data, dict) and "error" in data
+
+
+# ---- API 数据归一化（将后端字段名映射为前端期望格式）----
+
+def _normalize_preference(p: dict) -> dict:
+    """归一化单条偏好记忆 — 后端 text → 前端 content"""
+    if "text" in p and "content" not in p:
+        p["content"] = p["text"]
+    # 确保 scope 是 dict（Pydantic SceneScope 会序列化为 dict，但保险起见）
+    if not isinstance(p.get("scope"), dict):
+        p["scope"] = {"scene": "", "task_type": ""}
+    # evidences: 确保是 list[dict]
+    evidences = p.get("evidences", [])
+    normalized_evidences = []
+    for e in evidences:
+        if isinstance(e, dict):
+            normalized_evidences.append({
+                "content": e.get("content", ""),
+                "timestamp": str(e.get("timestamp", ""))[:10],
+            })
+    p["evidences"] = normalized_evidences
+    # 确保 datetime 字段是字符串
+    for key in ("created_at", "updated_at"):
+        val = p.get(key)
+        if val is not None and not isinstance(val, str):
+            p[key] = str(val)
+    return p
+
+
+def _normalize_knowledge(k: dict) -> dict:
+    """归一化单条知识记忆"""
+    if not isinstance(k.get("scope"), dict):
+        k["scope"] = {"scene": "", "task_type": ""}
+    for key in ("created_at", "updated_at"):
+        val = k.get(key)
+        if val is not None and not isinstance(val, str):
+            k[key] = str(val)
+    return k
+
+
+def _normalize_conflict(c: dict) -> dict:
+    """归一化单条冲突记录"""
+    for key in ("created_at", "resolved_at"):
+        val = c.get(key)
+        if val is not None and not isinstance(val, str):
+            c[key] = str(val)
+    return c
+
+
 class MockDataController(QObject):
-    """Mock 数据控制器 — 所有数据操作统一入口"""
+    """数据控制器 — Mock / Live 双模式"""
 
     # ---- 信号定义 ----
     dashboard_stats_ready = pyqtSignal(dict)
@@ -38,7 +95,60 @@ class MockDataController(QObject):
     forget_result_ready = pyqtSignal(dict)
     forget_history_ready = pyqtSignal(list)
     eval_reports_ready = pyqtSignal(list)
+    user_rules_ready = pyqtSignal(list)
+    user_rule_saved = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
+
+    def __init__(self, client: "MemoryHubClient | None" = None):
+        super().__init__()
+        self._client = client
+        # Mock 模式下的安全规则内存库（Live 模式走后端 SQLite）
+        self._mock_rules: list[dict] = [
+            {
+                "rule_id": "rule_001",
+                "label": "API Key",
+                "kind": "advanced_regex",
+                "effect": "mask_match",
+                "case_sensitive": False,
+                "replacement": "***",
+                "revision": 1,
+                "enabled": True,
+                "deleted": False,
+                "created_at": "2026-07-20T10:00:00",
+                "updated_at": "2026-07-20T10:00:00",
+            },
+            {
+                "rule_id": "rule_002",
+                "label": "身份证号",
+                "kind": "advanced_regex",
+                "effect": "mask_match",
+                "case_sensitive": False,
+                "replacement": "***",
+                "revision": 1,
+                "enabled": True,
+                "deleted": False,
+                "created_at": "2026-07-21T11:00:00",
+                "updated_at": "2026-07-21T11:00:00",
+            },
+            {
+                "rule_id": "rule_003",
+                "label": "银行卡号",
+                "kind": "advanced_regex",
+                "effect": "drop_event",
+                "case_sensitive": False,
+                "replacement": "***",
+                "revision": 2,
+                "enabled": False,
+                "deleted": False,
+                "created_at": "2026-07-22T09:00:00",
+                "updated_at": "2026-07-28T15:00:00",
+            },
+        ]
+
+    @property
+    def _is_live(self) -> bool:
+        """是否使用真实后端 API"""
+        return os.environ.get("MEMORYHUB_LIVE_BACKEND", "") == "1" and self._client is not None
 
     # ============================================================
     # Dashboard
@@ -46,6 +156,56 @@ class MockDataController(QObject):
 
     def load_dashboard_stats(self):
         """异步加载 Dashboard 统计数据"""
+        if self._is_live:
+            def _run():
+                try:
+                    # Dashboard 暂无专用 API，聚合多个接口
+                    prefs = self._client.list_preferences(status="")
+                    knows = self._client.list_knowledge()
+                    conflicts = self._client.list_conflicts(status="")
+                    reports = self._client.list_eval_reports()
+
+                    pref_list = prefs if isinstance(prefs, list) else []
+                    know_list = knows if isinstance(knows, list) else []
+                    conf_list = conflicts if isinstance(conflicts, list) else []
+
+                    active_prefs = [p for p in pref_list if p.get("status") == "active"]
+                    archived_prefs = [p for p in pref_list if p.get("status") == "archived"]
+                    pending_confs = [c for c in conf_list if c.get("decision") == "pending"]
+
+                    # 类型分布
+                    pref_type_dist: dict[str, int] = {}
+                    for p in pref_list:
+                        t = p.get("preference_type", "other")
+                        pref_type_dist[t] = pref_type_dist.get(t, 0) + 1
+
+                    know_type_dist: dict[str, int] = {}
+                    for k in know_list:
+                        t = k.get("knowledge_type", "other")
+                        know_type_dist[t] = know_type_dist.get(t, 0) + 1
+
+                    stats = {
+                        "total_memories": len(pref_list) + len(know_list),
+                        "preference_count": len(pref_list),
+                        "knowledge_count": len(know_list),
+                        "conflict_count": len(pending_confs),
+                        "active_preferences": len(active_prefs),
+                        "archived_preferences": len(archived_prefs),
+                        "avg_latency_ms": 0,
+                        "latency_history": [],
+                        "preference_type_dist": [
+                            {"type": k, "count": v} for k, v in pref_type_dist.items()
+                        ],
+                        "knowledge_type_dist": [
+                            {"type": k, "count": v} for k, v in know_type_dist.items()
+                        ],
+                    }
+                    self.dashboard_stats_ready.emit(stats)
+                except Exception as e:
+                    self.error_occurred.emit(f"Dashboard 加载失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
         def _run():
             _simulate_latency(250)
             self.dashboard_stats_ready.emit({
@@ -87,13 +247,28 @@ class MockDataController(QObject):
 
     def load_preferences(self, scene: str = "", status: str = "active"):
         """异步加载偏好记忆列表"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.list_preferences(scene=scene, status=status)
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    items = data if isinstance(data, list) else []
+                    items = [_normalize_preference(p) for p in items]
+                    self.preferences_ready.emit(items)
+                except Exception as e:
+                    self.error_occurred.emit(f"偏好加载失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
         def _run():
             _simulate_latency(300)
             samples = [
                 {
                     "memory_id": "pref_a1b2c3d4",
                     "preference_type": "output_style",
-                    "text": "项目周报默认使用 Markdown 格式，分三部分结构",
+                    "content": "项目周报默认使用 Markdown 格式，分三方面结构",
                     "scope": {"scene": "office", "task_type": "office.weekly_report"},
                     "confidence": 0.92,
                     "status": "active",
@@ -104,7 +279,7 @@ class MockDataController(QObject):
                         {"content": "重复选择 Markdown 模板 ×3", "timestamp": "2026-07-12"},
                     ],
                     "versions": [
-                        {"version": 3, "content": "项目周报默认使用 Markdown 格式，分三部分结构", "change": "细化结构为三部分", "created_at": "2026-07-28"},
+                        {"version": 3, "content": "项目周报默认使用 Markdown 格式，分三方面结构", "change": "细化结构为三方面", "created_at": "2026-07-28"},
                         {"version": 2, "content": "项目周报默认使用 Markdown 格式", "change": "增加默认格式", "created_at": "2026-07-15"},
                         {"version": 1, "content": "周报偏好 Markdown", "change": "初始创建", "created_at": "2026-07-01"},
                     ],
@@ -114,7 +289,7 @@ class MockDataController(QObject):
                 {
                     "memory_id": "pref_e5f6g7h8",
                     "preference_type": "tool_preference",
-                    "text": "文件搜索任务优先使用本地检索工具而非网络搜索",
+                    "content": "文件搜索任务优先使用本地检索工具而非网络搜索",
                     "scope": {"scene": "code", "task_type": "code.file_ops"},
                     "confidence": 0.85,
                     "status": "active",
@@ -133,7 +308,7 @@ class MockDataController(QObject):
                 {
                     "memory_id": "pref_i9j0k1l2",
                     "preference_type": "safety_pref",
-                    "text": "不保存 API Key、密码等敏感凭证信息",
+                    "content": "不保存 API Key、密码等敏感凭证信息",
                     "scope": {"scene": "*", "task_type": "*"},
                     "confidence": 1.0,
                     "status": "active",
@@ -151,7 +326,7 @@ class MockDataController(QObject):
                 {
                     "memory_id": "pref_m3n4o5p6",
                     "preference_type": "format_pref",
-                    "text": "代码注释使用中文，函数文档用英文",
+                    "content": "代码注释使用中文，函数文档用英文",
                     "scope": {"scene": "code", "task_type": "code.documentation"},
                     "confidence": 0.78,
                     "status": "active",
@@ -172,12 +347,25 @@ class MockDataController(QObject):
 
     def load_preference_detail(self, memory_id: str):
         """异步加载单条偏好详情"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.get_preference(memory_id)
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    self.preference_detail_ready.emit(_normalize_preference(data))
+                except Exception as e:
+                    self.error_occurred.emit(f"偏好详情加载失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
         def _run():
             _simulate_latency(200)
             self.preference_detail_ready.emit({
                 "memory_id": memory_id,
                 "preference_type": "output_style",
-                "text": "项目周报默认使用 Markdown 格式，分三部分结构",
+                "content": "项目周报默认使用 Markdown 格式，分三方面结构",
                 "scope": {"scene": "office", "task_type": "office.weekly_report"},
                 "confidence": 0.92,
                 "status": "active",
@@ -194,10 +382,28 @@ class MockDataController(QObject):
 
     def load_preference_versions(self, memory_id: str):
         """异步加载版本历史"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.get_preference_versions(memory_id)
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    versions = data if isinstance(data, list) else []
+                    # 归一化：确保 content 字段存在
+                    for v in versions:
+                        if "text" in v and "content" not in v:
+                            v["content"] = v["text"]
+                    self.preference_versions_ready.emit(versions)
+                except Exception as e:
+                    self.error_occurred.emit(f"版本历史加载失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
         def _run():
             _simulate_latency(200)
             self.preference_versions_ready.emit([
-                {"version": 3, "content": "项目周报默认使用 Markdown 格式，分三部分结构", "change": "细化结构为三部分", "created_at": "2026-07-28"},
+                {"version": 3, "content": "项目周报默认使用 Markdown 格式，分三方面结构", "change": "细化结构为三方面", "created_at": "2026-07-28"},
                 {"version": 2, "content": "项目周报默认使用 Markdown 格式", "change": "增加默认格式", "created_at": "2026-07-15"},
                 {"version": 1, "content": "周报偏好 Markdown", "change": "初始创建", "created_at": "2026-07-01"},
             ])
@@ -209,6 +415,21 @@ class MockDataController(QObject):
 
     def load_knowledge(self, knowledge_type: str = ""):
         """异步加载知识记忆列表"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.list_knowledge(knowledge_type=knowledge_type)
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    items = data if isinstance(data, list) else []
+                    items = [_normalize_knowledge(k) for k in items]
+                    self.knowledge_ready.emit(items)
+                except Exception as e:
+                    self.error_occurred.emit(f"知识加载失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
         def _run():
             _simulate_latency(300)
             samples = [
@@ -261,6 +482,22 @@ class MockDataController(QObject):
 
     def load_conflicts(self):
         """异步加载冲突列表"""
+        if self._is_live:
+            def _run():
+                try:
+                    # 加载所有冲突（含已解决），前端自行筛选
+                    data = self._client.list_conflicts(status="")
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    items = data if isinstance(data, list) else []
+                    items = [_normalize_conflict(c) for c in items]
+                    self.conflicts_ready.emit(items)
+                except Exception as e:
+                    self.error_occurred.emit(f"冲突加载失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
         def _run():
             _simulate_latency(250)
             self.conflicts_ready.emit([
@@ -288,8 +525,47 @@ class MockDataController(QObject):
                     "reason": "不同场景，可并存",
                     "created_at": "2026-07-20T10:00:00",
                 },
+                {
+                    "conflict_id": "conf_003",
+                    "new_memory_id": "pref_004",
+                    "old_memory_id": "pref_005",
+                    "memory_type": "preference",
+                    "old_content": "搜索文件优先使用本地工具",
+                    "new_content": "搜索文件优先使用网络搜索",
+                    "conflict_field": "content",
+                    "decision": "override",
+                    "reason": "用户明确要求更换搜索方式",
+                    "created_at": "2026-07-18T09:30:00",
+                },
+                {
+                    "conflict_id": "conf_004",
+                    "new_memory_id": "pref_006",
+                    "old_memory_id": "pref_007",
+                    "memory_type": "preference",
+                    "old_content": "代码注释使用中文",
+                    "new_content": "代码注释使用英文",
+                    "conflict_field": "content",
+                    "decision": "pending",
+                    "reason": "注释语言偏好冲突",
+                    "created_at": "2026-07-30T11:00:00",
+                },
             ])
         Thread(target=_run, daemon=True).start()
+
+    def resolve_conflict(self, conflict_id: str, decision: str):
+        """解决冲突 — Live 模式调用 API，Mock 模式仅更新内存"""
+        if self._is_live:
+            def _run():
+                try:
+                    result = self._client.resolve_conflict(conflict_id, decision)
+                    if _is_error(result):
+                        self.error_occurred.emit(result["error"])
+                        return
+                    # 解决成功后重新加载冲突列表
+                    self.load_conflicts()
+                except Exception as e:
+                    self.error_occurred.emit(f"冲突解决失败: {e}")
+            Thread(target=_run, daemon=True).start()
 
     # ============================================================
     # 检索
@@ -297,6 +573,39 @@ class MockDataController(QObject):
 
     def search(self, query: str, context: dict | None = None):
         """异步执行检索"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.search(query=query, context=context)
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    # 归一化检索结果
+                    prefs = [_normalize_preference(p) for p in data.get("preferences", [])]
+                    knows = [_normalize_knowledge(k) for k in data.get("knowledge", [])]
+                    # 后端仅在 results 数组中携带 score，这里按 memory_id 合并进去
+                    # （preferences/knowledge 数组是完整记忆对象，无 score 字段）
+                    score_map = {
+                        r.get("memory_id"): r.get("score")
+                        for r in data.get("results", [])
+                        if r.get("memory_id") is not None
+                    }
+                    for p in prefs:
+                        p["score"] = score_map.get(p.get("memory_id"))
+                    for k in knows:
+                        k["score"] = score_map.get(k.get("memory_id"))
+                    self.search_results_ready.emit({
+                        "query": query,
+                        "latency_ms": data.get("latency_ms", 0),
+                        "preferences": prefs,
+                        "knowledge": knows,
+                        "total_count": data.get("total_count", len(prefs) + len(knows)),
+                    })
+                except Exception as e:
+                    self.error_occurred.emit(f"检索失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
         def _run():
             start = time.time()
             _simulate_latency(200)
@@ -321,6 +630,19 @@ class MockDataController(QObject):
 
     def forget(self, instruction: str):
         """异步执行遗忘"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.forget(instruction=instruction)
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    self.forget_result_ready.emit(data)
+                except Exception as e:
+                    self.error_occurred.emit(f"遗忘失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
         def _run():
             _simulate_latency(400)
             self.forget_result_ready.emit({
@@ -333,6 +655,20 @@ class MockDataController(QObject):
 
     def load_forget_history(self):
         """异步加载遗忘历史"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.get_forget_history()
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    items = data if isinstance(data, list) else []
+                    self.forget_history_ready.emit(items)
+                except Exception as e:
+                    self.error_occurred.emit(f"遗忘历史加载失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
         def _run():
             _simulate_latency(200)
             self.forget_history_ready.emit([
@@ -347,6 +683,20 @@ class MockDataController(QObject):
 
     def load_eval_reports(self):
         """异步加载评测报告"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.list_eval_reports()
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    items = data if isinstance(data, list) else []
+                    self.eval_reports_ready.emit(items)
+                except Exception as e:
+                    self.error_occurred.emit(f"评测报告加载失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
         def _run():
             _simulate_latency(300)
             self.eval_reports_ready.emit([
@@ -377,4 +727,149 @@ class MockDataController(QObject):
                     "p95_latency_ms": 180.0,
                 },
             ])
+        Thread(target=_run, daemon=True).start()
+
+    def run_evaluation(self, task_name: str):
+        """异步运行评测，完成后刷新报告列表"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.run_evaluation(task_name=task_name)
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    # 运行完成后重新加载报告列表
+                    self.load_eval_reports()
+                except Exception as e:
+                    self.error_occurred.emit(f"评测运行失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
+        def _run():
+            _simulate_latency(400)
+            self.load_eval_reports()
+        Thread(target=_run, daemon=True).start()
+
+    # ============================================================
+    # 安全规则（用户自定义敏感规则）
+    # ============================================================
+
+    def load_user_rules(self):
+        """异步加载用户安全规则"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.list_user_rules()
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    items = data if isinstance(data, list) else []
+                    self.user_rules_ready.emit(items)
+                except Exception as e:
+                    self.error_occurred.emit(f"安全规则加载失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
+        def _run():
+            _simulate_latency(200)
+            items = [dict(r) for r in self._mock_rules if not r.get("deleted")]
+            self.user_rules_ready.emit(items)
+        Thread(target=_run, daemon=True).start()
+
+    def create_user_rule(self, label, kind, effect, matcher,
+                         case_sensitive=False, enabled=True):
+        """创建安全规则"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.create_user_rule(
+                        label=label, kind=kind, effect=effect, matcher=matcher,
+                        case_sensitive=case_sensitive, enabled=enabled,
+                    )
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    self.user_rule_saved.emit(data)
+                    self.load_user_rules()
+                except Exception as e:
+                    self.error_occurred.emit(f"创建规则失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
+        def _run():
+            _simulate_latency(200)
+            rule = {
+                "rule_id": f"rule_{random.randint(100, 999)}",
+                "label": label,
+                "kind": kind,
+                "effect": effect,
+                "case_sensitive": case_sensitive,
+                "replacement": "***",
+                "revision": 1,
+                "enabled": enabled,
+                "deleted": False,
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            }
+            self._mock_rules.append(rule)
+            self.user_rule_saved.emit(rule)
+            self.load_user_rules()
+        Thread(target=_run, daemon=True).start()
+
+    def update_user_rule(self, rule_id, expected_revision, **updates):
+        """更新安全规则（乐观锁）"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.update_user_rule(
+                        rule_id, expected_revision, **updates
+                    )
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    self.user_rule_saved.emit(data)
+                    self.load_user_rules()
+                except Exception as e:
+                    self.error_occurred.emit(f"更新规则失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
+        def _run():
+            _simulate_latency(200)
+            for r in self._mock_rules:
+                if r.get("rule_id") == rule_id:
+                    for k, v in updates.items():
+                        if v is not None:
+                            r[k] = v
+                    r["revision"] = r.get("revision", 1) + 1
+                    r["updated_at"] = datetime.now().isoformat(timespec="seconds")
+                    self.user_rule_saved.emit(dict(r))
+                    break
+            self.load_user_rules()
+        Thread(target=_run, daemon=True).start()
+
+    def delete_user_rule(self, rule_id, expected_revision):
+        """删除安全规则（软删除）"""
+        if self._is_live:
+            def _run():
+                try:
+                    data = self._client.delete_user_rule(
+                        rule_id, expected_revision
+                    )
+                    if _is_error(data):
+                        self.error_occurred.emit(data["error"])
+                        return
+                    self.load_user_rules()
+                except Exception as e:
+                    self.error_occurred.emit(f"删除规则失败: {e}")
+            Thread(target=_run, daemon=True).start()
+            return
+
+        def _run():
+            _simulate_latency(200)
+            for r in self._mock_rules:
+                if r.get("rule_id") == rule_id:
+                    r["deleted"] = True
+                    break
+            self.load_user_rules()
         Thread(target=_run, daemon=True).start()
