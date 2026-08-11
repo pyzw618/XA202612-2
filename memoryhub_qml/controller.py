@@ -70,6 +70,7 @@ class MemoryHubController(QObject):
         self.safety_model = SafetyRuleListModel(self)
         self.eval_model = EvalListModel(self)
         self.extraction_model = ExtractionListModel(self)
+        self._safety_notice = ""
         self._page_loading = False
         self._search_raw: list[dict[str, Any]] = []
         self._search_lookup: dict[str, str] = {}
@@ -158,6 +159,10 @@ class MemoryHubController(QObject):
     @Property(QObject, constant=True)
     def extractionsModel(self) -> QObject:
         return self.extraction_model
+
+    @Property(str, notify=stateChanged)
+    def safetyNotice(self) -> str:
+        return self._safety_notice
 
     @Property(bool, notify=stateChanged)
     def pageLoading(self) -> bool:
@@ -272,8 +277,8 @@ class MemoryHubController(QObject):
     def loadDemo(self) -> None:
         try:
             self._set_session(freshen_session(load_replay(self._demo_path)))
-            # 载入“全新会话”：先清空上一轮演示产生的偏好，避免重复累积
-            self.clearPreferences()
+            # 载入“全新会话”：清空上一轮演示产生的偏好/知识/事实，避免重复累积与“幽灵”记忆
+            self.clearDemoData()
             self._set_notice("已创建全新的 10 轮测试会话；记忆结果将在逐轮执行后生成。")
         except ReplayError as exc:
             self._set_notice(f"示例加载失败：{exc}")
@@ -387,9 +392,14 @@ class MemoryHubController(QObject):
             "action_type": action_type,
             "decision": resolution if commit else "用户忽略",
             "payload": (
-                {"scope": scope, "project_id": project_id or None, "resolution": resolution or None}
+                {
+                    "scope": scope,
+                    "project_id": project_id or None,
+                    "resolution": resolution or None,
+                    "user_id": self._current_user_id,
+                }
                 if commit
-                else {"reason": "用户在 QML 客户端中忽略"}
+                else {"reason": "用户在 QML 客户端中忽略", "user_id": self._current_user_id}
             ),
         }
         self._busy = True
@@ -536,8 +546,9 @@ class MemoryHubController(QObject):
         """执行一轮后拉取本轮写入的偏好/知识，填到抽屉“记忆”栏（只显示本轮，不混历史）。"""
         uid = self._current_user_id
         self._drawer_memory_rows = []
-        self._drawer_pref_ids = written_prefs or set()
-        self._drawer_know_ids = written_know or set()
+        # None 表示“未限定”（不过滤）；空集合表示“本轮没有写入”→ 抽屉保持为空
+        self._drawer_pref_ids = set(written_prefs) if written_prefs is not None else None
+        self._drawer_know_ids = set(written_know) if written_know is not None else None
         self._drawer_memory_loads = 2
         t1 = self.api.get("drawer_prefs", f"/api/memory/preferences?user_id={uid}")
         self._pending[t1] = ("drawer_prefs", None)
@@ -604,6 +615,7 @@ class MemoryHubController(QObject):
         if self._page_loading:
             return
         self._page_loading = True
+        self._safety_notice = ""
         self.stateChanged.emit()
         path = "/api/memory/safety/user-rules"
         token = self.api.get("safety_rules", path)
@@ -638,6 +650,18 @@ class MemoryHubController(QObject):
         path = f"/api/agent/preferences?user_id={uid}"
         token = self.api.delete("clear_preferences", path)
         self._pending[token] = ("clear_preferences", None)
+
+    @Slot(str)
+    def clearDemoData(self, user_id: str = "") -> None:
+        """清空指定用户的全部演示数据（偏好/知识/事实/事件/冲突/遗忘记录/向量索引）。
+
+        载入全新演示会话时调用，避免上一轮演示提交的事实沉淀在 SQLite/向量库，
+        导致 facts 页出现“幽灵”事实。
+        """
+        uid = user_id or self._current_user_id
+        path = f"/api/agent/demo-data?user_id={uid}"
+        token = self.api.delete("clear_demo_data", path)
+        self._pending[token] = ("clear_demo_data", None)
 
     @Slot()
     def openApiDocs(self) -> None:
@@ -768,7 +792,7 @@ class MemoryHubController(QObject):
             self._drawer_memory_loads -= 1
             for p in body:
                 mid = str(p.get("memory_id") or "")
-                if self._drawer_pref_ids and mid not in self._drawer_pref_ids:
+                if self._drawer_pref_ids is not None and mid not in self._drawer_pref_ids:
                     continue
                 self._drawer_memory_rows.append(
                     {
@@ -790,7 +814,7 @@ class MemoryHubController(QObject):
             self._drawer_memory_loads -= 1
             for k in body:
                 mid = str(k.get("memory_id") or "")
-                if self._drawer_know_ids and mid not in self._drawer_know_ids:
+                if self._drawer_know_ids is not None and mid not in self._drawer_know_ids:
                     continue
                 self._drawer_memory_rows.append(
                     {
@@ -824,6 +848,7 @@ class MemoryHubController(QObject):
             self._set_notice(f"已遗忘 {body.get('deleted_count', 0)} 条记忆。")
         elif pending_operation == "safety_rules" and isinstance(body, list):
             self._page_loading = False
+            self._safety_notice = ""
             self.safety_model.set_items(self._safety_rows(body))
         elif pending_operation == "eval_reports" and isinstance(body, list):
             self._page_loading = False
@@ -836,6 +861,11 @@ class MemoryHubController(QObject):
             if deleted:
                 self._set_notice(f"已清空 {deleted} 条偏好记忆，可重新执行演示。")
             self.loadPreferences()
+            self.stateChanged.emit()
+            return
+        elif pending_operation == "clear_demo_data":
+            counts = body.get("deleted", {}) if isinstance(body, dict) else {}
+            self._set_notice("已重置演示数据，可重新逐轮执行。")
             self.stateChanged.emit()
             return
         self.stateChanged.emit()
@@ -861,6 +891,15 @@ class MemoryHubController(QObject):
             "extractions",
         }:
             self._page_loading = False
+        if pending_operation == "safety_rules":
+            # 后端限制：user-rules 接口依赖身份解析器 + MEMORYHUB_USER_RULE_KEY，
+            # 裸跑 uvicorn 未注入时接口不可用。此处做前端降级提示，避免误报为前端 bug。
+            self._safety_notice = "安全规则接口暂不可用：后端需注入身份解析器并配置 MEMORYHUB_USER_RULE_KEY。"
+            self._set_notice(self._safety_notice)
+        if pending_operation in {"clear_preferences", "clear_demo_data"}:
+            self._set_notice("后端未连接，演示数据未重置。")
+            self.stateChanged.emit()
+            return
         if pending_operation.startswith("search_enrich"):
             # 检索补全失败：不再等待，直接按已收集内容出结果
             self._search_loads = 0

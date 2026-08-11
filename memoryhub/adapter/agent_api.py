@@ -77,6 +77,99 @@ async def clear_preferences(request: Request, user_id: str = "default"):
             pass
     return {"deleted": deleted, "user_id": user_id}
 
+
+@router.delete("/demo-data")
+async def clear_demo_data(request: Request, user_id: str = "default"):
+    """清空指定用户的全部演示数据（偏好/知识/事实/事件/冲突/遗忘记录/向量索引）。
+
+    前端“载入全新演示会话”时调用，避免上一轮演示提交的事实、沉淀的知识
+    残留在 SQLite / 向量库中，导致 facts 页出现“幽灵”事实。
+    """
+    db = getattr(request.app.state, "db", None)
+    if db is None:
+        raise HTTPException(status_code=503, detail="backend database not initialized")
+    from memoryhub.storage.models import (
+        ConflictRow,
+        EventRow,
+        ExtractionTaskRow,
+        ForgetRow,
+        KnowledgeRow,
+        KnowledgeVersionRow,
+        PreferenceRow,
+    )
+
+    counts: dict[str, int] = {}
+    with db.session() as s:
+        for name, model in [
+            ("preferences", PreferenceRow),
+            ("knowledge", KnowledgeRow),
+            ("knowledge_versions", KnowledgeVersionRow),
+            ("events", EventRow),
+            ("conflicts", ConflictRow),
+            ("forget_history", ForgetRow),
+            ("extraction_tasks", ExtractionTaskRow),
+        ]:
+            counts[name] = s.query(model).filter(model.user_id == user_id).delete(
+                synchronize_session=False
+            )
+
+    # 事实（含事实冲突/证据），演示用户的相关记录一并清掉
+    fact_store = getattr(request.app.state, "fact_store", None)
+    if fact_store is not None:
+        try:
+            facts = fact_store.list_facts(status=None, limit=100000, user_id=user_id)
+            fact_ids = [fact.fact_id for fact in facts]
+            counts["facts"] = len(fact_ids)
+            fact_store.delete_fact_artifacts(fact_ids, user_id)
+            conn = getattr(fact_store, "_conn", None)
+            if conn is not None:
+                if fact_ids:
+                    placeholders = ",".join("?" for _ in fact_ids)
+                    conn.execute(
+                        f"DELETE FROM facts WHERE user_id = ? AND fact_id IN ({placeholders})",
+                        [user_id, *fact_ids],
+                    )
+                    conn.commit()
+                conn.execute(
+                    "DELETE FROM fact_conflicts WHERE user_id = ?", (user_id,)
+                )
+                conn.commit()
+        except Exception:
+            counts["facts"] = 0
+
+    # 清空向量索引与进程内检索投影，避免检索返回已删除的“幽灵”记忆
+    vector_store = getattr(request.app.state, "vector_store", None)
+    if vector_store is not None:
+        try:
+            all_ids = list(getattr(vector_store, "reverse_map", {}).keys())
+            if all_ids:
+                vector_store.batch_delete(all_ids)
+                vector_store.save()
+        except Exception:
+            pass
+    memory_lookup = getattr(request.app.state, "memory_lookup", None)
+    if memory_lookup is not None:
+        try:
+            memory_lookup.clear()
+        except Exception:
+            pass
+    keyword_search = getattr(request.app.state, "keyword_search", None)
+    if keyword_search is not None:
+        try:
+            keyword_search.build_index([])
+        except Exception:
+            pass
+    search_cache = getattr(request.app.state, "search_cache", None)
+    if search_cache is not None:
+        try:
+            search_cache.clear()
+        except Exception:
+            pass
+
+    # 清理进程内的事实候选裁决暂存区
+    _FACT_PENDING.clear()
+    return {"deleted": counts, "user_id": user_id}
+
 # 进程内 fact 候选暂存区：proposal_id -> {"json": <dict>, "candidate": <FactCandidate>}
 # 便于前端 FactDialog 裁决（main 后端本身是自动 commit，无候选存储）
 _FACT_PENDING: dict[str, dict[str, Any]] = {}

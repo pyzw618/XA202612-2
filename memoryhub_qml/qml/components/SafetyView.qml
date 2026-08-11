@@ -45,7 +45,26 @@ Rectangle {
                         Label { text: "类型 " + kindZh(model.kind) + "   ·   修订 v" + model.revision + "   ·   " + model.ruleId; color: "#94A3B8"; font.pixelSize: 11; elide: Text.ElideRight }
                     }
                 }
-                Label { anchors.centerIn: parent; visible: parent.count === 0; text: controller.pageLoading ? "正在加载安全规则…" : "暂无安全规则"; color: "#94A3B8" }
+                Label {
+                    anchors.centerIn: parent
+                    visible: parent.count === 0 && controller.safetyNotice.length === 0
+                    text: controller.pageLoading ? "正在加载安全规则…" : "暂无安全规则"
+                    color: "#94A3B8"
+                }
+                Rectangle {
+                    visible: parent.count === 0 && controller.safetyNotice.length > 0
+                    anchors.centerIn: parent
+                    width: Math.min(parent.width - 40, 560)
+                    height: safetyMsg.implicitHeight + 32
+                    radius: 12
+                    color: "#FFFBEB"
+                    border.color: "#FDE68A"
+                    ColumnLayout {
+                        anchors.fill: parent; anchors.margins: 14; spacing: 8
+                        Label { text: "安全规则页暂不可用"; font.bold: true; color: "#92400E"; font.pixelSize: 13 }
+                        Label { id: safetyMsg; Layout.fillWidth: true; text: controller.safetyNotice; color: "#78350F"; wrapMode: Text.Wrap; font.pixelSize: 11 }
+                    }
+                }
             }
         }
     }

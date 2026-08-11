@@ -24,13 +24,17 @@ Rectangle {
         ScrollView {
             Layout.fillWidth: true; Layout.fillHeight: true; clip: true
             ColumnLayout {
-                Layout.fillWidth: true
+                width: parent.width
                 Layout.leftMargin: 20; Layout.rightMargin: 20; Layout.topMargin: 16; Layout.bottomMargin: 20
                 spacing: 16
 
                 // ---- 后端连接 ----
-                Rectangle { Layout.fillWidth: true; implicitHeight: connCol.implicitHeight + 40; radius: 12; color: "#F8FAFC"; border.color: "#E2E8F0"
-                    ColumnLayout { id: connCol; anchors.fill: parent; anchors.margins: 20; spacing: 16
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 200
+                    radius: 12; color: "#F8FAFC"; border.color: "#E2E8F0"
+                    ColumnLayout {
+                        anchors.fill: parent; anchors.margins: 20; spacing: 16
                         Label { text: "后端连接"; font.bold: true; color: "#172033"; font.pixelSize: 14 }
                         GridLayout {
                             columns: 2; Layout.fillWidth: true
@@ -54,10 +58,15 @@ Rectangle {
                 }
 
                 // ---- 演示数据 ----
-                Rectangle { Layout.fillWidth: true; implicitHeight: resCol.implicitHeight + 40; radius: 12; color: "#FEF2F2"; border.color: "#FECACA"
-                    ColumnLayout { id: resCol; anchors.fill: parent; anchors.margins: 20; spacing: 14
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 180
+                    radius: 12; color: "#FEF2F2"; border.color: "#FECACA"
+                    ColumnLayout {
+                        anchors.fill: parent; anchors.margins: 20; spacing: 14
                         Label { text: "演示数据"; font.bold: true; color: "#991B1B"; font.pixelSize: 14 }
                         Label { text: "清空当前用户（demo_user）的全部偏好记忆，便于重新执行演示。知识 / 事实 / 冲突不清。"; color: "#7F1D1D"; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                        Item { Layout.fillHeight: true }
                         Button { text: "清空偏好记忆"; highlighted: true; Layout.preferredWidth: 140; onClicked: confirmDialog.open() }
                     }
                 }
