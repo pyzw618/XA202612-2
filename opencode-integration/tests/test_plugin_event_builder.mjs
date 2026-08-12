@@ -4,7 +4,7 @@
  *   node opencode-integration/tests/test_plugin_event_builder.mjs
  */
 import assert from "node:assert"
-import { buildEventsFromSession, occurredAt, sha256Hex, truncate } from "../plugin/memoryhub.plugin.mjs"
+import { buildEventsFromSession, occurredAt, sha256Hex, truncate } from "../plugin/memoryhub_event_builder.mjs"
 
 const cfg = { ...{}, userId: "opencode", scene: "code", taskType: "coding_task", maxResultChars: 100, recordSummaries: true }
 

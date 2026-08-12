@@ -1,0 +1,42 @@
+{
+  "environment": {
+    "embedding_provider": "kylin_ollama (nomic-embed-text)",
+    "embedding_dim": 768,
+    "index_build_ms": 432939.42,
+    "warmup_count": 100,
+    "formal_count": 9900,
+    "timestamp": "2026-08-11T06:28:44.519700+00:00"
+  },
+  "phases": {
+    "cold": {
+      "phase": "cold",
+      "count": 9900,
+      "p50_ms": 23.44,
+      "p95_ms": 41.34,
+      "p99_ms": 152.46,
+      "max_ms": 705.15,
+      "mean_ms": 26.99,
+      "total_s": 267.27
+    },
+    "vector_hot": {
+      "phase": "vector_hot",
+      "count": 9900,
+      "p50_ms": 19.48,
+      "p95_ms": 33.15,
+      "p99_ms": 39.34,
+      "max_ms": 119.88,
+      "mean_ms": 19.43,
+      "total_s": 192.42
+    },
+    "result_hot": {
+      "phase": "result_hot",
+      "count": 9900,
+      "p50_ms": 0.0,
+      "p95_ms": 27.22,
+      "p99_ms": 35.73,
+      "max_ms": 175.56,
+      "mean_ms": 4.49,
+      "total_s": 44.5
+    }
+  }
+}

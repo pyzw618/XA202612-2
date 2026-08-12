@@ -1,0 +1,4347 @@
+{
+  "metadata": {
+    "dataset_id": "memoryhub-knowledge-retrieval-v1",
+    "version": "1.0.0",
+    "created_at": "2026-08-11T00:00:00Z",
+    "annotation_guideline_version": "1.0",
+    "split": "dev",
+    "description": "小规模开发集，用于检索权重、阈值和索引参数调优",
+    "generator_git_commit": "HEAD",
+    "generator_random_seed": 20260811
+  },
+  "memories": [
+    {
+      "id": "know_dev_001",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "项目周报生成流程",
+      "content": "根据日历筛选本周事件，收集项目文件和提交记录，汇总为结构化 Markdown 周报并邮件发送给项目干系人。",
+      "steps": [
+        "查询本周日历事件",
+        "收集项目文件变更",
+        "提取 Git 提交信息",
+        "按模板生成 Markdown 周报",
+        "邮件发送给干系人"
+      ],
+      "tools": [
+        "calendar",
+        "file_search",
+        "git_log",
+        "document_writer",
+        "email"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.weekly_report",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "周报",
+        "自动化",
+        "Markdown"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_002",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "会议纪要生成流程",
+      "content": "接收会议录音或文字记录，提取关键决策、行动项和截止日期，生成结构化会议纪要并分发。",
+      "steps": [
+        "接收会议原始记录",
+        "提取关键决策点",
+        "列出行动项和负责人",
+        "标注截止日期",
+        "生成结构化纪要",
+        "分发"
+      ],
+      "tools": [
+        "audio_transcribe",
+        "text_parser",
+        "document_writer",
+        "email"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.meeting_minutes",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "会议",
+        "纪要",
+        "行动项"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_003",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "邮件批量发送与追踪流程",
+      "content": "根据模板和收件人列表批量发送邮件，跟踪打开率和回复状态，自动发送提醒。",
+      "steps": [
+        "选择邮件模板",
+        "导入收件人列表",
+        "个性化填充变量",
+        "批量发送",
+        "跟踪打开/回复状态",
+        "自动提醒未回复"
+      ],
+      "tools": [
+        "email",
+        "template_engine",
+        "tracking"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.email_campaign",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "邮件",
+        "批量",
+        "追踪"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_004",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "文档协作审核流程",
+      "content": "文档提交审核后自动通知审核人，记录批注和修改意见，跟踪审核状态直到通过。",
+      "steps": [
+        "文档提交审核",
+        "通知审核人",
+        "审核人批注",
+        "作者修改",
+        "重新提交",
+        "最终通过"
+      ],
+      "tools": [
+        "document_manager",
+        "notification",
+        "comment"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.document_review",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "文档",
+        "审核",
+        "协作"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_005",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "日报自动汇总流程",
+      "content": "收集团队成员每日工作记录，自动汇总为日报并识别风险项。",
+      "steps": [
+        "收集成员日报",
+        "提取关键工作项",
+        "汇总为团队日报",
+        "识别延期/风险",
+        "发送团队日报"
+      ],
+      "tools": [
+        "data_collector",
+        "text_summarizer",
+        "risk_analyzer",
+        "email"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.daily_report",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "日报",
+        "汇总",
+        "风险识别"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_006",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "任务排期与分配流程",
+      "content": "根据团队可用资源和任务优先级自动排期，生成甘特图并分配给成员。",
+      "steps": [
+        "收集任务列表",
+        "评估资源可用性",
+        "按优先级排序",
+        "生成排期方案",
+        "分配任务到人",
+        "生成甘特图"
+      ],
+      "tools": [
+        "calendar",
+        "resource_planner",
+        "gantt_chart"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.task_scheduling",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "排期",
+        "甘特图",
+        "资源管理"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_007",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "季度 OKR 制定流程",
+      "content": "公司级目标拆解为部门 OKR，再拆解为个人 OKR，定期回顾进度。",
+      "steps": [
+        "定义公司级目标",
+        "拆解为部门 OKR",
+        "拆解为个人 OKR",
+        "设定关键结果",
+        "周度回顾",
+        "季度复盘"
+      ],
+      "tools": [
+        "okr_tracker",
+        "document_writer",
+        "dashboard"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.okr_planning",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "OKR",
+        "目标",
+        "季度"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_008",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "申请请假与审批流程",
+      "content": "员工提交请假申请，系统自动计算剩余年假，通知直属上级审批。",
+      "steps": [
+        "提交请假类型和日期",
+        "校验年假余额",
+        "通知直属上级",
+        "上级审批",
+        "记录到考勤系统",
+        "通知申请人结果"
+      ],
+      "tools": [
+        "hr_system",
+        "notification",
+        "approval"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.leave_request",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "请假",
+        "审批",
+        "考勤"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_009",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "费用报销审批流程",
+      "content": "员工提交报销单并附发票，财务审核合规性，审批通过后打款。",
+      "steps": [
+        "提交报销单和发票照片",
+        "部门经理初审",
+        "财务合规审核",
+        "审批通过/驳回",
+        "打款到工资卡"
+      ],
+      "tools": [
+        "expense_system",
+        "ocr",
+        "approval",
+        "payment"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.expense_report",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "报销",
+        "财务",
+        "审批"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_010",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "客户拜访跟进流程",
+      "content": "记录客户拜访要点，生成跟进任务，自动提醒后续动作。",
+      "steps": [
+        "记录拜访笔记",
+        "提取行动项",
+        "创建跟进任务",
+        "设置提醒",
+        "更新客户 CRM"
+      ],
+      "tools": [
+        "crm",
+        "note_taker",
+        "task_manager",
+        "reminder"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.client_visit",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "客户",
+        "拜访",
+        "CRM"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_011",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "内部培训组织流程",
+      "content": "发起培训需求 -> 确定讲师和时间 -> 发送通知 -> 收集反馈。",
+      "steps": [
+        "收集培训需求",
+        "确定讲师和日程",
+        "预订会议室/线上会议",
+        "发送培训通知",
+        "收集反馈问卷"
+      ],
+      "tools": [
+        "calendar",
+        "notification",
+        "survey"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.training",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "培训",
+        "组织",
+        "反馈"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_012",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "合同签署流程",
+      "content": "起草合同 -> 法务审核 -> 双方签署 -> 归档。支持电子签章。",
+      "steps": [
+        "起草合同草案",
+        "提交法务审核",
+        "修改定稿",
+        "发送给客户签署",
+        "我方签署",
+        "归档保存"
+      ],
+      "tools": [
+        "document_writer",
+        "e_signature",
+        "archive"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.contract_signing",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "合同",
+        "签署",
+        "法务"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_013",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "代码评审流程",
+      "content": "开发者提交 Pull Request 后自动通知 reviewer，记录评审意见，通过后合并到主分支并触发 CI。",
+      "steps": [
+        "提交 PR",
+        "通知 reviewer",
+        "reviewer 评审",
+        "作者修改",
+        "approve",
+        "合并到主分支",
+        "触发 CI"
+      ],
+      "tools": [
+        "git",
+        "code_review",
+        "ci_runner",
+        "notification"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.code_review",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "代码评审",
+        "PR",
+        "CI"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_014",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "自动化部署发布流程",
+      "content": "代码合并到发布分支后，触发自动化构建、测试、预发布环境部署，审批后灰度上线全量。",
+      "steps": [
+        "代码合并到 release 分支",
+        "触发 CI 构建",
+        "运行全量测试",
+        "部署预发布环境",
+        "人工审批",
+        "灰度 10% 流量",
+        "全量发布"
+      ],
+      "tools": [
+        "git",
+        "ci_runner",
+        "docker",
+        "k8s",
+        "approval"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.deployment",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "部署",
+        "CI/CD",
+        "灰度发布"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_015",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "Bug 修复发布流程",
+      "content": "收到 bug 报告后快速定位、修复、通过热修复流程发布到生产环境。",
+      "steps": [
+        "接收 bug 报告",
+        "复现 bug",
+        "定位根因",
+        "修复并测试",
+        "创建 hotfix 分支",
+        "CI 通过",
+        "热修复发布"
+      ],
+      "tools": [
+        "issue_tracker",
+        "git",
+        "ci_runner",
+        "monitoring"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.bugfix",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "bug",
+        "hotfix",
+        "修复"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_016",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "API 接口开发流程",
+      "content": "定义 API 规范 -> 实现逻辑 -> 编写测试 -> 文档更新 -> 评审合并。",
+      "steps": [
+        "定义 API 规范和接口",
+        "实现业务逻辑",
+        "编写单元测试/集成测试",
+        "更新 API 文档",
+        "代码评审",
+        "合并"
+      ],
+      "tools": [
+        "openapi",
+        "ide",
+        "test_runner",
+        "api_docs"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.api_development",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "API",
+        "开发",
+        "文档"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_017",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "数据库迁移流程",
+      "content": "编写迁移脚本 -> 本地验证 -> 代码评审 -> 灰度执行 -> 验证数据一致性。",
+      "steps": [
+        "编写 migration 脚本",
+        "本地数据库验证",
+        "提交代码评审",
+        "预发布环境执行",
+        "生产灰度执行",
+        "验证数据一致性"
+      ],
+      "tools": [
+        "db_migration",
+        "git",
+        "monitoring"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.db_migration",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "数据库",
+        "迁移",
+        "数据一致性"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_018",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "性能压测流程",
+      "content": "准备压测脚本 -> 部署压测环境 -> 执行压测 -> 收集指标 -> 分析瓶颈 -> 优化 -> 复测。",
+      "steps": [
+        "编写压测脚本",
+        "部署隔离压测环境",
+        "执行基线压测",
+        "收集 CPU/内存/QPS",
+        "识别瓶颈",
+        "优化代码",
+        "复测确认"
+      ],
+      "tools": [
+        "jmeter",
+        "grafana",
+        "profiler"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.performance_test",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "压测",
+        "性能",
+        "QPS"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_019",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "开源项目贡献流程",
+      "content": "fork 项目 -> 创建特性分支 -> 开发 -> 签署 CLA -> 提交 PR -> 回复评审意见。",
+      "steps": [
+        "fork 上游仓库",
+        "创建特性分支",
+        "本地开发和测试",
+        "签署 CLA",
+        "提交 PR",
+        "回复 reviewer 意见",
+        "等待合并"
+      ],
+      "tools": [
+        "git",
+        "github",
+        "test_runner"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.oss_contribution",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "开源",
+        "PR",
+        "贡献"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_020",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "技术方案评审流程",
+      "content": "编写方案文档 -> 发起评审会议 -> 收集意见 -> 修订方案 -> 技术委员会批准。",
+      "steps": [
+        "编写技术方案文档",
+        "发起评审会议",
+        "收集各方意见",
+        "修订方案",
+        "技术委员会投票",
+        "批准/驳回"
+      ],
+      "tools": [
+        "document_writer",
+        "calendar",
+        "approval"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.tech_review",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "技术方案",
+        "评审",
+        "架构"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_021",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "安全漏洞响应流程",
+      "content": "发现漏洞 -> 评估严重性 -> 紧急修复 -> 发布补丁 -> 通知用户 -> 复盘。",
+      "steps": [
+        "接收漏洞报告",
+        "评估严重等级",
+        "紧急修复",
+        "安全评审",
+        "发布补丁版本",
+        "通知受影响用户",
+        "事后复盘"
+      ],
+      "tools": [
+        "issue_tracker",
+        "git",
+        "ci_runner",
+        "notification"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.security_response",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "安全",
+        "漏洞",
+        "补丁"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_022",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "日志与监控接入流程",
+      "content": "新服务接入日志采集 -> 配置监控指标 -> 设置告警规则 -> 验证告警通道。",
+      "steps": [
+        "部署日志 agent",
+        "配置日志采集规则",
+        "定义监控指标",
+        "设置告警阈值",
+        "配置告警通道",
+        "模拟故障验证"
+      ],
+      "tools": [
+        "log_collector",
+        "prometheus",
+        "alertmanager",
+        "grafana"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.observability",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "日志",
+        "监控",
+        "告警"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_023",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "项目构建与打包流程",
+      "content": "配置构建脚本 -> 依赖管理 -> 编译 -> 打包制品 -> 推送制品库 -> 记录版本。",
+      "steps": [
+        "配置构建脚本 Makefile/CMake",
+        "拉取依赖",
+        "编译项目",
+        "运行测试",
+        "打包制品",
+        "推送到制品库",
+        "记录版本号"
+      ],
+      "tools": [
+        "make",
+        "docker",
+        "artifact_registry"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.build_release",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "构建",
+        "打包",
+        "制品库"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_024",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "代码规范检查流程",
+      "content": "配置 linter -> 提交前 hooks -> 扫描违规 -> 自动修复 -> 阻止合并。",
+      "steps": [
+        "配置 linter 规则（ruff/black）",
+        "安装 pre-commit hooks",
+        "提交时自动扫描",
+        "自动修复",
+        "违规时阻止提交",
+        "定期基线扫描"
+      ],
+      "tools": [
+        "ruff",
+        "black",
+        "pre-commit",
+        "git"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.code_linting",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "lint",
+        "代码规范",
+        "pre-commit"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_025",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "Linux 系统性能诊断流程",
+      "content": "检查系统负载 -> 查看 CPU/内存/磁盘/网络 -> 定位高负载进程 -> 分析日志 -> 提出优化建议。",
+      "steps": [
+        "top/htop 查看系统负载",
+        "free -m 检查内存",
+        "iostat 检查磁盘 IO",
+        "netstat 检查网络",
+        "排查异常进程",
+        "分析 syslog",
+        "输出诊断报告"
+      ],
+      "tools": [
+        "top",
+        "free",
+        "iostat",
+        "netstat",
+        "journalctl"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.performance_diagnosis",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Linux",
+        "性能",
+        "诊断"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_026",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "服务器环境初始化流程",
+      "content": "新服务器初始化：用户创建、SSH 配置、防火墙设置、基础软件安装、安全加固。",
+      "steps": [
+        "创建非 root 用户",
+        "配置 SSH Key 登录",
+        "禁用 root SSH",
+        "配置防火墙规则",
+        "安装基础软件包",
+        "安全加固",
+        "验证"
+      ],
+      "tools": [
+        "ssh",
+        "ufw",
+        "apt",
+        "systemd"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.server_setup",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "服务器",
+        "初始化",
+        "安全"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_027",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "SSL 证书申请与续签流程",
+      "content": "使用 certbot 或 acme.sh 自动申请 Let's Encrypt 证书，配置自动续签和到期告警。",
+      "steps": [
+        "安装 certbot",
+        "验证域名所有权",
+        "申请证书",
+        "配置 Nginx/Apache",
+        "设置 cron 自动续签",
+        "配置到期告警"
+      ],
+      "tools": [
+        "certbot",
+        "nginx",
+        "cron",
+        "alertmanager"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.ssl_certificate",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "SSL",
+        "证书",
+        "HTTPS"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_028",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "数据备份与恢复流程",
+      "content": "定期备份数据库和关键文件到异地存储，验证备份完整性，演练恢复流程。",
+      "steps": [
+        "定义备份策略",
+        "执行全量备份",
+        "执行增量备份",
+        "上传到异地存储",
+        "验证备份校验和",
+        "定期恢复演练"
+      ],
+      "tools": [
+        "mysqldump",
+        "rsync",
+        "gpg",
+        "cron"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.backup_restore",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "备份",
+        "恢复",
+        "异地"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_029",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "Docker 容器编排与部署流程",
+      "content": "编写 Dockerfile -> 构建镜像 -> 推送到私有仓库 -> 通过 docker-compose 或 K8s 部署。",
+      "steps": [
+        "编写 Dockerfile",
+        "构建镜像",
+        "测试容器",
+        "推送到镜像仓库",
+        "编写 docker-compose.yml",
+        "部署上线"
+      ],
+      "tools": [
+        "docker",
+        "docker-compose",
+        "kubectl"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.container_deploy",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Docker",
+        "容器",
+        "K8s"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_030",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "系统安全审计流程",
+      "content": "定期扫描开放端口、检查系统补丁、审查用户权限、检测异常登录。",
+      "steps": [
+        "扫描开放端口",
+        "检查未安装补丁",
+        "审查 sudo 权限",
+        "检查异常登录日志",
+        "生成审计报告"
+      ],
+      "tools": [
+        "nmap",
+        "apt",
+        "journalctl",
+        "auditd"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.security_audit",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "安全审计",
+        "端口扫描",
+        "权限"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_031",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "服务高可用架构搭建流程",
+      "content": "配置负载均衡 -> 部署多实例 -> 配置健康检查 -> 设置故障转移 -> 验证。",
+      "steps": [
+        "部署负载均衡器",
+        "部署至少 2 个服务实例",
+        "配置健康检查端点",
+        "设置故障转移策略",
+        "模拟故障验证"
+      ],
+      "tools": [
+        "nginx",
+        "haproxy",
+        "k8s",
+        "monitoring"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.ha_setup",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "高可用",
+        "负载均衡",
+        "故障转移"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_032",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "系统资源扩容流程",
+      "content": "监控资源水位 -> 触发扩容告警 -> 评估扩容方案 -> 执行扩容 -> 验证。",
+      "steps": [
+        "监控 CPU/内存/磁盘使用率",
+        "触发扩容阈值",
+        "评估扩容方案",
+        "执行水平/垂直扩容",
+        "验证服务正常"
+      ],
+      "tools": [
+        "prometheus",
+        "k8s",
+        "terraform",
+        "monitoring"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.scaling",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "扩容",
+        "资源",
+        "弹性"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_033",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "每日知识整理流程",
+      "content": "每天花 15 分钟记录新学到的知识点、工具技巧和错误经验，分类整理到知识库。",
+      "steps": [
+        "回顾今日工作/学习",
+        "记录新知识点",
+        "标注来源和可信度",
+        "分类归档",
+        "关联已有知识"
+      ],
+      "tools": [
+        "note_app",
+        "knowledge_base"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "personal",
+        "task_type": "personal.knowledge_organize",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "学习",
+        "整理",
+        "知识库"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_034",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "旅行行程规划流程",
+      "content": "确定目的地 -> 查询交通/住宿 -> 制定行程表 -> 预订 -> 整理注意事项。",
+      "steps": [
+        "确定目的地和日期",
+        "查询火车/机票",
+        "搜索住宿",
+        "制定每日行程",
+        "预订交通和酒店",
+        "整理天气和注意事项"
+      ],
+      "tools": [
+        "map",
+        "booking",
+        "calendar",
+        "weather"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "personal",
+        "task_type": "personal.travel_planning",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "旅行",
+        "行程",
+        "预订"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_035",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "个人财务管理流程",
+      "content": "记录收支 -> 分类归集 -> 月度汇总 -> 预算对比 -> 调整消费计划。",
+      "steps": [
+        "记录每日收支",
+        "按类别归集",
+        "生成月度报表",
+        "对比预算目标",
+        "调整下月预算"
+      ],
+      "tools": [
+        "spreadsheet",
+        "budget",
+        "chart"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "personal",
+        "task_type": "personal.finance",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "财务",
+        "预算",
+        "支出"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_036",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "健康饮食计划制定流程",
+      "content": "评估身体状况 -> 制定周餐单 -> 生成采购清单 -> 记录执行情况。",
+      "steps": [
+        "评估 BMI 和健康目标",
+        "制定一周餐单",
+        "生成采购清单",
+        "食材采购",
+        "记录每日执行",
+        "周末复盘调整"
+      ],
+      "tools": [
+        "health_tracker",
+        "recipe",
+        "shopping_list"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "personal",
+        "task_type": "personal.meal_planning",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "健康",
+        "饮食",
+        "计划"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_037",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "客户支持工单处理流程",
+      "content": "接收工单 -> 分类优先级 -> 分配给工程师 -> 处理并记录 -> 用户确认关闭。",
+      "steps": [
+        "接收客户工单",
+        "分类和排优先级",
+        "分配给对应工程师",
+        "处理并记录方案",
+        "通知客户确认",
+        "关闭工单"
+      ],
+      "tools": [
+        "ticketing",
+        "notification",
+        "knowledge_base"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "communication",
+        "task_type": "comm.ticket_handling",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "工单",
+        "客户支持",
+        "分类"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_038",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "团队公告发布流程",
+      "content": "草拟公告 -> 审核 -> 选择发布渠道 -> 定时发送 -> 确认已读率。",
+      "steps": [
+        "草拟公告内容",
+        "主管审核",
+        "选择发布渠道（邮件/IM）",
+        "设定发布时间",
+        "发布",
+        "确认已读率"
+      ],
+      "tools": [
+        "document_writer",
+        "approval",
+        "email",
+        "im"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "communication",
+        "task_type": "comm.announcement",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "公告",
+        "发布",
+        "已读"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_039",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "月末关账流程",
+      "content": "核对当月凭证 -> 调整预提/待摊 -> 生成财务报表 -> 财务主管审批 -> 关账。",
+      "steps": [
+        "核对当月会计凭证",
+        "确认预提和待摊费用",
+        "生成试算平衡表",
+        "生成三大报表",
+        "财务主管审批",
+        "关账"
+      ],
+      "tools": [
+        "accounting_system",
+        "spreadsheet",
+        "approval"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "finance",
+        "task_type": "finance.monthly_close",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "关账",
+        "财务报表",
+        "会计"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_040",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "发票开具与核验流程",
+      "content": "确认开票信息 -> 开具发票 -> 发送客户 -> 记录发票号 -> 核验抵扣。",
+      "steps": [
+        "确认购买方开票信息",
+        "填写发票内容",
+        "生成发票",
+        "发送给客户",
+        "记录发票号",
+        "按月核验抵扣"
+      ],
+      "tools": [
+        "invoice_system",
+        "email",
+        "accounting_system"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "finance",
+        "task_type": "finance.invoice_issuance",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "发票",
+        "开票",
+        "核验"
+      ],
+      "confidence": 0.95
+    },
+    {
+      "id": "know_dev_041",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "某次生产环境数据库连接池耗尽故障",
+      "content": "生产环境突发数据库连接池耗尽，排查发现新上线服务未配置连接池上限，紧急扩容后恢复，事后增加连接池监控告警。",
+      "steps": [
+        "收到数据库超时告警",
+        "排查连接池状态",
+        "发现新服务无连接限制",
+        "紧急增加最大连接数",
+        "恢复服务",
+        "事后：添加连接池监控"
+      ],
+      "tools": [
+        "monitoring",
+        "db_client",
+        "alert"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.incident_response",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "故障",
+        "数据库",
+        "连接池"
+      ],
+      "confidence": 0.85
+    },
+    {
+      "id": "know_dev_042",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "跨境费用汇率差异复核案例",
+      "content": "月末关账时发现一笔跨境费用存在币种不一致（EUR 12,480 vs USD 13,420），通过查询汇率快照、比对发票附件和采购合同确认差异，差异计入待摊费用并记录依据。",
+      "steps": [
+        "导出跨境费用明细",
+        "发现币种不一致",
+        "查询汇率快照",
+        "比对发票附件",
+        "对比采购合同条款",
+        "确认差异为汇率波动",
+        "差异计入待摊费用"
+      ],
+      "tools": [
+        "expense_export",
+        "fx_snapshot",
+        "ledger_post"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "finance",
+        "task_type": "finance.anomaly_review",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "跨境",
+        "汇率",
+        "复核"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_043",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "高并发下 Redis 缓存雪崩排查",
+      "content": "促销活动期间 Redis 缓存大量 key 同时过期，导致数据库瞬时高负载，通过随机 TTL + 多级缓存改造解决。",
+      "steps": [
+        "收到 CPU 飙升告警",
+        "发现大量缓存 miss",
+        "定位：TTL 集中过期",
+        "手动预热热点 key",
+        "事后：TTL 增加随机值",
+        "增加本地缓存层"
+      ],
+      "tools": [
+        "redis-cli",
+        "monitoring",
+        "grafana"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.performance_incident",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Redis",
+        "缓存雪崩",
+        "促销"
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "know_dev_044",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "一次 Webpack 构建耗时超过 10 分钟的优化",
+      "content": "前端项目构建从 3 分钟恶化到 10 分钟，排查发现未配置 thread-loader 和 cache-loader，优化后降至 2 分钟。",
+      "steps": [
+        "收到构建超时反馈",
+        "分析 build profile",
+        "发现单线程编译",
+        "添加 thread-loader",
+        "添加 cache-loader",
+        "重新 benchmark"
+      ],
+      "tools": [
+        "webpack",
+        "profiler",
+        "ci_runner"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.build_optimization",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Webpack",
+        "构建",
+        "优化"
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "know_dev_045",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "一次跨团队 API 变更导致的下游服务崩溃",
+      "content": "上游团队修改 API 字段名未通知下游，导致下游服务解析报错，事后建立 API 版本管理和变更通知机制。",
+      "steps": [
+        "收到下游服务告警",
+        "定位解析报错",
+        "发现 API 字段名变更",
+        "紧急回滚上游",
+        "修复下游兼容",
+        "建立 API 变更通知制度"
+      ],
+      "tools": [
+        "monitoring",
+        "api_docs",
+        "git"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.api_incident",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "API变更",
+        "下游",
+        "版本管理"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_046",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "Python 依赖冲突导致服务启动失败的修复",
+      "content": "新安装的第三方库依赖升级引发版本冲突，使用 pip-tools 锁定依赖版本并增加 CI 依赖一致性检查。",
+      "steps": [
+        "发现服务启动失败",
+        "检查依赖树",
+        "定位版本冲突",
+        "使用 pip-tools 锁定",
+        "更新 CI 添加依赖检查"
+      ],
+      "tools": [
+        "pip",
+        "pip-compile",
+        "ci_runner"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.dependency_management",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Python",
+        "依赖",
+        "版本冲突"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_047",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "一个 Docker 镜像体积膨胀的排查与优化",
+      "content": "镜像从 200MB 膨胀到 1.2GB，排查发现多阶段构建被误删，恢复后降至 180MB。",
+      "steps": [
+        "发现 CI 构建变慢",
+        "检查镜像大小",
+        "对比历史 Dockerfile",
+        "恢复多阶段构建",
+        "添加 .dockerignore",
+        "验证镜像体积"
+      ],
+      "tools": [
+        "docker",
+        "git",
+        "du"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.docker_optimization",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Docker",
+        "镜像",
+        "优化"
+      ],
+      "confidence": 0.87
+    },
+    {
+      "id": "know_dev_048",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "误删生产数据库表的恢复过程",
+      "content": "DBA 误执行 DELETE 语句删除了核心表数据，通过备份+binlog 恢复，事后增加生产操作二次确认。",
+      "steps": [
+        "发现数据异常",
+        "确认误删操作",
+        "停止相关服务",
+        "从全量备份恢复",
+        "回放 binlog 到故障点",
+        "验证数据完整性",
+        "增加二次确认机制"
+      ],
+      "tools": [
+        "mysql",
+        "binlog",
+        "backup"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.data_recovery",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "数据库",
+        "恢复",
+        "误删除"
+      ],
+      "confidence": 0.85
+    },
+    {
+      "id": "know_dev_049",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "服务器被植入挖矿程序的排查与清理",
+      "content": "服务器 CPU 持续 100%，排查发现 Redis 未设密码被入侵植入挖矿木马，清理后加固安全配置。",
+      "steps": [
+        "收到 CPU 100% 告警",
+        "排查高 CPU 进程",
+        "发现未知进程",
+        "定位入侵来源（Redis 无认证）",
+        "杀掉恶意进程",
+        "清理 crontab 和开机启动",
+        "加固 Redis 密码"
+      ],
+      "tools": [
+        "top",
+        "ps",
+        "chkrootkit",
+        "crontab"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.security_incident",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "安全",
+        "入侵",
+        "挖矿"
+      ],
+      "confidence": 0.82
+    },
+    {
+      "id": "know_dev_050",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "Nginx 反向代理配置错误导致 502 故障",
+      "content": "修改 upstream 配置时少写一个分号，导致所有请求返回 502，快速回滚后增加配置校验步骤。",
+      "steps": [
+        "收到 502 告警",
+        "检查 Nginx error log",
+        "发现配置语法错误",
+        "回滚到上一版本",
+        "恢复服务",
+        "增加 nginx -t 校验步骤"
+      ],
+      "tools": [
+        "nginx",
+        "git",
+        "monitoring"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.nginx_incident",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Nginx",
+        "502",
+        "配置错误"
+      ],
+      "confidence": 0.87
+    },
+    {
+      "id": "know_dev_051",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "磁盘满导致 MySQL 无法写入的应急处理",
+      "content": "磁盘使用率达到 100% 导致数据库写操作全部失败，清理过期日志后恢复，配置磁盘监控告警。",
+      "steps": [
+        "收到数据库写入失败告警",
+        "df -h 检查磁盘",
+        "发现 /var/log 日志过大",
+        "清理过期日志",
+        "恢复数据库写入",
+        "配置磁盘使用率监控"
+      ],
+      "tools": [
+        "df",
+        "du",
+        "logrotate",
+        "monitoring"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.disk_incident",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "磁盘",
+        "MySQL",
+        "日志清理"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_052",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "使用 Docker 快速搭建本地测试环境",
+      "content": "新成员加入团队需要搭建本地开发环境，通过 docker-compose 一键拉起 MySQL + Redis + Nginx 组合服务，30 分钟完成。",
+      "steps": [
+        "编写 docker-compose.yml",
+        "配置服务依赖",
+        "启动容器",
+        "导入测试数据",
+        "验证连接"
+      ],
+      "tools": [
+        "docker",
+        "docker-compose"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.local_env",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "docker-compose",
+        "本地环境",
+        "测试"
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "know_dev_053",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "一次大型项目依赖升级的踩坑记录",
+      "content": "将项目从 Django 3.2 升级到 4.2，遇到中间件废弃、async 视图兼容和第三方插件不兼容问题，逐项修复。",
+      "steps": [
+        "分析 Django 4.2 changelog",
+        "修改废弃中间件",
+        "适配 async 视图",
+        "排查第三方插件兼容性",
+        "逐个修复测试",
+        "全量回归测试"
+      ],
+      "tools": [
+        "git",
+        "test_runner",
+        "pip"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.upgrade",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Django",
+        "升级",
+        "兼容性"
+      ],
+      "confidence": 0.86
+    },
+    {
+      "id": "know_dev_054",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "用 Python 脚本自动化重命名 5000 个文件",
+      "content": "客户提供的产品图片命名不规范，编写 Python 脚本批量按规则重命名并生成 CSV 对照表。",
+      "steps": [
+        "分析文件名规律",
+        "编写 rename 脚本",
+        "先 dry-run 预览",
+        "执行重命名",
+        "生成 CSV 对照表"
+      ],
+      "tools": [
+        "python",
+        "os",
+        "csv"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.batch_rename",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Python",
+        "重命名",
+        "批量"
+      ],
+      "confidence": 0.92
+    },
+    {
+      "id": "know_dev_055",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "手动合并 300 行 Excel 数据出错后改用 Pandas 自动化",
+      "content": "财务同事手动合并多家子公司 Excel 报表出错，用 Pandas 脚本实现自动化合并和校验，消除人工错误。",
+      "steps": [
+        "分析 Excel 格式和问题",
+        "编写 pandas 合并脚本",
+        "添加数据校验逻辑",
+        "生成汇总报表",
+        "人工复核"
+      ],
+      "tools": [
+        "pandas",
+        "openpyxl",
+        "spreadsheet"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.data_merge",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Excel",
+        "Pandas",
+        "自动化"
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "know_dev_056",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "一次项目周报被主管指出格式问题后的改进",
+      "content": "主管反馈周报格式不一致、缺少关键指标，随后建立了统一的周报模板并沉淀为团队规范。",
+      "steps": [
+        "收到主管反馈",
+        "分析周报问题点",
+        "设计统一周报模板",
+        "分享给团队",
+        "收集改进意见",
+        "形成团队规范文档"
+      ],
+      "tools": [
+        "document_writer",
+        "email"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.weekly_report",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "周报",
+        "模板",
+        "规范"
+      ],
+      "confidence": 0.93
+    },
+    {
+      "id": "know_dev_057",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "通过日志分析定位一个间歇性超时的 API",
+      "content": "用户反馈 API 偶尔超时但无法复现，通过分析 Nginx 访问日志和 APM trace 定位到某第三方服务偶发慢响应，增加超时+重试机制。",
+      "steps": [
+        "收集用户反馈",
+        "分析 Nginx 日志",
+        "查看 APM trace",
+        "定位慢服务",
+        "增加超时和重试逻辑",
+        "观察效果"
+      ],
+      "tools": [
+        "nginx",
+        "elasticsearch",
+        "apm"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.performance_debug",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "超时",
+        "日志分析",
+        "APM"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_058",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "一份复盘报告帮助团队避免同类线上事故",
+      "content": "线上出现严重故障后，团队进行了详细的 5-why 分析并产出复盘报告，建立了 checklist 防止同类问题。",
+      "steps": [
+        "记录故障时间线",
+        "进行 5-why 分析",
+        "识别根因",
+        "制定预防措施",
+        "编写复盘报告",
+        "分享给全团队",
+        "建立 checklist"
+      ],
+      "tools": [
+        "document_writer",
+        "issue_tracker"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.postmortem",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "复盘",
+        "故障",
+        "5-why"
+      ],
+      "confidence": 0.91
+    },
+    {
+      "id": "know_dev_059",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "用 Shell 脚本快速统计大日志文件中的错误率",
+      "content": "运维同事需要统计 50GB 的 access log 中 5xx 错误占比，编写 shell 脚本用 awk 流式处理，2 分钟完成。",
+      "steps": [
+        "分析日志格式",
+        "编写 awk 统计脚本",
+        "流式处理大文件",
+        "生成统计结果",
+        "输出百分比"
+      ],
+      "tools": [
+        "awk",
+        "grep",
+        "shell"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.log_analysis",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Shell",
+        "日志",
+        "awk"
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "know_dev_060",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "低代码平台中一个表单验证规则的配置案例",
+      "content": "业务人员需要在低代码平台配置复杂表单验证（多字段联动+异步校验），通过组合规则引擎配置实现，无需写代码。",
+      "steps": [
+        "分析表单需求",
+        "在规则引擎中配置字段校验",
+        "添加跨字段联动规则",
+        "配置异步接口校验",
+        "测试验证"
+      ],
+      "tools": [
+        "low_code_platform",
+        "rule_engine"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.low_code_form",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "低代码",
+        "表单",
+        "规则"
+      ],
+      "confidence": 0.85
+    },
+    {
+      "id": "know_dev_061",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "使用 Git Bisect 定位一个引入 Bug 的提交",
+      "content": "测试发现在某个版本引入了一个难以定位的 bug，通过 git bisect 在 200 个提交中找到引入 bug 的具体 commit。",
+      "steps": [
+        "确认 good 和 bad commit",
+        "执行 git bisect start",
+        "逐次标记 good/bad",
+        "定位到具体 commit",
+        "分析引入原因",
+        "修复"
+      ],
+      "tools": [
+        "git",
+        "test_runner"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.bug_hunting",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "git bisect",
+        "bug",
+        "定位"
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "know_dev_062",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "一次参与大型项目代码合并冲突的处理",
+      "content": "两个分支并行开发 2 周后合并时产生了 50+ 个冲突文件，通过逐文件分析语义解决冲突，总结出频繁小合并的策略。",
+      "steps": [
+        "拉取最新目标分支",
+        "逐一分析冲突文件",
+        "根据语义选择合并策略",
+        "运行测试验证",
+        "提交合并",
+        "建立频繁合并规范"
+      ],
+      "tools": [
+        "git",
+        "ide",
+        "test_runner"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.merge_conflict",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "git",
+        "合并冲突",
+        "分支"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_063",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "Nginx 日志通过 GoAccess 实时可视化的配置",
+      "content": "为方便查看网站实时访问情况，用 GoAccess 配置了 Nginx 日志的实时可视化仪表板。",
+      "steps": [
+        "安装 goaccess",
+        "配置 Nginx 日志格式",
+        "设置实时报告",
+        "配置 WebSocket 输出",
+        "Nginx 反向代理仪表板"
+      ],
+      "tools": [
+        "goaccess",
+        "nginx",
+        "websocket"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.log_visualization",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "GoAccess",
+        "日志",
+        "可视化"
+      ],
+      "confidence": 0.87
+    },
+    {
+      "id": "know_dev_064",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "一个组织活动收集参与者偏好的方案案例",
+      "content": "工会组织团建活动，需要收集 80 位同事的时间和活动偏好，用在线表单收集并自动统计，2 天完成。",
+      "steps": [
+        "设计活动选项",
+        "创建在线调查表单",
+        "发送给同事填写",
+        "自动汇总统计",
+        "确认为大多数人的时间和活动"
+      ],
+      "tools": [
+        "form_builder",
+        "spreadsheet",
+        "chart"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.event_planning",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "活动",
+        "调查",
+        "统计"
+      ],
+      "confidence": 0.92
+    },
+    {
+      "id": "know_dev_065",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "用 Python 封装了一个 API 对接多个短信服务商",
+      "content": "需要对接短信/邮件/微信三个通知渠道，每种渠道配置不同，封装成统一通知服务。",
+      "steps": [
+        "分析三个渠道 API 文档",
+        "设计统一通知接口",
+        "实现短信适配器",
+        "实现邮件适配器",
+        "实现微信适配器",
+        "集成测试"
+      ],
+      "tools": [
+        "python",
+        "requests",
+        "flask"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.notification_service",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "通知",
+        "适配器",
+        "封装"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_066",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "一个 CI/CD Pipeline 优化的实际收益记录",
+      "content": "通过并行化测试、缓存依赖和优化 Docker 构建，将 CI 时间从 22 分钟降到 7 分钟，记录了每一步效果。",
+      "steps": [
+        "分析当前 CI 耗时分布",
+        "并行运行独立测试",
+        "添加依赖缓存",
+        "优化 Docker layer",
+        "重新计时",
+        "对比优化前后"
+      ],
+      "tools": [
+        "ci_runner",
+        "docker",
+        "cache"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.ci_optimization",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "CI/CD",
+        "优化",
+        "缓存"
+      ],
+      "confidence": 0.89
+    },
+    {
+      "id": "know_dev_067",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "使用 dd 命令恢复一个损坏的 U 盘",
+      "content": "U 盘分区表损坏无法读取，使用 dd 全盘镜像备份后用 testdisk 恢复分区表，成功找回文件。",
+      "steps": [
+        "插入 U 盘",
+        "dd 创建全盘镜像",
+        "testdisk 分析镜像",
+        "恢复分区表",
+        "挂载并验证文件"
+      ],
+      "tools": [
+        "dd",
+        "testdisk",
+        "mount"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.data_recovery",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "dd",
+        "恢复",
+        "U盘"
+      ],
+      "confidence": 0.84
+    },
+    {
+      "id": "know_dev_068",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "用 LangChain 搭建一个内部知识库问答机器人",
+      "content": "为减少重复答疑，用 LangChain + FAISS 搭建了公司制度问答机器人，员工可通过聊天界面查询 HR 和行政规定。",
+      "steps": [
+        "收集公司制度文档",
+        "文本分割和向量化",
+        "搭建 FAISS 索引",
+        "配置 LangChain 检索链",
+        "部署聊天界面",
+        "试用并调优"
+      ],
+      "tools": [
+        "langchain",
+        "faiss",
+        "streamlit"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.knowledge_bot",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "LangChain",
+        "问答",
+        "知识库"
+      ],
+      "confidence": 0.85
+    },
+    {
+      "id": "know_dev_069",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "一次误关工单导致客户投诉的服务补救",
+      "content": "工程师操作失误关闭了正确的工单，客户投诉后重新打开工单、加速处理并发送致歉邮件，之后增加关闭确认弹窗。",
+      "steps": [
+        "收到客户投诉",
+        "确认工单被误关",
+        "重新打开工单",
+        "升级优先级",
+        "快速处理完成",
+        "发送致歉邮件",
+        "系统增加确认弹窗"
+      ],
+      "tools": [
+        "ticketing",
+        "email",
+        "notification"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "communication",
+        "task_type": "comm.service_recovery",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "工单",
+        "投诉",
+        "补救"
+      ],
+      "confidence": 0.89
+    },
+    {
+      "id": "know_dev_070",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "一次线上活动报名系统的快速搭建",
+      "content": "紧急需求：2 天内搭建报名系统。使用 Google Forms + Google Sheets + App Script 实现自动名额控制和邮件确认。",
+      "steps": [
+        "分析报名需求",
+        "创建报名表单",
+        "配置名额计数",
+        "编写自动邮件脚本",
+        "测试报名流程",
+        "上线"
+      ],
+      "tools": [
+        "form_builder",
+        "spreadsheet",
+        "email",
+        "script"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.registration",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "报名",
+        "表单",
+        "自动化"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_071",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "项目周报模板",
+      "content": "项目周报的标准 Markdown 模板，包含本周进展、下周计划、风险与问题、需要的支持四个部分。",
+      "steps": [
+        "填写本周进展"
+      ],
+      "tools": [
+        "document_writer"
+      ],
+      "template_body": "# 项目周报\n## 本周进展\n- [ ] \n## 下周计划\n- [ ] \n## 风险与问题\n- \n## 需要的支持\n- ",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.weekly_report",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "周报",
+        "Markdown",
+        "模板"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_072",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "会议纪要模板",
+      "content": "标准会议纪要模板，包含会议日期、参与者、议题、决议、行动项和下次会议时间。",
+      "steps": [
+        "填充模板"
+      ],
+      "tools": [
+        "document_writer"
+      ],
+      "template_body": "# 会议纪要\n**日期**：\n**参与者**：\n## 议题\n1. \n## 决议\n- \n## 行动项\n| 行动 | 负责人 | 截止日期 |\n|------|--------|----------|\n| | | |\n## 下次会议\n- ",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.meeting_minutes",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "会议",
+        "纪要",
+        "模板"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_073",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "邮件签名模板",
+      "content": "公司统一邮件签名模板，包含姓名、职位、部门、电话和公司地址信息。",
+      "steps": [
+        "替换个人信息"
+      ],
+      "tools": [
+        "email"
+      ],
+      "template_body": "---\n**{name}** | {title}\n{department} | {company}\nTel: {phone}\nEmail: {email}\n{address}",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.email_signature",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "邮件",
+        "签名",
+        "模板"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_074",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "代码评审 Checklist 模板",
+      "content": "代码评审前需逐项检查：功能完整性、代码规范、边界处理、测试覆盖、性能考量和安全审查。",
+      "steps": [
+        "逐项检查"
+      ],
+      "tools": [
+        "code_review"
+      ],
+      "template_body": "## Code Review Checklist\n- [ ] 功能实现是否正确\n- [ ] 代码风格符合规范\n- [ ] 边界条件处理\n- [ ] 单元测试覆盖\n- [ ] 是否有明显性能问题\n- [ ] 是否存在安全风险（SQL注入、XSS等）\n- [ ] 是否需要更新文档",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.code_review",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "代码评审",
+        "Checklist",
+        "规范"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_075",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "API 接口文档模板",
+      "content": "RESTful API 接口文档模板，包含请求方法、URL、参数说明、请求/响应示例和错误码。",
+      "steps": [
+        "填写接口信息"
+      ],
+      "tools": [
+        "openapi",
+        "document_writer"
+      ],
+      "template_body": "## {API名称}\n**Method**: `{GET|POST|PUT|DELETE}`\n**URL**: `/{path}`\n### 请求参数\n| 参数 | 类型 | 必填 | 说明 |\n|------|------|------|------|\n### 请求示例\n```json\n{}\n```\n### 响应示例\n```json\n{}\n```\n### 错误码\n| 状态码 | 说明 |\n|--------|------|",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.api_documentation",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "API",
+        "文档",
+        "模板"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_076",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "Bug Report 模板",
+      "content": "标准 Bug 报告模板，包含复现步骤、预期与实际行为、环境信息以及截图附件。",
+      "steps": [
+        "填写 bug 信息"
+      ],
+      "tools": [
+        "issue_tracker"
+      ],
+      "template_body": "## Bug 描述\n\n## 复现步骤\n1. \n2. \n3. \n## 预期行为\n\n## 实际行为\n\n## 环境信息\n- OS: \n- 版本: \n- 浏览器: \n## 截图/日志\n",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.bug_report",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Bug",
+        "报告",
+        "模板"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_077",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "发布上线 Checklist 模板",
+      "content": "发布上线前必须逐项确认：测试通过、回滚方案就绪、数据库变更已执行、监控已配置等。",
+      "steps": [
+        "逐项确认"
+      ],
+      "tools": [
+        "ci_runner"
+      ],
+      "template_body": "## 发布上线 Checklist\n- [ ] 全量测试通过\n- [ ] 预发布环境验证通过\n- [ ] 回滚方案已就绪\n- [ ] 数据库变更已执行\n- [ ] 监控告警已配置\n- [ ] 发布公告已发送\n- [ ] 相关人员已通知\n- [ ] 发布时间已确认（避开高峰）",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.deployment",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "发布",
+        "Checklist",
+        "上线"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_078",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "运维日志分析报告模板",
+      "content": "服务器运维日志分析报告模板，包含时间段、错误统计、趋势分析和改进建议。",
+      "steps": [
+        "填写分析结果"
+      ],
+      "tools": [
+        "document_writer"
+      ],
+      "template_body": "# 运维日志分析报告\n**时间段**：\n**分析人**：\n## 整体统计\n- 总请求量: \n- 错误数: \n- 错误率: \n## 错误分布\n| 类型 | 数量 | 占比 |\n|------|------|------|\n## 趋势分析\n\n## 改进建议\n",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.log_analysis",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "日志",
+        "分析",
+        "报告"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_079",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "Dockerfile 基础模板",
+      "content": "Python 项目 Dockerfile 基础模板，使用多阶段构建，包含依赖安装层和应用代码层。",
+      "steps": [
+        "替换项目路径和端口"
+      ],
+      "tools": [
+        "docker"
+      ],
+      "template_body": "FROM python:3.12-slim AS builder\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install --user -r requirements.txt --no-cache-dir\n\nFROM python:3.12-slim\nWORKDIR /app\nCOPY --from=builder /root/.local /root/.local\nCOPY . .\nENV PATH=/root/.local/bin:$PATH\nEXPOSE {port}\nCMD [\"python\", \"-m\", \"uvicorn\", \"main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"{port}\"]",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.container_build",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Dockerfile",
+        "Python",
+        "模板"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_080",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "服务器防火墙规则模板",
+      "content": "基础 iptables/ufw 防火墙规则模板，保留 SSH 和 Web 端口，拒绝其余入站流量。",
+      "steps": [
+        "按需调整端口"
+      ],
+      "tools": [
+        "ufw",
+        "iptables"
+      ],
+      "template_body": "#!/bin/bash\nufw default deny incoming\nufw default allow outgoing\nufw allow ssh\nufw allow 80/tcp\nufw allow 443/tcp\nufw enable",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.firewall",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "防火墙",
+        "ufw",
+        "安全"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_081",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "技术方案文档模板",
+      "content": "技术方案文档模板，包含背景、目标方案、备选方案对比、风险和实施计划。",
+      "steps": [
+        "填写方案内容"
+      ],
+      "tools": [
+        "document_writer"
+      ],
+      "template_body": "# 技术方案：{方案名称}\n## 背景与问题\n## 目标\n## 方案设计\n### 架构图\n### 核心流程\n### 数据模型\n## 备选方案对比\n| 方案 | 优点 | 缺点 | 结论 |\n|------|------|------|------|\n## 风险与缓解\n| 风险 | 影响 | 缓解措施 |\n|------|------|----------|\n## 实施计划\n| 阶段 | 内容 | 排期 |\n|------|------|------|",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.tech_review",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "方案",
+        "文档",
+        "架构"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_082",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "Python 脚本文件头模板",
+      "content": "Python 脚本标准文件头，包含 shebang、编码声明、模块注释和 import 结构。",
+      "steps": [
+        "替换项目信息"
+      ],
+      "tools": [
+        "python"
+      ],
+      "template_body": "#!/usr/bin/env python3\n\"\"\"{模块简述}\"\"\"\nfrom __future__ import annotations\n\nimport argparse\nimport logging\n\nlogger = logging.getLogger(__name__)\n\ndef main() -> None:\n    pass\n\nif __name__ == \"__main__\":\n    main()",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.code_template",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Python",
+        "模板",
+        "代码风格"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_083",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "Git 提交信息模板",
+      "content": "团队统一的 Git 提交信息格式模板，包含类型、范围、简短描述和详细说明。",
+      "steps": [
+        "按约定填写"
+      ],
+      "tools": [
+        "git"
+      ],
+      "template_body": "{type}({scope}): {简短描述}\n\n{详细说明（可选）}\n\nRefs: #{issue_id}",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.git_workflow",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Git",
+        "提交",
+        "规范"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_084",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "项目 README 模板",
+      "content": "开源项目 README.md 标准模板，包含简介、安装、使用、贡献和许可证。",
+      "steps": [
+        "填写项目信息"
+      ],
+      "tools": [
+        "markdown"
+      ],
+      "template_body": "# {项目名称}\n{一句话描述}\n## 安装\n## 快速开始\n## 文档\n## 贡献指南\n## 许可证",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.project_docs",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "README",
+        "文档",
+        "开源"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_085",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "故障复盘报告模板",
+      "content": "线上故障复盘标准模板，包含时间线、影响范围、根本原因、改进措施和责任分配。",
+      "steps": [
+        "填写故障信息"
+      ],
+      "tools": [
+        "document_writer"
+      ],
+      "template_body": "# 故障复盘报告\n**故障编号**: \n**发生时间**: \n**恢复时间**: \n**影响范围**: \n## 时间线\n## 根本原因\n## 改进措施\n| 措施 | 负责人 | 截止日期 |\n|------|--------|----------|\n## 经验教训",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.postmortem",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "复盘",
+        "故障",
+        "模板"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_086",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "测试用例模板",
+      "content": "标准化测试用例格式，包含用例 ID、测试标题、前置条件、测试步骤和预期结果。",
+      "steps": [
+        "填写测试信息"
+      ],
+      "tools": [
+        "test_runner"
+      ],
+      "template_body": "| Test ID | {编号} |\n| Title | {标题} |\n| Precondition | {前置条件} |\n| Steps | 1. {步骤1} 2. {步骤2} |\n| Expected | {预期结果} |\n| Priority | {P0/P1/P2} |",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.testing",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "测试",
+        "用例",
+        "模板"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_087",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "休假交接邮件模板",
+      "content": "员工休假前发给团队的交接邮件模板，包含未完成任务、紧急联系方式和交接人。",
+      "steps": [
+        "填写交接信息"
+      ],
+      "tools": [
+        "email"
+      ],
+      "template_body": "主题：{姓名} 休假交接 ({日期}～{日期})\n大家好，我将于 {日期} 至 {日期} 休假，期间事项已交接如下：\n## 未完成任务\n| 任务 | 当前状态 | 交接人 | 备注 |\n|------|----------|--------|------|\n## 紧急联系方式\n{电话/微信}\n谢谢！",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.handover",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "休假",
+        "交接",
+        "邮件"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_088",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "数据备份脚本模板",
+      "content": "通用数据备份 shell 脚本模板，支持压缩、加密、上传和保留策略。",
+      "steps": [
+        "替换备份目标和路径"
+      ],
+      "tools": [
+        "bash",
+        "rsync",
+        "gpg"
+      ],
+      "template_body": "#!/bin/bash\nBACKUP_DIR=\"/path/to/backup\"\nBACKUP_NAME=\"backup_$(date +%Y%m%d_%H%M%S)\"\ntar -czf \"$BACKUP_DIR/$BACKUP_NAME.tar.gz\" /target/dir\ngpg --encrypt --recipient {recipient_key} \"$BACKUP_DIR/$BACKUP_NAME.tar.gz\"\nrsync -avz \"$BACKUP_DIR/$BACKUP_NAME.tar.gz.gpg\" remote:/backup/\nfind \"$BACKUP_DIR\" -name \"*.tar.gz.gpg\" -mtime +{retention_days} -delete",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.backup",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "备份",
+        "Shell",
+        "加密"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_089",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "系统监控告警规则模板",
+      "content": "Prometheus 告警规则 YAML 模板，包含 CPU、内存、磁盘和 HTTP 错误率告警。",
+      "steps": [
+        "调整阈值和环境"
+      ],
+      "tools": [
+        "prometheus",
+        "alertmanager"
+      ],
+      "template_body": "groups:\n- name: system_alerts\n  rules:\n  - alert: HighCPU\n    expr: cpu_usage_percent > {cpu_threshold}\n    for: 5m\n    labels: {severity: warning}\n    annotations: {summary: \"CPU使用率超过阈值\"}\n  - alert: HighMemory\n    expr: mem_usage_percent > {mem_threshold}\n    for: 5m\n  - alert: DiskFull\n    expr: disk_usage_percent > {disk_threshold}\n    for: 1m",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.monitoring",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "监控",
+        "告警",
+        "Prometheus"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_090",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "活动策划方案模板",
+      "content": "公司内部活动策划标准文档模板，包含活动目标、参与者、预算、日程和物料清单。",
+      "steps": [
+        "填写活动信息"
+      ],
+      "tools": [
+        "document_writer"
+      ],
+      "template_body": "# {活动名称} 策划方案\n## 活动目标\n## 参与人员\n## 时间地点\n## 日程安排\n| 时间 | 环节 | 负责人 |\n|------|------|--------|\n## 预算\n| 项目 | 金额 |\n|------|------|\n## 物料清单\n- [ ]",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.event_planning",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "活动",
+        "策划",
+        "模板"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_091",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "数据库表结构设计模板",
+      "content": "数据库表结构设计文档模板，包含字段定义、索引设计和迁移 SQL。",
+      "steps": [
+        "填写表结构"
+      ],
+      "tools": [
+        "db_migration"
+      ],
+      "template_body": "## 表名: {table_name}\n### 字段\n| 字段 | 类型 | 约束 | 说明 |\n|------|------|------|------|\n| id | BIGINT | PK AUTO_INCREMENT | 主键 |\n### 索引\n| 索引名 | 字段 | 类型 |\n|--------|------|------|\n### 迁移 SQL\n```sql\n```",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.db_design",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "数据库",
+        "设计",
+        "模板"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_092",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "REST API 错误响应模板",
+      "content": "统一的 API 错误响应 JSON 格式模板，包含错误码、消息和请求 ID。",
+      "steps": [
+        "按模板返回"
+      ],
+      "tools": [
+        "openapi"
+      ],
+      "template_body": "{\"error\": {\"code\": \"{ERROR_CODE}\", \"message\": \"{用户友好的错误描述}\", \"request_id\": \"{UUIDv4}\", \"timestamp\": \"{ISO8601}\"}}",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.api_standard",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "API",
+        "错误",
+        "规范"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_093",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "技术分享 PPT 模板",
+      "content": "内部技术分享的大纲模板，包含背景、核心技术、实践演示和 Q&A。",
+      "steps": [
+        "按大纲准备内容"
+      ],
+      "tools": [
+        "presentation"
+      ],
+      "template_body": "# {分享主题}\n## 背景与动机\n## 核心技术\n### 关键概念\n### 架构设计\n## 实践演示\n### Demo 1: \n### Demo 2: \n## 踩坑与经验\n## Q&A",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.tech_sharing",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "分享",
+        "PPT",
+        "模板"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_094",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "Nginx 站点配置模板",
+      "content": "标准 Nginx 虚拟主机配置模板，包含 SSL、反向代理、静态资源缓存和 Gzip。",
+      "steps": [
+        "替换域名和代理地址"
+      ],
+      "tools": [
+        "nginx"
+      ],
+      "template_body": "server {\n    listen 443 ssl http2;\n    server_name {domain};\n    ssl_certificate /etc/ssl/{domain}.pem;\n    ssl_certificate_key /etc/ssl/{domain}.key;\n    location / {\n        proxy_pass http://{backend};\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n    }\n    location /static/ {\n        root /var/www;\n        expires 30d;\n    }\n}",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.nginx_config",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Nginx",
+        "配置",
+        "SSL"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_095",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "GitLab CI 配置模板",
+      "content": "标准 .gitlab-ci.yml 模板，包含 build、test、deploy 三阶段和缓存配置。",
+      "steps": [
+        "按项目修改"
+      ],
+      "tools": [
+        "gitlab",
+        "docker"
+      ],
+      "template_body": "stages:\n  - build\n  - test\n  - deploy\ncache:\n  key: ${CI_COMMIT_REF_SLUG}\n  paths:\n    - .pip-cache/\nbuild:\n  stage: build\n  script: docker build -t {image} .\ntest:\n  stage: test\n  script: pytest tests/\ndeploy:\n  stage: deploy\n  script: docker push {image}\n  only: [main]",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.ci_config",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "CI",
+        "GitLab",
+        "模板"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_096",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "需求文档（PRD）模板",
+      "content": "产品需求文档模板，包含用户故事、功能描述、交互原型链接和验收标准。",
+      "steps": [
+        "填写需求详情"
+      ],
+      "tools": [
+        "document_writer"
+      ],
+      "template_body": "# {需求名称} PRD\n## 用户故事\n作为 {角色}，我想要 {功能}，以便 {价值}。\n## 功能描述\n### 核心流程\n### 交互说明\n## 验收标准\n- [ ] \n- [ ] \n## 优先级\n{P0/P1/P2/P3}",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.prd",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "PRD",
+        "需求",
+        "文档"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_097",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "kubectl 部署 YAML 模板",
+      "content": "标准 Kubernetes Deployment + Service YAML 模板，包含资源限制、健康检查和滚动更新策略。",
+      "steps": [
+        "替换服务名和镜像"
+      ],
+      "tools": [
+        "kubectl"
+      ],
+      "template_body": "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: {service-name}}\nspec:\n  replicas: {count}\n  selector: {matchLabels: {app: {service-name}}}\n  template:\n    metadata: {labels: {app: {service-name}}}\n    spec:\n      containers:\n      - name: {service-name}\n        image: {image}:{tag}\n        ports: [{containerPort: {port}}]\n        resources:\n          requests: {cpu: 100m, memory: 128Mi}\n          limits: {cpu: 500m, memory: 512Mi}\n---\napiVersion: v1\nkind: Service\nmetadata: {name: {service-name}}\nspec:\n  type: ClusterIP\n  ports: [{port: 80, targetPort: {port}}]\n  selector: {app: {service-name}}",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.k8s_deploy",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Kubernetes",
+        "部署",
+        "YAML"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_098",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "日志收集 Filebeat 配置模板",
+      "content": "Filebeat 标准配置模板，将应用日志收集到 Elasticsearch 或 Logstash。",
+      "steps": [
+        "修改日志路径"
+      ],
+      "tools": [
+        "filebeat",
+        "elasticsearch"
+      ],
+      "template_body": "filebeat.inputs:\n- type: log\n  enabled: true\n  paths: [{log_path}]\n  multiline.pattern: '^\\d{4}-\\d{2}-\\d{2}'\n  multiline.negate: true\n  multiline.match: after\noutput.elasticsearch:\n  hosts: [{es_hosts}]\n  index: \"{index_name}-%{+yyyy.MM.dd}\"\nsetup.template.name: \"{index_name}\"\nsetup.template.pattern: \"{index_name}-*\" ",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.log_collection",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Filebeat",
+        "日志",
+        "Elasticsearch"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_099",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "项目排期甘特图模板",
+      "content": "甘特图模板，按阶段列出任务、负责人、开始和结束日期及依赖关系。",
+      "steps": [
+        "填写任务排期"
+      ],
+      "tools": [
+        "gantt_chart",
+        "spreadsheet"
+      ],
+      "template_body": "| 阶段 | 任务 | 负责人 | 开始 | 结束 | 依赖 |\n|------|------|--------|------|------|------|\n| 需求 | | | | | |\n| 设计 | | | | | |\n| 开发 | | | | | |\n| 测试 | | | | | |\n| 发布 | | | | | |",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.project_planning",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "甘特图",
+        "排期",
+        "项目管理"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_100",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "SSH 配置文件模板",
+      "content": "SSH config 标准配置模板，别名访问不同环境服务器，支持跳板机代理。",
+      "steps": [
+        "替换服务器地址"
+      ],
+      "tools": [
+        "ssh"
+      ],
+      "template_body": "Host {alias}-dev\n    HostName {dev_ip}\n    User {username}\n    IdentityFile ~/.ssh/id_ed25519\n\nHost {alias}-staging\n    HostName {staging_ip}\n    User {username}\n    ProxyJump {bastion_host}\n\nHost {alias}-prod\n    HostName {prod_ip}\n    User {username}\n    ProxyJump {bastion_host}\n    StrictHostKeyChecking yes",
+      "scope": {
+        "scene": "system",
+        "task_type": "sys.ssh_config",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "SSH",
+        "配置",
+        "跳板机"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_101",
+      "user_id": "user_002",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "日报自动汇总流程",
+      "content": "收集团队成员每日工作记录，自动汇总为日报并识别风险项。",
+      "steps": [
+        "收集成员日报",
+        "提取关键工作项",
+        "汇总为团队日报"
+      ],
+      "tools": [
+        "data_collector",
+        "text_summarizer"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.daily_report",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "日报",
+        "汇总",
+        "user_002"
+      ],
+      "confidence": 0.85
+    },
+    {
+      "id": "know_dev_102",
+      "user_id": "user_002",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "项目周报模板",
+      "content": "项目周报标准 Markdown 模板（user_002的自定义版本，包含额外的资源统计区块）。",
+      "steps": [
+        "填写本周进展"
+      ],
+      "tools": [
+        "document_writer"
+      ],
+      "template_body": "# 项目周报\n## 本周进展\n## 下周计划\n## 资源使用",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.weekly_report",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "周报",
+        "模板",
+        "user_002"
+      ],
+      "confidence": 0.88
+    },
+    {
+      "id": "know_dev_103",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "代码评审流程",
+      "content": "开发者提交 Pull Request 后评审、修改、通过后合并到主分支并触发 CI（project_b 简化版）。",
+      "steps": [
+        "提交 PR",
+        "reviewer 评审",
+        "作者修改",
+        "approve",
+        "合并"
+      ],
+      "tools": [
+        "git",
+        "code_review",
+        "ci_runner"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.code_review",
+        "app": "agent"
+      },
+      "project_id": "project_b",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "代码评审",
+        "PR",
+        "project_b"
+      ],
+      "confidence": 0.85
+    },
+    {
+      "id": "know_dev_104",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "case",
+      "name": "project_b 某次 Django 升级的兼容性修复",
+      "content": "project_b 从 Django 3.2 升级到 4.2 遇到中间件不兼容问题，逐个修复。",
+      "steps": [
+        "分析 changelog",
+        "修改中间件",
+        "逐项测试",
+        "全量回归"
+      ],
+      "tools": [
+        "git",
+        "test_runner"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.upgrade",
+        "app": "agent"
+      },
+      "project_id": "project_b",
+      "status": "active",
+      "version": 1,
+      "tags": [
+        "Django",
+        "升级",
+        "project_b"
+      ],
+      "confidence": 0.85
+    },
+    {
+      "id": "know_dev_105",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "旧版日报汇总流程（已归档）",
+      "content": "旧版日报流程（已被新版替代），通过手动表格收集日报。",
+      "steps": [
+        "手动收表格",
+        "粘贴汇总"
+      ],
+      "tools": [
+        "spreadsheet"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.daily_report",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "archived",
+      "version": 1,
+      "tags": [
+        "日报",
+        "旧版",
+        "已归档"
+      ],
+      "confidence": 0.5
+    },
+    {
+      "id": "know_dev_106",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "废弃的邮件签名工具流程（已删除）",
+      "content": "旧版邮件签名生成工具流程，已废弃删除。",
+      "steps": [
+        "登录旧工具",
+        "选择模板",
+        "生成签名"
+      ],
+      "tools": [
+        "old_tool"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "office",
+        "task_type": "office.email_signature",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "deleted",
+      "version": 1,
+      "tags": [
+        "邮件签名",
+        "已删除"
+      ],
+      "confidence": 0.3
+    },
+    {
+      "id": "know_dev_107",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "workflow",
+      "name": "旧版代码评审流程",
+      "content": "旧版评审流程（被新版替代），仅支持单 reviewer。",
+      "steps": [
+        "提交 PR",
+        "单个 reviewer 评审",
+        "合并"
+      ],
+      "tools": [
+        "git"
+      ],
+      "template_body": "",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.code_review",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "replaced",
+      "version": 1,
+      "tags": [
+        "代码评审",
+        "旧版"
+      ],
+      "confidence": 0.4,
+      "replaced_by": "know_dev_013"
+    },
+    {
+      "id": "know_dev_108",
+      "user_id": "user_001",
+      "memory_type": "knowledge",
+      "knowledge_type": "template",
+      "name": "旧版 API 文档模板（已替换）",
+      "content": "旧版 API 文档模板，缺少错误码和请求示例。",
+      "steps": [
+        "填写接口信息"
+      ],
+      "tools": [
+        "document_writer"
+      ],
+      "template_body": "## {API名称}\n**URL**: `/{path}`\n### 参数\n| 参数 | 说明 |\n",
+      "scope": {
+        "scene": "development",
+        "task_type": "dev.api_documentation",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "status": "replaced",
+      "version": 1,
+      "tags": [
+        "API",
+        "旧版",
+        "已替换"
+      ],
+      "confidence": 0.4,
+      "replaced_by": "know_dev_075"
+    }
+  ],
+  "queries": [
+    {
+      "query_id": "q_dev_001",
+      "user_id": "user_001",
+      "query_text": "生成这周的项目周报",
+      "context": {
+        "scene": "office",
+        "task_type": "office.weekly_report",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "exact",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_001": 3,
+        "know_dev_071": 2
+      },
+      "notes": "know_dev_001 是可以直接执行的周报生成流程"
+    },
+    {
+      "query_id": "q_dev_002",
+      "user_id": "user_001",
+      "query_text": "给我看一下代码评审的模板",
+      "context": {
+        "scene": "development",
+        "task_type": "dev.code_review",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "exact",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_074": 3,
+        "know_dev_013": 1
+      },
+      "notes": "know_dev_074 是代码评审 checklist 模板；know_dev_013 是流程非模板"
+    },
+    {
+      "query_id": "q_dev_003",
+      "user_id": "user_001",
+      "query_text": "帮我做服务器初始化",
+      "context": {
+        "scene": "system",
+        "task_type": "sys.server_setup",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "exact",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_025": 3,
+        "know_dev_088": 1
+      },
+      "notes": "know_dev_025 是服务器初始化流程"
+    },
+    {
+      "query_id": "q_dev_004",
+      "user_id": "user_001",
+      "query_text": "给我一个周报的 Markdown 模板",
+      "context": {
+        "scene": "office",
+        "task_type": "office.weekly_report",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "exact",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_071": 3,
+        "know_dev_001": 1
+      },
+      "notes": "know_dev_071 是周报 Markdown 模板"
+    },
+    {
+      "query_id": "q_dev_005",
+      "user_id": "user_001",
+      "query_text": "帮我写一个 Python 项目的 Dockerfile",
+      "context": {
+        "scene": "system",
+        "task_type": "sys.container_build",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "exact",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_079": 3,
+        "know_dev_029": 1
+      },
+      "notes": "know_dev_079 是 Dockerfile 模板; know_dev_029 是容器编排流程非 Dockerfile"
+    },
+    {
+      "query_id": "q_dev_006",
+      "user_id": "user_001",
+      "query_text": "这周干了什么，帮我整理一下发给领导",
+      "context": {
+        "scene": "office",
+        "task_type": "office.weekly_report",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "semantic",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_001": 3,
+        "know_dev_071": 2,
+        "know_dev_005": 1
+      },
+      "notes": "语义上等同于生成并发送周报"
+    },
+    {
+      "query_id": "q_dev_007",
+      "user_id": "user_001",
+      "query_text": "新来一个同事，帮他搭好开发环境",
+      "context": {
+        "scene": "system",
+        "task_type": "sys.server_setup",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "semantic",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_025": 3,
+        "know_dev_048": 2,
+        "know_dev_029": 1
+      },
+      "notes": "等同于服务器初始化 + 本地环境搭建"
+    },
+    {
+      "query_id": "q_dev_008",
+      "user_id": "user_001",
+      "query_text": "上线的代码出 bug 了，怎么快速修了发出去",
+      "context": {
+        "scene": "development",
+        "task_type": "dev.bugfix",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "semantic",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_015": 3,
+        "know_dev_013": 1
+      },
+      "notes": "等同于 bug 修复发布流程"
+    },
+    {
+      "query_id": "q_dev_009",
+      "user_id": "user_001",
+      "query_text": "我要出差两天，帮我把酒店和车票都定了",
+      "context": {
+        "scene": "personal",
+        "task_type": "personal.travel_planning",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "semantic",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_035": 3
+      },
+      "notes": "等同于旅行行程规划流程"
+    },
+    {
+      "query_id": "q_dev_010",
+      "user_id": "user_001",
+      "query_text": "网站要做 HTTPS，帮我把证书申请好配置好",
+      "context": {
+        "scene": "system",
+        "task_type": "sys.ssl_certificate",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "semantic",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_027": 3,
+        "know_dev_094": 1,
+        "know_dev_088": 1
+      },
+      "notes": "等同于 SSL 证书申请与续签流程"
+    },
+    {
+      "query_id": "q_dev_011",
+      "user_id": "user_001",
+      "query_text": "老板让我做一个下个季度的目标计划",
+      "context": {
+        "scene": "office",
+        "task_type": "office.okr_planning",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "semantic",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_007": 3,
+        "know_dev_096": 1
+      },
+      "notes": "等同于季度 OKR 制定流程"
+    },
+    {
+      "query_id": "q_dev_012",
+      "user_id": "user_001",
+      "query_text": "公司代码规范怎么配？提交的时候自动帮我检查",
+      "context": {
+        "scene": "development",
+        "task_type": "dev.code_linting",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "semantic",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_024": 3,
+        "know_dev_082": 1
+      },
+      "notes": "等同于代码规范检查流程"
+    },
+    {
+      "query_id": "q_dev_013",
+      "user_id": "user_001",
+      "query_text": "数据库表结构怎么设计，给我一个标准格式",
+      "context": {
+        "scene": "development",
+        "task_type": "dev.db_design",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "semantic",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_091": 3,
+        "know_dev_017": 1
+      },
+      "notes": "等同于数据库表结构设计模板"
+    },
+    {
+      "query_id": "q_dev_014",
+      "user_id": "user_001",
+      "query_text": "上次有个故障，是怎么恢复的，我想写一个复盘报告",
+      "context": {
+        "scene": "development",
+        "task_type": "dev.postmortem",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "semantic",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_085": 3,
+        "know_dev_043": 2
+      },
+      "notes": "know_dev_085 是复盘报告模板; know_dev_043 是一个具体故障案例"
+    },
+    {
+      "query_id": "q_dev_015",
+      "user_id": "user_001",
+      "query_text": "怎么用 docker 把多个服务一起跑起来",
+      "context": {
+        "scene": "system",
+        "task_type": "sys.container_deploy",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "semantic",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_029": 3,
+        "know_dev_048": 2,
+        "know_dev_079": 1
+      },
+      "notes": "等同于容器编排部署流程"
+    },
+    {
+      "query_id": "q_dev_016",
+      "user_id": "user_001",
+      "query_text": "帮我配置防火墙，屏蔽外网的 SSH 端口",
+      "context": {
+        "scene": "system",
+        "task_type": "sys.firewall",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "hard-negative",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_080": 3,
+        "know_dev_025": 0
+      },
+      "notes": "know_dev_080 是防火墙规则模板; know_dev_025 包含 SSH 配置但非防火墙主题"
+    },
+    {
+      "query_id": "q_dev_017",
+      "user_id": "user_001",
+      "query_text": "给团队发一个公告，通知下周的培训时间",
+      "context": {
+        "scene": "communication",
+        "task_type": "comm.announcement",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "hard-negative",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_038": 3,
+        "know_dev_011": 1,
+        "know_dev_097": 0
+      },
+      "notes": "know_dev_038 是团队公告发布流程; know_dev_011 是培训组织流程（非公告）; know_dev_097 是 user_002 的日报流程（干扰）"
+    },
+    {
+      "query_id": "q_dev_018",
+      "user_id": "user_001",
+      "query_text": "我的年终总结怎么写，找一下去年的模板",
+      "context": {
+        "scene": "office",
+        "task_type": "office.weekly_report",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "hard-negative",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_071": 1,
+        "know_dev_050": 1
+      },
+      "notes": "周报模板与年终总结主题相近但不能直接用；会议纪要模板词面相似但完全不同"
+    },
+    {
+      "query_id": "q_dev_019",
+      "user_id": "user_001",
+      "query_text": "怎么排查系统被入侵了",
+      "context": {
+        "scene": "system",
+        "task_type": "sys.security_incident",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "hard-negative",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_045": 3,
+        "know_dev_030": 2,
+        "know_dev_039": 0
+      },
+      "notes": "know_dev_045 是被入侵具体案例; know_dev_030 是安全审计流程; know_dev_039 是已删除的旧签名工具（干扰项）"
+    },
+    {
+      "query_id": "q_dev_020",
+      "user_id": "user_001",
+      "query_text": "我要合并分支，帮我解决一下 conflict",
+      "context": {
+        "scene": "development",
+        "task_type": "dev.merge_conflict",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "hard-negative",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_056": 3,
+        "know_dev_013": 0,
+        "know_dev_023": 0
+      },
+      "notes": "know_dev_056 是合并冲突案例; know_dev_013 是代码评审流程（词面相似但不等同）; know_dev_023 是代码规范流程（干扰）"
+    },
+    {
+      "query_id": "q_dev_021",
+      "user_id": "user_001",
+      "query_text": "review 一下我的 Pull Request 代码",
+      "context": {
+        "scene": "development",
+        "task_type": "dev.code_review",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "hard-negative",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_013": 3,
+        "know_dev_074": 2,
+        "know_dev_092": 0,
+        "know_dev_094": 0
+      },
+      "notes": "know_dev_092 是 project_b 的代码评审（不同项目）; know_dev_094 是旧版已替代的评审流程（status=replaced）"
+    },
+    {
+      "query_id": "q_dev_022",
+      "user_id": "user_001",
+      "query_text": "帮我生成一份 API 的接口文档",
+      "context": {
+        "scene": "development",
+        "task_type": "dev.api_documentation",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "hard-negative",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_075": 3,
+        "know_dev_016": 1,
+        "know_dev_096": 0
+      },
+      "notes": "know_dev_075 是 API 文档模板; know_dev_096 是旧版已替换的 API 文档模板（应被过滤）"
+    },
+    {
+      "query_id": "q_dev_023",
+      "user_id": "user_001",
+      "query_text": "帮我做一个备份方案",
+      "context": {
+        "scene": "system",
+        "task_type": "sys.backup_restore",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "cross-domain",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_028": 3,
+        "know_dev_087": 2,
+        "know_dev_078": 0
+      },
+      "notes": "know_dev_028 是备份流程; know_dev_087 是备份脚本模板; know_dev_078 是日志分析报告模板（同属 system 但非备份主题）"
+    },
+    {
+      "query_id": "q_dev_024",
+      "user_id": "user_001",
+      "query_text": "组织一个团队分享的活动",
+      "context": {
+        "scene": "office",
+        "task_type": "office.tech_sharing",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "cross-domain",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_092": 3,
+        "know_dev_090": 2,
+        "know_dev_057": 1
+      },
+      "notes": "know_dev_092 是技术分享模板; know_dev_090 是活动策划模板; know_dev_057 是团建活动案例"
+    },
+    {
+      "query_id": "q_dev_025",
+      "user_id": "user_001",
+      "query_text": "性能瓶颈在哪里，怎么优化",
+      "context": {
+        "scene": "development",
+        "task_type": "dev.performance_test",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "cross-domain",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_018": 3,
+        "know_dev_039": 2,
+        "know_dev_025": 1,
+        "know_dev_045": 1
+      },
+      "notes": "'性能'在 dev 和 system 两个 scene 都有; know_dev_018 是压测流程; know_dev_039 是 Redis 性能案例; know_dev_025 是系统诊断; know_dev_045 是安全非性能"
+    },
+    {
+      "query_id": "q_dev_026",
+      "user_id": "user_001",
+      "query_text": "帮我部署上线，把新版本推到生产环境",
+      "context": {
+        "scene": "development",
+        "task_type": "dev.deployment",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "cross-domain",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_014": 3,
+        "know_dev_077": 2,
+        "know_dev_029": 1,
+        "know_dev_095": 1
+      },
+      "notes": "know_dev_014 是部署流程; '部署'在不同场景下有不同含义"
+    },
+    {
+      "query_id": "q_dev_027",
+      "user_id": "user_001",
+      "query_text": "怎么管理我的日常开支",
+      "context": {
+        "scene": "personal",
+        "task_type": "personal.finance",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "cross-domain",
+      "language": "zh-CN",
+      "relevance": {
+        "know_dev_036": 3,
+        "know_dev_009": 0,
+        "know_dev_033": 0
+      },
+      "notes": "know_dev_036 是个人财务流程; know_dev_009 是费用报销（office 场景）; know_dev_033 是月末关账（finance 场景）"
+    },
+    {
+      "query_id": "q_dev_028",
+      "user_id": "user_001",
+      "query_text": "如何在麒麟操作系统上安装 Hadoop 分布式集群",
+      "context": {
+        "scene": "system",
+        "task_type": "sys.bigdata_setup",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "no-answer",
+      "language": "zh-CN",
+      "relevance": {},
+      "notes": "数据集中没有 Hadoop 相关记忆"
+    },
+    {
+      "query_id": "q_dev_029",
+      "user_id": "user_001",
+      "query_text": "帮我写一个 iOS 的 SwiftUI 动画效果",
+      "context": {
+        "scene": "development",
+        "task_type": "dev.ios_app",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "no-answer",
+      "language": "zh-CN",
+      "relevance": {},
+      "notes": "数据集中没有 iOS/SwiftUI 相关记忆"
+    },
+    {
+      "query_id": "q_dev_030",
+      "user_id": "user_001",
+      "query_text": "HR 系统的入职流程怎么走",
+      "context": {
+        "scene": "office",
+        "task_type": "office.onboarding",
+        "app": "agent"
+      },
+      "project_id": "project_a",
+      "memory_types": [
+        "knowledge"
+      ],
+      "top_k": 5,
+      "difficulty": "no-answer",
+      "language": "zh-CN",
+      "relevance": {},
+      "notes": "数据集中没有 HR 入职相关记忆——只有请假和报销流程"
+    }
+  ]
+}

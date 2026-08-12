@@ -18,15 +18,18 @@ applying it, and equally safe to drop.
    with ``TypeError: Object of type _ImmutableMapping is not JSON serializable``.
    ``EventRepository._to_row`` now projects via ``model_dump(mode="json")``, so
    this patch is only needed for unfixed versions.
-3. ``ensure_safety_keys`` — backwards-compatible wrapper around MemoryHub's
-   persistent local safety-key store.  New startup code provisions keys in the
-   core application lifecycle and does not need this wrapper.
+3. ``ensure_safety_keys`` — auto-generates the 32-byte Base64 keys the safety
+   gate requires, so the service boots without manual key setup. In dev mode
+   the generated keys are persisted to a file and reused across restarts,
+   otherwise the HMAC audit chain breaks on the next boot (``audit.head_invalid``).
 """
 
 from __future__ import annotations
 
 import base64
 import os
+import secrets
+from pathlib import Path
 
 
 def apply_re_parser_shim() -> None:
@@ -67,27 +70,61 @@ def patch_event_repository() -> None:
     EventRepository.batch_save = patched_batch
 
 
-def ensure_safety_keys(config=None):
-    """Provision persistent keys for older callers of this helper.
+_KEY_NAMES = ("MEMORYHUB_AUDIT_HMAC_KEY", "MEMORYHUB_QUARANTINE_KEY", "MEMORYHUB_USER_RULE_KEY")
 
-    ``config`` should be supplied so the key file is colocated with that
-    deployment's database.  The no-argument form retains the standard
-    ``data/memoryhub.db`` default without creating process-temporary secrets.
+
+def load_or_create_keys(key_file: str | Path) -> dict[str, str]:
+    """Return {env_name: base64key}, loading from ``key_file`` or generating once.
+
+    Dev mode: keys must stay stable across restarts so the on-disk audit chain
+    (HMAC-signed head/records) keeps verifying. Never reuse across environments.
     """
+    path = Path(key_file)
+    keys: dict[str, str] = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            name, _, value = line.partition("=")
+            name = name.strip()
+            value = value.strip().strip('"').strip("'")
+            if name in _KEY_NAMES and value:
+                keys[name] = value
+    missing = [name for name in _KEY_NAMES if name not in keys]
+    if missing:
+        for name in missing:
+            keys[name] = base64.b64encode(secrets.token_bytes(32)).decode()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        path.write_text(
+            "".join(f"{name}={keys[name]}\n" for name in _KEY_NAMES),
+            encoding="utf-8",
+        )
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        print(f"[memoryhub] 已生成并持久化安全密钥: {path}", flush=True)
+    else:
+        print(f"[memoryhub] 复用已持久化安全密钥: {path}", flush=True)
+    return keys
 
-    if config is None:
-        from memoryhub.config import AppConfig
 
-        config = AppConfig()
-    from memoryhub.core.safety.key_store import provision_safety_keys
-
-    resolution = provision_safety_keys(config)
-    env_names = {
-        "audit_hmac": config.safety.audit.hmac_key_env,
-        "quarantine": config.safety.quarantine.encryption_key_env,
-        "user_rule": config.safety.user_rules.encryption_key_env,
-    }
-    for name, env_name in env_names.items():
-        if not os.environ.get(env_name, "").strip():
-            os.environ[env_name] = base64.b64encode(resolution.key(name)).decode("ascii")
-    return resolution
+def ensure_safety_keys(key_file: str | Path | None = None) -> dict[str, str]:
+    """Auto-generate (once) the safety keys and export them to the environment."""
+    keys = load_or_create_keys(key_file) if key_file else {n: os.environ.get(n, "") for n in _KEY_NAMES}
+    for name in _KEY_NAMES:
+        value = os.environ.get(name, "").strip() or keys.get(name, "")
+        if not value:
+            value = base64.b64encode(secrets.token_bytes(32)).decode()
+            print(
+                f"[memoryhub] {name} 未设置，已自动生成临时 32 字节密钥。"
+                "生产环境请通过密钥服务注入真实密钥。",
+                flush=True,
+            )
+        os.environ[name] = value
+    return {name: os.environ[name] for name in _KEY_NAMES}

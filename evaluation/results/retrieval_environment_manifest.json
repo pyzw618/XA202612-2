@@ -1,0 +1,83 @@
+{
+  "timestamp": "2026-08-11T08:21:25Z",
+  "platform": {
+    "os": "Linux 6.6.0-63-generic",
+    "cpu": "x86_64 (x86_64)",
+    "python": "3.12.3"
+  },
+  "sdk_mode": "mock",
+  "embedding_dim": 768,
+  "checks": [
+    {
+      "check": "平台: Linux",
+      "pass": true,
+      "detail": "Linux 6.6.0-63-generic"
+    },
+    {
+      "check": "CPU 架构",
+      "pass": true,
+      "detail": "x86_64 (x86_64)"
+    },
+    {
+      "check": "系统内存",
+      "pass": true,
+      "detail": "3882 MB"
+    },
+    {
+      "check": "Python 版本",
+      "pass": true,
+      "detail": "3.12.3"
+    },
+    {
+      "check": "Embedding mock SDK (.so)",
+      "pass": true,
+      "detail": "存在且可加载: /home/ueser/桌面/XA202612-2/third_party/kylin-mock/build/libkylin-coreai-embedding-mock.so"
+    },
+    {
+      "check": "Vector Engine mock SDK (.so)",
+      "pass": true,
+      "detail": "存在且可加载: /home/ueser/桌面/XA202612-2/third_party/kylin-mock/build/libkysdk-vector-engine-client-capi-mock.so"
+    },
+    {
+      "check": "KylinEmbeddingClient(use_mock=True) embed 768维",
+      "pass": true,
+      "detail": "dim=768"
+    },
+    {
+      "check": "依赖: fastapi",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "依赖: uvicorn",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "依赖: sqlalchemy",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "依赖: pydantic",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "依赖: faiss",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "依赖: numpy",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "依赖: jieba",
+      "pass": true,
+      "detail": ""
+    }
+  ],
+  "overall_pass": true
+}

@@ -1,0 +1,41 @@
+{
+  "environment": {
+    "base_url": "http://127.0.0.1:8003",
+    "dataset": "evaluation/datasets/memoryhub_retrieval_latency_v1.json",
+    "phase": "cold",
+    "timestamp": "2026-08-11T08:30:13.910081+00:00",
+    "git_commit": "06d95bc"
+  },
+  "phases": {
+    "cold_c1": {
+      "count": 150,
+      "success": 150,
+      "errors": 0,
+      "error_rate": 0.0,
+      "p50_ms": 106.08,
+      "p95_ms": 115.38,
+      "p99_ms": 120.99,
+      "max_ms": 124.77,
+      "mean_ms": 74.1,
+      "server_p50_ms": 100.83,
+      "server_p95_ms": 103.03,
+      "qps": 13.49,
+      "wall_clock_s": 11.13
+    },
+    "cold_c4": {
+      "count": 150,
+      "success": 150,
+      "errors": 0,
+      "error_rate": 0.0,
+      "p50_ms": 16.34,
+      "p95_ms": 38.46,
+      "p99_ms": 44.88,
+      "max_ms": 45.48,
+      "mean_ms": 19.14,
+      "server_p50_ms": 100.83,
+      "server_p95_ms": 103.03,
+      "qps": 52.24,
+      "wall_clock_s": 0.73
+    }
+  }
+}

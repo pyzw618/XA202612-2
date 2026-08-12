@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "memoryhub_retrieval_dataset_schema_v1",
+  "title": "MemoryHub 检索评测数据集 Schema",
+  "description": "冻结评测数据集的字段、枚举和结构契约，用于自动校验数据完整性",
+  "version": "1.0.0",
+  "type": "object",
+  "required": ["metadata", "memories", "queries"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["dataset_id", "version", "split"],
+      "properties": {
+        "dataset_id": {"type": "string", "pattern": "^memoryhub-knowledge-retrieval-v[0-9]+$"},
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "created_at": {"type": "string", "format": "date-time"},
+        "annotation_guideline_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$"},
+        "split": {"type": "string", "enum": ["dev", "test", "latency"]},
+        "description": {"type": "string"},
+        "generator_git_commit": {"type": "string"},
+        "generator_random_seed": {"type": "integer"},
+        "checkpoint_sha256": {"type": "string"}
+      }
+    },
+    "memories": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id", "user_id", "memory_type", "knowledge_type",
+          "name", "content", "scope", "project_id", "status"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^know_[a-z0-9_]+$"},
+          "user_id": {"type": "string", "minLength": 1},
+          "memory_type": {"type": "string", "const": "knowledge"},
+          "knowledge_type": {"type": "string", "enum": ["workflow", "case", "template"]},
+          "name": {"type": "string", "minLength": 1, "maxLength": 256},
+          "content": {"type": "string", "minLength": 1, "maxLength": 4096},
+          "steps": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "description": "workflow类型至少2个步骤，case/template至少1个"
+          },
+          "tools": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "template_body": {"type": "string", "description": "template类型必填"},
+          "scope": {
+            "type": "object",
+            "required": ["scene", "task_type", "app"],
+            "properties": {
+              "scene": {"type": "string", "enum": ["office", "development", "system", "personal", "communication", "finance"]},
+              "task_type": {"type": "string", "minLength": 1},
+              "app": {"type": "string", "minLength": 1}
+            }
+          },
+          "project_id": {"type": "string", "minLength": 1},
+          "status": {"type": "string", "enum": ["active", "archived", "deleted", "replaced"]},
+          "version": {"type": "integer", "minimum": 1},
+          "replaced_by": {"type": "string", "description": "被哪个版本替代（status=replaced时必填）"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"knowledge_type": {"const": "workflow"}}},
+            "then": {"properties": {"steps": {"minItems": 2}}}
+          },
+          {
+            "if": {"properties": {"knowledge_type": {"const": "template"}}},
+            "then": {"required": ["template_body"]}
+          },
+          {
+            "if": {"properties": {"status": {"const": "replaced"}}},
+            "then": {"required": ["replaced_by"]}
+          }
+        ]
+      }
+    },
+    "queries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "query_id", "user_id", "query_text", "context",
+          "project_id", "memory_types", "difficulty", "language", "relevance"
+        ],
+        "properties": {
+          "query_id": {"type": "string", "pattern": "^q_[a-z0-9_]+$"},
+          "user_id": {"type": "string", "minLength": 1},
+          "query_text": {"type": "string", "minLength": 1, "maxLength": 1024},
+          "context": {
+            "type": "object",
+            "required": ["scene", "task_type", "app"],
+            "properties": {
+              "scene": {"type": "string", "minLength": 1},
+              "task_type": {"type": "string", "minLength": 1},
+              "app": {"type": "string", "minLength": 1}
+            }
+          },
+          "project_id": {"type": "string", "minLength": 1},
+          "memory_types": {
+            "type": "array",
+            "items": {"type": "string", "enum": ["knowledge", "preference", "fact"]}
+          },
+          "top_k": {"type": "integer", "default": 5, "minimum": 1, "maximum": 50},
+          "difficulty": {"type": "string", "enum": ["exact", "semantic", "hard-negative", "cross-domain", "no-answer"]},
+          "language": {"type": "string", "enum": ["zh-CN", "en-US", "mixed"]},
+          "relevance": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 3
+            },
+            "description": "memory_id -> relevance等级(0-3)"
+          },
+          "notes": {"type": "string"},
+          "expected_by_type": {
+            "type": "object",
+            "properties": {
+              "knowledge": {"type": "array", "items": {"type": "string"}},
+              "preference": {"type": "array", "items": {"type": "string"}},
+              "fact": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        }
+      }
+    }
+  }
+}
