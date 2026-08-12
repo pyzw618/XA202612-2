@@ -271,3 +271,6 @@ step_response*.json
 .idea/
 .vscode/
 *.code-workspace
+
+# 前端重构参考源码（本地克隆，不入库）
+前端重构/代码仓库分析/

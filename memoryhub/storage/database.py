@@ -336,13 +336,23 @@ class EventRepository:
             ).all()
             return [_event_row_to_pydantic(row) for row in rows]
 
-    def get_recent(self, user_id: str, limit: int = 100) -> list[MemoryEvent]:
+    def get_recent(self, user_id: str, limit: int = 100, offset: int = 0) -> list[MemoryEvent]:
         with self.db.session() as session:
             rows = (
                 session.query(EventRow).filter(EventRow.user_id == user_id)
-                .order_by(EventRow.occurred_at.desc()).limit(limit).all()
+                .order_by(EventRow.occurred_at.desc()).offset(offset).limit(limit).all()
             )
             return [_event_row_to_pydantic(row) for row in rows]
+
+    def count(self, user_id: str) -> int:
+        """统计指定用户的事件总数（供列表分页）。"""
+        with self.db.session() as session:
+            return (
+                session.query(func.count(EventRow.event_id))
+                .filter(EventRow.user_id == user_id)
+                .scalar()
+                or 0
+            )
 
 
 def _event_row_to_pydantic(row: EventRow) -> MemoryEvent:
@@ -907,6 +917,21 @@ class ForgetRepository:
                 )
                 for r in rows
             ]
+
+    def get_by_id(self, record_id: str) -> ForgetRecord | None:
+        """按 record_id 查询单条遗忘记录（供遗忘历史详情页）。"""
+        with self.db.session() as s:
+            row = s.query(ForgetRow).filter(ForgetRow.record_id == record_id).first()
+            if row is None:
+                return None
+            return ForgetRecord(
+                record_id=row.record_id,
+                user_id=row.user_id or "",
+                instruction=row.instruction or "",
+                target_memory_ids=row.target_memory_ids or [],
+                deleted_count=row.deleted_count or 0,
+                created_at=row.created_at,
+            )
 
     def delete_memories(self, memory_ids: list[str], table: str) -> int:
         """

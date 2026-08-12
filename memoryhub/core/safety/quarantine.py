@@ -574,6 +574,45 @@ class ReviewQuarantineStore:
         except OSError:
             raise QuarantineError("quarantine.delete_failed") from None
 
+    def list_records(self) -> tuple[list[dict[str, object]], int]:
+        """返回隔离区记录的安全元数据（不解密，不包含事件正文）。
+
+        供管理后台只读展示；损坏或无法认证的记录跳过。
+        """
+        self._ensure_directory()
+        items: list[dict[str, object]] = []
+        try:
+            candidates = tuple(self._directory.glob("review_*.json"))
+        except OSError:
+            raise QuarantineError("quarantine.list_failed") from None
+        for path in candidates:
+            review_id = path.stem
+            try:
+                record, _ = self._read_record(review_id)
+            except QuarantineError:
+                continue
+            items.append(
+                {
+                    "review_id": review_id,
+                    "audit_id": record.get("audit_id"),
+                    "event_ref": record.get("event_ref"),
+                    "input_fingerprint": record.get("input_fingerprint"),
+                    "decision": record.get("decision"),
+                    "reason_codes": record.get("reason_codes"),
+                    "highest_level": record.get("highest_level"),
+                    "rule_set_version": record.get("rule_set_version"),
+                    "policy_version": record.get("policy_version"),
+                    "key_id": record.get("key_id"),
+                    "created_at": record.get("created_at"),
+                    "expires_at": record.get("expires_at"),
+                }
+            )
+        items.sort(
+            key=lambda item: str(item.get("created_at") or ""),
+            reverse=True,
+        )
+        return items, len(items)
+
     def cleanup_expired(self, *, now: datetime | None = None) -> int:
         """Authenticate and remove records beyond the configured retention window."""
 

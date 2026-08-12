@@ -303,9 +303,14 @@ def test_api_10_extraction_tasks_endpoints(client: TestClient) -> None:
 
 def test_api_11_evaluate_endpoints(client: TestClient) -> None:
     """POST /evaluate/{task_name}、GET /evaluate/reports"""
+    # preference/conflict 评测框架已定义、实现未落地 → 501 稳定错误码
     resp = client.post("/api/memory/evaluate/preference")
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["task_name"] == "preference"
+    assert resp.status_code == 501, resp.text
+    assert resp.json()["detail"]["code"] == "evaluation.not_implemented"
+
+    # retrieval 评测需要服务器端数据集路径，缺省 → 400
+    resp = client.post("/api/memory/evaluate/retrieval")
+    assert resp.status_code == 400, resp.text
 
     reports = client.get("/api/memory/evaluate/reports")
     assert reports.status_code == 200

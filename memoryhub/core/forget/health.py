@@ -111,6 +111,16 @@ class HealthCalculator:
         hits = getattr(memory, "access_count_30d", 0) or 0
         return min(1.0, hits / 5.0)
 
+    def factors_for(self, memory) -> HealthFactors:
+        """返回当前记忆的两个健康度因子（时间衰减 / 使用频率）。
+
+        供健康度看板逐条展示；兼容 PreferenceMemory / KnowledgeMemory / Fact。
+        """
+        return HealthFactors(
+            time_decay=self._time_decay_factor(memory),
+            usage_frequency=self._usage_frequency_factor(memory),
+        )
+
     def calculate_from_row(self, row) -> float:
         """
         从 SQLAlchemy Row 对象计算健康度。

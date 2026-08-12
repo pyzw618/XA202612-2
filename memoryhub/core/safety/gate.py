@@ -206,6 +206,16 @@ class SafetyWriteGate:
         self._capability_key = secrets.token_bytes(32)
         self._issuer_id = secrets.token_hex(16)
 
+    @property
+    def audit_log(self) -> SafetyAuditLog:
+        """只读访问底层审计日志（供管理后台展示/验链）。"""
+        return self._audit_log
+
+    @property
+    def quarantine(self) -> ReviewQuarantineStore | None:
+        """只读访问底层 REVIEW 隔离区（供管理后台审查）。"""
+        return self._quarantine
+
     @classmethod
     def from_config(
         cls,
