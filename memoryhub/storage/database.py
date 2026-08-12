@@ -667,24 +667,24 @@ class KnowledgeRepository:
                 return None
             return _know_row_to_pydantic(row)
 
-    def get_by_type(self, user_id: str, knowledge_type: str = "") -> list[KnowledgeMemory]:
+    def get_by_type(self, user_id: str, knowledge_type: str = "", status: str = "active") -> list[KnowledgeMemory]:
         """按类型查询"""
         with self.db.session() as s:
             q = s.query(KnowledgeRow).filter(
                 KnowledgeRow.user_id == user_id,
-                KnowledgeRow.status == "active",
+                KnowledgeRow.status == status,
             )
             if knowledge_type:
                 q = q.filter(KnowledgeRow.knowledge_type == knowledge_type)
             rows = q.order_by(KnowledgeRow.confidence.desc()).all()
             return [_know_row_to_pydantic(r) for r in rows]
 
-    def get_by_scope(self, user_id: str, scene: str, task_type: str) -> list[KnowledgeMemory]:
+    def get_by_scope(self, user_id: str, scene: str, task_type: str, status: str = "active") -> list[KnowledgeMemory]:
         """按场景和任务类型查询"""
         with self.db.session() as s:
             query = s.query(KnowledgeRow).filter(
                 KnowledgeRow.user_id == user_id,
-                KnowledgeRow.status == "active",
+                KnowledgeRow.status == status,
             )
             if scene:
                 query = query.filter(KnowledgeRow.scope_scene == scene)

@@ -824,17 +824,20 @@ async def list_knowledge(
     user_id: str = "default",
     scene: str = "",
     knowledge_type: str = "",
+    status: str = "active",
 ):
-    """列出知识记忆，支持按类型和场景过滤"""
+    """列出知识记忆，支持按类型、场景和状态过滤（状态过滤对前端待审查/归档/回收站页必需）"""
     repo = getattr(request.app.state, "know_repo", None)
     if repo is None:
         raise HTTPException(status_code=503, detail="knowledge repository not initialized")
+    # 空串视为 active，保持向后兼容（避免 list_all 匹配到空状态返回空）
+    status = status or "active"
     if scene:
-        values = repo.get_by_scope(user_id, scene, "")
+        values = repo.get_by_scope(user_id, scene, "", status)
     elif knowledge_type:
-        values = repo.get_by_type(user_id, knowledge_type)
+        values = repo.get_by_type(user_id, knowledge_type, status)
     else:
-        values = repo.list_all(status="active", user_id=user_id)
+        values = repo.list_all(status=status, user_id=user_id)
     return values
 
 

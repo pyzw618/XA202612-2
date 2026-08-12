@@ -2,9 +2,10 @@
 
 基于麒麟操作系统的 AI Agent 记忆引擎 —— 端侧轻量化混合检索与存储层。
 
-本仓库为纯后端实现，包含：
+本仓库包含：
 
 - `memoryhub`：Python/FastAPI 本地记忆服务，负责事件处理、偏好、知识、事实、检索、冲突和遗忘。
+- `desktop-client`：Qt 5 原生桌面控制台（银河麒麟/Windows），可视化审计、演示与调参（详见 `desktop-client/README.md`）。
 
 ## 项目定位
 
