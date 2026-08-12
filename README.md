@@ -2,14 +2,9 @@
 
 基于麒麟操作系统的 AI Agent 记忆引擎 —— 端侧轻量化混合检索与存储层。
 
-本项目由两个独立部分组成：
+本仓库为纯后端实现，包含：
 
 - `memoryhub`：Python/FastAPI 本地记忆服务，负责事件处理、偏好、知识、事实、检索、冲突和遗忘。
-- `frontend`：React 对话工作台 + Electron 桌面客户端。
-- `memoryhub_qml`：PySide6 + QML 桌面客户端（与 React/Electron 共用同一后端）。
-- `console`：PySide6 管理控制台。
-
-Electron 只负责窗口和桌面交互，不拥有后端生命周期。关闭前端窗口后，后端服务可以继续运行。
 
 ## 项目定位
 
@@ -31,10 +26,10 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的"记忆系统"，让 AI 助手能�
 └──────────────────────────────────┘
 ```
 
-前端与后端职责：
+职责划分：
 
 ```text
-React / Electron / QML 客户端
+OS Agent / 客户端
               │ HTTP JSON
               ▼
        FastAPI 本地后端（127.0.0.1:8000）
@@ -43,19 +38,17 @@ React / Electron / QML 客户端
      记忆处理、SQLite、BM25、向量索引
 ```
 
-React 负责页面、状态和用户操作；Agent 负责决定何时调用工具；MemoryHub 负责真正的记忆读写、冲突处理和遗忘。前端不要直接修改核心记忆数据库。
+MemoryHub 负责真正的记忆读写、冲突处理和遗忘；客户端通过 REST API 访问，不应直接修改核心记忆数据库。
 
 ## 环境要求
 
 - Windows 10/11 或银河麒麟 Linux
 - Git
 - Python 3.11+
-- Node.js 22+（仅前端需要）
-- npm
 
 ## 安装
 
-### 1. 安装后端环境
+### 安装后端环境
 
 ```powershell
 python -m venv .venv
@@ -68,19 +61,11 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
 ```
 
-### 2. 安装前端依赖
-
-```powershell
-cd frontend
-npm.cmd install
-cd ..
-```
-
 ## 启动
 
 ### 启动后端
 
-在仓库根目录打开第一个 PowerShell 窗口：
+在仓库根目录打开 PowerShell 窗口：
 
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File .\scripts\start-memoryhub-service.ps1
@@ -98,47 +83,11 @@ http://127.0.0.1:8000/docs
 powershell.exe -ExecutionPolicy Bypass -File .\scripts\stop-memoryhub-service.ps1
 ```
 
-### 启动 React 网页版
+也可手动启动：
 
 ```powershell
-cd frontend
-npm.cmd run dev
-```
-
-浏览器打开 `http://127.0.0.1:3000`（React 开发服务器只负责提供页面资源，记忆数据仍由 8000 端口后端处理）。
-
-### 启动 Electron 桌面版
-
-```powershell
-cd frontend
-npm.cmd run desktop:dev
-```
-
-### 生成桌面程序和快捷方式
-
-```powershell
-cd frontend
-npm.cmd run desktop:build
-# 程序位于 frontend\desktop-dist\win-unpacked\MemoryHub.exe
-cd ..
-powershell.exe -ExecutionPolicy Bypass -File .\scripts\create-memoryhub-shortcut.ps1
-```
-
-需要安装包时执行 `npm.cmd run desktop:dist`，安装包输出到 `frontend\desktop-dist\`。
-
-### 启动 PySide6 + QML 客户端
-
-桌面端推荐直接双击桌面的 `MemoryHub QML.lnk`。它会自动检查后端状态，后端未启动时先启动 FastAPI，再打开 QML 客户端。也可手动启动：
-
-```powershell
-# 终端 1：启动后端
 .\.venv\Scripts\python.exe -m uvicorn memoryhub.app:app --host 127.0.0.1 --port 8000
-
-# 终端 2：启动 QML 客户端
-.\.venv\Scripts\python.exe -m memoryhub_qml
 ```
-
-后端地址可通过 `MEMORYHUB_BACKEND_URL` 覆盖。详细说明见 `docs/QML_CLIENT.md`。
 
 ## 项目结构
 
@@ -185,27 +134,6 @@ memoryhub/                  # 核心 Python 包
     ├── kylin_client.py     # 麒麟 SDK 封装
     └── mock_client.py      # 开发用 Mock
 
-frontend/                   # React + Electron 前端
-├── app/                    # Next.js 页面与 API 封装
-├── electron/               # Electron 主进程与 IPC 桥接
-├── public/examples/        # 内置回放案例
-└── worker/                 # 回放处理 worker
-
-memoryhub_qml/              # PySide6 + QML 桌面客户端
-├── __main__.py             # 客户端入口
-├── controller.py           # 回放状态和 API 控制器
-├── api.py                  # QNetworkAccessManager HTTP 封装
-├── replay.py               # JSON 回放校验和脱敏
-├── models.py               # QML 列表模型
-└── qml/                    # 主窗口和三栏布局、组件
-
-console/                    # PySide6 管理控制台
-├── main.py                 # 应用入口
-├── api_client.py           # MemoryHub API 客户端
-├── main_window.py          # 主窗口框架
-├── pages/                  # 各功能页面（偏好/知识/检索/遗忘/评测/冲突/安全规则）
-└── widgets/                # 可复用组件
-
 evaluation/                 # 评测模块
 ├── metrics/
 │   ├── preference_eval.py  # 偏好提取评测
@@ -214,7 +142,7 @@ evaluation/                 # 评测模块
 │   └── latency_benchmark.py # 性能基准测试
 
 docs/                       # 设计/验收/技术文档
-scripts/                    # 服务与客户端启动脚本
+scripts/                    # 服务启动脚本
 integrations/               # Qwen Agent 等 Agent 集成
 claudecode-integration/     # Claude Code MCP 接入
 opencode-integration/       # opencode MCP 接入
@@ -277,10 +205,6 @@ vecs = client.embed_batch(["文本1", "文本2"])
 
 详细参数以 Swagger 文档为准：`http://127.0.0.1:8000/docs`。
 
-## 内置回放案例
-
-主页面支持导入 JSON 对话，内置案例位于 `frontend\public\examples\memory-system-long-replay.json`。导入后可逐轮执行，观察工具调用、检索候选、本轮引用、新写入记忆和事实 Propose / Commit / Reject。导入 JSON 本身不会自动批量写入数据库，只有点击执行某一轮时才调用后端处理流程。
-
 ## 检查和测试
 
 后端测试：
@@ -289,28 +213,19 @@ vecs = client.embed_batch(["文本1", "文本2"])
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-前端检查：
-
-```powershell
-cd frontend
-npm.cmd run lint
-npm.cmd run build
-```
-
 ## 提交代码前的约定
 
 - 不要把数据库文件、向量索引、密钥和 .env 提交到 GitHub。
-- 不要把未脱敏的工具调用原文直接展示到前端。
+- 不要把未脱敏的工具调用原文直接暴露给外部客户端。
 - 修改 API 响应时尽量保持已有字段兼容。
 - 涉及记忆状态变化时，优先通过 Agent action 接口完成。
-- 提交前至少运行后端测试以及前端 lint/build。
-- 如果修改了桌面启动流程，同时检查浏览器版和 Electron 版。
+- 提交前至少运行后端测试。
 
 ## 当前限制
 
 - 当前 Agent 默认以确定性规则编排，真实大模型接入沿用现有 Agent transport。
 - 自动遗忘调度、完整评测执行和部分安全看板仍在完善。
-- 银河麒麟版本需要在目标机器上重新安装 Python、Node 和 Linux Electron 构建依赖。
+- 银河麒麟版本需要在目标机器上重新安装 Python 依赖。
 
 ## License
 
