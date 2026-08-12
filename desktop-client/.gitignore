@@ -1,0 +1,9 @@
+# 构建产物
+/build/
+/build-*/
+/build-release/
+/build-debug/
+/CMakeLists.txt.user
+
+# Qt 缓存
+*.autosave
