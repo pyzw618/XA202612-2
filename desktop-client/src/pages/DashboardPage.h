@@ -1,19 +1,21 @@
 #pragma once
-// 总览 Dashboard：统计卡片 + 类型占比环图 + 状态分布柱图 + 最近事件 + 系统状态
 
 #include "BasePage.h"
 
+#include <QJsonArray>
 #include <QList>
 
+class QLabel;
+class QWidget;
+class QVBoxLayout;
 class QGridLayout;
-class QLabel;
+class QHBoxLayout;
+class PageStateView;
 class StatCard;
-class QTableWidget;
-class QLabel;
+class QFrame;
 namespace QtCharts {
 class QChartView;
 class QPieSeries;
-class QBarSet;
 class QBarSeries;
 }
 
@@ -25,21 +27,45 @@ public:
     void refresh() override;
     QString pageKey() const override { return "dashboard"; }
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+
 private:
-    void loadStats();
-    void loadCharts(int pref, int know, int fact);
-    void loadRecentEvents();
-    void loadSystemStatus();
-    void showBackendOffline();
+    void beginLoading();
+    void finishRequest(bool ok);
+    void updateMemoryVisuals();
+    void updateActivity(const QJsonArray &items, bool ok);
+    void updateTasks();
+    void setBanner(const QString &text, const QString &state);
 
-    QGridLayout *m_statGrid = nullptr;
     QList<StatCard *> m_statCards;
-
-    QtCharts::QChartView *m_pieView = nullptr;
     QtCharts::QPieSeries *m_pieSeries = nullptr;
-    QtCharts::QChartView *m_barView = nullptr;
     QtCharts::QBarSeries *m_barSeries = nullptr;
+    QLabel *m_banner = nullptr;
+    QLabel *m_chartEmpty = nullptr;
+    QLabel *m_pieCenter = nullptr;
+    QLabel *m_conflictCount = nullptr;
+    QLabel *m_deadLetterCount = nullptr;
+    QLabel *m_updateTime = nullptr;
+    QWidget *m_activityContainer = nullptr;
+    QVBoxLayout *m_activityLayout = nullptr;
+    PageStateView *m_activityState = nullptr;
+    QGridLayout *m_statsLayout = nullptr;
+    QHBoxLayout *m_chartLayout = nullptr;
+    QHBoxLayout *m_bottomLayout = nullptr;
+    QFrame *m_barCard = nullptr;
+    QFrame *m_pieCard = nullptr;
+    QFrame *m_activityCard = nullptr;
+    QFrame *m_taskCard = nullptr;
+    bool m_narrowLayout = false;
 
-    QTableWidget *m_eventTable = nullptr;
-    QLabel *m_statusBody = nullptr;
+    int m_generation = 0;
+    int m_pendingRequests = 0;
+    int m_successfulRequests = 0;
+    int m_pref = -1;
+    int m_know = -1;
+    int m_fact = -1;
+    int m_conflicts = -1;
+    int m_deadLetters = -1;
 };

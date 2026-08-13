@@ -11,6 +11,8 @@ class QComboBox;
 class MemoryFilterBar;
 class DetailDrawer;
 class QPushButton;
+class PageStateView;
+class QWidget;
 
 class KnowledgePage : public BasePage {
     Q_OBJECT
@@ -38,5 +40,9 @@ private:
     DetailDrawer *m_drawer = nullptr;
     QPushButton *m_batchDelete = nullptr;
     QPushButton *m_addBtn = nullptr;
+    QWidget *m_content = nullptr;
+    PageStateView *m_stateView = nullptr;
     QJsonArray m_all;
+    int m_generation = 0;
+    int m_detailGeneration = 0;
 };

@@ -17,11 +17,13 @@ endif()
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTOGEN_PARALLEL 1)
 
 # 优先查找 Qt5；目标环境为麒麟 Qt 5.15
 find_package(Qt5 5.9 REQUIRED COMPONENTS
     Core Gui Widgets Network Charts
 )
+find_package(Qt5 5.9 REQUIRED COMPONENTS Test)
 
 set(CLIENT_SOURCES
     src/main.cpp
@@ -38,6 +40,8 @@ set(CLIENT_SOURCES
     src/widgets/DetailDrawer.cpp
     src/widgets/MemoryFilterBar.cpp
     src/widgets/ConfirmDialog.cpp
+    src/widgets/RoundedContainer.cpp
+    src/widgets/PageStateView.cpp
     src/pages/BasePage.cpp
     src/pages/DashboardPage.cpp
     src/pages/TerminalPage.cpp
@@ -65,6 +69,8 @@ set(CLIENT_HEADERS
     src/widgets/DetailDrawer.h
     src/widgets/MemoryFilterBar.h
     src/widgets/ConfirmDialog.h
+    src/widgets/RoundedContainer.h
+    src/widgets/PageStateView.h
     src/pages/BasePage.h
     src/pages/DashboardPage.h
     src/pages/TerminalPage.h
@@ -83,6 +89,12 @@ add_executable(memoryhub-client WIN32 ${CLIENT_SOURCES} ${CLIENT_HEADERS} resour
 target_link_libraries(memoryhub-client PRIVATE
     Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Network Qt5::Charts
 )
+
+enable_testing()
+add_executable(memoryhub-client-api-tests tests/ApiClientTest.cpp src/api/ApiClient.cpp)
+target_include_directories(memoryhub-client-api-tests PRIVATE src)
+target_link_libraries(memoryhub-client-api-tests PRIVATE Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Network Qt5::Test)
+add_test(NAME memoryhub-client-api-tests COMMAND memoryhub-client-api-tests)
 
 if(WIN32)
     target_compile_definitions(memoryhub-client PRIVATE _CRT_SECURE_NO_WARNINGS)

@@ -11,6 +11,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QTabWidget>
@@ -25,6 +26,8 @@
 #include "../widgets/JsonViewer.h"
 #include "../widgets/MemoryFilterBar.h"
 #include "../widgets/PageHeader.h"
+#include "../widgets/PageStateView.h"
+#include "../widgets/RoundedContainer.h"
 #include "../widgets/ScoreRing.h"
 #include "../widgets/StatusTag.h"
 
@@ -34,9 +37,10 @@ KnowledgePage::KnowledgePage(QWidget *parent) : BasePage(parent) {
     root->setSpacing(0);
 
     auto *header = new PageHeader(this);
+    header->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     header->setTitle("知识记忆");
     header->setSubtitle("沉淀的工作流 / 案例 / 模板，可被检索复用");
-    m_addBtn = new QPushButton("＋ 新增知识", this);
+    m_addBtn = new QPushButton(QIcon(":/icons/plus.svg"), "新增知识", this);
     m_addBtn->setObjectName("primaryBtn");
     connect(m_addBtn, &QPushButton::clicked, this, [this]() { openEditDialog(QJsonObject(), true); });
     m_batchDelete = new QPushButton("删除选中", this);
@@ -52,22 +56,28 @@ KnowledgePage::KnowledgePage(QWidget *parent) : BasePage(parent) {
         for (const QString &id : ids) arr.append(id);
         body["memory_ids"] = arr;
         body["cascade"] = true;
-        const api::Result r = AppContext::instance()->api()->post("/api/memory/memories/delete", body);
-        if (r.ok) { QMessageBox::information(this, "完成", "已删除"); onRefresh(); }
-        else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+        m_batchDelete->setEnabled(false);
+        AppContext::instance()->api()->postAsync(
+            "/api/memory/memories/delete", body,
+            [this](const api::Result &r) {
+                m_batchDelete->setEnabled(true);
+                if (r.ok) { QMessageBox::information(this, "完成", "已删除"); onRefresh(); }
+                else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+            }, false, this);
     });
     header->actionLayout()->addWidget(m_batchDelete);
     header->actionLayout()->addWidget(m_addBtn);
     root->addWidget(header);
 
     m_filterBar = new MemoryFilterBar(this);
+    m_filterBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_filterBar->setSearchPlaceholder("搜索名称 / 内容...");
     m_typeCombo = new QComboBox(this);
     m_typeCombo->addItem("全部类型", "");
     const QStringList types = {"workflow", "case", "template"};
     for (const QString &t : types) m_typeCombo->addItem(t, t);
     m_statusCombo = new QComboBox(this);
-    m_statusCombo->addItem("全部状态", "");
+    m_statusCombo->addItem("有效", "active");
     for (const QString &s : QStringList{"active", "archived", "pending", "deleted"})
         m_statusCombo->addItem(StatusTag::statusText(s), s);
     m_filterBar->addWidget(m_typeCombo);
@@ -79,9 +89,15 @@ KnowledgePage::KnowledgePage(QWidget *parent) : BasePage(parent) {
     connect(m_statusCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &KnowledgePage::onRefresh);
     root->addWidget(m_filterBar);
 
-    auto *content = new QWidget(this);
+    m_stateView = new PageStateView(this);
+    m_stateView->hide();
+    // 表格隐藏时，由状态视图独占剩余高度，避免头部与筛选栏被拉伸。
+    root->addWidget(m_stateView, 1);
+    auto *content = new RoundedContainer(this);
+    m_content = content;
+    content->setObjectName("dataTableContainer");
     auto *clay = new QHBoxLayout(content);
-    clay->setContentsMargins(0, 8, 0, 0);
+    clay->setContentsMargins(2, 2, 2, 2);
     clay->setSpacing(0);
 
     m_table = new QTableWidget(0, 8, content);
@@ -111,14 +127,38 @@ KnowledgePage::KnowledgePage(QWidget *parent) : BasePage(parent) {
 void KnowledgePage::refresh() { onRefresh(); }
 
 void KnowledgePage::onRefresh() {
+    const int generation = ++m_generation;
+    const bool hadData = !m_all.isEmpty();
+    if (!hadData) m_content->hide();
+    m_stateView->setState(PageState::Loading, hadData ? "正在刷新" : "正在加载知识记忆",
+                          hadData ? "当前仍显示上次成功加载的数据。" : "正在从后端读取真实数据…");
+    m_stateView->clearAction();
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
     const QString status = m_statusCombo->currentData().toString();
-    const api::Result r = api->get(api::ApiClient::urlWithQuery(
+    api->getAsync(api::ApiClient::urlWithQuery(
         "/api/memory/knowledge",
-        {{"user_id", uid}, {"status", status.isEmpty() ? "active" : status}}));
-    m_all = r.jsonArray();
-    applyLocalFilter();
+        {{"user_id", uid}, {"status", status.isEmpty() ? "active" : status}}),
+        [this, generation](const api::Result &r) {
+            if (generation != m_generation) return;
+            if (!r.ok || !r.hasJsonArray()) {
+                m_content->setVisible(!m_all.isEmpty());
+                m_stateView->setState(r.networkError ? PageState::Offline : PageState::Error,
+                                      r.networkError ? "后端离线" : "知识记忆加载失败",
+                                      r.errorMessage.isEmpty() ? "请稍后重试。" : r.errorMessage);
+                m_stateView->setAction("重试", [this]() { onRefresh(); });
+                return;
+            }
+            m_all = r.jsonArray();
+            m_content->setVisible(!m_all.isEmpty());
+            if (m_all.isEmpty()) {
+                m_stateView->setState(PageState::Empty, "暂无知识记忆", "当前接口返回了空数据。");
+                m_stateView->setAction("刷新", [this]() { onRefresh(); });
+            } else {
+                m_stateView->setState(PageState::Content, QString(), QString());
+            }
+            applyLocalFilter();
+        }, this);
 }
 
 void KnowledgePage::applyLocalFilter() {
@@ -197,25 +237,39 @@ void KnowledgePage::populateRow(int row, const QJsonObject &m) {
     bForget->setStyleSheet("color:#EF4444;");
     connect(bDetail, &QPushButton::clicked, this, [this, id]() { openDetail(id); });
     connect(bEdit, &QPushButton::clicked, this, [this, m]() { openEditDialog(m, false); });
-    connect(bConfirm, &QPushButton::clicked, this, [this, m]() {
+    connect(bConfirm, &QPushButton::clicked, this, [this, m, bConfirm]() {
+        QPointer<QPushButton> guard(bConfirm);
+        guard->setEnabled(false);
         QJsonObject body;
         body["user_id"] = AppContext::instance()->userId();
         body["memory_id"] = j::str(m, "memory_id");
         body["action"] = "confirm";
         body["feedback_text"] = "";
-        const api::Result r = AppContext::instance()->api()->post("/api/memory/feedback", body);
-        if (r.ok) { QMessageBox::information(this, "完成", "复用计数 +1"); onRefresh(); }
-        else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+        AppContext::instance()->api()->postAsync(
+            "/api/memory/feedback", body,
+            [this, guard](const api::Result &r) {
+                if (!guard) return;
+                guard->setEnabled(true);
+                if (r.ok) { QMessageBox::information(this, "完成", "复用计数 +1"); onRefresh(); }
+                else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+            }, false, this);
     });
-    connect(bForget, &QPushButton::clicked, this, [this, m]() {
+    connect(bForget, &QPushButton::clicked, this, [this, m, bForget]() {
         if (!ConfirmDialog::confirm(this, "精准遗忘", "确认遗忘这条知识记忆？")) return;
+        QPointer<QPushButton> guard(bForget);
+        guard->setEnabled(false);
         QJsonObject body;
         body["user_id"] = AppContext::instance()->userId();
         body["target_memory_ids"] = QJsonArray{j::str(m, "memory_id")};
         body["cascade"] = true;
-        const api::Result r = AppContext::instance()->api()->post("/api/memory/forget", body);
-        if (r.ok) { QMessageBox::information(this, "完成", "已遗忘"); onRefresh(); }
-        else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+        AppContext::instance()->api()->postAsync(
+            "/api/memory/forget", body,
+            [this, guard](const api::Result &r) {
+                if (!guard) return;
+                guard->setEnabled(true);
+                if (r.ok) { QMessageBox::information(this, "完成", "已遗忘"); onRefresh(); }
+                else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+            }, false, this);
     });
     ol->addWidget(bDetail);
     ol->addWidget(bEdit);

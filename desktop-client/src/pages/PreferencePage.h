@@ -14,6 +14,8 @@ class QDoubleSpinBox;
 class MemoryFilterBar;
 class DetailDrawer;
 class QPushButton;
+class PageStateView;
+class QWidget;
 
 class PreferencePage : public BasePage {
     Q_OBJECT
@@ -45,6 +47,9 @@ private:
     DetailDrawer *m_drawer = nullptr;
     QPushButton *m_batchDelete = nullptr;
     QPushButton *m_addBtn = nullptr;
+    QWidget *m_content = nullptr;
+    PageStateView *m_stateView = nullptr;
 
     QJsonArray m_all;   // 最近一次从后端拉取的全量（未应用客户端过滤）
+    int m_generation = 0;
 };

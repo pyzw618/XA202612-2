@@ -11,6 +11,7 @@ class QWidget;
 class QLabel;
 class QPushButton;
 class QScrollArea;
+class PageStateView;
 
 class ConflictPage : public BasePage {
     Q_OBJECT
@@ -39,6 +40,10 @@ private:
     QLabel *m_pageInfo = nullptr;
     QPushButton *m_prevBtn = nullptr;
     QPushButton *m_nextBtn = nullptr;
+    PageStateView *m_stateView = nullptr;
+    int m_generation = 0;
+    int m_pendingLoads = 0;
+    bool m_writeInProgress = false;
 
     int m_currentPage = 1;
     int m_total = 0;

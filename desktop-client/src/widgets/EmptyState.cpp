@@ -28,6 +28,10 @@ EmptyState::EmptyState(QWidget *parent) : QWidget(parent) {
 }
 
 void EmptyState::setIconText(const QString &t) { m_icon->setText(t); }
+void EmptyState::setIcon(const QIcon &icon) {
+    m_icon->setText(QString());
+    m_icon->setPixmap(icon.pixmap(28, 28));
+}
 void EmptyState::setTitle(const QString &t) { m_title->setText(t); }
 void EmptyState::setHint(const QString &h) {
     m_hint->setText(h);

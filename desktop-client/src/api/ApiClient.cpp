@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
+#include <QPointer>
 
 namespace api {
 
@@ -42,6 +43,7 @@ Result ApiClient::parseReply(QNetworkReply *reply) const {
     Result r;
     const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     r.statusCode = code;
+    r.ok = (code >= 200 && code < 300);
 
     const QByteArray raw = reply->readAll();
 
@@ -49,19 +51,24 @@ Result ApiClient::parseReply(QNetworkReply *reply) const {
     const QJsonDocument doc = QJsonDocument::fromJson(raw, &perr);
     if (perr.error == QJsonParseError::NoError) {
         r.doc = doc;
-        // 解析 FastAPI 错误结构
-        if (!doc.isObject()) return r;
-        const QJsonObject o = doc.object();
-        const QJsonValue detail = o.value("detail");
-        if (detail.isString()) {
-            r.errorMessage = detail.toString();
-        } else if (detail.isObject()) {
-            const QJsonObject d = detail.toObject();
-            r.errorCode = d.value("code").toString();
-            r.errorMessage = d.value("message").toString();
+        if (doc.isObject()) {
+            // 解析 FastAPI 错误结构；成功响应仍完整保留 object。
+            const QJsonObject o = doc.object();
+            const QJsonValue detail = o.value("detail");
+            if (detail.isString()) {
+                r.errorMessage = detail.toString();
+            } else if (detail.isObject()) {
+                const QJsonObject d = detail.toObject();
+                r.errorCode = d.value("code").toString();
+                r.errorMessage = d.value("message").toString();
+                if (r.errorMessage.isEmpty()) r.errorMessage = d.value("detail").toString();
+            }
         }
+    } else if (!raw.trimmed().isEmpty()) {
+        r.errorMessage = QString::fromUtf8(raw).trimmed();
     }
-    r.ok = (code >= 200 && code < 300);
+    if (!r.ok && r.errorMessage.isEmpty() && code > 0)
+        r.errorMessage = QStringLiteral("HTTP %1").arg(code);
     return r;
 }
 
@@ -119,8 +126,12 @@ Result ApiClient::sendSync(const QString &method, const QString &path,
         r.networkError = true;
         r.networkErrorText = reply->errorString();
         // 部分网络错误仍带响应体（如 503），尽量解析
-        r = parseReply(reply);
-        r.networkError = true;
+        Result parsed = parseReply(reply);
+        parsed.networkError = true;
+        parsed.networkErrorText = r.networkErrorText;
+        if (parsed.errorMessage.isEmpty() && !parsed.networkErrorText.isEmpty())
+            parsed.errorMessage = parsed.networkErrorText;
+        r = parsed;
     } else {
         r = parseReply(reply);
     }
@@ -161,18 +172,67 @@ Result ApiClient::delNoBody(const QString &path, bool useUserHeader) {
     return sendSync("DELETE", path, QByteArray(), useUserHeader);
 }
 
-void ApiClient::getAsync(const QString &path, std::function<void(const Result &)> callback) {
+QNetworkReply *ApiClient::sendAsync(const QString &method, const QString &path,
+                                    const QByteArray &body, bool useUserHeader,
+                                    Callback callback, QObject *context, int timeoutMs) {
     const QString full = m_baseUrl + path;
     QNetworkRequest req((QUrl(full)));
-    applyCommonHeaders(&req, false);
+    applyCommonHeaders(&req, useUserHeader);
 
-    QNetworkReply *reply = m_nam.get(req);
-    QObject::connect(reply, &QNetworkReply::finished, this,
-                     [this, reply, callback]() {
+    QNetworkReply *reply = nullptr;
+    if (method == QLatin1String("GET")) reply = m_nam.get(req);
+    else if (method == QLatin1String("POST")) reply = m_nam.post(req, body);
+    else if (method == QLatin1String("PATCH")) reply = m_nam.sendCustomRequest(req, "PATCH", body);
+    else if (method == QLatin1String("DELETE")) reply = m_nam.deleteResource(req);
+    else reply = m_nam.sendCustomRequest(req, method.toUtf8(), body);
+
+    QTimer::singleShot(timeoutMs, reply, [reply]() {
+        if (!reply->isFinished()) reply->abort();
+    });
+    QObject *receiver = context ? context : this;
+    QObject::connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
+    QObject::connect(reply, &QNetworkReply::finished, receiver,
+                     [this, reply, callback, timeoutMs]() {
                          Result r = parseReply(reply);
-                         reply->deleteLater();
+                         if (reply->error() != QNetworkReply::NoError) {
+                             r.networkError = true;
+                             r.networkErrorText = reply->errorString();
+                             if (r.errorMessage.isEmpty())
+                                 r.errorMessage = r.networkErrorText;
+                         }
                          if (callback) callback(r);
                      });
+    return reply;
+}
+
+QNetworkReply *ApiClient::getAsync(const QString &path, Callback callback,
+                                   QObject *context, int timeoutMs) {
+    return sendAsync("GET", path, QByteArray(), false, std::move(callback), context, timeoutMs);
+}
+
+QNetworkReply *ApiClient::getAsync(const QString &path, Callback callback,
+                                   bool useUserHeader, QObject *context, int timeoutMs) {
+    return sendAsync("GET", path, QByteArray(), useUserHeader, std::move(callback), context, timeoutMs);
+}
+
+QNetworkReply *ApiClient::postAsync(const QString &path, const QJsonObject &body,
+                                    Callback callback, bool useUserHeader,
+                                    QObject *context, int timeoutMs) {
+    return sendAsync("POST", path, QJsonDocument(body).toJson(QJsonDocument::Compact),
+                     useUserHeader, std::move(callback), context, timeoutMs);
+}
+
+QNetworkReply *ApiClient::patchAsync(const QString &path, const QJsonObject &body,
+                                     Callback callback, bool useUserHeader,
+                                     QObject *context, int timeoutMs) {
+    return sendAsync("PATCH", path, QJsonDocument(body).toJson(QJsonDocument::Compact),
+                     useUserHeader, std::move(callback), context, timeoutMs);
+}
+
+QNetworkReply *ApiClient::deleteAsync(const QString &path, Callback callback,
+                                      bool useUserHeader, QObject *context, int timeoutMs) {
+    return sendAsync("DELETE", path, QByteArray(), useUserHeader,
+                     std::move(callback), context, timeoutMs);
 }
 
 } // namespace api

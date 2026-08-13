@@ -58,8 +58,10 @@ SettingsStatusPage::SettingsStatusPage(QWidget *parent) : BasePage(parent) {
 void SettingsStatusPage::refresh() { loadStatus(); }
 
 void SettingsStatusPage::loadStatus() {
+    const int generation = ++m_generation;
     api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->get("/api/memory/system/status");
+    api->getAsync("/api/memory/system/status", [this, generation](const api::Result &r) {
+    if (generation != m_generation) return;
     m_table->setRowCount(0);
     if (!r.hasJsonObject()) {
         m_table->insertRow(0);
@@ -111,12 +113,15 @@ void SettingsStatusPage::loadStatus() {
                .arg(j::boolean(safety, "audit_enabled") ? "开" : "关")
                .arg(j::boolean(safety, "quarantine_enabled") ? "开" : "关"));
 
-    const api::Result rCfg = api->get("/api/memory/system/config");
-    QString indexPath = "—";
-    if (rCfg.hasJsonObject())
-        indexPath = j::str(j::obj(rCfg.jsonObject(), "storage"), "vector_index_path", "—");
-    m_connLabel->setText(QString("<b>API Base URL</b> %1<br/><b>数据库路径</b> %2<br/><b>索引路径</b> %3")
-        .arg(AppContext::instance()->baseUrl(), j::str(storage, "db_path"), indexPath));
+    api::ApiClient *configApi = AppContext::instance()->api();
+    configApi->getAsync("/api/memory/system/config", [this, generation, storage](const api::Result &rCfg) {
+        if (generation != m_generation) return;
+        QString indexPath = "—";
+        if (rCfg.hasJsonObject()) indexPath = j::str(j::obj(rCfg.jsonObject(), "storage"), "vector_index_path", "—");
+        m_connLabel->setText(QString("<b>API Base URL</b> %1<br/><b>数据库路径</b> %2<br/><b>索引路径</b> %3")
+            .arg(AppContext::instance()->baseUrl(), j::str(storage, "db_path"), indexPath));
+    }, this);
+    }, this);
 }
 
 // ============================================================
@@ -161,13 +166,15 @@ void SettingsConfigPage::addGroup(QVBoxLayout *lay, const QString &title, const 
 }
 
 void SettingsConfigPage::loadConfig() {
+    const int generation = ++m_generation;
     // 清空旧分组
     while (QLayoutItem *item = m_layout->takeAt(0)) {
         if (QWidget *w = item->widget()) w->deleteLater();
         delete item;
     }
     api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->get("/api/memory/system/config");
+    api->getAsync("/api/memory/system/config", [this, generation](const api::Result &r) {
+    if (generation != m_generation) return;
     if (!r.hasJsonObject()) {
         auto *lbl = new QLabel("配置接口不可用", m_body);
         lbl->setObjectName("pageSubtitle");
@@ -214,6 +221,7 @@ void SettingsConfigPage::loadConfig() {
             .arg(j::boolean(j::obj(safety, "audit"), "enabled") ? "开" : "关")
             .arg(j::boolean(j::obj(safety, "quarantine"), "enabled") ? "开" : "关"));
     m_layout->addStretch();
+    }, this);
 }
 
 // ============================================================
@@ -231,13 +239,14 @@ SettingsDemoPage::SettingsDemoPage(QWidget *parent) : BasePage(parent) {
     auto *card = new QFrame(this);
     card->setObjectName("card");
     auto *cl = new QVBoxLayout(card);
-    auto *warn = new QLabel("⚠ 以下操作会删除当前用户（" + AppContext::instance()->userId() + "）的演示数据，请谨慎执行。", card);
+    auto *warn = new QLabel("以下操作会删除当前用户（" + AppContext::instance()->userId() + "）的演示数据，请谨慎执行。", card);
     warn->setStyleSheet("background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;color:#B91C1C;padding:8px;");
     warn->setWordWrap(true);
     cl->addWidget(warn);
 
     auto *row1 = new QHBoxLayout();
     auto *b1 = new QPushButton("清空偏好", card);
+    m_clearPreferencesButton = b1;
     b1->setObjectName("dangerBtn");
     connect(b1, &QPushButton::clicked, this, &SettingsDemoPage::clearPreferences);
     auto *desc1 = new QLabel("仅删除当前用户的偏好记忆（含向量索引投影）", card);
@@ -248,6 +257,7 @@ SettingsDemoPage::SettingsDemoPage(QWidget *parent) : BasePage(parent) {
 
     auto *row2 = new QHBoxLayout();
     auto *b2 = new QPushButton("清空全部演示数据", card);
+    m_clearAllButton = b2;
     b2->setObjectName("solidDangerBtn");
     connect(b2, &QPushButton::clicked, this, &SettingsDemoPage::clearAllDemo);
     auto *desc2 = new QLabel("删除偏好/知识/事实/事件/冲突/遗忘历史等全部演示数据", card);
@@ -269,26 +279,31 @@ void SettingsDemoPage::refresh() {}
 
 void SettingsDemoPage::clearPreferences() {
     if (!ConfirmDialog::confirm(this, "清空偏好", "确认清空当前用户的全部偏好记忆？", "清空")) return;
-    const api::Result r = AppContext::instance()->api()->del(
-        api::ApiClient::urlWithQuery("/api/agent/preferences",
-                                     {{"user_id", AppContext::instance()->userId()}}));
-    if (r.ok) m_resultLabel->setText(QString("已清空 %1 条偏好记忆。").arg(j::integer(r.jsonObject(), "deleted")));
-    else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+    m_clearPreferencesButton->setEnabled(false);
+    AppContext::instance()->api()->deleteAsync(
+        api::ApiClient::urlWithQuery("/api/agent/preferences", {{"user_id", AppContext::instance()->userId()}}),
+        [this](const api::Result &r) {
+            m_clearPreferencesButton->setEnabled(true);
+            if (r.ok) m_resultLabel->setText(QString("已清空 %1 条偏好记忆。").arg(j::integer(r.jsonObject(), "deleted")));
+            else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+        }, false, this);
 }
 
 void SettingsDemoPage::clearAllDemo() {
     if (!ConfirmDialog::confirm(this, "清空全部演示数据",
                                 "将删除偏好/知识/事实/事件/冲突/遗忘历史等全部数据，且不可恢复。确认输入“清空全部”执行。",
                                 "清空全部", "确认清空")) return;
-    const api::Result r = AppContext::instance()->api()->del(
-        api::ApiClient::urlWithQuery("/api/agent/demo-data",
-                                     {{"user_id", AppContext::instance()->userId()}}));
-    if (r.ok) {
-        const QJsonObject del = j::obj(r.jsonObject(), "deleted");
-        QString html = "<b>清理结果：</b><br/>";
-        const QStringList keys = {"preferences", "knowledge", "knowledge_versions", "events",
-                                  "conflicts", "forget_history", "extraction_tasks", "facts"};
-        for (const QString &k : keys) html += QString("%1: %2　").arg(k).arg(j::integer(del, k));
-        m_resultLabel->setText(html);
-    } else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+    m_clearAllButton->setEnabled(false);
+    AppContext::instance()->api()->deleteAsync(
+        api::ApiClient::urlWithQuery("/api/agent/demo-data", {{"user_id", AppContext::instance()->userId()}}),
+        [this](const api::Result &r) {
+            m_clearAllButton->setEnabled(true);
+            if (r.ok) {
+                const QJsonObject del = j::obj(r.jsonObject(), "deleted");
+                QString html = "<b>清理结果：</b><br/>";
+                const QStringList keys = {"preferences", "knowledge", "knowledge_versions", "events", "conflicts", "forget_history", "extraction_tasks", "facts"};
+                for (const QString &k : keys) html += QString("%1: %2　").arg(k).arg(j::integer(del, k));
+                m_resultLabel->setText(html);
+            } else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+        }, false, this);
 }

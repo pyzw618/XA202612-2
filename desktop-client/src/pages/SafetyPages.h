@@ -22,6 +22,7 @@ private:
     QLabel *m_policyLabel = nullptr;
     QLabel *m_ruleCountLabel = nullptr;
     QLabel *m_statusLabel = nullptr;
+    int m_generation = 0;
 };
 
 class SafetyUserRulesPage : public BasePage {
@@ -46,6 +47,7 @@ private:
     QTableWidget *m_table = nullptr;
     QPushButton *m_addBtn = nullptr;
     QJsonArray m_all;
+    int m_generation = 0;
 };
 
 class SafetyAuditPage : public BasePage {
@@ -68,6 +70,7 @@ private:
     QPushButton *m_verifyBtn = nullptr;
     QLabel *m_stateLabel = nullptr;
     QJsonArray m_all;
+    int m_generation = 0;
 };
 
 class SafetyQuarantinePage : public BasePage {
@@ -90,4 +93,6 @@ private:
     QTableWidget *m_table = nullptr;
     QLabel *m_stateLabel = nullptr;
     QJsonArray m_all;
+    int m_generation = 0;
+    int m_viewGeneration = 0;
 };

@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
+#include <QStringList>
 
 class QTabWidget;
 class QLineEdit;
@@ -57,6 +58,10 @@ private:
 
     QJsonArray m_prefAll, m_knowAll, m_factAll;
     QList<QString> m_candidateIds;
+    int m_generation = 0;
+    int m_pendingLoads = 0;
+    bool m_executeInProgress = false;
+    QStringList m_loadFailures;
 };
 
 // ---- P4.2 待审查队列：pending 记忆，保持/归档/删除 ----
@@ -69,8 +74,8 @@ public:
 
 private slots:
     void onRefresh();
-    void setSingleStatus(const QString &id, const QString &status);
-    void batchSetStatus(const QString &status);
+    void setSingleStatus(const QString &id, const QString &status, QPushButton *caller = nullptr);
+    void batchSetStatus(const QString &status, QPushButton *caller = nullptr);
 
 private:
     void loadTable();
@@ -80,6 +85,7 @@ private:
     QTableWidget *m_table = nullptr;
     QPushButton *m_allActive = nullptr;
     QPushButton *m_allArchive = nullptr;
+    int m_generation = 0;
 };
 
 // ---- P4.3 归档仓库：archived 记忆，解除归档/删除 ----
@@ -92,13 +98,14 @@ public:
 
 private slots:
     void onRefresh();
-    void unarchive(const QString &id);
-    void deleteMemory(const QString &id);
+    void unarchive(const QString &id, QPushButton *caller = nullptr);
+    void deleteMemory(const QString &id, QPushButton *caller = nullptr);
 
 private:
     void loadTable();
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
+    int m_generation = 0;
 };
 
 // ---- P4.4 回收站：deleted 记忆，恢复/彻底删除 ----
@@ -111,13 +118,14 @@ public:
 
 private slots:
     void onRefresh();
-    void restore(const QString &id);
-    void hardDelete(const QString &id);
+    void restore(const QString &id, QPushButton *caller = nullptr);
+    void hardDelete(const QString &id, QPushButton *caller = nullptr);
 
 private:
     void loadTable();
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
+    int m_generation = 0;
 };
 
 // ---- P4.5 健康度看板：分布直方图 + 衰减最快 TopN + 明细 ----
@@ -134,6 +142,7 @@ private:
     QWidget *m_listContainer = nullptr;
     QLabel *m_warningLabel = nullptr;
     QJsonArray m_items;
+    int m_generation = 0;
 };
 
 // ---- P4.6 遗忘历史：ForgetRecord 列表 + 详情 ----
@@ -146,11 +155,12 @@ public:
 
 private slots:
     void onRefresh();
-    void openDetail(const QString &recordId);
+    void openDetail(const QString &recordId, QPushButton *caller = nullptr);
 
 private:
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
+    int m_generation = 0;
 };
 
 // ---- P4.7 遗忘设置：权重/阈值只读展示 + 触发自动遗忘 ----
@@ -162,12 +172,13 @@ public:
     QString pageKey() const override { return "forget/settings"; }
 
 private slots:
-    void runAutoForget();
-    void runLifecycleCheck();
+    void runAutoForget(QPushButton *caller = nullptr);
+    void runLifecycleCheck(QPushButton *caller = nullptr);
 
 private:
     QLabel *m_weightsLabel = nullptr;
     QLabel *m_autoForgetLabel = nullptr;
     QLabel *m_lifecycleLabel = nullptr;
     QLabel *m_resultLabel = nullptr;
+    int m_generation = 0;
 };

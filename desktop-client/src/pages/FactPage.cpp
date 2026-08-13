@@ -10,6 +10,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QPointer>
 #include <QPushButton>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -23,6 +24,8 @@
 #include "../widgets/JsonViewer.h"
 #include "../widgets/MemoryFilterBar.h"
 #include "../widgets/PageHeader.h"
+#include "../widgets/PageStateView.h"
+#include "../widgets/RoundedContainer.h"
 #include "../widgets/StatusTag.h"
 
 namespace {
@@ -44,15 +47,17 @@ FactPage::FactPage(QWidget *parent) : BasePage(parent) {
     root->setSpacing(0);
 
     auto *header = new PageHeader(this);
+    header->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     header->setTitle("事实记忆");
     header->setSubtitle("知识图谱三元组（主语 → 谓词 → 宾语），支持人工提案与裁决");
-    m_proposeBtn = new QPushButton("＋ 手动提交三元组", this);
+    m_proposeBtn = new QPushButton(QIcon(":/icons/plus.svg"), "手动提交三元组", this);
     m_proposeBtn->setObjectName("primaryBtn");
     connect(m_proposeBtn, &QPushButton::clicked, this, &FactPage::openProposeDialog);
     header->actionLayout()->addWidget(m_proposeBtn);
     root->addWidget(header);
 
     m_filterBar = new MemoryFilterBar(this);
+    m_filterBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_filterBar->setSearchPlaceholder("搜索三元组 / 来源...");
     m_scopeCombo = new QComboBox(this);
     m_scopeCombo->addItem("全部作用域", "");
@@ -76,14 +81,21 @@ FactPage::FactPage(QWidget *parent) : BasePage(parent) {
 
     // 候选裁决区（折叠卡片容器）
     m_candidateContainer = new QWidget(this);
+    m_candidateContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_candidateContainer->hide();
     m_candidateLayout = new QVBoxLayout(m_candidateContainer);
     m_candidateLayout->setContentsMargins(0, 8, 0, 4);
     root->addWidget(m_candidateContainer);
 
-    auto *content = new QWidget(this);
+    m_stateView = new PageStateView(this);
+    m_stateView->hide();
+    // 表格隐藏时，由状态视图独占剩余高度，避免头部与筛选栏被拉伸。
+    root->addWidget(m_stateView, 1);
+    auto *content = new RoundedContainer(this);
+    m_content = content;
+    content->setObjectName("dataTableContainer");
     auto *clay = new QHBoxLayout(content);
-    clay->setContentsMargins(0, 8, 0, 0);
+    clay->setContentsMargins(2, 2, 2, 2);
     clay->setSpacing(0);
 
     m_table = new QTableWidget(0, 8, content);
@@ -113,14 +125,38 @@ FactPage::FactPage(QWidget *parent) : BasePage(parent) {
 void FactPage::refresh() { onRefresh(); }
 
 void FactPage::onRefresh() {
+    const int generation = ++m_generation;
+    const bool hadData = !m_all.isEmpty();
+    if (!hadData) m_content->hide();
+    m_stateView->setState(PageState::Loading, hadData ? "正在刷新" : "正在加载事实记忆",
+                          hadData ? "当前仍显示上次成功加载的数据。" : "正在从后端读取真实数据…");
+    m_stateView->clearAction();
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
     const QString status = m_statusCombo->currentData().toString();
-    const api::Result r = api->get(api::ApiClient::urlWithQuery(
+    api->getAsync(api::ApiClient::urlWithQuery(
         "/api/memory/facts",
-        {{"user_id", uid}, {"status", status.isEmpty() ? "active" : status}, {"limit", "500"}}));
-    m_all = r.jsonArray();
-    applyLocalFilter();
+        {{"user_id", uid}, {"status", status.isEmpty() ? "active" : status}, {"limit", "500"}}),
+        [this, generation](const api::Result &r) {
+            if (generation != m_generation) return;
+            if (!r.ok || !r.hasJsonArray()) {
+                m_content->setVisible(!m_all.isEmpty());
+                m_stateView->setState(r.networkError ? PageState::Offline : PageState::Error,
+                                      r.networkError ? "后端离线" : "事实记忆加载失败",
+                                      r.errorMessage.isEmpty() ? "请稍后重试。" : r.errorMessage);
+                m_stateView->setAction("重试", [this]() { onRefresh(); });
+                return;
+            }
+            m_all = r.jsonArray();
+            m_content->setVisible(!m_all.isEmpty());
+            if (m_all.isEmpty()) {
+                m_stateView->setState(PageState::Empty, "暂无事实记忆", "当前接口返回了空数据。");
+                m_stateView->setAction("刷新", [this]() { onRefresh(); });
+            } else {
+                m_stateView->setState(PageState::Content, QString(), QString());
+            }
+            applyLocalFilter();
+        }, this);
 }
 
 void FactPage::applyLocalFilter() {
@@ -177,13 +213,28 @@ void FactPage::populateRow(int row, const QJsonObject &f) {
     bDelete->setStyleSheet("color:#EF4444;");
     connect(bDetail, &QPushButton::clicked, this, [this, id]() { openDetail(id); });
     connect(bEvidence, &QPushButton::clicked, this, [this, id]() { openDetail(id); });
-    connect(bDelete, &QPushButton::clicked, this, [this, f]() {
+    connect(bDelete, &QPushButton::clicked, this, [this, f, bDelete]() {
         if (!ConfirmDialog::confirm(this, "删除事实", "确认删除这条事实三元组？")) return;
-        const api::Result r = AppContext::instance()->api()->del(
-            api::ApiClient::urlWithQuery("/api/memory/facts/" + j::str(f, "fact_id"),
-                                         {{"user_id", AppContext::instance()->userId()}}));
-        if (r.ok) { QMessageBox::information(this, "完成", "已删除"); onRefresh(); }
-        else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+        QPointer<QPushButton> guard(bDelete);
+        bDelete->setEnabled(false);
+        const QString factId = j::str(f, "fact_id");
+        const QString uid = AppContext::instance()->userId();
+        AppContext::instance()->api()->deleteAsync(
+            api::ApiClient::urlWithQuery("/api/memory/facts/" + factId,
+                                         {{"user_id", uid}}),
+            [this, guard](const api::Result &r) {
+                if (guard) guard->setEnabled(true);
+                if (r.ok) {
+                    QMessageBox::information(this, "完成", "已删除");
+                    onRefresh();
+                } else if (r.errorCode == "memory.safety.review_required") {
+                    QMessageBox::warning(this, "需人工复核", "删除需人工复核。");
+                } else if (r.errorCode == "memory.safety.rejected") {
+                    QMessageBox::warning(this, "被策略拒绝", "删除被安全策略拒绝。");
+                } else {
+                    QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+                }
+            }, this);
     });
     ol->addWidget(bDetail);
     ol->addWidget(bEvidence);
@@ -194,57 +245,70 @@ void FactPage::populateRow(int row, const QJsonObject &f) {
 void FactPage::openDetail(const QString &id) {
     api::ApiClient *api = AppContext::instance()->api();
     const QString uid = AppContext::instance()->userId();
-    const api::Result r = api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/facts/" + id, {{"user_id", uid}}));
-    if (!r.hasJsonObject()) { QMessageBox::warning(this, "加载失败", r.errorCode); return; }
-    const QJsonObject f = r.jsonObject();
+    const int generation = ++m_detailGeneration;
 
-    auto *tabs = new QTabWidget();
-    auto *info = new QWidget();
-    auto *il = new QVBoxLayout(info);
-    auto *label = new QLabel();
-    label->setTextFormat(Qt::RichText);
-    label->setWordWrap(true);
-    label->setStyleSheet("color:#374151;font-size:13px;line-height:1.7;");
-    QString html;
-    html += QString("<b>三元组</b><br/><div style='font-size:15px;color:#1F2430;'>%1</div><br/>")
-                .arg(tripleText(f).toHtmlEscaped());
-    html += QString("<b>置信度</b> %1　<b>版本</b> %2<br/>")
-                .arg(QString::number(j::num(f, "confidence"), 'f', 2))
-                .arg(j::integer(f, "version"));
-    html += QString("<b>作用域</b> %1　<b>项目</b> %2<br/>")
-                .arg(j::str(f, "scope"), j::str(f, "project_id").isEmpty() ? "—" : j::str(f, "project_id"));
-    html += QString("<b>来源文本</b><br/>%1<br/><br/>").arg(j::str(f, "source_text").toHtmlEscaped());
-    html += QString("<b>观察时间</b> %1<br/>").arg(j::fmtTime(j::str(f, "observed_at")));
-    label->setText(html);
-    il->addWidget(label);
-    il->addStretch();
-    tabs->addTab(info, "事实");
+    api->getAsync(api::ApiClient::urlWithQuery(
+        "/api/memory/facts/" + id, {{"user_id", uid}}),
+        [this, generation, id, uid, api](const api::Result &r) {
+            if (generation != m_detailGeneration) return;
+            if (!r.hasJsonObject()) {
+                QMessageBox::warning(this, "加载失败", r.errorCode);
+                return;
+            }
+            const QJsonObject f = r.jsonObject();
 
-    // 证据
-    auto *evW = new QWidget();
-    auto *el = new QVBoxLayout(evW);
-    auto *evT = new QTableWidget(0, 3);
-    evT->setHorizontalHeaderLabels({"时间", "事件", "内容"});
-    evT->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
-    evT->verticalHeader()->setVisible(false);
-    evT->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    const api::Result rev = api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/facts/" + id + "/evidence", {{"user_id", uid}}));
-    if (rev.hasJsonArray()) {
-        const QJsonArray evs = rev.jsonArray();
-        evT->setRowCount(int(evs.size()));
-        for (int i = 0; i < evs.size(); ++i) {
-            const QJsonObject e = evs[i].toObject();
-            evT->setItem(i, 0, new QTableWidgetItem(j::timeAgo(j::str(e, "timestamp"))));
-            evT->setItem(i, 1, new QTableWidgetItem(j::str(e, "event_id")));
-            evT->setItem(i, 2, new QTableWidgetItem(j::str(e, "content")));
-        }
-    }
-    el->addWidget(evT);
-    tabs->addTab(evW, "证据");
+            auto *tabs = new QTabWidget();
+            auto *info = new QWidget();
+            auto *il = new QVBoxLayout(info);
+            auto *label = new QLabel();
+            label->setTextFormat(Qt::RichText);
+            label->setWordWrap(true);
+            label->setStyleSheet("color:#374151;font-size:13px;line-height:1.7;");
+            QString html;
+            html += QString("<b>三元组</b><br/><div style='font-size:15px;color:#1F2430;'>%1</div><br/>")
+                        .arg(tripleText(f).toHtmlEscaped());
+            html += QString("<b>置信度</b> %1　<b>版本</b> %2<br/>")
+                        .arg(QString::number(j::num(f, "confidence"), 'f', 2))
+                        .arg(j::integer(f, "version"));
+            html += QString("<b>作用域</b> %1　<b>项目</b> %2<br/>")
+                        .arg(j::str(f, "scope"), j::str(f, "project_id").isEmpty() ? "—" : j::str(f, "project_id"));
+            html += QString("<b>来源文本</b><br/>%1<br/><br/>").arg(j::str(f, "source_text").toHtmlEscaped());
+            html += QString("<b>观察时间</b> %1<br/>").arg(j::fmtTime(j::str(f, "observed_at")));
+            label->setText(html);
+            il->addWidget(label);
+            il->addStretch();
+            tabs->addTab(info, "事实");
 
-    m_drawer->open(j::shortId(id), tabs);
+            // 证据
+            api->getAsync(api::ApiClient::urlWithQuery(
+                "/api/memory/facts/" + id + "/evidence", {{"user_id", uid}}),
+                [this, generation, id, tabs, api](const api::Result &rev) {
+                    if (generation != m_detailGeneration) {
+                        tabs->deleteLater();
+                        return;
+                    }
+                    auto *evW = new QWidget();
+                    auto *el = new QVBoxLayout(evW);
+                    auto *evT = new QTableWidget(0, 3);
+                    evT->setHorizontalHeaderLabels({"时间", "事件", "内容"});
+                    evT->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+                    evT->verticalHeader()->setVisible(false);
+                    evT->setEditTriggers(QAbstractItemView::NoEditTriggers);
+                    if (rev.hasJsonArray()) {
+                        const QJsonArray evs = rev.jsonArray();
+                        evT->setRowCount(int(evs.size()));
+                        for (int i = 0; i < evs.size(); ++i) {
+                            const QJsonObject e = evs[i].toObject();
+                            evT->setItem(i, 0, new QTableWidgetItem(j::timeAgo(j::str(e, "timestamp"))));
+                            evT->setItem(i, 1, new QTableWidgetItem(j::str(e, "event_id")));
+                            evT->setItem(i, 2, new QTableWidgetItem(j::str(e, "content")));
+                        }
+                    }
+                    el->addWidget(evT);
+                    tabs->addTab(evW, "证据");
+                    m_drawer->open(j::shortId(id), tabs);
+                }, this);
+        }, this);
 }
 
 void FactPage::openProposeDialog() {
@@ -299,15 +363,23 @@ void FactPage::openProposeDialog() {
     body["project_id"] = projEdit->text().trimmed().isEmpty() ? QJsonValue() : QJsonValue(projEdit->text().trimmed());
     body["triples"] = QJsonArray{triple};
 
-    const api::Result r = AppContext::instance()->api()->post("/api/memory/facts/propose", body);
-    if (r.hasJsonArray()) {
-        const QJsonArray proposals = r.jsonArray();
-        for (const QJsonValue &p : proposals) m_candidates.append(p.toObject());
-        QMessageBox::information(this, "完成", QString("已生成 %1 条事实候选，请到上方裁决区处理").arg(proposals.size()));
-        renderCandidates();
-    } else {
-        QMessageBox::warning(this, "提交失败", r.errorCode + " " + r.errorMessage);
-    }
+    m_proposeBtn->setEnabled(false);
+    AppContext::instance()->api()->postAsync("/api/memory/facts/propose", body,
+        [this](const api::Result &r) {
+            m_proposeBtn->setEnabled(true);
+            if (r.hasJsonArray()) {
+                const QJsonArray proposals = r.jsonArray();
+                for (const QJsonValue &p : proposals) m_candidates.append(p.toObject());
+                QMessageBox::information(this, "完成", QString("已生成 %1 条事实候选，请到上方裁决区处理").arg(proposals.size()));
+                renderCandidates();
+            } else if (r.errorCode == "memory.safety.review_required") {
+                QMessageBox::warning(this, "需人工复核", "提案需人工复核。");
+            } else if (r.errorCode == "memory.safety.rejected") {
+                QMessageBox::warning(this, "被策略拒绝", "提案被安全策略拒绝。");
+            } else {
+                QMessageBox::warning(this, "提交失败", r.errorCode + " " + r.errorMessage);
+            }
+        }, this);
 }
 
 void FactPage::renderCandidates() {
@@ -349,7 +421,7 @@ void FactPage::renderCandidates() {
         auto *reject = new QPushButton("驳回");
         reject->setObjectName("dangerBtn");
         const QString pid = j::str(p, "proposal_id");
-        connect(accept, &QPushButton::clicked, this, [this, pid]() {
+        connect(accept, &QPushButton::clicked, this, [this, pid, accept, reject]() {
             QDialog dlg(this);
             dlg.setWindowTitle("采纳事实候选");
             auto *form = new QFormLayout(&dlg);
@@ -373,23 +445,53 @@ void FactPage::renderCandidates() {
             body["action_type"] = "fact_commit";
             body["decision"] = "commit";
             body["payload"] = payload;
-            const api::Result r = AppContext::instance()->api()->post(
-                "/api/agent/actions/" + pid + "/decision", body);
-            if (r.ok) {
-                QMessageBox::information(this, "完成", "事实已入库");
-                removeCandidate(pid);
-                onRefresh();
-            } else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+            QPointer<QPushButton> guardAccept(accept);
+            QPointer<QPushButton> guardReject(reject);
+            accept->setEnabled(false);
+            reject->setEnabled(false);
+            AppContext::instance()->api()->postAsync(
+                "/api/agent/actions/" + pid + "/decision", body,
+                [this, pid, guardAccept, guardReject](const api::Result &r) {
+                    if (guardAccept) guardAccept->setEnabled(true);
+                    if (guardReject) guardReject->setEnabled(true);
+                    if (r.ok) {
+                        QMessageBox::information(this, "完成", "事实已入库");
+                        removeCandidate(pid);
+                        onRefresh();
+                    } else if (r.errorCode == "memory.safety.review_required") {
+                        QMessageBox::warning(this, "需人工复核", "采纳需人工复核。");
+                    } else if (r.errorCode == "memory.safety.rejected") {
+                        QMessageBox::warning(this, "被策略拒绝", "采纳被安全策略拒绝。");
+                    } else {
+                        QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+                    }
+                }, this);
         });
-        connect(reject, &QPushButton::clicked, this, [this, pid]() {
+        connect(reject, &QPushButton::clicked, this, [this, pid, accept, reject]() {
             QJsonObject body;
             body["action_type"] = "fact_reject";
             body["decision"] = "reject";
             body["payload"] = QJsonObject();
-            const api::Result r = AppContext::instance()->api()->post(
-                "/api/agent/actions/" + pid + "/decision", body);
-            if (r.ok) { QMessageBox::information(this, "完成", "已驳回"); removeCandidate(pid); }
-            else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+            QPointer<QPushButton> guardAccept(accept);
+            QPointer<QPushButton> guardReject(reject);
+            accept->setEnabled(false);
+            reject->setEnabled(false);
+            AppContext::instance()->api()->postAsync(
+                "/api/agent/actions/" + pid + "/decision", body,
+                [this, pid, guardAccept, guardReject](const api::Result &r) {
+                    if (guardAccept) guardAccept->setEnabled(true);
+                    if (guardReject) guardReject->setEnabled(true);
+                    if (r.ok) {
+                        QMessageBox::information(this, "完成", "已驳回");
+                        removeCandidate(pid);
+                    } else if (r.errorCode == "memory.safety.review_required") {
+                        QMessageBox::warning(this, "需人工复核", "驳回需人工复核。");
+                    } else if (r.errorCode == "memory.safety.rejected") {
+                        QMessageBox::warning(this, "被策略拒绝", "驳回被安全策略拒绝。");
+                    } else {
+                        QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+                    }
+                }, this);
         });
         row->addWidget(accept);
         row->addWidget(reject);

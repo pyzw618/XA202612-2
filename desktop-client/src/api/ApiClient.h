@@ -10,6 +10,7 @@
 #include <QNetworkAccessManager>
 #include <QString>
 #include <functional>
+#include <QList>
 
 class QNetworkReply;
 
@@ -53,7 +54,7 @@ public:
     // 是否在请求期间显示等待光标（同步请求默认开启）
     void setWaitCursorEnabled(bool on) { m_waitCursor = on; }
 
-    // ---- 同步调用（阻塞，事件循环内等待，含超时） ----
+    // ---- 同步调用（遗留兼容接口；新页面必须使用异步接口） ----
     // path 以 "/api/..." 或 "/" 开头；useUserHeader 用于需要 X-MemoryHub-User 的接口（用户规则）
     Result get(const QString &path, bool useUserHeader = false);
     Result post(const QString &path, const QJsonObject &body, bool useUserHeader = false);
@@ -64,8 +65,22 @@ public:
     // 无响应体的请求（如 204），返回状态码
     Result delNoBody(const QString &path, bool useUserHeader = false);
 
-    // ---- 异步调用（非阻塞，用于健康轮询等后台任务） ----
-    void getAsync(const QString &path, std::function<void(const Result &)> callback);
+    // ---- 异步调用（非阻塞；context 销毁后自动断开回调） ----
+    using Callback = std::function<void(const Result &)>;
+    QNetworkReply *getAsync(const QString &path, Callback callback,
+                            QObject *context = nullptr, int timeoutMs = 8000);
+    QNetworkReply *getAsync(const QString &path, Callback callback,
+                            bool useUserHeader, QObject *context = nullptr,
+                            int timeoutMs = 8000);
+    QNetworkReply *postAsync(const QString &path, const QJsonObject &body, Callback callback,
+                             bool useUserHeader = false, QObject *context = nullptr,
+                             int timeoutMs = 10000);
+    QNetworkReply *patchAsync(const QString &path, const QJsonObject &body, Callback callback,
+                              bool useUserHeader = false, QObject *context = nullptr,
+                              int timeoutMs = 10000);
+    QNetworkReply *deleteAsync(const QString &path, Callback callback,
+                               bool useUserHeader = false, QObject *context = nullptr,
+                               int timeoutMs = 10000);
 
     // 查询字符串构造辅助
     static QString urlWithQuery(const QString &path, const QList<QPair<QString, QString>> &params);
@@ -73,6 +88,9 @@ public:
 private:
     Result sendSync(const QString &method, const QString &path,
                     const QByteArray &body, bool useUserHeader);
+    QNetworkReply *sendAsync(const QString &method, const QString &path,
+                             const QByteArray &body, bool useUserHeader,
+                             Callback callback, QObject *context, int timeoutMs);
     void applyCommonHeaders(QNetworkRequest *req, bool useUserHeader) const;
     Result parseReply(QNetworkReply *reply) const;
 

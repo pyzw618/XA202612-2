@@ -18,6 +18,9 @@
 #include <QPushButton>
 #include <QTableWidget>
 #include <QVBoxLayout>
+#include <QIcon>
+#include <QJsonDocument>
+#include <QPointer>
 
 #include "../AppContext.h"
 #include "../api/ApiClient.h"
@@ -95,9 +98,10 @@ SafetyOverviewPage::SafetyOverviewPage(QWidget *parent) : BasePage(parent) {
 }
 
 void SafetyOverviewPage::refresh() {
+    const int generation = ++m_generation;
     api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->get("/api/memory/system/status");
-    const api::Result rc = api->get("/api/memory/system/config");
+    api->getAsync("/api/memory/system/status", [this, generation](const api::Result &r) {
+    if (generation != m_generation) return;
     if (r.hasJsonObject()) {
         const QJsonObject s = r.jsonObject();
         const QJsonObject safety = j::obj(s, "safety");
@@ -110,6 +114,9 @@ void SafetyOverviewPage::refresh() {
             .arg(j::boolean(safety, "quarantine_enabled") ? "已开启" : "未开启")
             .arg(j::str(safety, "rule_set_id"), j::str(safety, "rule_set_version")));
     }
+    }, this);
+    api->getAsync("/api/memory/system/config", [this, generation](const api::Result &rc) {
+    if (generation != m_generation) return;
     if (rc.hasJsonObject()) {
         const QJsonObject cfg = rc.jsonObject();
         const QJsonObject safety = j::obj(cfg, "safety");
@@ -122,6 +129,7 @@ void SafetyOverviewPage::refresh() {
             .arg(j::boolean(policy, "fail_closed") ? "是" : "否")
             .arg(j::boolean(safety, "auto_mask") ? "是" : "否"));
     }
+    }, this);
 }
 
 // ============================================================
@@ -134,7 +142,7 @@ SafetyUserRulesPage::SafetyUserRulesPage(QWidget *parent) : BasePage(parent) {
     auto *header = new PageHeader(this);
     header->setTitle("用户规则");
     header->setSubtitle("自定义敏感信息规则 · matcher 密文写入，保存后不可回显");
-    m_addBtn = new QPushButton("＋ 新增规则", this);
+    m_addBtn = new QPushButton(QIcon(":/icons/plus.svg"), "新增规则", this);
     m_addBtn->setObjectName("primaryBtn");
     connect(m_addBtn, &QPushButton::clicked, this, &SafetyUserRulesPage::openCreateDialog);
     header->actionLayout()->addWidget(m_addBtn);
@@ -170,15 +178,17 @@ void SafetyUserRulesPage::refresh() { onRefresh(); }
 void SafetyUserRulesPage::onRefresh() { loadTable(); }
 
 void SafetyUserRulesPage::loadTable() {
+    const int generation = ++m_generation;
     api::ApiClient *api = AppContext::instance()->api();
     const QString kw = m_filterBar->searchBox()->text().trimmed();
-    const api::Result r = api->get("/api/memory/safety/user-rules", /*useUserHeader=*/true);
+    api->getAsync("/api/memory/safety/user-rules", [this, generation, kw](const api::Result &r) {
+    if (generation != m_generation) return;
     m_table->setRowCount(0);
     if (!r.hasJsonArray()) {
         if (r.errorCode == "user_rule.service_unavailable" || r.errorCode == "user_rule.identity_unavailable") {
             m_table->setRowCount(1);
             auto *empty = new EmptyState();
-            empty->setIconText("🔒");
+            empty->setIcon(QIcon(":/icons/shield.svg"));
             empty->setTitle("用户规则服务不可用");
             empty->setHint("需 config.yaml 开启 safety.user_rules.enabled 且配置密钥");
             m_table->setCellWidget(0, 0, empty);
@@ -224,6 +234,7 @@ void SafetyUserRulesPage::loadTable() {
         m_table->setCellWidget(row, 7, ops);
         ++row;
     }
+    }, true, this);
 }
 
 void SafetyUserRulesPage::openCreateDialog() {
@@ -268,10 +279,19 @@ void SafetyUserRulesPage::openCreateDialog() {
     body["matcher"] = matcherEdit->toPlainText().trimmed();
     body["case_sensitive"] = caseCheck->isChecked();
     body["enabled"] = enabledCheck->isChecked();
-    const api::Result r = AppContext::instance()->api()->post(
-        "/api/memory/safety/user-rules", body, /*useUserHeader=*/true);
-    if (r.ok) { QMessageBox::information(this, "完成", "规则已创建"); onRefresh(); }
-    else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+    QPointer<QPushButton> btn = qobject_cast<QPushButton *>(sender());
+    if (btn) btn->setEnabled(false);
+    AppContext::instance()->api()->postAsync(
+        "/api/memory/safety/user-rules", body,
+        [this, btn](const api::Result &r) {
+            if (btn) btn->setEnabled(true);
+            if (r.ok) {
+                QMessageBox::information(this, "完成", "规则已创建");
+                onRefresh();
+            } else {
+                QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+            }
+        }, /*useUserHeader=*/true, this);
 }
 
 void SafetyUserRulesPage::openEditDialog(const QJsonObject &rule) {
@@ -317,31 +337,58 @@ void SafetyUserRulesPage::openEditDialog(const QJsonObject &rule) {
         body["enabled"] = enabledCheck->isChecked();
     if (body.size() <= 1) { QMessageBox::information(this, "提示", "没有需要修改的内容"); return; }
 
-    const api::Result r = AppContext::instance()->api()->patch(
-        "/api/memory/safety/user-rules/" + j::str(rule, "rule_id"), body, /*useUserHeader=*/true);
-    if (r.ok) { QMessageBox::information(this, "完成", "规则已更新"); onRefresh(); }
-    else if (r.errorCode == "user_rule.conflict")
-        QMessageBox::warning(this, "并发冲突", "该规则已被他人修改，请刷新后重试。");
-    else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+    QPointer<QPushButton> btn = qobject_cast<QPushButton *>(sender());
+    if (btn) btn->setEnabled(false);
+    AppContext::instance()->api()->patchAsync(
+        "/api/memory/safety/user-rules/" + j::str(rule, "rule_id"), body,
+        [this, btn](const api::Result &r) {
+            if (btn) btn->setEnabled(true);
+            if (r.ok) {
+                QMessageBox::information(this, "完成", "规则已更新");
+                onRefresh();
+            } else if (r.errorCode == "user_rule.conflict") {
+                QMessageBox::warning(this, "并发冲突", "该规则已被他人修改，请刷新后重试。");
+            } else {
+                QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+            }
+        }, /*useUserHeader=*/true, this);
 }
 
 void SafetyUserRulesPage::toggleEnabled(const QString &ruleId, int revision, bool on) {
+    QPointer<QCheckBox> check = qobject_cast<QCheckBox *>(sender());
+    if (check) check->setEnabled(false);
     QJsonObject body;
     body["expected_revision"] = revision;
     body["enabled"] = on;
-    const api::Result r = AppContext::instance()->api()->patch(
-        "/api/memory/safety/user-rules/" + ruleId, body, /*useUserHeader=*/true);
-    if (!r.ok) QMessageBox::warning(this, "切换失败", r.errorCode + " " + r.errorMessage);
+    AppContext::instance()->api()->patchAsync(
+        "/api/memory/safety/user-rules/" + ruleId, body,
+        [this, check](const api::Result &r) {
+            if (check) check->setEnabled(true);
+            if (r.ok) {
+                QMessageBox::information(this, "完成", "规则状态已更新");
+                onRefresh();
+            } else {
+                QMessageBox::warning(this, "切换失败", r.errorCode + " " + r.errorMessage);
+            }
+        }, /*useUserHeader=*/true, this);
 }
 
 void SafetyUserRulesPage::removeRule(const QString &ruleId, int revision) {
     if (!ConfirmDialog::confirm(this, "删除规则", "确认删除该规则？")) return;
-    const api::Result r = AppContext::instance()->api()->del(
+    QPointer<QPushButton> btn = qobject_cast<QPushButton *>(sender());
+    if (btn) btn->setEnabled(false);
+    AppContext::instance()->api()->deleteAsync(
         api::ApiClient::urlWithQuery("/api/memory/safety/user-rules/" + ruleId,
                                      {{"expected_revision", QString::number(revision)}}),
-        /*useUserHeader=*/true);
-    if (r.ok) onRefresh();
-    else QMessageBox::warning(this, "删除失败", r.errorCode + " " + r.errorMessage);
+        [this, btn](const api::Result &r) {
+            if (btn) btn->setEnabled(true);
+            if (r.ok) {
+                QMessageBox::information(this, "完成", "规则已删除");
+                onRefresh();
+            } else {
+                QMessageBox::warning(this, "删除失败", r.errorCode + " " + r.errorMessage);
+            }
+        }, /*useUserHeader=*/true, this);
 }
 
 void SafetyUserRulesPage::showVersionHistory(const QJsonObject &rule) {
@@ -409,16 +456,19 @@ void SafetyAuditPage::refresh() { onRefresh(); }
 void SafetyAuditPage::onRefresh() { loadTable(); }
 
 void SafetyAuditPage::loadTable() {
+    const int generation = ++m_generation;
     api::ApiClient *api = AppContext::instance()->api();
     const QString kw = m_filterBar->searchBox()->text().trimmed();
-    const api::Result r = api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/safety/audit-logs", {{"limit", "200"}, {"offset", "0"}}));
+    api->getAsync(api::ApiClient::urlWithQuery(
+        "/api/memory/safety/audit-logs", {{"limit", "200"}, {"offset", "0"}}),
+        [this, generation, kw](const api::Result &r) {
+    if (generation != m_generation) return;
     m_table->setRowCount(0);
     if (!r.hasJsonObject()) {
         m_stateLabel->show();
         m_stateLabel->setStyleSheet("background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;"
                                     "color:#92400E;padding:8px;");
-        m_stateLabel->setText("⚠ 审计功能未开启（safety.audit_disabled）· 请在 config.yaml 设置 "
+        m_stateLabel->setText("审计功能未开启（safety.audit_disabled）· 请在 config.yaml 设置 "
                               "safety.audit.enabled: true 后重启后端。");
         return;
     }
@@ -441,19 +491,27 @@ void SafetyAuditPage::loadTable() {
         m_table->setItem(row, 5, new QTableWidgetItem(j::timeAgo(j::str(rec, "created_at"))));
         ++row;
     }
+    }, this);
 }
 
 void SafetyAuditPage::verifyChain() {
-    api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->get("/api/memory/safety/audit-logs/verify");
-    if (r.hasJsonObject()) {
-        const bool valid = j::boolean(r.jsonObject(), "valid");
-        QMessageBox::information(this, "验链结果", valid ? "✅ 哈希链校验通过" : "❌ 校验失败：" + j::str(r.jsonObject(), "code"));
-    } else QMessageBox::warning(this, "验链失败", r.errorCode);
+    m_verifyBtn->setEnabled(false);
+    AppContext::instance()->api()->getAsync("/api/memory/safety/audit-logs/verify",
+        [this](const api::Result &r) {
+            m_verifyBtn->setEnabled(true);
+            if (r.hasJsonObject()) {
+                const bool valid = j::boolean(r.jsonObject(), "valid");
+                QMessageBox::information(this, "验链结果", valid ? "哈希链校验通过" : "校验失败：" + j::str(r.jsonObject(), "code"));
+            } else QMessageBox::warning(this, "验链失败", r.errorCode + " " + r.errorMessage);
+        }, this);
 }
 
 void SafetyAuditPage::showRecord(const QJsonObject &rec) {
-    Q_UNUSED(rec);
+    QMessageBox box(this);
+    box.setWindowTitle("审计记录详情");
+    box.setText(QJsonDocument(rec).toJson(QJsonDocument::Indented));
+    box.setTextInteractionFlags(Qt::TextSelectableByMouse);
+    box.exec();
 }
 
 // ============================================================
@@ -498,15 +556,17 @@ void SafetyQuarantinePage::refresh() { onRefresh(); }
 void SafetyQuarantinePage::onRefresh() { loadTable(); }
 
 void SafetyQuarantinePage::loadTable() {
+    const int generation = ++m_generation;
     api::ApiClient *api = AppContext::instance()->api();
     const QString kw = m_filterBar->searchBox()->text().trimmed();
-    const api::Result r = api->get("/api/memory/safety/quarantine");
+    api->getAsync("/api/memory/safety/quarantine", [this, generation, kw](const api::Result &r) {
+    if (generation != m_generation) return;
     m_table->setRowCount(0);
     if (!r.hasJsonObject()) {
         m_stateLabel->show();
         m_stateLabel->setStyleSheet("background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;"
                                     "color:#92400E;padding:8px;");
-        m_stateLabel->setText("⚠ 隔离区未开启（safety.quarantine_disabled）· 请在 config.yaml 设置 "
+        m_stateLabel->setText("隔离区未开启（safety.quarantine_disabled）· 请在 config.yaml 设置 "
                               "safety.quarantine.enabled: true 后重启后端。");
         return;
     }
@@ -543,39 +603,61 @@ void SafetyQuarantinePage::loadTable() {
         m_table->setCellWidget(row, 4, ops);
         ++row;
     }
+    }, this);
 }
 
 void SafetyQuarantinePage::viewRecord(const QString &reviewId) {
     if (!ConfirmDialog::confirm(this, "特权审查",
                                 "查看原文将解密隔离事件内容。确认继续？")) return;
+    const int token = ++m_viewGeneration;
     api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->get("/api/memory/safety/quarantine/" + reviewId);
-    if (!r.hasJsonObject()) { QMessageBox::warning(this, "读取失败", r.errorCode); return; }
-    QDialog dlg(this);
-    dlg.setWindowTitle("隔离事件原文 · " + j::shortId(reviewId));
-    dlg.resize(620, 480);
-    auto *lay = new QVBoxLayout(&dlg);
-    auto *view = new JsonViewer(&dlg);
-    view->setObject(r.jsonObject());
-    lay->addWidget(view, 1);
-    dlg.exec();
+    api->getAsync("/api/memory/safety/quarantine/" + reviewId,
+        [this, token, reviewId](const api::Result &r) {
+            if (token != m_viewGeneration) return;
+            if (!r.hasJsonObject()) { QMessageBox::warning(this, "读取失败", r.errorCode); return; }
+            QDialog dlg(this);
+            dlg.setWindowTitle("隔离事件原文 · " + j::shortId(reviewId));
+            dlg.resize(620, 480);
+            auto *lay = new QVBoxLayout(&dlg);
+            auto *view = new JsonViewer(&dlg);
+            view->setObject(r.jsonObject());
+            lay->addWidget(view, 1);
+            dlg.exec();
+        }, this);
 }
 
 void SafetyQuarantinePage::releaseRecord(const QString &reviewId, const QString &decision) {
+    QPointer<QPushButton> btn = qobject_cast<QPushButton *>(sender());
+    if (btn) btn->setEnabled(false);
     QJsonObject body;
     body["decision"] = decision;
     body["user_id"] = AppContext::instance()->userId();
-    const api::Result r = AppContext::instance()->api()->post(
-        "/api/memory/safety/quarantine/" + reviewId + "/release", body);
-    if (r.ok) {
-        QMessageBox::information(this, "完成", decision == "allow" ? "已放行，事件重新进入管线" : "已驳回，隔离记录已删除");
-        onRefresh();
-    } else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+    AppContext::instance()->api()->postAsync(
+        "/api/memory/safety/quarantine/" + reviewId + "/release", body,
+        [this, btn, decision](const api::Result &r) {
+            if (btn) btn->setEnabled(true);
+            if (r.ok) {
+                QMessageBox::information(this, "完成", decision == "allow" ? "已放行，事件重新进入管线" : "已驳回，隔离记录已删除");
+                onRefresh();
+            } else {
+                QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+            }
+        }, this);
 }
 
 void SafetyQuarantinePage::deleteRecord(const QString &reviewId) {
     if (!ConfirmDialog::confirm(this, "删除隔离记录", "确认删除该隔离记录？")) return;
-    const api::Result r = AppContext::instance()->api()->del("/api/memory/safety/quarantine/" + reviewId);
-    if (r.ok) onRefresh();
-    else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+    QPointer<QPushButton> btn = qobject_cast<QPushButton *>(sender());
+    if (btn) btn->setEnabled(false);
+    AppContext::instance()->api()->deleteAsync(
+        "/api/memory/safety/quarantine/" + reviewId,
+        [this, btn](const api::Result &r) {
+            if (btn) btn->setEnabled(true);
+            if (r.ok) {
+                QMessageBox::information(this, "完成", "隔离记录已删除");
+                onRefresh();
+            } else {
+                QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+            }
+        }, this);
 }

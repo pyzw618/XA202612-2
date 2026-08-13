@@ -8,6 +8,7 @@ class QLabel;
 class QTableWidget;
 class QVBoxLayout;
 class QWidget;
+class QPushButton;
 
 class SettingsStatusPage : public BasePage {
     Q_OBJECT
@@ -21,6 +22,7 @@ private:
 
     QTableWidget *m_table = nullptr;
     QLabel *m_connLabel = nullptr;
+    int m_generation = 0;
 };
 
 class SettingsConfigPage : public BasePage {
@@ -36,6 +38,7 @@ private:
 
     QWidget *m_body = nullptr;
     QVBoxLayout *m_layout = nullptr;
+    int m_generation = 0;
 };
 
 class SettingsDemoPage : public BasePage {
@@ -51,4 +54,6 @@ private slots:
 
 private:
     QLabel *m_resultLabel = nullptr;
+    QPushButton *m_clearPreferencesButton = nullptr;
+    QPushButton *m_clearAllButton = nullptr;
 };

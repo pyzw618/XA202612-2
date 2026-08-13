@@ -30,6 +30,8 @@
 #include "../widgets/JsonViewer.h"
 #include "../widgets/MemoryFilterBar.h"
 #include "../widgets/PageHeader.h"
+#include "../widgets/PageStateView.h"
+#include "../widgets/RoundedContainer.h"
 #include "../widgets/ScoreRing.h"
 #include "../widgets/StatusTag.h"
 
@@ -45,9 +47,10 @@ PreferencePage::PreferencePage(QWidget *parent) : BasePage(parent) {
 
     // 头部
     auto *header = new PageHeader(this);
+    header->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     header->setTitle("偏好记忆");
     header->setSubtitle("记录用户的输出风格、工具偏好、场景习惯等，随检索自动召回");
-    m_addBtn = new QPushButton("＋ 新增偏好", this);
+    m_addBtn = new QPushButton(QIcon(":/icons/plus.svg"), "新增偏好", this);
     m_addBtn->setObjectName("primaryBtn");
     connect(m_addBtn, &QPushButton::clicked, this, [this]() {
         openEditDialog(QJsonObject(), true);
@@ -61,6 +64,7 @@ PreferencePage::PreferencePage(QWidget *parent) : BasePage(parent) {
 
     // 筛选栏
     m_filterBar = new MemoryFilterBar(this);
+    m_filterBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_filterBar->setSearchPlaceholder("搜索内容 / 标签...");
 
     m_typeCombo = new QComboBox(this);
@@ -71,7 +75,7 @@ PreferencePage::PreferencePage(QWidget *parent) : BasePage(parent) {
     for (const QString &t : types) m_typeCombo->addItem(StatusTag::memoryTypeText(t) + " · " + t, t);
 
     m_statusCombo = new QComboBox(this);
-    m_statusCombo->addItem("全部状态", "");
+    m_statusCombo->addItem("有效", "active");
     const QStringList statuses = {"active", "archived", "pending", "deleted"};
     for (const QString &s : statuses) m_statusCombo->addItem(StatusTag::statusText(s), s);
 
@@ -80,16 +84,21 @@ PreferencePage::PreferencePage(QWidget *parent) : BasePage(parent) {
     m_sceneEdit->setFixedWidth(120);
 
     m_minConf = new QDoubleSpinBox(this);
+    m_minConf->setObjectName("filterSpin");
+    m_minConf->setButtonSymbols(QAbstractSpinBox::NoButtons);
     m_minConf->setRange(0.0, 1.0);
     m_minConf->setSingleStep(0.1);
     m_minConf->setValue(0.0);
-    m_minConf->setPrefix("置信≥");
     m_minConf->setDecimals(1);
-    m_minConf->setFixedWidth(110);
+    m_minConf->setFixedWidth(76);
+
+    auto *minConfLabel = new QLabel("置信 ≥", this);
+    minConfLabel->setObjectName("filterLabel");
 
     m_filterBar->addWidget(m_typeCombo);
     m_filterBar->addWidget(m_statusCombo);
     m_filterBar->addWidget(m_sceneEdit);
+    m_filterBar->addWidget(minConfLabel);
     m_filterBar->addWidget(m_minConf);
     m_filterBar->addStretch();
 
@@ -107,9 +116,17 @@ PreferencePage::PreferencePage(QWidget *parent) : BasePage(parent) {
     root->addWidget(m_filterBar);
 
     // 表格 + 抽屉
-    auto *content = new QWidget(this);
+    m_stateView = new PageStateView(this);
+    m_stateView->hide();
+    // 离线/加载时表格会隐藏；将所有剩余高度明确交给状态视图，
+    // 防止标题与筛选栏被 Qt 的默认扩张策略拉开。
+    root->addWidget(m_stateView, 1);
+
+    auto *content = new RoundedContainer(this);
+    m_content = content;
+    content->setObjectName("dataTableContainer");
     auto *contentLay = new QHBoxLayout(content);
-    contentLay->setContentsMargins(0, 8, 0, 0);
+    contentLay->setContentsMargins(2, 2, 2, 2);
     contentLay->setSpacing(0);
 
     m_table = new QTableWidget(0, 9, content);
@@ -142,20 +159,44 @@ void PreferencePage::refresh() {
 }
 
 void PreferencePage::onRefresh() {
+    const int generation = ++m_generation;
+    const bool hadData = !m_all.isEmpty();
+    if (!hadData) {
+        m_content->hide();
+        m_stateView->setState(PageState::Loading, "正在加载偏好记忆",
+                              "正在从后端读取真实数据…");
+    } else {
+        m_stateView->setState(PageState::Loading, "正在刷新",
+                              "当前仍显示上次成功加载的数据。");
+    }
+    m_stateView->clearAction();
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
     const QString status = m_statusCombo->currentData().toString();
 
-    const api::Result r = api->get(api::ApiClient::urlWithQuery(
+    api->getAsync(api::ApiClient::urlWithQuery(
         "/api/memory/preferences",
-        {{"user_id", uid}, {"status", status.isEmpty() ? "active" : status}}));
-    if (!r.hasJsonArray()) {
-        m_all = QJsonArray();
-        m_table->setRowCount(0);
-        return;
-    }
-    m_all = r.jsonArray();
-    applyLocalFilter();
+        {{"user_id", uid}, {"status", status.isEmpty() ? "active" : status}}),
+        [this, generation](const api::Result &r) {
+            if (generation != m_generation) return;
+            if (!r.ok || !r.hasJsonArray()) {
+                m_content->setVisible(!m_all.isEmpty());
+                m_stateView->setState(r.networkError ? PageState::Offline : PageState::Error,
+                                      r.networkError ? "后端离线" : "偏好记忆加载失败",
+                                      r.errorMessage.isEmpty() ? "请稍后重试。" : r.errorMessage);
+                m_stateView->setAction("重试", [this]() { onRefresh(); });
+                return;
+            }
+            m_all = r.jsonArray();
+            m_content->setVisible(!m_all.isEmpty());
+            if (m_all.isEmpty()) {
+                m_stateView->setState(PageState::Empty, "暂无偏好记忆", "当前接口返回了空数据。");
+                m_stateView->setAction("刷新", [this]() { onRefresh(); });
+            } else {
+                m_stateView->setState(PageState::Content, QString(), QString());
+            }
+            applyLocalFilter();
+        }, this);
 }
 
 void PreferencePage::applyLocalFilter() {
@@ -357,7 +398,7 @@ void PreferencePage::openDetail(const QString &memoryId) {
     elay->addWidget(evTable);
     if (evidences.isEmpty()) {
         auto *empty = new EmptyState();
-        empty->setIconText("🗂");
+        empty->setIcon(QIcon(":/icons/preference.svg"));
         empty->setTitle("暂无证据链");
         empty->setHint("该记忆尚未沉淀关联证据");
         elay->addWidget(empty);

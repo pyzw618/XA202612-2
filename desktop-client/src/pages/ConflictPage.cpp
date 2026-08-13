@@ -19,6 +19,7 @@
 #include "../api/Json.h"
 #include "../widgets/EmptyState.h"
 #include "../widgets/PageHeader.h"
+#include "../widgets/PageStateView.h"
 #include "../widgets/StatusTag.h"
 
 ConflictPage::ConflictPage(QWidget *parent) : BasePage(parent) {
@@ -80,6 +81,9 @@ ConflictPage::ConflictPage(QWidget *parent) : BasePage(parent) {
     m_cardsLayout->setSpacing(12);
     m_scroll->setWidget(m_cardsContainer);
     root->addWidget(m_scroll, 1);
+    m_stateView = new PageStateView(this);
+    m_stateView->hide();
+    root->addWidget(m_stateView);
 }
 
 void ConflictPage::refresh() { loadPage(1); }
@@ -88,44 +92,60 @@ void ConflictPage::onFilterChanged() { loadPage(1); }
 
 void ConflictPage::loadPage(int page) {
     m_currentPage = qMax(1, page);
+    const int generation = ++m_generation;
+    ++m_pendingLoads;
+    m_scroll->setEnabled(false);
+    m_stateView->setState(PageState::Loading, "正在加载冲突", "正在读取统计与分页数据…");
+    m_stateView->clearAction();
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
     const QString status = m_statusCombo->currentData().toString();
 
-    // 统计：拉全量
-    const api::Result rAll = api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/conflicts", {{"user_id", uid}, {"status", ""}}));
-    int pending = 0, resolved = 0;
-    if (rAll.hasJsonArray()) {
-        for (const QJsonValue &v : rAll.jsonArray()) {
-            const QString d = j::str(v.toObject(), "decision");
-            if (d == "pending") ++pending;
-            else ++resolved;
-        }
-    }
-    m_statPending->setText(QString("待处理：%1").arg(pending));
-    m_statResolved->setText(QString("已解决：%1").arg(resolved));
+    api->getAsync(api::ApiClient::urlWithQuery(
+        "/api/memory/conflicts", {{"user_id", uid}, {"status", ""}}),
+        [this, generation](const api::Result &rAll) {
+            if (generation != m_generation) return;
+            if (rAll.ok && rAll.hasJsonArray()) {
+                int pending = 0, resolved = 0;
+                for (const QJsonValue &v : rAll.jsonArray())
+                    j::str(v.toObject(), "decision") == "pending" ? ++pending : ++resolved;
+                m_statPending->setText(QString("待处理：%1").arg(pending));
+                m_statResolved->setText(QString("已解决：%1").arg(resolved));
+            } else {
+                m_statPending->setText("待处理：加载失败");
+                m_statResolved->setText("已解决：加载失败");
+            }
+        }, this);
 
     // 分页数据
-    const api::Result r = api->get(api::ApiClient::urlWithQuery(
+    api->getAsync(api::ApiClient::urlWithQuery(
         "/api/memory/conflicts",
         {{"user_id", uid}, {"status", status}, {"page", QString::number(m_currentPage)},
-         {"size", QString::number(m_size)}}));
-
-    QJsonArray items;
-    if (r.jsonObject().contains("items")) {
-        items = j::arr(r.jsonObject(), "items");
-        m_total = j::integer(r.jsonObject(), "total");
-    } else if (r.hasJsonArray()) {
-        items = r.jsonArray();
-        m_total = int(items.size());
-    }
-
-    renderCards(items);
-    const int maxPage = qMax(1, (m_total + m_size - 1) / m_size);
-    m_pageInfo->setText(QString("第 %1 / %2 页 · 共 %3 条").arg(m_currentPage).arg(maxPage).arg(m_total));
-    m_prevBtn->setEnabled(m_currentPage > 1);
-    m_nextBtn->setEnabled(m_currentPage < maxPage);
+         {"size", QString::number(m_size)}}),
+        [this, generation](const api::Result &r) {
+            if (generation != m_generation) return;
+            m_scroll->setEnabled(true);
+            if (!r.ok || (!r.hasJsonArray() && !r.hasJsonObject())) {
+                m_stateView->setState(r.networkError ? PageState::Offline : PageState::Error,
+                                      r.networkError ? "后端离线" : "冲突加载失败",
+                                      r.errorMessage.isEmpty() ? "请稍后重试。" : r.errorMessage);
+                m_stateView->setAction("重试", [this]() { loadPage(m_currentPage); });
+                return;
+            }
+            QJsonArray items;
+            if (r.hasJsonObject() && r.jsonObject().contains("items")) {
+                items = j::arr(r.jsonObject(), "items");
+                m_total = j::integer(r.jsonObject(), "total");
+            } else { items = r.jsonArray(); m_total = int(items.size()); }
+            m_stateView->setState(items.isEmpty() ? PageState::Empty : PageState::Content,
+                                  "暂无冲突", "有偏好、知识或事实写入冲突时会出现在这里。");
+            if (items.isEmpty()) m_stateView->setAction("刷新", [this]() { loadPage(m_currentPage); });
+            renderCards(items);
+            const int maxPage = qMax(1, (m_total + m_size - 1) / m_size);
+            m_pageInfo->setText(QString("第 %1 / %2 页 · 共 %3 条").arg(m_currentPage).arg(maxPage).arg(m_total));
+            m_prevBtn->setEnabled(m_currentPage > 1);
+            m_nextBtn->setEnabled(m_currentPage < maxPage);
+        }, this);
 }
 
 void ConflictPage::renderCards(const QJsonArray &items) {
@@ -135,7 +155,7 @@ void ConflictPage::renderCards(const QJsonArray &items) {
     }
     if (items.isEmpty()) {
         auto *empty = new EmptyState();
-        empty->setIconText("🛡");
+        empty->setIcon(QIcon(":/icons/conflict.svg"));
         empty->setTitle("暂无冲突");
         empty->setHint("有偏好/知识写入冲突时会出现在这里");
         m_cardsLayout->addWidget(empty, 1);
@@ -220,6 +240,7 @@ void ConflictPage::buildCard(QWidget *parent, const QJsonObject &c) {
 }
 
 void ConflictPage::resolveConflict(const QJsonObject &c, const QString &decision) {
+    if (m_writeInProgress) return;
     // 询问原因（可选）
     QDialog dlg(this);
     dlg.setWindowTitle("解决冲突 · " + decision);
@@ -243,11 +264,12 @@ void ConflictPage::resolveConflict(const QJsonObject &c, const QString &decision
     body["result_id"] = j::str(c, "result_memory_id");
 
     api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->post("/api/memory/conflicts/" + j::str(c, "conflict_id") + "/resolve", body);
-    if (r.ok) {
-        QMessageBox::information(this, "完成", "冲突已解决");
-        loadPage(m_currentPage);
-    } else {
-        QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
-    }
+    m_writeInProgress = true;
+    AppContext::instance()->api()->postAsync(
+        "/api/memory/conflicts/" + j::str(c, "conflict_id") + "/resolve", body,
+        [this](const api::Result &r) {
+            m_writeInProgress = false;
+            if (r.ok) loadPage(m_currentPage);
+            else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+        }, this);
 }

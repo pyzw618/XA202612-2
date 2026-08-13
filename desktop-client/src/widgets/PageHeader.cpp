@@ -14,8 +14,7 @@ PageHeader::PageHeader(QWidget *parent) : QWidget(parent) {
     m_prefix->hide();
 
     m_title = new QLabel(this);
-    m_title->setObjectName("cardTitle");
-    m_title->setStyleSheet("font-size: 17px; font-weight: 700; color: #1F2430;");
+    m_title->setObjectName("pageTitle");
 
     m_subtitle = new QLabel(this);
     m_subtitle->setObjectName("pageSubtitle");

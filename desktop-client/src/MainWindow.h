@@ -12,6 +12,7 @@ class QLabel;
 class QLineEdit;
 class QComboBox;
 class QTimer;
+class QPushButton;
 class BasePage;
 
 class MainWindow : public QMainWindow {
@@ -34,6 +35,7 @@ private:
     void updateBreadcrumb(const QString &group, const QString &title);
     void pollHealth();
     void refreshCurrentPage();
+    void polishPopupControls(QWidget *root);
 
     QTreeWidget *m_nav = nullptr;
     QStackedWidget *m_stack = nullptr;
@@ -41,7 +43,8 @@ private:
     QLabel *m_statusDot = nullptr;
     QLabel *m_statusText = nullptr;
     QLineEdit *m_globalSearch = nullptr;
-    QComboBox *m_userCombo = nullptr;
+    QLineEdit *m_userEdit = nullptr;
+    QPushButton *m_refreshButton = nullptr;
     QTimer *m_healthTimer = nullptr;
     bool m_backendOnline = false;
     bool m_healthChecked = false;

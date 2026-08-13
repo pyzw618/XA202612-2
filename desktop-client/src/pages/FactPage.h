@@ -13,6 +13,7 @@ class DetailDrawer;
 class QPushButton;
 class QVBoxLayout;
 class QWidget;
+class PageStateView;
 
 class FactPage : public BasePage {
     Q_OBJECT
@@ -42,7 +43,11 @@ private:
 
     QVBoxLayout *m_candidateLayout = nullptr; // 候选裁决区
     QWidget *m_candidateContainer = nullptr;
+    QWidget *m_content = nullptr;
+    PageStateView *m_stateView = nullptr;
 
     QJsonArray m_all;
     QJsonArray m_candidates;  // 本会话提案（裁决区）
+    int m_generation = 0;
+    int m_detailGeneration = 0;
 };

@@ -15,6 +15,7 @@ class QCheckBox;
 class QVBoxLayout;
 class QLabel;
 class QScrollArea;
+class PageStateView;
 
 class SearchPage : public BasePage {
     Q_OBJECT
@@ -52,6 +53,11 @@ private:
     QLabel *m_cacheLabel = nullptr;
     QLabel *m_contextText = nullptr;
     QPushButton *m_copyContextBtn = nullptr;
+    QPushButton *m_searchButton = nullptr;
+    QPushButton *m_contextButton = nullptr;
+    PageStateView *m_stateView = nullptr;
+    int m_generation = 0;
+    bool m_contextLoading = false;
 
     QJsonObject m_lastRequest;
     QJsonObject m_lastResponse;

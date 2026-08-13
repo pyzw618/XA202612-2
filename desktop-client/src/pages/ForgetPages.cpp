@@ -8,6 +8,7 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QFrame>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -28,6 +29,7 @@
 #include <QtCharts/QValueAxis>
 
 #include <algorithm>
+#include <memory>
 #include <QSet>
 
 #include "../AppContext.h"
@@ -150,30 +152,59 @@ ForgetPrecisePage::ForgetPrecisePage(QWidget *parent) : BasePage(parent) {
 
 void ForgetPrecisePage::refresh() {
     // 加载三类记忆，供 ID 定位与预览展示使用
+    const int generation = ++m_generation;
+    m_pendingLoads = 3;
+    m_prefAll = QJsonArray();
+    m_knowAll = QJsonArray();
+    m_factAll = QJsonArray();
+    m_loadFailures.clear();
+    m_idList->clear();
+    m_previewContainer->show();
+    m_previewSummary->setText("正在并行读取偏好、知识和事实记忆…");
+    m_executeBtn->setEnabled(false);
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
-    m_prefAll = api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/preferences", {{"user_id", uid}, {"status", ""}})).jsonArray();
-    m_knowAll = api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/knowledge", {{"user_id", uid}})).jsonArray();
-    m_factAll = api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/facts", {{"user_id", uid}, {"status", ""}})).jsonArray();
+    auto finish = [this, generation](const QString &type, const api::Result &r) {
+        if (generation != m_generation) return;
+        if (r.ok && r.hasJsonArray()) {
+            if (type == "偏好") m_prefAll = r.jsonArray();
+            else if (type == "知识") m_knowAll = r.jsonArray();
+            else m_factAll = r.jsonArray();
+        } else {
+            m_loadFailures.append(type);
+        }
+        if (--m_pendingLoads != 0) return;
 
-    // 填充 ID 列表
-    m_idList->clear();
-    auto addMem = [this](const QJsonObject &m, const QString &type) {
-        QString content = j::str(m, "text");
-        if (content.isEmpty()) content = j::str(m, "name");
-        if (content.isEmpty()) content = j::str(m, "content");
-        const QString id = j::str(m, "memory_id").isEmpty() ? j::str(m, "fact_id") : j::str(m, "memory_id");
-        auto *item = new QListWidgetItem(QString("[%1] %2").arg(type, content));
-        item->setData(Qt::UserRole, id);
-        item->setToolTip(id);
-        m_idList->addItem(item);
+        auto addMem = [this](const QJsonObject &m, const QString &label) {
+            QString content = j::str(m, "text");
+            if (content.isEmpty()) content = j::str(m, "name");
+            if (content.isEmpty()) content = j::str(m, "content");
+            const QString id = j::str(m, "memory_id").isEmpty() ? j::str(m, "fact_id") : j::str(m, "memory_id");
+            auto *item = new QListWidgetItem(QString("[%1] %2").arg(label, content));
+            item->setData(Qt::UserRole, id);
+            item->setToolTip(id);
+            m_idList->addItem(item);
+        };
+        for (const QJsonValue &v : m_prefAll) addMem(v.toObject(), "偏好");
+        for (const QJsonValue &v : m_knowAll) addMem(v.toObject(), "知识");
+        for (const QJsonValue &v : m_factAll) addMem(v.toObject(), "事实");
+        if (m_loadFailures.isEmpty()) {
+            m_previewSummary->setText(QString("可选记忆已加载：偏好 %1 · 知识 %2 · 事实 %3")
+                                      .arg(m_prefAll.size()).arg(m_knowAll.size()).arg(m_factAll.size()));
+        } else {
+            m_previewSummary->setText(QString("部分记忆加载失败：%1。已保留成功类型，可稍后刷新重试。")
+                                      .arg(m_loadFailures.join("、")));
+        }
     };
-    for (const QJsonValue &v : m_prefAll) addMem(v.toObject(), "偏好");
-    for (const QJsonValue &v : m_knowAll) addMem(v.toObject(), "知识");
-    for (const QJsonValue &v : m_factAll) addMem(v.toObject(), "事实");
+    api->getAsync(api::ApiClient::urlWithQuery(
+        "/api/memory/preferences", {{"user_id", uid}, {"status", ""}}),
+        [finish](const api::Result &r) { finish("偏好", r); }, this);
+    api->getAsync(api::ApiClient::urlWithQuery(
+        "/api/memory/knowledge", {{"user_id", uid}}),
+        [finish](const api::Result &r) { finish("知识", r); }, this);
+    api->getAsync(api::ApiClient::urlWithQuery(
+        "/api/memory/facts", {{"user_id", uid}, {"status", ""}}),
+        [finish](const api::Result &r) { finish("事实", r); }, this);
 }
 
 QJsonObject ForgetPrecisePage::buildPreviewRequest() {
@@ -216,16 +247,26 @@ void ForgetPrecisePage::doPreview() {
 
     const QJsonObject body = buildPreviewRequest();
     api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->post("/api/memory/forget/preview", body);
-    if (!r.ok) { QMessageBox::warning(this, "预览失败", r.errorCode + " " + r.errorMessage); return; }
-    QList<QString> ids;
-    for (const QJsonValue &v : j::arr(r.jsonObject(), "candidate_ids")) ids << v.toString();
-    m_candidateIds = ids;
-    renderCandidates(ids);
-    const QString type = j::str(r.jsonObject(), "memory_type");
-    const QString topic = j::str(r.jsonObject(), "target_topic");
-    m_previewSummary->setText(QString("解析结果：类型=%1 · 主题=%2 · 匹配 %3 条")
-                                  .arg(type, topic).arg(ids.size()));
+    const int generation = ++m_generation;
+    m_executeBtn->setEnabled(false);
+    m_previewSummary->setText("正在生成遗忘预览…");
+    api->postAsync("/api/memory/forget/preview", body,
+        [this, generation](const api::Result &r) {
+            if (generation != m_generation) return;
+            m_executeBtn->setEnabled(false);
+            if (!r.ok || !r.hasJsonObject()) {
+                m_previewSummary->setText(r.errorMessage.isEmpty() ? "预览失败" : r.errorMessage);
+                return;
+            }
+            QList<QString> ids;
+            for (const QJsonValue &v : j::arr(r.jsonObject(), "candidate_ids")) ids << v.toString();
+            m_candidateIds = ids;
+            renderCandidates(ids);
+            const QString type = j::str(r.jsonObject(), "memory_type");
+            const QString topic = j::str(r.jsonObject(), "target_topic");
+            m_previewSummary->setText(QString("解析结果：类型=%1 · 主题=%2 · 匹配 %3 条")
+                                      .arg(type, topic).arg(ids.size()));
+        }, false, this, 10000);
 }
 
 void ForgetPrecisePage::renderCandidates(const QList<QString> &ids) {
@@ -295,6 +336,7 @@ QList<QString> ForgetPrecisePage::selectedCandidateIds() const {
 }
 
 void ForgetPrecisePage::doExecute() {
+    if (m_executeInProgress) return;
     QList<QString> ids = selectedCandidateIds();
     if (ids.isEmpty() && m_tabs->currentIndex() == 2) {
         for (int i = 0; i < m_idList->count(); ++i) {
@@ -313,23 +355,38 @@ void ForgetPrecisePage::doExecute() {
     body["target_memory_ids"] = QJsonArray::fromStringList(ids);
     body["cascade"] = m_cascadeCheck->isChecked();
     api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->post("/api/memory/forget", body);
-    if (r.ok) {
-        QMessageBox::information(this, "完成",
-                                 QString("已遗忘 %1 条，记录 ID：%2")
-                                     .arg(j::integer(r.jsonObject(), "deleted_count"))
-                                     .arg(j::str(r.jsonObject(), "record_id")));
-        m_previewContainer->hide();
-        m_executeBtn->setEnabled(false);
-    } else {
-        QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
-    }
+    m_executeInProgress = true;
+    m_executeBtn->setEnabled(false);
+    m_executeBtn->setText("执行中…");
+    api->postAsync("/api/memory/forget", body,
+        [this](const api::Result &r) {
+            m_executeInProgress = false;
+            m_executeBtn->setText("确认遗忘");
+            if (r.ok) {
+                QMessageBox::information(this, "完成",
+                    QString("已遗忘 %1 条，记录 ID：%2")
+                        .arg(j::integer(r.jsonObject(), "deleted_count"))
+                        .arg(j::str(r.jsonObject(), "record_id")));
+                m_previewContainer->hide();
+                m_executeBtn->setEnabled(false);
+            } else {
+                m_executeBtn->setEnabled(true);
+                QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+            }
+        }, false, this, 15000);
 }
 
 // ============================================================
 // P4.2 待审查队列
 // ============================================================
 namespace {
+struct AsyncListState {
+    int pending = 0;
+    QJsonArray preference;
+    QJsonArray knowledge;
+    QJsonArray fact;
+};
+
 void buildStatusTable(QTableWidget *t) {
     t->setColumnCount(6);
     t->setHorizontalHeaderLabels({"", "内容", "类型", "健康度", "状态", "操作"});
@@ -366,8 +423,8 @@ ForgetPendingPage::ForgetPendingPage(QWidget *parent) : BasePage(parent) {
     header->setSubtitle("健康度低于阈值待审查的记忆，可保持 / 归档 / 删除");
     m_allActive = new QPushButton("全部保持", this);
     m_allArchive = new QPushButton("全部归档", this);
-    connect(m_allActive, &QPushButton::clicked, this, [this]() { batchSetStatus("active"); });
-    connect(m_allArchive, &QPushButton::clicked, this, [this]() { batchSetStatus("archived"); });
+    connect(m_allActive, &QPushButton::clicked, this, [this]() { batchSetStatus("active", m_allActive); });
+    connect(m_allArchive, &QPushButton::clicked, this, [this]() { batchSetStatus("archived", m_allArchive); });
     header->actionLayout()->addWidget(m_allActive);
     header->actionLayout()->addWidget(m_allArchive);
     root->addWidget(header);
@@ -389,11 +446,12 @@ void ForgetPendingPage::refresh() { onRefresh(); }
 void ForgetPendingPage::onRefresh() { loadTable(); }
 
 void ForgetPendingPage::loadTable() {
+    const int generation = ++m_generation;
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
     const QString kw = m_filterBar->searchBox()->text().trimmed();
     m_table->setRowCount(0);
-    auto append = [&](const QString &type, const QJsonArray &arr) {
+    auto append = [this, kw](const QString &type, const QJsonArray &arr) {
         for (const QJsonValue &v : arr) {
             const QJsonObject m = v.toObject();
             if (!kw.isEmpty() && !memContent(m, type).contains(kw, Qt::CaseInsensitive)) continue;
@@ -419,31 +477,59 @@ void ForgetPendingPage::loadTable() {
             auto *b2 = new QPushButton("归档", ops); b2->setObjectName("textBtn");
             auto *b3 = new QPushButton("删除", ops); b3->setStyleSheet("color:#EF4444;");
             const QString id = memId(m, type);
-            connect(b1, &QPushButton::clicked, this, [this, id]() { setSingleStatus(id, "active"); });
-            connect(b2, &QPushButton::clicked, this, [this, id]() { setSingleStatus(id, "archived"); });
-            connect(b3, &QPushButton::clicked, this, [this, id]() {
-                if (ConfirmDialog::confirm(this, "删除", "确认删除该记忆？")) setSingleStatus(id, "deleted");
+            connect(b1, &QPushButton::clicked, this, [this, id, b1]() { setSingleStatus(id, "active", b1); });
+            connect(b2, &QPushButton::clicked, this, [this, id, b2]() { setSingleStatus(id, "archived", b2); });
+            connect(b3, &QPushButton::clicked, this, [this, id, b3]() {
+                if (ConfirmDialog::confirm(this, "删除", "确认删除该记忆？")) setSingleStatus(id, "deleted", b3);
             });
             ol->addWidget(b1); ol->addWidget(b2); ol->addWidget(b3);
             m_table->setCellWidget(row, 5, ops);
         }
     };
-    append("preference", api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/preferences", {{"user_id", uid}, {"status", "pending"}})).jsonArray());
-    append("knowledge", api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/knowledge", {{"user_id", uid}, {"status", "pending"}})).jsonArray());
-    append("fact", api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/facts", {{"user_id", uid}, {"status", "pending"}})).jsonArray());
+
+    auto state = std::make_shared<AsyncListState>();
+    state->pending = 3;
+    auto finish = [this, generation, state, append]() {
+        if (generation != m_generation) return;
+        if (--state->pending != 0) return;
+        append("preference", state->preference);
+        append("knowledge", state->knowledge);
+        append("fact", state->fact);
+    };
+    auto handle = [state, finish](const QString &type, const api::Result &r) {
+        if (r.ok && r.hasJsonArray()) {
+            if (type == "preference") state->preference = r.jsonArray();
+            else if (type == "knowledge") state->knowledge = r.jsonArray();
+            else state->fact = r.jsonArray();
+        }
+        finish();
+    };
+    api->getAsync(api::ApiClient::urlWithQuery(
+        "/api/memory/preferences", {{"user_id", uid}, {"status", "pending"}}),
+        [handle](const api::Result &r) { handle("preference", r); }, this);
+    api->getAsync(api::ApiClient::urlWithQuery(
+        "/api/memory/knowledge", {{"user_id", uid}, {"status", "pending"}}),
+        [handle](const api::Result &r) { handle("knowledge", r); }, this);
+    api->getAsync(api::ApiClient::urlWithQuery(
+        "/api/memory/facts", {{"user_id", uid}, {"status", "pending"}}),
+        [handle](const api::Result &r) { handle("fact", r); }, this);
 }
 
-void ForgetPendingPage::setSingleStatus(const QString &id, const QString &status) {
+void ForgetPendingPage::setSingleStatus(const QString &id, const QString &status, QPushButton *caller) {
+    if (caller) caller->setEnabled(false);
     QJsonObject body;
     body["user_id"] = AppContext::instance()->userId();
     body["status"] = status;
-    const api::Result r = AppContext::instance()->api()->patch(
-        "/api/memory/memories/" + id + "/status", body);
-    if (r.ok) { onRefresh(); }
-    else QMessageBox::warning(this, "操作失败", r.errorCode + " " + r.errorMessage);
+    AppContext::instance()->api()->patchAsync(
+        "/api/memory/memories/" + id + "/status", body,
+        [this, caller](const api::Result &r) {
+            if (caller) caller->setEnabled(true);
+            if (r.ok) {
+                onRefresh();
+            } else {
+                QMessageBox::warning(this, "操作失败", r.errorCode + " " + r.errorMessage);
+            }
+        }, false, this);
 }
 
 QList<QString> ForgetPendingPage::selectedIds() const {
@@ -455,19 +541,26 @@ QList<QString> ForgetPendingPage::selectedIds() const {
     return ids;
 }
 
-void ForgetPendingPage::batchSetStatus(const QString &status) {
+void ForgetPendingPage::batchSetStatus(const QString &status, QPushButton *caller) {
     const QList<QString> ids = selectedIds();
     if (ids.isEmpty()) { QMessageBox::information(this, "提示", "请先勾选记忆"); return; }
+    if (caller) caller->setEnabled(false);
     QJsonObject body;
     body["user_id"] = AppContext::instance()->userId();
     body["memory_ids"] = QJsonArray::fromStringList(ids);
     body["status"] = status;
-    const api::Result r = AppContext::instance()->api()->post("/api/memory/memories/status", body);
-    if (r.ok) {
-        QMessageBox::information(this, "完成", QString("已处理 %1 / %2 条")
-            .arg(j::integer(r.jsonObject(), "applied")).arg(j::integer(r.jsonObject(), "total")));
-        onRefresh();
-    } else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+    AppContext::instance()->api()->postAsync(
+        "/api/memory/memories/status", body,
+        [this, caller, ids](const api::Result &r) {
+            if (caller) caller->setEnabled(true);
+            if (r.ok) {
+                QMessageBox::information(this, "完成", QString("已处理 %1 / %2 条")
+                    .arg(j::integer(r.jsonObject(), "applied")).arg(j::integer(r.jsonObject(), "total")));
+                onRefresh();
+            } else {
+                QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+            }
+        }, false, this);
 }
 
 // ============================================================
@@ -532,7 +625,7 @@ void ForgetArchivedPage::onRefresh() {
     append("fact", api->get(api::ApiClient::urlWithQuery(
         "/api/memory/facts", {{"user_id", uid}, {"status", "archived"}})).jsonArray());
 }
-void ForgetArchivedPage::unarchive(const QString &id) {
+void ForgetArchivedPage::unarchive(const QString &id, QPushButton *caller) {
     QJsonObject body;
     body["user_id"] = AppContext::instance()->userId();
     body["status"] = "active";
@@ -540,7 +633,7 @@ void ForgetArchivedPage::unarchive(const QString &id) {
     if (r.ok) onRefresh();
     else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
 }
-void ForgetArchivedPage::deleteMemory(const QString &id) {
+void ForgetArchivedPage::deleteMemory(const QString &id, QPushButton *caller) {
     if (!ConfirmDialog::confirm(this, "删除", "确认删除该归档记忆？")) return;
     QJsonObject body;
     body["user_id"] = AppContext::instance()->userId();
@@ -610,7 +703,7 @@ void ForgetRecyclePage::onRefresh() {
     append("fact", api->get(api::ApiClient::urlWithQuery(
         "/api/memory/facts", {{"user_id", uid}, {"status", "deleted"}})).jsonArray());
 }
-void ForgetRecyclePage::restore(const QString &id) {
+void ForgetRecyclePage::restore(const QString &id, QPushButton *caller) {
     QJsonObject body;
     body["user_id"] = AppContext::instance()->userId();
     body["status"] = "active";
@@ -618,7 +711,7 @@ void ForgetRecyclePage::restore(const QString &id) {
     if (r.ok) onRefresh();
     else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
 }
-void ForgetRecyclePage::hardDelete(const QString &id) {
+void ForgetRecyclePage::hardDelete(const QString &id, QPushButton *caller) {
     if (!ConfirmDialog::confirm(this, "彻底删除", "物理删除该记忆？将无法恢复。", "彻底删除")) return;
     const api::Result r = AppContext::instance()->api()->del(
         api::ApiClient::urlWithQuery("/api/memory/memories/" + id,
@@ -641,8 +734,7 @@ ForgetHealthPage::ForgetHealthPage(QWidget *parent) : BasePage(parent) {
     root->addWidget(header);
 
     m_warningLabel = new QLabel(this);
-    m_warningLabel->setStyleSheet("background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;"
-                                  "color:#B91C1C;padding:8px;");
+    m_warningLabel->setObjectName("healthWarning");
     m_warningLabel->hide();
     root->addWidget(m_warningLabel);
 
@@ -651,7 +743,7 @@ ForgetHealthPage::ForgetHealthPage(QWidget *parent) : BasePage(parent) {
     scroll->setFrameShape(QFrame::NoFrame);
     auto *body = new QWidget();
     auto *bl = new QVBoxLayout(body);
-    bl->setContentsMargins(0, 8, 0, 0);
+    bl->setContentsMargins(0, 4, 0, 4);
     scroll->setWidget(body);
     root->addWidget(scroll, 1);
 
@@ -659,6 +751,7 @@ ForgetHealthPage::ForgetHealthPage(QWidget *parent) : BasePage(parent) {
     m_listContainer = new QWidget(body);
     m_listLayout = new QVBoxLayout(m_listContainer);
     m_listLayout->setContentsMargins(0, 0, 0, 0);
+    m_listLayout->setSpacing(14);
     bl->addWidget(m_listContainer);
 }
 
@@ -675,13 +768,72 @@ void ForgetHealthPage::loadData() {
         "/api/memory/memories/health", {{"user_id", uid}, {"status", "active"}}));
     m_items = j::arr(r.jsonObject(), "items");
 
-    // 低健康度预警
+    // 摘要指标
     int low = 0;
-    for (const QJsonValue &v : m_items) if (j::num(v.toObject(), "health_score") < 0.4) ++low;
+    int healthy = 0;
+    double healthSum = 0.0;
+    for (const QJsonValue &v : m_items) {
+        const double health = j::num(v.toObject(), "health_score");
+        healthSum += health;
+        if (health < 0.4) ++low;
+        if (health >= 0.6) ++healthy;
+    }
+    const double average = m_items.isEmpty() ? 0.0 : healthSum / m_items.size();
+
+    auto *metrics = new QWidget(m_listContainer);
+    auto *metricsLayout = new QGridLayout(metrics);
+    metricsLayout->setContentsMargins(0, 0, 0, 0);
+    metricsLayout->setHorizontalSpacing(12);
+    metricsLayout->setVerticalSpacing(12);
+    auto addMetric = [&](int column, const QString &caption, const QString &value,
+                         const QString &hint, const QString &tone) {
+        auto *card = new QFrame(metrics);
+        card->setObjectName("healthMetricCard");
+        auto *layout = new QVBoxLayout(card);
+        layout->setContentsMargins(18, 14, 18, 14);
+        layout->setSpacing(3);
+        auto *captionLabel = new QLabel(caption, card);
+        captionLabel->setObjectName("healthMetricCaption");
+        auto *valueLabel = new QLabel(value, card);
+        valueLabel->setObjectName("healthMetricValue");
+        valueLabel->setProperty("tone", tone);
+        auto *hintLabel = new QLabel(hint, card);
+        hintLabel->setObjectName("healthMetricHint");
+        layout->addWidget(captionLabel);
+        layout->addWidget(valueLabel);
+        layout->addWidget(hintLabel);
+        metricsLayout->addWidget(card, 0, column);
+    };
+    addMetric(0, "活跃记忆", QString::number(m_items.size()), "纳入健康度计算", "primary");
+    addMetric(1, "平均健康度", QString::number(average, 'f', 2),
+              average >= 0.6 ? "整体状态良好" : average >= 0.4 ? "建议持续关注" : "需要及时处理",
+              average >= 0.6 ? "good" : average >= 0.4 ? "warning" : "danger");
+    addMetric(2, "健康记忆", QString::number(healthy), "健康度 ≥ 0.6", "good");
+    addMetric(3, "风险记忆", QString::number(low), "健康度 < 0.4", low > 0 ? "danger" : "muted");
+    for (int column = 0; column < 4; ++column) metricsLayout->setColumnStretch(column, 1);
+    m_listLayout->addWidget(metrics);
+
+    // 低健康度预警
     if (low > 0) {
-        m_warningLabel->setText(QString("⚠ 有 %1 条记忆健康度低于 0.4，建议及时处理或调整。").arg(low));
+        m_warningLabel->setText(QString("有 %1 条记忆进入风险区间，建议检查长期未访问或持续衰减的内容。").arg(low));
         m_warningLabel->show();
     } else m_warningLabel->hide();
+
+    if (m_items.isEmpty()) {
+        auto *emptyCard = new QFrame(m_listContainer);
+        emptyCard->setObjectName("healthPanel");
+        auto *emptyLayout = new QVBoxLayout(emptyCard);
+        emptyLayout->setContentsMargins(24, 36, 24, 36);
+        auto *empty = new EmptyState(emptyCard);
+        empty->setIcon(QIcon(":/icons/activity.svg"));
+        empty->setTitle(r.ok ? "暂无健康度数据" : "暂时无法读取健康度数据");
+        empty->setHint(r.ok ? "产生并使用记忆后，这里会展示健康分布与衰减风险。"
+                            : "请确认后端服务已启动，然后刷新页面重试。");
+        emptyLayout->addWidget(empty);
+        m_listLayout->addWidget(emptyCard);
+        m_listLayout->addStretch();
+        return;
+    }
 
     // 直方图：四档
     int b0 = 0, b1 = 0, b2 = 0, b3 = 0;
@@ -692,10 +844,17 @@ void ForgetHealthPage::loadData() {
         else if (h < 0.6) ++b2;
         else ++b3;
     }
-    auto *hist = new QLabel();
+    auto *chartCard = new QFrame(m_listContainer);
+    chartCard->setObjectName("healthPanel");
+    auto *chartLayout = new QVBoxLayout(chartCard);
+    chartLayout->setContentsMargins(18, 16, 18, 14);
+    chartLayout->setSpacing(2);
+    auto *hist = new QLabel("健康度分布", chartCard);
     hist->setObjectName("cardTitle");
-    hist->setText("健康度分布");
-    m_listLayout->addWidget(hist);
+    auto *histHint = new QLabel("按健康度区间查看活跃记忆数量", chartCard);
+    histHint->setObjectName("cardHint");
+    chartLayout->addWidget(hist);
+    chartLayout->addWidget(histHint);
     auto *set = new QtCharts::QBarSet("记忆数");
     set->setColor(QColor("#3790FA"));
     *set << b0 << b1 << b2 << b3;
@@ -704,47 +863,90 @@ void ForgetHealthPage::loadData() {
     auto *chart = new QtCharts::QChart();
     chart->addSeries(series);
     chart->setBackgroundVisible(false);
+    chart->legend()->hide();
+    chart->setMargins(QMargins(2, 8, 8, 2));
+    series->setBarWidth(0.48);
+    series->setLabelsVisible(true);
+    series->setLabelsFormat("@value");
+    series->setLabelsPosition(QtCharts::QAbstractBarSeries::LabelsOutsideEnd);
     auto *axisX = new QtCharts::QBarCategoryAxis();
     axisX->append({"<0.2", "0.2~0.4", "0.4~0.6", "≥0.6"});
     chart->addAxis(axisX, Qt::AlignBottom);
     series->attachAxis(axisX);
+    axisX->setGridLineVisible(false);
+    axisX->setLinePenColor(QColor("#DCE2EA"));
+    axisX->setLabelsColor(QColor("#697180"));
     auto *axisY = new QtCharts::QValueAxis();
-    axisY->setRange(0, qMax(10, qMax(qMax(b0, b1), qMax(b2, b3)) + 2));
+    axisY->setRange(0, qMax(4, qMax(qMax(b0, b1), qMax(b2, b3)) + 1));
+    axisY->setTickCount(5);
+    axisY->setLabelFormat("%d");
+    axisY->setLabelsColor(QColor("#8B93A2"));
+    axisY->setLinePenColor(Qt::transparent);
+    axisY->setGridLinePen(QPen(QColor("#E9EDF3"), 1));
     chart->addAxis(axisY, Qt::AlignLeft);
     series->attachAxis(axisY);
     auto *view = new QtCharts::QChartView(chart);
     view->setRenderHint(QPainter::Antialiasing);
-    view->setMinimumHeight(220);
-    m_listLayout->addWidget(view);
+    view->setFrameShape(QFrame::NoFrame);
+    view->setStyleSheet("background:transparent;");
+    view->setFixedHeight(280);
+    chartLayout->addWidget(view);
+    m_listLayout->addWidget(chartCard);
 
     // TopN 衰减最快列表（健康度升序取前 10）
-    auto *topTitle = new QLabel();
+    auto *tableCard = new QFrame(m_listContainer);
+    tableCard->setObjectName("healthPanel");
+    auto *tableLayout = new QVBoxLayout(tableCard);
+    tableLayout->setContentsMargins(18, 16, 18, 16);
+    tableLayout->setSpacing(10);
+    auto *topTitle = new QLabel("重点关注", tableCard);
     topTitle->setObjectName("cardTitle");
-    topTitle->setText("衰减最快 Top 10");
-    m_listLayout->addWidget(topTitle);
+    auto *topHint = new QLabel("按健康度从低到高排列，最多展示 10 条", tableCard);
+    topHint->setObjectName("cardHint");
+    tableLayout->addWidget(topTitle);
+    tableLayout->addWidget(topHint);
     QList<QJsonObject> sorted;
     for (const QJsonValue &v : m_items) sorted.append(v.toObject());
     std::sort(sorted.begin(), sorted.end(), [](const QJsonObject &a, const QJsonObject &b) {
         return j::num(a, "health_score") < j::num(b, "health_score");
     });
     auto *topTable = new QTableWidget(qMin(10, int(sorted.size())), 6);
+    topTable->setObjectName("healthRiskTable");
     topTable->setHorizontalHeaderLabels({"内容", "类型", "健康度", "时间衰减", "使用频率", "访问"});
     topTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     topTable->verticalHeader()->setVisible(false);
     topTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    topTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    topTable->setShowGrid(false);
     topTable->setAlternatingRowColors(true);
+    topTable->verticalHeader()->setDefaultSectionSize(44);
+    topTable->setColumnWidth(1, 100);
+    topTable->setColumnWidth(2, 90);
+    topTable->setColumnWidth(3, 110);
+    topTable->setColumnWidth(4, 110);
+    topTable->setColumnWidth(5, 80);
     for (int i = 0; i < topTable->rowCount(); ++i) {
         const QJsonObject m = sorted[i];
         QString content = j::str(m, "content");
         if (content.isEmpty()) content = j::str(m, "memory_id");
         topTable->setItem(i, 0, new QTableWidgetItem(content));
-        topTable->setItem(i, 1, new QTableWidgetItem(j::str(m, "memory_type")));
-        topTable->setItem(i, 2, new QTableWidgetItem(QString::number(j::num(m, "health_score"), 'f', 2)));
+        auto *typeTag = new StatusTag(topTable);
+        typeTag->setMemoryType(j::str(m, "memory_type"));
+        topTable->setCellWidget(i, 1, typeTag);
+        auto *health = new QLabel(QString::number(j::num(m, "health_score"), 'f', 2), topTable);
+        health->setAlignment(Qt::AlignCenter);
+        health->setProperty("healthLevel", j::num(m, "health_score") < 0.4 ? "risk"
+                                           : j::num(m, "health_score") < 0.6 ? "warning" : "good");
+        topTable->setCellWidget(i, 2, health);
         topTable->setItem(i, 3, new QTableWidgetItem(QString::number(j::num(m, "time_decay"), 'f', 2)));
         topTable->setItem(i, 4, new QTableWidgetItem(QString::number(j::num(m, "usage_frequency"), 'f', 2)));
         topTable->setItem(i, 5, new QTableWidgetItem(QString::number(j::integer(m, "access_count_30d"))));
+        for (int column = 3; column < 6; ++column)
+            topTable->item(i, column)->setTextAlignment(Qt::AlignCenter);
     }
-    m_listLayout->addWidget(topTable);
+    topTable->setFixedHeight(43 + topTable->rowCount() * 44 + 2);
+    tableLayout->addWidget(topTable);
+    m_listLayout->addWidget(tableCard);
     m_listLayout->addStretch();
 }
 
@@ -802,7 +1004,8 @@ void ForgetHistoryPage::onRefresh() {
         ++row;
     }
 }
-void ForgetHistoryPage::openDetail(const QString &recordId) {
+void ForgetHistoryPage::openDetail(const QString &recordId, QPushButton *caller) {
+    Q_UNUSED(caller)
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
     const api::Result r = api->get(api::ApiClient::urlWithQuery(
@@ -872,8 +1075,8 @@ ForgetSettingsPage::ForgetSettingsPage(QWidget *parent) : BasePage(parent) {
     auto *autoBtn = new QPushButton("立即执行自动遗忘扫描", card);
     autoBtn->setObjectName("primaryBtn");
     auto *checkBtn = new QPushButton("执行生命周期检查", card);
-    connect(autoBtn, &QPushButton::clicked, this, &ForgetSettingsPage::runAutoForget);
-    connect(checkBtn, &QPushButton::clicked, this, &ForgetSettingsPage::runLifecycleCheck);
+    connect(autoBtn, &QPushButton::clicked, this, [this, autoBtn]() { runAutoForget(autoBtn); });
+    connect(checkBtn, &QPushButton::clicked, this, [this, checkBtn]() { runLifecycleCheck(checkBtn); });
     runRow->addWidget(autoBtn);
     runRow->addWidget(checkBtn);
     runRow->addStretch();
@@ -910,7 +1113,8 @@ void ForgetSettingsPage::refresh() {
         .arg(j::num(m2l, "min_confidence"), 0, 'f', 1)
         .arg(j::integer(m2l, "min_days")));
 }
-void ForgetSettingsPage::runAutoForget() {
+void ForgetSettingsPage::runAutoForget(QPushButton *caller) {
+    Q_UNUSED(caller)
     const api::Result r = AppContext::instance()->api()->post("/api/memory/lifecycle/auto-forget", QJsonObject());
     if (r.ok) {
         const QJsonObject o = r.jsonObject();
@@ -919,7 +1123,8 @@ void ForgetSettingsPage::runAutoForget() {
             .arg(j::integer(o, "reviewed")).arg(j::integer(o, "kept")));
     } else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
 }
-void ForgetSettingsPage::runLifecycleCheck() {
+void ForgetSettingsPage::runLifecycleCheck(QPushButton *caller) {
+    Q_UNUSED(caller)
     const api::Result r = AppContext::instance()->api()->post("/api/memory/lifecycle/check", QJsonObject());
     if (r.ok) {
         const QJsonObject o = r.jsonObject();

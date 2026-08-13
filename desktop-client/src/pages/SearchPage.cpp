@@ -24,6 +24,7 @@
 #include "../widgets/EmptyState.h"
 #include "../widgets/JsonViewer.h"
 #include "../widgets/PageHeader.h"
+#include "../widgets/PageStateView.h"
 #include "../widgets/StatusTag.h"
 
 SearchPage::SearchPage(QWidget *parent) : BasePage(parent) {
@@ -44,13 +45,14 @@ SearchPage::SearchPage(QWidget *parent) : BasePage(parent) {
     m_queryEdit->setMinimumHeight(38);
     m_queryEdit->setStyleSheet("font-size:14px;");
     connect(m_queryEdit, &QLineEdit::returnPressed, this, &SearchPage::runSearch);
-    auto *searchBtn = new QPushButton("检索", this);
-    searchBtn->setObjectName("primaryBtn");
-    searchBtn->setMinimumHeight(38);
-    searchBtn->setFixedWidth(100);
-    connect(searchBtn, &QPushButton::clicked, this, &SearchPage::runSearch);
+    m_searchButton = new QPushButton("检索", this);
+    m_searchButton->setObjectName("primaryBtn");
+    m_searchButton->setMinimumHeight(38);
+    m_searchButton->setFixedWidth(100);
+    m_searchButton->setAccessibleName("执行记忆检索");
+    connect(m_searchButton, &QPushButton::clicked, this, &SearchPage::runSearch);
     searchRow->addWidget(m_queryEdit, 1);
-    searchRow->addWidget(searchBtn);
+    searchRow->addWidget(m_searchButton);
     root->addLayout(searchRow);
 
     // ---- 筛选面板 ----
@@ -65,9 +67,13 @@ SearchPage::SearchPage(QWidget *parent) : BasePage(parent) {
     m_taskEdit->setPlaceholderText("任务类型（如 office.weekly_report）");
     m_taskEdit->setFixedWidth(190);
     m_topK = new QSpinBox(this);
+    m_topK->setObjectName("filterSpin");
+    m_topK->setButtonSymbols(QAbstractSpinBox::NoButtons);
     m_topK->setRange(1, 30);
     m_topK->setValue(10);
-    m_topK->setPrefix("TopK ");
+    m_topK->setFixedWidth(68);
+    auto *topKLabel = new QLabel("TopK", this);
+    topKLabel->setObjectName("filterLabel");
     m_cbPreference = new QCheckBox("偏好", this);
     m_cbPreference->setChecked(true);
     m_cbKnowledge = new QCheckBox("知识", this);
@@ -75,17 +81,23 @@ SearchPage::SearchPage(QWidget *parent) : BasePage(parent) {
     m_cbFact = new QCheckBox("事实", this);
     m_cbFact->setChecked(true);
     m_minConf = new QDoubleSpinBox(this);
+    m_minConf->setObjectName("filterSpin");
+    m_minConf->setButtonSymbols(QAbstractSpinBox::NoButtons);
     m_minConf->setRange(0, 1);
     m_minConf->setSingleStep(0.05);
     m_minConf->setValue(0);
-    m_minConf->setPrefix("置信≥ ");
     m_minConf->setDecimals(2);
+    m_minConf->setFixedWidth(78);
+    auto *minConfLabel = new QLabel("置信 ≥", this);
+    minConfLabel->setObjectName("filterLabel");
     filterRow->addWidget(m_sceneCombo);
     filterRow->addWidget(m_taskEdit);
+    filterRow->addWidget(topKLabel);
     filterRow->addWidget(m_topK);
     filterRow->addWidget(m_cbPreference);
     filterRow->addWidget(m_cbKnowledge);
     filterRow->addWidget(m_cbFact);
+    filterRow->addWidget(minConfLabel);
     filterRow->addWidget(m_minConf);
     filterRow->addStretch();
     root->addLayout(filterRow);
@@ -106,6 +118,9 @@ SearchPage::SearchPage(QWidget *parent) : BasePage(parent) {
     m_resultsLayout->setSpacing(10);
     m_resultsScroll->setWidget(m_resultsContainer);
     mainRow->addWidget(m_resultsScroll, 3);
+    m_stateView = new PageStateView(m_resultsContainer);
+    m_stateView->setState(PageState::Empty, "输入查询开始检索", "结果会显示在这里。");
+    m_resultsLayout->addWidget(m_stateView);
 
     // 右：侧栏
     auto *side = new QWidget(content);
@@ -133,9 +148,10 @@ SearchPage::SearchPage(QWidget *parent) : BasePage(parent) {
                                  "padding:10px;color:#374151;font-family:Consolas,monospace;font-size:12px;");
     ctxCard.second->addWidget(m_contextText);
     auto *ctxBtns = new QHBoxLayout();
-    auto *genCtxBtn = new QPushButton("生成上下文", ctxCard.first);
-    genCtxBtn->setObjectName("primaryBtn");
-    connect(genCtxBtn, &QPushButton::clicked, this, &SearchPage::generateContext);
+    m_contextButton = new QPushButton("生成上下文", ctxCard.first);
+    m_contextButton->setObjectName("primaryBtn");
+    m_contextButton->setAccessibleName("生成检索上下文");
+    connect(m_contextButton, &QPushButton::clicked, this, &SearchPage::generateContext);
     m_copyContextBtn = new QPushButton("复制", ctxCard.first);
     connect(m_copyContextBtn, &QPushButton::clicked, this, [this]() {
         if (m_contextText->text().isEmpty()) return;
@@ -143,7 +159,7 @@ SearchPage::SearchPage(QWidget *parent) : BasePage(parent) {
         m_copyContextBtn->setText("已复制 ✓");
         QTimer::singleShot(1200, m_copyContextBtn, [this]() { m_copyContextBtn->setText("复制"); });
     });
-    ctxBtns->addWidget(genCtxBtn);
+    ctxBtns->addWidget(m_contextButton);
     ctxBtns->addWidget(m_copyContextBtn);
     ctxCard.second->addLayout(ctxBtns);
     sideLay->addWidget(ctxCard.first);
@@ -204,22 +220,34 @@ void SearchPage::runSearch() {
     if (q.isEmpty()) { QMessageBox::information(this, "提示", "请输入查询内容"); return; }
 
     m_lastRequest = updateRequestJson();
-    api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->post("/api/memory/search", m_lastRequest);
-
-    if (!r.ok) {
-        // 空态：显示错误
-        QMessageBox::warning(this, "检索失败", r.errorCode + " " + r.errorMessage);
-        return;
-    }
-    m_lastResponse = r.jsonObject();
-    renderResults(m_lastResponse);
+    const int generation = ++m_generation;
+    m_searchButton->setEnabled(false);
+    m_searchButton->setText("检索中…");
+    m_stateView->setState(PageState::Loading, "正在检索", "正在查询真实记忆数据…");
+    AppContext::instance()->api()->postAsync("/api/memory/search", m_lastRequest,
+        [this, generation](const api::Result &r) {
+            if (generation != m_generation) return;
+            m_searchButton->setEnabled(true);
+            m_searchButton->setText("检索");
+            if (!r.ok || !r.hasJsonObject()) {
+                m_stateView->setState(r.networkError ? PageState::Offline : PageState::Error,
+                                      r.networkError ? "后端离线" : "检索失败",
+                                      r.errorMessage.isEmpty() ? "请检查后端状态后重试。" : r.errorMessage);
+                m_stateView->setAction("重试", [this]() { runSearch(); });
+                return;
+            }
+            m_lastResponse = r.jsonObject();
+            m_stateView->setState(PageState::Content, QString(), QString());
+            renderResults(m_lastResponse);
+        }, this);
 }
 
 void SearchPage::renderResults(const QJsonObject &resp) {
     // 清空
     while (QLayoutItem *item = m_resultsLayout->takeAt(0)) {
-        if (QWidget *w = item->widget()) w->deleteLater();
+        if (QWidget *w = item->widget()) {
+            if (w != m_stateView) w->deleteLater();
+        }
         delete item;
     }
 
@@ -230,7 +258,7 @@ void SearchPage::renderResults(const QJsonObject &resp) {
     const int total = prefs.size() + knows.size() + facts.size();
     if (total == 0) {
         auto *empty = new EmptyState();
-        empty->setIconText("🔍");
+        empty->setIcon(QIcon(":/icons/search.svg"));
         empty->setTitle("未检索到相关记忆");
         empty->setHint("尝试调整查询词、放宽类型或置信度阈值");
         m_resultsLayout->addWidget(empty, 1);
@@ -243,7 +271,11 @@ void SearchPage::renderResults(const QJsonObject &resp) {
 
     m_totalLabel->setText(QString("结果总数：%1").arg(total));
     m_latencyLabel->setText(QString("耗时：%1 ms").arg(j::num(resp, "latency_ms"), 0, 'f', 1));
-    m_cacheLabel->setText("缓存命中：—");
+    const QJsonValue cache = resp.value("cache_hit");
+    m_cacheLabel->setText(cache.isBool() ? QString("缓存命中：%1").arg(cache.toBool() ? "是" : "否")
+                                         : "缓存命中：接口未提供");
+    m_resultsLayout->addWidget(m_stateView);
+    m_stateView->setState(PageState::Content, QString(), QString());
 }
 
 void SearchPage::renderGroup(const QString &title, const QColor &color, const QJsonArray &items) {
@@ -301,15 +333,24 @@ void SearchPage::generateContext() {
         return;
     }
     const QJsonObject req = updateRequestJson();
-    api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->post("/api/memory/context", req);
-    if (!r.ok) {
-        QMessageBox::warning(this, "生成失败", r.errorCode + " " + r.errorMessage);
-        return;
-    }
-    QString ctx = j::str(r.jsonObject(), "context_text");
-    if (ctx.isEmpty()) ctx = j::str(r.jsonObject(), "context");
-    m_contextText->setText(ctx);
-    m_contextText->setToolTip(ctx);
-    m_copyContextBtn->setEnabled(!ctx.isEmpty());
+    if (m_contextLoading) return;
+    m_contextLoading = true;
+    m_contextButton->setEnabled(false);
+    m_contextButton->setText("生成中…");
+    AppContext::instance()->api()->postAsync("/api/memory/context", req,
+        [this](const api::Result &r) {
+            m_contextLoading = false;
+            m_contextButton->setEnabled(true);
+            m_contextButton->setText("生成上下文");
+            if (!r.ok || !r.hasJsonObject()) {
+                m_contextText->setText(r.errorMessage.isEmpty() ? "上下文生成失败" : r.errorMessage);
+                m_copyContextBtn->setEnabled(false);
+                return;
+            }
+            QString ctx = j::str(r.jsonObject(), "context_text");
+            if (ctx.isEmpty()) ctx = j::str(r.jsonObject(), "context");
+            m_contextText->setText(ctx);
+            m_contextText->setToolTip(ctx);
+            m_copyContextBtn->setEnabled(!ctx.isEmpty());
+        }, false, this, 10000);
 }
