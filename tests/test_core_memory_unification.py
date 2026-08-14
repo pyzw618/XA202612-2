@@ -1,5 +1,6 @@
-﻿from datetime import datetime
+﻿from datetime import datetime, timedelta, timezone
 
+from memoryhub.adapter.schemas import SearchRequest, SearchResult
 from memoryhub.core.fact.extractor import TripleExtractor
 from memoryhub.core.memory.base import BaseMemoryHandler, MemoryCandidate
 from memoryhub.core.memory.confidence import (
@@ -7,7 +8,9 @@ from memoryhub.core.memory.confidence import (
     UnifiedConfidenceCalculator,
 )
 from memoryhub.core.memory.evidence import EvidenceMerger
+from memoryhub.core.memory.freshness import freshness_score
 from memoryhub.core.memory.llm import StructuredLLMAdapter
+from memoryhub.retrieval.reranker import Reranker
 
 
 class _Handler(BaseMemoryHandler):
@@ -131,3 +134,42 @@ def test_fact_extractor_uses_application_level_generate_client():
     triples = TripleExtractor(llm_client=_TripleLLM()).extract("??A???????")
     assert len(triples) == 1
     assert triples[0].object_text == "??"
+
+
+def test_shared_freshness_is_bounded_and_uses_type_half_lives():
+    now = datetime(2026, 8, 14, tzinfo=timezone.utc)
+    old = (now - timedelta(days=60)).isoformat()
+    assert freshness_score(old, memory_type="fact", now=now) == 0.25
+    assert freshness_score(old, memory_type="preference", now=now) == 0.5
+    assert freshness_score(old, memory_type="knowledge", now=now) > 0.5
+    assert freshness_score("invalid", memory_type="fact", now=now) == 0.5
+    assert 0.0 <= freshness_score(now.isoformat(), memory_type="fact", now=now) <= 1.0
+
+
+def test_reranker_records_bounded_confidence_and_freshness_signals():
+    now = datetime.now(timezone.utc)
+    results = [
+        SearchResult(
+            memory_id="old-fact",
+            memory_type="fact",
+            content="project owner alice",
+            score=0.8,
+            metadata={
+                "confidence": 0.9,
+                "observed_at": (now - timedelta(days=120)).isoformat(),
+            },
+        ),
+        SearchResult(
+            memory_id="fresh-fact",
+            memory_type="fact",
+            content="project owner bob",
+            score=0.8,
+            metadata={"confidence": 0.9, "observed_at": now.isoformat()},
+        ),
+    ]
+    reranked = Reranker().rerank(results, SearchRequest(query="project owner"))
+    assert reranked[0].memory_id == "fresh-fact"
+    for result in reranked:
+        assert 0.0 <= result.metadata["confidence_score"] <= 1.0
+        assert 0.0 <= result.metadata["freshness_score"] <= 1.0
+        assert 0.0 <= result.metadata["rerank_score"] <= 1.0

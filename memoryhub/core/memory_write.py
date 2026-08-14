@@ -60,9 +60,15 @@ class MemoryWriteService:
             "content": cls.index_text(memory),
             "confidence": memory.confidence,
             "scope": memory.scope.model_dump(),
-            "status": memory.status.value
-            if hasattr(memory.status, "value")
-            else str(memory.status),
+            "status": (
+                memory.status.value
+                if hasattr(memory.status, "value")
+                else str(memory.status)
+            ),
+            "quality_score": getattr(memory, "quality_score", 1.0),
+            "updated_at": str(getattr(memory, "updated_at", "") or ""),
+            "created_at": str(getattr(memory, "created_at", "") or ""),
+            "evidence_count": len(getattr(memory, "evidences", []) or []),
         }
 
     def upsert_memory(self, memory: Memory) -> None:
@@ -78,7 +84,11 @@ class MemoryWriteService:
 
     def sync_memory(self, memory: Memory, *, remove: bool = False) -> None:
         explicit_remove = remove
-        status = memory.status.value if hasattr(memory.status, "value") else str(memory.status)
+        status = (
+            memory.status.value
+            if hasattr(memory.status, "value")
+            else str(memory.status)
+        )
         remove = remove or status != MemoryStatus.ACTIVE.value
         memory_id = memory.memory_id
 
@@ -98,9 +108,13 @@ class MemoryWriteService:
                 self.keyword_search.delete(memory_id)
             if self.memory_lookup is not None:
                 self.memory_lookup.pop(memory_id, None)
-            if (explicit_remove or status == MemoryStatus.DELETED.value) and self.evidence_store is not None:
+            if (
+                explicit_remove or status == MemoryStatus.DELETED.value
+            ) and self.evidence_store is not None:
                 self.evidence_store.delete(memory_id)
-            if (explicit_remove or status == MemoryStatus.DELETED.value) and self.conflict_repo is not None:
+            if (
+                explicit_remove or status == MemoryStatus.DELETED.value
+            ) and self.conflict_repo is not None:
                 self.conflict_repo.delete_for_memories([memory_id])
             self._clear_cache()
             self._mark_synchronized(memory)
@@ -121,7 +135,9 @@ class MemoryWriteService:
         if self.vector_engine is not None:
             self.vector_engine.insert(memory_id, text, vector, metadata=metadata)
         if self.keyword_search is not None:
-            self.keyword_search.update(memory_id, text, json.dumps(metadata, ensure_ascii=False))
+            self.keyword_search.update(
+                memory_id, text, json.dumps(metadata, ensure_ascii=False)
+            )
         if self.memory_lookup is not None:
             self.memory_lookup[memory_id] = memory
         self._clear_cache()

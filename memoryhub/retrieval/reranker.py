@@ -1,12 +1,11 @@
-"""
+﻿"""
 重排序模块
 
 对融合后的检索结果进行二次排序。
 """
 
-from datetime import datetime
-
 from memoryhub.adapter.schemas import SearchRequest, SearchResult
+from memoryhub.core.memory.freshness import freshness_score
 
 
 class Reranker:
@@ -24,7 +23,9 @@ class Reranker:
     def __init__(self, llm_client=None):
         self.llm_client = llm_client
 
-    def rerank(self, results: list[SearchResult], request: SearchRequest) -> list[SearchResult]:
+    def rerank(
+        self, results: list[SearchResult], request: SearchRequest
+    ) -> list[SearchResult]:
         """
         对检索结果重排序
 
@@ -53,15 +54,17 @@ class Reranker:
             freshness = self._compute_freshness_score(result)
             health = self._compute_health_score(result)
 
-            # 综合得分：原始分数 + 相关性 + 场景 + 新鲜度 + 健康度
+            confidence = self._compute_confidence_score(result)
+
+            # Preserve relevance while applying bounded lifecycle signals.
             final_score = (
-                0.50 * result.score
-                + 0.20 * relevance
+                0.45 * self._clamp(result.score)
+                + 0.15 * relevance
                 + 0.10 * scope
+                + 0.10 * confidence
                 + 0.10 * freshness
                 + 0.10 * health
             )
-
             # Keep SearchResult.score as the documented hybrid-fusion score.
             # Reranking changes order only; expose its score separately for auditability.
             result.metadata["rerank_score"] = final_score
@@ -69,6 +72,7 @@ class Reranker:
             result.metadata["scope_score"] = scope
             result.metadata["freshness_score"] = freshness
             result.metadata["health_score"] = health
+            result.metadata["confidence_score"] = confidence
             scored_results.append((final_score, result))
 
         scored_results.sort(key=lambda x: x[0], reverse=True)
@@ -115,7 +119,9 @@ class Reranker:
 
         return len(overlap) / len(union)
 
-    def _compute_scope_score(self, result: SearchResult, request: SearchRequest) -> float:
+    def _compute_scope_score(
+        self, result: SearchResult, request: SearchRequest
+    ) -> float:
         """
         计算场景匹配分数
 
@@ -140,14 +146,21 @@ class Reranker:
 
         return 1.0 if total == 0 else matches / total
 
+    def _compute_confidence_score(self, result: SearchResult) -> float:
+        return self._clamp(result.metadata.get("confidence", 1.0))
+
     def _compute_freshness_score(self, result: SearchResult) -> float:
-        """计算时间新鲜度分数：按天数指数衰减，30 天半衰期"""
-        raw = result.metadata.get("updated_at") or result.metadata.get("created_at")
-        if not raw:
-            return 0.5  # 无时间信息时给中性分
+        """Use the same per-memory-type half lives as confidence calculation."""
+        timestamp = (
+            result.metadata.get("observed_at")
+            or result.metadata.get("updated_at")
+            or result.metadata.get("created_at")
+        )
+        return freshness_score(timestamp, memory_type=result.memory_type)
+
+    @staticmethod
+    def _clamp(value) -> float:
         try:
-            ts = datetime.fromisoformat(str(raw))
-        except ValueError:
-            return 0.5
-        age_days = max((datetime.now() - ts.replace(tzinfo=None)).days, 0)
-        return 0.5 ** (age_days / 30.0)
+            return max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return 0.0

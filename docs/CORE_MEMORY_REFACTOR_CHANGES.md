@@ -116,3 +116,29 @@
 4. Fact 冲突裁决同样优先通过 `StructuredLLMAdapter` 执行结构化 JSON 校验和调用；无应用级 client 时维持兼容降级行为。
 
 验证范围包括 Fact、偏好和知识模块的相关单元测试与静态检查。
+
+---
+
+## 第四轮跨模块联动优化（2026-08-14）
+
+本轮将记忆生命周期与检索、遗忘和索引投影联动：
+
+1. 新增 `memoryhub/core/memory/freshness.py`，提供统一的时间解析与 `[0, 1]` 新鲜度计算；Fact、Preference、Knowledge 的半衰期分别为 30、60、90 天。
+2. `Reranker` 现在将融合分数、相关性、scope、confidence、freshness 与 health 共同用于排序，并在检索 metadata 中保留各分项，便于审计。
+3. `MemoryWriteService` 和 `FactIndexService` 索引 metadata 补充质量、时间和证据数量，使检索重排可以使用写入链路产生的生命周期信息。
+4. `AutoForgetEngine` 支持注入 `MemoryWriteService`；偏好与知识被归档、待审或降级时，数据库、向量/关键词索引、运行时 lookup 与缓存通过同一写入服务同步更新，避免遗忘后仍被检索到的投影残留。
+5. 管理端自动遗忘 API 已传递应用级 `memory_write_service`。
+
+新增测试覆盖统一 freshness 的范围、按记忆类型的半衰期差异，以及重排写入 confidence/freshness/rerank 审计分数。
+
+---
+
+## 第五轮更新决策优化（2026-08-14）
+
+本轮调整三类记忆的“相似输入”处理顺序，优先保留既有语义与证据链：
+
+1. **Preference**：候选匹配改为同时要求偏好类型、scope 和结构化 `target` 可比较，避免仅凭同类型/同场景拿到任意旧偏好。决策顺序改为先判断内容一致或兼容，再判断显式冲突；相同 target/value 的复合输入会原地补充 evidence、更新 confidence，而不覆盖原偏好文本或创建错误版本。
+2. **Knowledge**：语义未变化但新增独立 evidence 时，保留当前活跃知识的语义内容与稳定 ID，仅合并证据、更新支持统计和 revision；语义发生变化时创建后继版本，设置 `parent_id`，归档旧版本后写入新版本。
+3. **Fact**：同一主体/谓词/客体的重复事实不再丢弃新来源；新来源 evidence 会绑定到保留的既有 Fact。真实冲突仍按照原有冲突裁决创建/保留对应事实状态。
+
+新增回归测试覆盖“相似但包含额外内容”的偏好输入不会覆盖原偏好，以及重复 Fact 会在保留事实上新增 evidence。

@@ -118,16 +118,16 @@ class ConflictResolver:
                 "Identical preference reinforced by new evidence.",
             )
 
-        if new_pref.extract_source == "explicit_feedback":
-            return (
-                ConflictDecision.OVERRIDE,
-                "Explicit user feedback overrides implicit preference.",
-            )
-
         if not detector.check_preference(old_pref, new_pref):
             return (
                 ConflictDecision.MERGE,
-                "Preferences are compatible and can be merged.",
+                "Preferences are compatible; reinforce evidence before changing content.",
+            )
+
+        if new_pref.extract_source == "explicit_feedback":
+            return (
+                ConflictDecision.OVERRIDE,
+                "Explicit feedback conflicts with the same preference target.",
             )
 
         if (
@@ -213,6 +213,11 @@ class PreferenceUpdater:
             return self.update(existing_pref.memory_id, preference, conflict_rec)
 
         elif decision == ConflictDecision.MERGE:
+            if ConflictResolver._is_same_content(existing_pref, preference):
+                self._reinforce(existing_pref, preference)
+                self._save(existing_pref)
+                self._record_conflict(conflict_rec, existing_pref.memory_id)
+                return existing_pref.memory_id
             merged = self.merge(existing_pref, preference)
             self._save(existing_pref, new_status=MemoryStatus.ARCHIVED)
             self._save(merged)
@@ -239,6 +244,17 @@ class PreferenceUpdater:
             self._save(preference)
             self._record_conflict(conflict_rec, preference.memory_id)
             return preference.memory_id
+
+    def _reinforce(
+        self, existing: PreferenceMemory, incoming: PreferenceMemory
+    ) -> None:
+        """Keep an unchanged preference active and attach independent evidence."""
+        existing.evidences = self._merge_evidences(
+            existing.evidences, incoming.evidences
+        )
+        existing.quality_score = max(existing.quality_score, incoming.quality_score)
+        existing.updated_at = datetime.now(timezone.utc)
+        self.confidence_calculator.calculate(existing)
 
     def update(
         self, memory_id: str, new_pref: PreferenceMemory, conflict_rec=None
@@ -318,7 +334,7 @@ class PreferenceUpdater:
         return chain
 
     def _find_existing(self, preference: PreferenceMemory):
-        """查找当前活跃的候选旧偏好"""
+        """Find only a comparable active preference; never use type/scope alone."""
         if self.pref_repo is not None:
             candidates = self.pref_repo.get_active(preference.user_id)
         else:
@@ -329,22 +345,40 @@ class PreferenceUpdater:
                 and pref.status == MemoryStatus.ACTIVE
             ]
         for pref in candidates:
-            same_type = pref.preference_type == preference.preference_type
-            scope_overlap = (
-                pref.is_global
-                or preference.is_global
-                or (
-                    pref.scope.scene in ("*", preference.scope.scene)
-                    or preference.scope.scene in ("*", pref.scope.scene)
-                )
-                and (
-                    pref.scope.task_type in ("*", preference.scope.task_type)
-                    or preference.scope.task_type in ("*", pref.scope.task_type)
-                )
-            )
-            if same_type and scope_overlap:
+            if pref.preference_type != preference.preference_type:
+                continue
+            if not self._scope_overlaps(pref, preference):
+                continue
+            if self._same_preference_target(pref, preference):
                 return pref
         return None
+
+    @staticmethod
+    def _scope_overlaps(left: PreferenceMemory, right: PreferenceMemory) -> bool:
+        return (
+            left.is_global
+            or right.is_global
+            or (
+                (
+                    left.scope.scene in ("*", right.scope.scene)
+                    or right.scope.scene in ("*", left.scope.scene)
+                )
+                and (
+                    left.scope.task_type in ("*", right.scope.task_type)
+                    or right.scope.task_type in ("*", left.scope.task_type)
+                )
+            )
+        )
+
+    @staticmethod
+    def _same_preference_target(
+        left: PreferenceMemory, right: PreferenceMemory
+    ) -> bool:
+        left_target = str(left.payload.get("target", "")).strip()
+        right_target = str(right.payload.get("target", "")).strip()
+        if left_target or right_target:
+            return bool(left_target and left_target == right_target)
+        return left.text.strip().casefold() == right.text.strip().casefold()
 
     def _get(self, memory_id: str):
         """获取偏好"""

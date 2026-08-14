@@ -28,12 +28,14 @@ class AutoForgetEngine:
         calculator=None,
         fact_store=None,
         fact_index_service=None,
+        memory_write_service=None,
     ):
         self.pref_repo = pref_repo
         self.know_repo = know_repo
         self.db = db
         self.fact_store = fact_store
         self.fact_index_service = fact_index_service
+        self.memory_write_service = memory_write_service
         self.calculator = calculator or HealthCalculator()
 
     def run(self) -> dict:
@@ -42,7 +44,8 @@ class AutoForgetEngine:
             is_fact = getattr(memory, "memory_type", "") == "fact"
             health = (
                 self.calculator.calculate_from_row(memory)
-                if is_fact else self.calculator.calculate(memory)
+                if is_fact
+                else self.calculator.calculate(memory)
             )
             if health < self.ARCHIVE_THRESHOLD:
                 self._update_status(memory, MemoryStatus.ARCHIVED, health)
@@ -96,7 +99,9 @@ class AutoForgetEngine:
             try:
                 memory.status = status
                 memory.health_score = health
-                write_service = getattr(repo, "write_service", None)
+                write_service = self.memory_write_service or getattr(
+                    repo, "write_service", None
+                )
                 if write_service is not None:
                     write_service.upsert_memory(memory)
                 else:
@@ -112,7 +117,9 @@ class AutoForgetEngine:
             try:
                 memory.level = level
                 memory.health_score = health
-                write_service = getattr(repo, "write_service", None)
+                write_service = self.memory_write_service or getattr(
+                    repo, "write_service", None
+                )
                 if write_service is not None:
                     write_service.upsert_memory(memory)
                 else:

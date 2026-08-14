@@ -134,3 +134,19 @@ def test_commit_preserves_event_time_and_marks_commit_time_fallback():
     fallback = pipeline.propose("????????")[0]
     fallback_result = pipeline.commit(fallback, scope="global")
     assert fallback_result.new_fact.source_id.startswith("recorded_at_fallback")
+
+
+def test_duplicate_fact_adds_evidence_to_retained_fact():
+    pipeline = _pipeline(_triple())
+    first = pipeline.propose("????????", source_id="event-one")[0]
+    first_result = pipeline.commit(first, scope="global")
+    duplicate = pipeline.propose("????????", source_id="event-two")[0]
+    duplicate_result = pipeline.commit(duplicate, scope="global")
+
+    assert duplicate_result.relation == "DUPLICATE"
+    evidence = pipeline.store.list_fact_evidence(
+        first_result.new_fact.fact_id, "default"
+    )
+    assert {
+        item["source_id"].removeprefix("recorded_at_fallback:") for item in evidence
+    } == {"event-one", "event-two"}

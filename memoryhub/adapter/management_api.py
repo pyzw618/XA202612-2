@@ -122,6 +122,7 @@ def _build_forgetter(state) -> MemoryForgetter:
         conflict_repo=getattr(state, "conflict_repo", None),
         fact_store=getattr(state, "fact_store", None),
         fact_index_service=getattr(state, "fact_index_service", None),
+        memory_write_service=getattr(state, "memory_write_service", None),
     )
 
 
@@ -223,7 +224,10 @@ def _get_audit_log(request: Request):
     """解析已装配的安全审计日志；未启用/不可用时抛出稳定错误。"""
     gate = getattr(request.app.state, "safety_gate", None)
     if gate is None:
-        code = getattr(request.app.state, "safety_gate_error", "") or "safety.gate_unavailable"
+        code = (
+            getattr(request.app.state, "safety_gate_error", "")
+            or "safety.gate_unavailable"
+        )
         raise HTTPException(status_code=503, detail={"code": code})
     audit_log = getattr(gate, "audit_log", None)
     if audit_log is None:
@@ -235,11 +239,16 @@ def _get_quarantine_store(request: Request):
     """解析已装配的 REVIEW 隔离区；未启用/不可用时抛出稳定错误。"""
     gate = getattr(request.app.state, "safety_gate", None)
     if gate is None:
-        code = getattr(request.app.state, "safety_gate_error", "") or "safety.gate_unavailable"
+        code = (
+            getattr(request.app.state, "safety_gate_error", "")
+            or "safety.gate_unavailable"
+        )
         raise HTTPException(status_code=503, detail={"code": code})
     store = getattr(gate, "quarantine", None)
     if store is None:
-        raise HTTPException(status_code=503, detail={"code": "safety.quarantine_disabled"})
+        raise HTTPException(
+            status_code=503, detail={"code": "safety.quarantine_disabled"}
+        )
     return store
 
 
@@ -264,14 +273,18 @@ async def batch_update_memory_status(body: BatchMemoryStatusUpdate, request: Req
     results: list[dict[str, Any]] = []
     for mid in body.memory_ids:
         try:
-            results.append(_set_memory_status(request.app.state, mid, body.user_id, body.status))
+            results.append(
+                _set_memory_status(request.app.state, mid, body.user_id, body.status)
+            )
         except HTTPException as exc:
             results.append(
                 {
                     "memory_id": mid,
                     "error": {
                         "status_code": exc.status_code,
-                        "code": exc.detail if isinstance(exc.detail, str) else exc.detail,
+                        "code": (
+                            exc.detail if isinstance(exc.detail, str) else exc.detail
+                        ),
                     },
                 }
             )
@@ -333,7 +346,9 @@ async def get_knowledge_versions(
     """获取知识记忆的不可变版本历史（快照 + 当前版）。"""
     repo = getattr(request.app.state, "know_repo", None)
     if repo is None:
-        raise HTTPException(status_code=503, detail="knowledge repository not initialized")
+        raise HTTPException(
+            status_code=503, detail="knowledge repository not initialized"
+        )
     return repo.get_version_history(memory_id, user_id=user_id)
 
 
@@ -365,8 +380,12 @@ async def list_memories_health(
                     "access_count_30d": m.access_count_30d,
                     "last_accessed_at": _iso(m.last_accessed_at),
                     "confidence": m.confidence,
-                    "status": m.status.value if hasattr(m.status, "value") else str(m.status),
-                    "level": m.level.value if hasattr(m.level, "value") else str(m.level),
+                    "status": (
+                        m.status.value if hasattr(m.status, "value") else str(m.status)
+                    ),
+                    "level": (
+                        m.level.value if hasattr(m.level, "value") else str(m.level)
+                    ),
                 }
             )
 
@@ -385,8 +404,12 @@ async def list_memories_health(
                     "access_count_30d": m.access_count_30d,
                     "last_accessed_at": _iso(m.last_accessed_at),
                     "confidence": m.confidence,
-                    "status": m.status.value if hasattr(m.status, "value") else str(m.status),
-                    "level": m.level.value if hasattr(m.level, "value") else str(m.level),
+                    "status": (
+                        m.status.value if hasattr(m.status, "value") else str(m.status)
+                    ),
+                    "level": (
+                        m.level.value if hasattr(m.level, "value") else str(m.level)
+                    ),
                 }
             )
 
@@ -433,6 +456,7 @@ async def run_auto_forget(request: Request):
         calculator=HealthCalculator(),
         fact_store=getattr(state, "fact_store", None),
         fact_index_service=getattr(state, "fact_index_service", None),
+        memory_write_service=getattr(state, "memory_write_service", None),
     )
     try:
         return engine.run()
@@ -489,7 +513,10 @@ async def list_events(
     if repo is None:
         raise HTTPException(status_code=503, detail="event repository not initialized")
     total = repo.count(user_id)
-    items = [event.model_dump(mode="json") for event in repo.get_recent(user_id, limit=limit, offset=offset)]
+    items = [
+        event.model_dump(mode="json")
+        for event in repo.get_recent(user_id, limit=limit, offset=offset)
+    ]
     return {"total": total, "limit": limit, "offset": offset, "items": items}
 
 
@@ -597,7 +624,9 @@ async def release_quarantine(
         processor = getattr(request.app.state, "event_processor", None)
         event_repo = getattr(request.app.state, "event_repo", None)
         if processor is None or event_repo is None:
-            raise HTTPException(status_code=503, detail="event processor not initialized")
+            raise HTTPException(
+                status_code=503, detail="event processor not initialized"
+            )
         if event_repo.get_by_id(event.event_id) is None:
             event_repo.save(event)
             summary = processor.process([event])
@@ -652,10 +681,14 @@ async def get_forget_history_detail(
             status_value = mem.status
         elif mtype == "preference":
             content = mem.text
-            status_value = mem.status.value if hasattr(mem.status, "value") else str(mem.status)
+            status_value = (
+                mem.status.value if hasattr(mem.status, "value") else str(mem.status)
+            )
         else:
             content = mem.name
-            status_value = mem.status.value if hasattr(mem.status, "value") else str(mem.status)
+            status_value = (
+                mem.status.value if hasattr(mem.status, "value") else str(mem.status)
+            )
         resolved.append(
             {
                 "memory_id": mid,
@@ -755,28 +788,53 @@ async def system_status(request: Request):
         "vector_engine": {
             "provider": config.vector_engine.provider if config is not None else None,
             "collection": config.vector_engine.collection if config is not None else "",
-            "connected": getattr(vector_engine, "_connected", None) if vector_engine is not None else None,
-            "vector_count": vector_store.size() if vector_store is not None and hasattr(vector_store, "size") else None,
+            "connected": (
+                getattr(vector_engine, "_connected", None)
+                if vector_engine is not None
+                else None
+            ),
+            "vector_count": (
+                vector_store.size()
+                if vector_store is not None and hasattr(vector_store, "size")
+                else None
+            ),
         },
         "retrieval": {
             "type": type(retriever).__name__ if retriever is not None else None,
-            "default_top_k": config.retrieval.default_top_k if config is not None else None,
+            "default_top_k": (
+                config.retrieval.default_top_k if config is not None else None
+            ),
             "weights": {
-                "vector": config.retrieval.vector_weight if config is not None else None,
-                "keyword": config.retrieval.keyword_weight if config is not None else None,
-                "metadata": config.retrieval.metadata_weight if config is not None else None,
+                "vector": (
+                    config.retrieval.vector_weight if config is not None else None
+                ),
+                "keyword": (
+                    config.retrieval.keyword_weight if config is not None else None
+                ),
+                "metadata": (
+                    config.retrieval.metadata_weight if config is not None else None
+                ),
             },
-            "cache_ttl_seconds": config.retrieval.cache_ttl_seconds if config is not None else None,
+            "cache_ttl_seconds": (
+                config.retrieval.cache_ttl_seconds if config is not None else None
+            ),
             "compensation": comp_metrics,
         },
         "safety": {
             "gate_available": getattr(state, "safety_gate", None) is not None,
             "gate_error": getattr(state, "safety_gate_error", "") or "",
-            "user_rule_service_available": getattr(state, "user_rule_service", None) is not None,
+            "user_rule_service_available": getattr(state, "user_rule_service", None)
+            is not None,
             "rule_set_id": config.safety.rule_set_id if config is not None else None,
-            "rule_set_version": config.safety.rule_set_version if config is not None else None,
-            "audit_enabled": config.safety.audit.enabled if config is not None else None,
-            "quarantine_enabled": config.safety.quarantine.enabled if config is not None else None,
+            "rule_set_version": (
+                config.safety.rule_set_version if config is not None else None
+            ),
+            "audit_enabled": (
+                config.safety.audit.enabled if config is not None else None
+            ),
+            "quarantine_enabled": (
+                config.safety.quarantine.enabled if config is not None else None
+            ),
         },
     }
 

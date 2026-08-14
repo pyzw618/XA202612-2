@@ -3,6 +3,7 @@
 from .base import BaseMemoryHandler, MemoryCandidate, MemoryDecision
 from .confidence import ConfidenceFactors, UnifiedConfidenceCalculator
 from .evidence import EvidenceMerger
+from .freshness import freshness_score, memory_timestamp, parse_timestamp
 from .llm import StructuredLLMAdapter
 
 __all__ = [
@@ -13,4 +14,7 @@ __all__ = [
     "UnifiedConfidenceCalculator",
     "EvidenceMerger",
     "StructuredLLMAdapter",
+    "freshness_score",
+    "memory_timestamp",
+    "parse_timestamp",
 ]

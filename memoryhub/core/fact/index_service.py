@@ -51,6 +51,8 @@ class FactIndexService:
             "predicate_id": fact.predicate_id,
             "object_id": fact.object_id,
             "status": fact.status,
+            "observed_at": fact.observed_at,
+            "evidence_count": 1 if fact.source_text else 0,
         }
 
     def sync_fact(self, fact: Fact, *, remove: bool = False) -> None:
@@ -73,7 +75,9 @@ class FactIndexService:
 
         text = self.index_text(fact)
         metadata = self.index_metadata(fact)
-        if (self.vector_store is not None or self.vector_engine is not None) and self.embedding_client is None:
+        if (
+            self.vector_store is not None or self.vector_engine is not None
+        ) and self.embedding_client is None:
             raise RuntimeError("embedding client not initialized")
         vector = None
         if self.vector_store is not None or self.vector_engine is not None:
@@ -88,7 +92,9 @@ class FactIndexService:
             else:
                 self.vector_engine.insert(fact_id, text, vector, metadata=metadata)
         if self.keyword_search is not None:
-            self.keyword_search.update(fact_id, text, json.dumps(metadata, ensure_ascii=False))
+            self.keyword_search.update(
+                fact_id, text, json.dumps(metadata, ensure_ascii=False)
+            )
         self.memory_lookup[fact_id] = fact
         self._mark_indexed(fact)
         self._clear_cache()
@@ -107,16 +113,22 @@ class FactIndexService:
     def sync_result(self, result: ConflictResult) -> None:
         existing = result.existing_fact
         if existing is not None:
-            current = self.fact_store.get_fact(existing.fact_id, user_id=existing.user_id)
+            current = self.fact_store.get_fact(
+                existing.fact_id, user_id=existing.user_id
+            )
             if current is not None:
                 self.sync_fact(current)
-        current = self.fact_store.get_fact(result.new_fact.fact_id, user_id=result.new_fact.user_id)
+        current = self.fact_store.get_fact(
+            result.new_fact.fact_id, user_id=result.new_fact.user_id
+        )
         if current is not None:
             self.sync_fact(current)
 
     def _mark_indexed(self, fact: Fact) -> None:
         version = time.time_ns()
-        if not self.fact_store.mark_indexed(fact.fact_id, version, user_id=fact.user_id):
+        if not self.fact_store.mark_indexed(
+            fact.fact_id, version, user_id=fact.user_id
+        ):
             raise RuntimeError("fact projection state was not persisted")
         fact.pending_index = False
         fact.index_version = version

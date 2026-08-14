@@ -1,4 +1,4 @@
-"""Semantic consolidation and conflict auditing for knowledge memories."""
+﻿"""Semantic consolidation and conflict auditing for knowledge memories."""
 
 from __future__ import annotations
 
@@ -45,13 +45,24 @@ class KnowledgeUpdater:
             has_new_evidence = bool(incoming_events - existing_events)
             if not has_new_evidence and not self._has_semantic_delta(exact, memory):
                 return exact.memory_id
+            if not self._has_semantic_delta(exact, memory):
+                reinforced = self._reinforce(
+                    exact,
+                    memory,
+                    add_support=has_new_evidence
+                    and not bool(incoming_events & existing_events),
+                )
+                if has_new_evidence:
+                    reinforced.version = max(1, exact.version) + 1
+                self.write_service.upsert_memory(reinforced)
+                return reinforced.memory_id
             merged = self._merge(
                 exact,
                 memory,
                 add_support=has_new_evidence
                 and not bool(incoming_events & existing_events),
             )
-            self.write_service.upsert_memory(merged)
+            self._archive_and_save_version(exact, merged)
             return merged.memory_id
 
         existing, score = self._find_best_candidate(memory)
@@ -67,12 +78,20 @@ class KnowledgeUpdater:
             self.write_service.upsert_memory(existing)
             return existing.memory_id
 
+        if not self._has_semantic_delta(existing, memory):
+            reinforced = self._reinforce(
+                existing,
+                memory,
+                add_support=not bool(incoming_events & existing_events),
+            )
+            self.write_service.upsert_memory(reinforced)
+            return reinforced.memory_id
         merged = self._merge(
             existing,
             memory,
             add_support=not bool(incoming_events & existing_events),
         )
-        self.write_service.upsert_memory(merged)
+        self._archive_and_save_version(existing, merged)
         return merged.memory_id
 
     def _find_equivalent(self, memory: KnowledgeMemory) -> KnowledgeMemory | None:
@@ -187,6 +206,43 @@ class KnowledgeUpdater:
             ),
         )
 
+    def _reinforce(
+        self, existing: KnowledgeMemory, incoming: KnowledgeMemory, *, add_support: bool
+    ) -> KnowledgeMemory:
+        """Preserve the active semantic record when only evidence has changed."""
+        reinforced = existing.model_copy(deep=True)
+        reinforced.evidences = self._merge_evidences(
+            existing.evidences, incoming.evidences
+        )
+        if add_support:
+            reinforced.total_count = max(1, existing.total_count) + max(
+                1, incoming.total_count
+            )
+            reinforced.success_count = min(
+                reinforced.total_count,
+                max(0, existing.success_count) + max(0, incoming.success_count),
+            )
+            # Evidence revisions remain addressable through the stable memory ID.
+            reinforced.version = max(1, existing.version) + 1
+        reinforced.confidence = self.confidence_calculator.merge_score(
+            existing_confidence=existing.confidence,
+            incoming_confidence=incoming.confidence,
+            success_count=reinforced.success_count,
+            total_count=reinforced.total_count,
+            evidence_count=len(reinforced.evidences),
+        )
+        reinforced.updated_at = datetime.now(timezone.utc)
+        return reinforced
+
+    def _archive_and_save_version(
+        self, existing: KnowledgeMemory, successor: KnowledgeMemory
+    ) -> None:
+        archived = existing.model_copy(deep=True)
+        archived.status = MemoryStatus.ARCHIVED
+        archived.updated_at = datetime.now(timezone.utc)
+        self.write_service.upsert_memory(archived)
+        self.write_service.upsert_memory(successor)
+
     def _merge(
         self,
         existing: KnowledgeMemory,
@@ -194,7 +250,10 @@ class KnowledgeUpdater:
         *,
         add_support: bool,
     ) -> KnowledgeMemory:
-        merged = existing.model_copy(deep=True)
+        merged = incoming.model_copy(deep=True)
+        if not merged.memory_id or merged.memory_id == existing.memory_id:
+            merged.memory_id = f"{existing.memory_id}_v{existing.version + 1}"
+        merged.parent_id = existing.memory_id
         merged.steps = self._ordered_union(existing.steps, incoming.steps, limit=12)
         merged.tools = self._ordered_union(existing.tools, incoming.tools, limit=20)
         merged.evidences = self._merge_evidences(existing.evidences, incoming.evidences)

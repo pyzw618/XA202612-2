@@ -202,13 +202,27 @@ class FactMemoryPipeline:
 
         self._apply(result)
         self.store.save_fact_conflict(result)
+        evidence_target = (
+            result.existing_fact
+            if result.relation == "DUPLICATE" and result.existing_fact is not None
+            else result.new_fact
+        )
         if (
             self.store.get_fact(
-                result.new_fact.fact_id, user_id=result.new_fact.user_id
+                evidence_target.fact_id, user_id=evidence_target.user_id
             )
             is not None
         ):
-            self.store.save_fact_evidence(result.new_fact)
+            # Rebind duplicate evidence to the retained fact instead of losing it.
+            evidence_target = Fact(
+                **{
+                    **evidence_target.__dict__,
+                    "source_id": result.new_fact.source_id,
+                    "source_text": result.new_fact.source_text,
+                    "observed_at": result.new_fact.observed_at,
+                }
+            )
+            self.store.save_fact_evidence(evidence_target)
         if getattr(self, "index_service", None) is not None:
             self.index_service.sync_result(result)
         return result
