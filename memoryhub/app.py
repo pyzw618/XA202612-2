@@ -23,6 +23,7 @@ from memoryhub.adapter import user_rule_schemas
 from memoryhub.adapter.agent_api import root_router as agent_root_router
 from memoryhub.adapter.agent_api import router as agent_router
 from memoryhub.adapter.api import router as memory_router
+from memoryhub.adapter.management_api import router as management_router
 from memoryhub.adapter.schemas import SearchResult
 from memoryhub.adapter.service import MemoryService
 from memoryhub.config import AppConfig, load_config, validate_production_runtime
@@ -266,6 +267,7 @@ def create_app(
     app.include_router(memory_router)
     app.include_router(agent_router)
     app.include_router(agent_root_router)
+    app.include_router(management_router)
 
     # 注册生命周期
     async def startup():

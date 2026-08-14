@@ -515,6 +515,26 @@ class SafetyAuditLog:
         except Exception:
             raise SafetyAuditLogError("audit.verify_failed") from None
 
+    def list_records(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[SafetyAuditLogRecord], int]:
+        """返回已验链的审计记录分页（新的在前）；供管理后台只读展示。"""
+        if type(limit) is not int or limit <= 0 or type(offset) is not int or offset < 0:
+            raise SafetyAuditLogError("audit.invalid_query")
+        try:
+            with self._exclusive_lock():
+                records, _, _, _ = self._read_and_verify_locked()
+        except SafetyAuditLogError:
+            raise
+        except Exception:
+            raise SafetyAuditLogError("audit.list_failed") from None
+        ordered = [record for _, record in records]  # 升序（按 sequence）
+        total = len(ordered)
+        page = list(reversed(ordered))[offset : offset + limit]
+        return page, total
+
     def assert_persisted(
         self,
         record: SafetyAuditLogRecord,

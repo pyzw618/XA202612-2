@@ -824,17 +824,20 @@ async def list_knowledge(
     user_id: str = "default",
     scene: str = "",
     knowledge_type: str = "",
+    status: str = "active",
 ):
-    """列出知识记忆，支持按类型和场景过滤"""
+    """列出知识记忆，支持按类型、场景和状态过滤（状态过滤对前端待审查/归档/回收站页必需）"""
     repo = getattr(request.app.state, "know_repo", None)
     if repo is None:
         raise HTTPException(status_code=503, detail="knowledge repository not initialized")
+    # 空串视为 active，保持向后兼容（避免 list_all 匹配到空状态返回空）
+    status = status or "active"
     if scene:
-        values = repo.get_by_scope(user_id, scene, "")
+        values = repo.get_by_scope(user_id, scene, "", status)
     elif knowledge_type:
-        values = repo.get_by_type(user_id, knowledge_type)
+        values = repo.get_by_type(user_id, knowledge_type, status)
     else:
-        values = repo.list_all(status="active", user_id=user_id)
+        values = repo.list_all(status=status, user_id=user_id)
     return values
 
 
@@ -855,16 +858,34 @@ async def get_knowledge(memory_id: str, request: Request, user_id: str = "defaul
 # ============================================================
 
 
-@router.get("/conflicts", response_model=list[ConflictRecord])
+@router.get("/conflicts")
 async def list_conflicts(
-    status: str = "pending", user_id: str = "default", request: Request = None
+    status: str = "pending",
+    user_id: str = "default",
+    page: int | None = Query(default=None, ge=1),
+    size: int = Query(default=10, ge=1, le=200),
+    request: Request = None,
 ):
-    """列出冲突记录，支持按状态过滤"""
-    # 尝试访问冲突仓储，若不可用则返回空列表
+    """列出冲突记录，支持按状态过滤。
+
+    向后兼容：不传 page 时返回全部列表；传 page 时返回分页结构
+    {"items": [...], "total": N, "page": P, "size": S}。
+    """
+    # 尝试访问冲突仓储，若不可用则返回空
     repo = getattr(request.app.state, "conflict_repo", None) if request else None
-    if repo is not None:
-        return repo.list_all(status, user_id=user_id)
-    return []
+    if repo is None:
+        return [] if page is None else {"items": [], "total": 0, "page": page, "size": size}
+    values = repo.list_all(status, user_id=user_id)
+    if page is None:
+        return values
+    total = len(values)
+    start = (page - 1) * size
+    return {
+        "items": values[start : start + size],
+        "total": total,
+        "page": page,
+        "size": size,
+    }
 
 
 class ResolveConflictRequest(BaseModel):
@@ -1265,17 +1286,73 @@ async def list_forget_history(
 # ============================================================
 
 
-@router.post("/evaluate/{task_name}", response_model=EvalReport)
+@router.post("/evaluate/{task_name}")
 async def run_evaluation(task_name: str, dataset_path: str = "", request: Request = None):
     """
     运行指定任务的评测
 
-    task_name: "preference" | "retrieval" | "conflict" | "latency"
+    task_name: "retrieval" | "latency"（preference / conflict 后端尚未实现）
 
     数据流: 触发评测 → 加载数据集 → 批量执行 → 计算指标 → 生成报告
+
+    retrieval: dataset_path 指向服务器上的评测数据集 JSON（queries[].query_text/relevant_ids）
+    latency:   dataset_path 指向含 queries[].query_text 的数据集，跑检索延迟基准
     """
-    # 最小实现：返回基本评测报告
-    return EvalReport(task_name=task_name)
+    state = request.app.state if request is not None else None
+    retriever = getattr(state, "retriever", None) if state is not None else None
+    task = (task_name or "").lower()
+
+    if task == "retrieval":
+        if not dataset_path:
+            raise HTTPException(status_code=400, detail="dataset_path is required for retrieval evaluation")
+        if retriever is None:
+            raise HTTPException(status_code=503, detail="retriever not initialized")
+        try:
+            from evaluation.metrics.retrieval_eval import RetrievalEvaluator
+        except ImportError:
+            raise HTTPException(status_code=503, detail="evaluation module unavailable")
+        try:
+            report = RetrievalEvaluator(retriever, top_k=10).run(dataset_path)
+        except FileNotFoundError:
+            raise HTTPException(status_code=400, detail="dataset file not found")
+        except (ValueError, KeyError, TypeError):
+            raise HTTPException(status_code=400, detail="invalid dataset file")
+        return report
+
+    if task == "latency":
+        if not dataset_path:
+            raise HTTPException(status_code=400, detail="dataset_path is required for latency benchmark")
+        if retriever is None:
+            raise HTTPException(status_code=503, detail="retriever not initialized")
+        try:
+            import json
+
+            from evaluation.metrics.latency_benchmark import LatencyBenchmark
+        except ImportError:
+            raise HTTPException(status_code=503, detail="evaluation module unavailable")
+        try:
+            with open(dataset_path, "r", encoding="utf-8") as f:
+                queries = [item["query_text"] for item in json.load(f)["queries"]]
+        except (FileNotFoundError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            raise HTTPException(status_code=400, detail="invalid dataset file")
+        if not queries:
+            raise HTTPException(status_code=400, detail="dataset has no queries")
+        from memoryhub.adapter.schemas import SearchRequest
+
+        bench = LatencyBenchmark(
+            search_fn=lambda q: retriever.search(SearchRequest(query=q, top_k=5))
+        )
+        try:
+            result = bench.benchmark_search(queries, iterations=20)
+        except Exception:
+            raise HTTPException(status_code=503, detail="latency benchmark failed") from None
+        return result.to_dict()
+
+    # preference / conflict 评测框架已定义、实现未落地
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={"code": "evaluation.not_implemented", "task_name": task_name},
+    )
 
 
 @router.get("/evaluate/reports", response_model=list[EvalReport])
