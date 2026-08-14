@@ -30,6 +30,11 @@ class PreferenceMemoryHandler(BaseMemoryHandler):
         event_id = str(getattr(source, "event_id", ""))
         occurred_at = str(getattr(source, "occurred_at", ""))
         quality = float(getattr(getattr(source, "quality", None), "score", 1.0) or 1.0)
+        safety_meta = dict(getattr(source, "payload", {}).get("_safety", {}) or {})
+        memories = self.extractor.extract(source)
+        for memory in memories:
+            if safety_meta:
+                memory.extra_payload = {**memory.extra_payload, "safety": safety_meta}
         return [
             MemoryCandidate(
                 "preference",
@@ -43,7 +48,7 @@ class PreferenceMemoryHandler(BaseMemoryHandler):
                 float(getattr(memory, "confidence", 0.5) or 0.5),
                 {},
             )
-            for memory in self.extractor.extract(source)
+            for memory in memories
         ]
 
     def find_similar(self, candidate: MemoryCandidate) -> Any:

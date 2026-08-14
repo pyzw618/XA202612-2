@@ -27,6 +27,8 @@ class MemoryWriteService:
         embedding_client=None,
         evidence_store=None,
         conflict_repo=None,
+        safety_gate=None,
+        require_safety: bool = False,
     ) -> None:
         self.pref_repo = pref_repo
         self.know_repo = know_repo
@@ -38,6 +40,8 @@ class MemoryWriteService:
         self.embedding_client = embedding_client
         self.evidence_store = evidence_store
         self.conflict_repo = conflict_repo
+        self.safety_gate = safety_gate
+        self.require_safety = bool(require_safety)
 
     @staticmethod
     def index_text(memory: Memory) -> str:
@@ -69,9 +73,38 @@ class MemoryWriteService:
             "updated_at": str(getattr(memory, "updated_at", "") or ""),
             "created_at": str(getattr(memory, "created_at", "") or ""),
             "evidence_count": len(getattr(memory, "evidences", []) or []),
+            "safety": dict(
+                getattr(memory, "extra_payload", {}).get("safety", {}) or {}
+            ),
         }
 
     def upsert_memory(self, memory: Memory) -> None:
+        """Persist through the memory safety gate whenever active content is written."""
+        status = (
+            memory.status.value
+            if hasattr(memory.status, "value")
+            else str(memory.status)
+        )
+        if status == MemoryStatus.ACTIVE.value:
+            if self.safety_gate is None:
+                if self.require_safety:
+                    raise RuntimeError("memory_write.safety_gate_unavailable")
+                return self._unsafe_upsert_memory(memory)
+            from memoryhub.core.safety.memory_write import guard_memory_write
+
+            guarded = guard_memory_write(
+                self.safety_gate,
+                memory,
+                self._unsafe_upsert_memory,
+                operation="memory_sync",
+            )
+            if guarded.memory is None:
+                raise RuntimeError(f"memory_write.blocked:{guarded.action.value}")
+            return None
+        return self._unsafe_upsert_memory(memory)
+
+    def _unsafe_upsert_memory(self, memory: Memory) -> None:
+        """Internal sink invoked only after a verified safe projection or lifecycle action."""
         repo = self.know_repo if memory.memory_type == "knowledge" else self.pref_repo
         repo.save(memory)
         if self.evidence_store is not None:

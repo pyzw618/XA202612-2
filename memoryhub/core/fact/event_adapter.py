@@ -160,4 +160,5 @@ class FactIngestionAdapter:
             "quality_status": FactIngestionAdapter._enum_value(
                 getattr(quality, "status", "")
             ),
+            "safety": dict(getattr(event, "payload", {}).get("_safety", {}) or {}),
         }

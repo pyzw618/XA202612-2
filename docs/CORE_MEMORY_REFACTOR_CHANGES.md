@@ -170,3 +170,17 @@
 6. `QualityScorer` 将 tool status 纳入质量门控：partial 强制 review 且分数不超过 0.60；error / timeout / cancelled 强制 rejected 且不超过最小质量阈值。
 
 新增测试覆盖未知来源拒绝、外部 hash 忽略、稳定工具结果幂等、缺失时间语义，以及 partial / timeout 工具调用质量状态。
+
+---
+
+## 第八轮安全写入边界与审计联动（2026-08-14）
+
+本轮将安全模块的能力接入 Memory、Fact 和隔离放行链路：
+
+1. `MemoryWriteService` 支持 safety-aware 模式。应用装配时注入 `SafetyWriteGate`；ACTIVE 的 Preference / Knowledge 写入会通过 `guard_memory_write(..., operation="memory_sync")` 生成并验证安全投影后才进入内部 sink。生产模式缺少 gate 时会失败关闭；归档、删除等不引入新内容的生命周期操作仍可完成投影清理。
+2. `FactMemoryPipeline` 支持注入 `SafetyWriteGate`。`commit()` 会把候选三元组投影为标准安全事件，使用 gate 的 safe projection 重建三元组；REVIEW / REJECT 直接阻止提交。应用创建 FactPipeline 时已注入 gate。
+3. 隔离记录人工 allow 时，管理端会向恢复事件写入 `_safety.review_id`、`release_action` 和 `released_at`，并重算 source_hash，使下游能区分普通事件与隔离放行事件。
+4. `DataCleaner` 新增可选 SafetyConfig 资源预算：深度、文本长度、工具调用数量和字段数量限制可与安全扫描配置对齐，减少异常 payload 在进入安全扫描前消耗资源。
+5. Event ingestion 把 gate 返回的 audit ID、动作和审计哈希写入安全事件的 `_safety` 元数据；Preference Handler 将其投影到 `extra_payload.safety`，Fact proposal metadata 同样保留该信息；Memory 索引 metadata 暴露安全关联而不复制原始正文。
+
+验证覆盖安全 gate、memory-write guard、数据接入、Fact、API 和跨链路回归。

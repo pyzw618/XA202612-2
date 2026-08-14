@@ -19,13 +19,13 @@ REST API 路由定义 — 管理后台缺口补齐（供前端可视化后台使
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from memoryhub.adapter.schemas import ForgetRequest
+from memoryhub.adapter.schemas import ForgetRequest, canonical_sha256
 from memoryhub.core.forget import MemoryForgetter
 from memoryhub.core.forget.auto_forget import AutoForgetEngine
 from memoryhub.core.forget.health import HealthCalculator
@@ -628,6 +628,25 @@ async def release_quarantine(
                 status_code=503, detail="event processor not initialized"
             )
         if event_repo.get_by_id(event.event_id) is None:
+            payload = dict(event.payload)
+            payload["_safety"] = {
+                "review_id": review_id,
+                "release_action": "manual_allow",
+                "released_at": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+            }
+            event = event.model_copy(
+                update={
+                    "payload": payload,
+                    "source_hash": canonical_sha256(
+                        {
+                            "released_event": event.model_dump(mode="json"),
+                            "review_id": review_id,
+                        }
+                    ),
+                }
+            )
             event_repo.save(event)
             summary = processor.process([event])
             result["processing"] = summary.model_dump(mode="json")

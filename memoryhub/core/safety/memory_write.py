@@ -21,7 +21,7 @@ from memoryhub.core.safety.gate import ApprovedWrite, SafetyGateError, SafetyWri
 Memory = PreferenceMemory | KnowledgeMemory
 SinkResult = TypeVar("SinkResult")
 
-_OPERATIONS = frozenset({"explicit_write", "feedback_update"})
+_OPERATIONS = frozenset({"explicit_write", "feedback_update", "memory_sync"})
 
 
 class MemoryWriteSafetyError(ValueError):
@@ -50,7 +50,9 @@ def _memory_class(memory: Memory):
     raise MemoryWriteSafetyError("memory_write.unsupported_type")
 
 
-def _memory_envelope(memory: Memory, operation: str) -> tuple[dict[str, Any], dict[str, str]]:
+def _memory_envelope(
+    memory: Memory, operation: str
+) -> tuple[dict[str, Any], dict[str, str]]:
     if operation not in _OPERATIONS:
         raise MemoryWriteSafetyError("memory_write.invalid_operation")
     memory_class = _memory_class(memory)
@@ -73,7 +75,9 @@ def _memory_envelope(memory: Memory, operation: str) -> tuple[dict[str, Any], di
     )
 
 
-def build_memory_write_event(memory: Memory, *, operation: str = "explicit_write") -> MemoryEvent:
+def build_memory_write_event(
+    memory: Memory, *, operation: str = "explicit_write"
+) -> MemoryEvent:
     """Project every content-bearing memory field into one canonical gate event."""
 
     envelope, identity = _memory_envelope(memory, operation)

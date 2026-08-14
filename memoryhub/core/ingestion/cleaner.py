@@ -12,6 +12,18 @@ class DataCleaner:
 
     _required_fields = {"event_id", "source_type", "event_type"}
 
+    def __init__(self, safety_config=None) -> None:
+        self.max_depth = min(16, int(getattr(safety_config, "max_depth", 16)))
+        self.max_text_chars = min(
+            100_000, int(getattr(safety_config, "max_field_chars", 100_000))
+        )
+        self.max_tool_calls = min(
+            100, int(getattr(safety_config, "max_candidates", 100))
+        )
+        self.max_fields = min(
+            5_000, int(getattr(safety_config, "max_scanned_fields", 5_000))
+        )
+
     def clean(self, raw_data: dict) -> dict:
         """
         清洗单条原始数据
@@ -42,12 +54,29 @@ class DataCleaner:
             raise ValueError("tool_calls must be a list")
         if not isinstance(cleaned["text"], str):
             raise ValueError("text must be a string")
-        if len(cleaned["text"]) > 100_000:
-            raise ValueError("text exceeds 100000 characters")
-        if len(cleaned["tool_calls"]) > 100:
-            raise ValueError("tool_calls exceeds 100 entries")
-
+        if len(cleaned["text"]) > self.max_text_chars:
+            raise ValueError("text exceeds configured safety budget")
+        if len(cleaned["tool_calls"]) > self.max_tool_calls:
+            raise ValueError("tool_calls exceeds configured safety budget")
+        self._validate_structure(cleaned["payload"])
+        self._validate_structure(cleaned["tool_calls"])
         return cleaned
+
+    def _validate_structure(self, value) -> None:
+        pending = [(value, 0)]
+        fields = 0
+        while pending:
+            current, depth = pending.pop()
+            if depth > self.max_depth:
+                raise ValueError("payload exceeds configured safety depth")
+            if isinstance(current, dict):
+                fields += len(current)
+                pending.extend((item, depth + 1) for item in current.values())
+            elif isinstance(current, list):
+                fields += len(current)
+                pending.extend((item, depth + 1) for item in current)
+            if fields > self.max_fields:
+                raise ValueError("payload exceeds configured safety field budget")
 
     def deduplicate(self, events: list[MemoryEvent]) -> list[MemoryEvent]:
         """

@@ -19,8 +19,17 @@
         print(f"{r.relation} → {r.resolution}: {r.reason}")
 """
 
+import copy
 import logging
 from typing import Optional
+
+from memoryhub.adapter.schemas import (
+    EventQuality,
+    MemoryEvent,
+    QualityStatus,
+    SourceType,
+    canonical_sha256,
+)
 
 from .admission import FactAdmissionPolicy
 from .conflict import ConflictDetector
@@ -66,6 +75,7 @@ class FactMemoryPipeline:
         llm_client=None,
         store: Optional[FactStore] = None,
         index_service=None,
+        safety_gate=None,
     ):
         """
         Args:
@@ -89,6 +99,7 @@ class FactMemoryPipeline:
         )
         self.admission = admission_policy or FactAdmissionPolicy()
         self.index_service = index_service
+        self.safety_gate = safety_gate
 
     def propose(
         self,
@@ -282,6 +293,58 @@ class FactMemoryPipeline:
         logger.info(f"[ingest] 完成: {counts}, total={len(results)}")
 
         return results
+
+    def _safety_checked_proposal(self, proposal: FactProposal) -> FactProposal:
+        """Sanitize direct Fact commits through the configured safety gate."""
+        if self.safety_gate is None:
+            return proposal
+        triple = proposal.raw_triple
+        user_id = str(proposal.metadata.get("user_id", "") or "default")
+        payload = {
+            "fact": {
+                "subject_text": triple.subject_text,
+                "subject_type": triple.subject_type,
+                "predicate_text": triple.predicate_text,
+                "object_text": triple.object_text,
+                "object_type": triple.object_type,
+                "evidence": triple.evidence,
+                "confidence": triple.confidence,
+            }
+        }
+        event = MemoryEvent(
+            event_id=f"fact_commit_{proposal.candidate_id}",
+            source_type=SourceType.MANUAL_CONFIG,
+            event_type="fact_commit",
+            user_id=user_id,
+            occurred_at=str(proposal.metadata.get("occurred_at", "") or ""),
+            text=triple.evidence,
+            payload=payload,
+            source_hash=canonical_sha256(
+                {"proposal": proposal.candidate_id, "payload": payload}
+            ),
+            quality=EventQuality(
+                score=1.0,
+                status=QualityStatus.ACCEPTED,
+                completeness=1.0,
+                validity=1.0,
+                consistency=1.0,
+                freshness=1.0,
+            ),
+        )
+        outcome = self.safety_gate.route(event)
+        if outcome.approved is None:
+            action = getattr(outcome.action, "value", outcome.action)
+            raise ValueError(f"fact_commit.blocked:{action}")
+        try:
+            sanitized = type(triple)(
+                **dict(outcome.approved.safe_event.payload["fact"])
+            )
+        except Exception as exc:
+            raise ValueError("fact_commit.invalid_safe_projection") from exc
+        safe = copy.deepcopy(proposal)
+        safe.raw_triple = sanitized
+        safe.metadata["safety_audit_id"] = str(getattr(outcome, "audit_id", "") or "")
+        return safe
 
     def _apply(self, result: ConflictResult):
         """根据检测 + 裁决结果写入 / 更新 store"""

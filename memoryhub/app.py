@@ -466,6 +466,7 @@ def create_app(
             app.state.fact_pipeline = FactMemoryPipeline(
                 db_path=config.storage.db_path,
                 llm_client=llm_client,
+                safety_gate=app.state.safety_gate,
             )
             app.state.owns_fact_pipeline = True
         fact_store = app.state.fact_pipeline.store
@@ -603,6 +604,8 @@ def create_app(
             embedding_client=embedding_client,
             evidence_store=app.state.evidence_store,
             conflict_repo=conflict_repo,
+            safety_gate=app.state.safety_gate,
+            require_safety=config.runtime.is_production,
         )
         pref_repo.write_service = app.state.memory_write_service
         know_repo.write_service = app.state.memory_write_service

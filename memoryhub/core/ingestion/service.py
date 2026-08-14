@@ -99,6 +99,18 @@ class EventIngestionService:
                 continue
 
             safe_event = approved.safe_event
+            safe_payload = dict(safe_event.payload)
+            audit_id = str(getattr(outcome, "audit_id", "") or "")
+            action = getattr(outcome, "action", "")
+            action_value = str(getattr(action, "value", action) or "")
+            audit_hash = str(getattr(approved, "audit_record_hash", "") or "")
+            if audit_id or action_value or audit_hash:
+                safe_payload["_safety"] = {
+                    "audit_id": audit_id,
+                    "action": action_value,
+                    "audit_record_hash": audit_hash,
+                }
+            safe_event = safe_event.model_copy(update={"payload": safe_payload})
             newly_saved.append(safe_event)
             pending_by_id[safe_event.event_id] = safe_event
             pending_hashes.add(safe_event.source_hash)
@@ -113,21 +125,29 @@ class EventIngestionService:
         self._extract_facts(newly_saved, result)
         return result
 
-    def _extract_preferences(self, events: list[MemoryEvent], result: EventIngestionResult) -> None:
+    def _extract_preferences(
+        self, events: list[MemoryEvent], result: EventIngestionResult
+    ) -> None:
         if not self.extraction_executor.supports(ExtractionType.PREFERENCE):
             return
         for event in events:
             try:
                 self.extraction_executor.run_preference(event)
             except Exception:
-                self._record_extraction_failure(ExtractionType.PREFERENCE, [event], result)
+                self._record_extraction_failure(
+                    ExtractionType.PREFERENCE, [event], result
+                )
 
-    def _extract_knowledge(self, events: list[MemoryEvent], result: EventIngestionResult) -> None:
+    def _extract_knowledge(
+        self, events: list[MemoryEvent], result: EventIngestionResult
+    ) -> None:
         if not self.extraction_executor.supports(ExtractionType.KNOWLEDGE):
             return
         trajectories: dict[tuple[str, str, str], list[MemoryEvent]] = defaultdict(list)
         for event in events:
-            trajectories[(event.user_id, event.session_id, event.task_type)].append(event)
+            trajectories[(event.user_id, event.session_id, event.task_type)].append(
+                event
+            )
         for (user_id, session_id, task_type), new_events in trajectories.items():
             trajectory = new_events
             if session_id:
@@ -137,9 +157,13 @@ class EventIngestionService:
             try:
                 self.extraction_executor.run_knowledge(trajectory)
             except Exception:
-                self._record_extraction_failure(ExtractionType.KNOWLEDGE, trajectory, result)
+                self._record_extraction_failure(
+                    ExtractionType.KNOWLEDGE, trajectory, result
+                )
 
-    def _extract_facts(self, events: list[MemoryEvent], result: EventIngestionResult) -> None:
+    def _extract_facts(
+        self, events: list[MemoryEvent], result: EventIngestionResult
+    ) -> None:
         if not self.extraction_executor.supports(ExtractionType.FACT):
             return
         for event in events:
