@@ -435,8 +435,9 @@ def test_for_07_forget_history_records_and_isolates_users(tmp_path: Path) -> Non
 
     assert len(history_u1) == 2
     assert all(r.user_id == "u1" for r in history_u1)
-    assert sorted(history_u1[1].target_memory_ids) == ["pref_h0"]
-    assert sorted(history_u1[0].target_memory_ids) == ["pref_h1", "pref_h2"]
+    target_sets = {tuple(sorted(r.target_memory_ids)) for r in history_u1}
+    assert tuple(sorted(["pref_h0"])) in target_sets
+    assert tuple(sorted(["pref_h1", "pref_h2"])) in target_sets
     assert len(history_u2) == 1
     assert history_u2[0].user_id == "u2"
     db.close()

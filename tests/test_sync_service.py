@@ -29,7 +29,9 @@ from memoryhub.app import create_app
 from memoryhub.config import (
     AppConfig,
     EmbeddingConfig,
+    SafetyConfig,
     StorageConfig,
+    UserRuleConfig,
     VectorEngineConfig,
 )
 from memoryhub.retrieval.cache import SearchCache
@@ -305,6 +307,7 @@ def _milvus_mock_config(tmp_path, db_path: str):
         ),
         embedding=EmbeddingConfig(provider="kylin_mock", dimension=768),
         vector_engine=VectorEngineConfig(provider="milvus_mock", app_id="test-app-id"),
+        safety=SafetyConfig(user_rules=UserRuleConfig(enabled=False)),
     )
 
 

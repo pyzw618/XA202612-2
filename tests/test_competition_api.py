@@ -225,6 +225,8 @@ def test_agent_step_extracts_memory_from_raw_dialogue_and_retrieves_it(client):
 def test_long_demo_builds_memory_across_one_multi_turn_session(client):
     test_client, _ = client
     replay_path = Path(__file__).parents[1] / "frontend" / "public" / "examples" / "memory-system-long-replay.json"
+    if not replay_path.exists():
+        pytest.skip("missing long-demo replay fixture: frontend/public/examples/memory-system-long-replay.json")
     replay = json.loads(replay_path.read_text(encoding="utf-8"))
     events_by_turn = {event["turn_id"]: [event] for event in replay["events"]}
 

@@ -44,7 +44,7 @@ safety:
   auto_mask: true
   reject_on_detect: false
   audit:
-    enabled: false
+    enabled: true
     directory: "data/safety-audit"
     hmac_key_env: "MEMORYHUB_AUDIT_HMAC_KEY"
     key_id: "device-local-v1"
@@ -56,7 +56,7 @@ safety:
     fsync: true
     fail_closed: true
   quarantine:
-    enabled: false
+    enabled: true
     directory: "data/review-quarantine"
     encryption_key_env: "MEMORYHUB_QUARANTINE_KEY"
     key_id: "device-local-v1"
@@ -66,7 +66,7 @@ safety:
     fsync: true
     fail_closed: true
   user_rules:
-    enabled: true
+    enabled: false
     encryption_key_env: "MEMORYHUB_USER_RULE_KEY"
     key_id: "device-local-v1"
     max_rules_per_user: 100
