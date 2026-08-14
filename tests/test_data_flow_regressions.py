@@ -75,14 +75,35 @@ def _safety_gate(tmp_path: Path) -> SafetyWriteGate:
 
 def test_event_repository_round_trips_schema_11(tmp_path: Path) -> None:
     event = MemoryEvent(
-        event_id="evt_roundtrip", source_type="tool_result",
-        event_type="agent_response", user_id="u1", session_id="s1", turn_id="t1",
-        occurred_at="2026-08-03T09:00:00Z", text="done",
-        tool_calls=[ToolCallResult(call_id="c1", sequence=1, tool_name="writer",
-            status=ToolCallStatus.SUCCESS, arguments={"format": "md"}, result={"ok": True})],
-        schema_version="1.1", source_hash="a" * 64, redactions=["/payload/token"],
-        quality=EventQuality(score=0.9, status=QualityStatus.ACCEPTED, completeness=1,
-            validity=1, consistency=1, freshness=1),
+        event_id="evt_roundtrip",
+        source_type="tool_result",
+        event_type="agent_response",
+        user_id="u1",
+        session_id="s1",
+        turn_id="t1",
+        occurred_at="2026-08-03T09:00:00Z",
+        text="done",
+        tool_calls=[
+            ToolCallResult(
+                call_id="c1",
+                sequence=1,
+                tool_name="writer",
+                status=ToolCallStatus.SUCCESS,
+                arguments={"format": "md"},
+                result={"ok": True},
+            )
+        ],
+        schema_version="1.1",
+        source_hash="a" * 64,
+        redactions=["/payload/token"],
+        quality=EventQuality(
+            score=0.9,
+            status=QualityStatus.ACCEPTED,
+            completeness=1,
+            validity=1,
+            consistency=1,
+            freshness=1,
+        ),
     )
     repo = EventRepository(_db(tmp_path))
     repo.save(event)
@@ -92,10 +113,21 @@ def test_event_repository_round_trips_schema_11(tmp_path: Path) -> None:
 def test_hybrid_retrieval_isolates_users() -> None:
     memory = PreferenceMemory(memory_id="pref_u1", user_id="u1", text="secretblue")
     keyword = KeywordSearcher()
-    keyword.build_index([(memory.memory_id, memory.text,
-        '{"memory_type":"preference","user_id":"u1","content":"secretblue","confidence":1.0,"scope":{}}')])
-    retriever = HybridRetriever(keyword_search=keyword, memory_lookup={memory.memory_id: memory})
-    assert retriever.search(SearchRequest(user_id="u2", query="secretblue")).results == []
+    keyword.build_index(
+        [
+            (
+                memory.memory_id,
+                memory.text,
+                '{"memory_type":"preference","user_id":"u1","content":"secretblue","confidence":1.0,"scope":{}}',
+            )
+        ]
+    )
+    retriever = HybridRetriever(
+        keyword_search=keyword, memory_lookup={memory.memory_id: memory}
+    )
+    assert (
+        retriever.search(SearchRequest(user_id="u2", query="secretblue")).results == []
+    )
 
 
 def test_forget_enforces_owner_and_reports_actual_count(tmp_path: Path) -> None:
@@ -156,9 +188,7 @@ def _request_with_state(**values):
         "embedding_client": None,
     }
     defaults.update(values)
-    return SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(**defaults))
-    )
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(**defaults)))
 
 
 def test_feedback_update_synchronizes_all_runtime_indexes(tmp_path: Path) -> None:
@@ -183,8 +213,10 @@ def test_feedback_update_synchronizes_all_runtime_indexes(tmp_path: Path) -> Non
     result = asyncio.run(
         submit_feedback(
             FeedbackRequest(
-                user_id="u1", memory_id=memory.memory_id,
-                feedback_text="new searchable wording", action="update",
+                user_id="u1",
+                memory_id=memory.memory_id,
+                feedback_text="new searchable wording",
+                action="update",
             ),
             request,
         )
@@ -217,7 +249,9 @@ def test_feedback_reject_removes_indexes_and_enforces_owner(tmp_path: Path) -> N
     with pytest.raises(HTTPException) as exc:
         asyncio.run(
             submit_feedback(
-                FeedbackRequest(user_id="u2", memory_id=memory.memory_id, action="reject"),
+                FeedbackRequest(
+                    user_id="u2", memory_id=memory.memory_id, action="reject"
+                ),
                 request,
             )
         )
@@ -234,7 +268,9 @@ def test_feedback_reject_removes_indexes_and_enforces_owner(tmp_path: Path) -> N
     assert memory.memory_id not in lookup
 
 
-def test_conflict_repository_resolve_reports_truth_and_result_id(tmp_path: Path) -> None:
+def test_conflict_repository_resolve_reports_truth_and_result_id(
+    tmp_path: Path,
+) -> None:
     repo = ConflictRepository(_db(tmp_path))
     record = ConflictRecord(
         conflict_id="conf_data_flow",
@@ -296,19 +332,29 @@ def test_preference_llm_callers_use_prompt_and_response_content() -> None:
         '"preference_type":"output_style","action_payload":{},"tags":["concise"]}'
     )
     event = MemoryEvent(
-        event_id="evt_llm", source_type="user_behavior", event_type="response",
-        user_id="u1", text="The user repeatedly accepts concise answers.",
-        occurred_at="2026-08-03T10:00:00Z", payload={"status": "SUCCESS"},
+        event_id="evt_llm",
+        source_type="user_behavior",
+        event_type="response",
+        user_id="u1",
+        text="The user repeatedly accepts concise answers.",
+        occurred_at="2026-08-03T10:00:00Z",
+        payload={"status": "SUCCESS"},
         source_hash="b" * 64,
         quality=EventQuality(
-            score=0.9, status=QualityStatus.ACCEPTED, completeness=1.0,
-            validity=1.0, consistency=1.0, freshness=1.0,
+            score=0.9,
+            status=QualityStatus.ACCEPTED,
+            completeness=1.0,
+            validity=1.0,
+            consistency=1.0,
+            freshness=1.0,
         ),
     )
     extracted = PreferenceExtractor(extractor_llm)._llm_extract(event)
     assert extracted[0].text == "Prefer concise technical summaries"
     assert "Execution Context" in extractor_llm.calls[0][0]
-    assert extractor_llm.calls[0][1].startswith("You are a Preference Abstraction Engine")
+    assert extractor_llm.calls[0][1].startswith(
+        "You are a Preference Abstraction Engine"
+    )
 
 
 class _FakeVectorEngine:
@@ -330,13 +376,13 @@ def test_forget_reports_actual_ids_and_persists_vector_engine(tmp_path: Path) ->
     repo.save(PreferenceMemory(memory_id="owned_second", user_id="u1", text="y"))
     engine = _FakeVectorEngine()
     forgetter = MemoryForgetter(
-        pref_repo=repo, know_repo=KnowledgeRepository(db), vector_engine=engine,
+        pref_repo=repo,
+        know_repo=KnowledgeRepository(db),
+        vector_engine=engine,
     )
 
     response = forgetter.execute(
-        ForgetRequest(
-            user_id="u1", target_memory_ids=["other_first", "owned_second"]
-        )
+        ForgetRequest(user_id="u1", target_memory_ids=["other_first", "owned_second"])
     )
 
     assert response.deleted_count == 1
@@ -353,7 +399,10 @@ def test_preference_detail_read_enforces_user_boundary(tmp_path: Path) -> None:
     with pytest.raises(HTTPException) as exc:
         asyncio.run(get_preference("pref_detail", request, user_id="u2"))
     assert exc.value.status_code == 404
-    assert asyncio.run(get_preference("pref_detail", request, user_id="u1")).text == "private"
+    assert (
+        asyncio.run(get_preference("pref_detail", request, user_id="u1")).text
+        == "private"
+    )
 
 
 class _FixedQualityScorer:
@@ -363,7 +412,8 @@ class _FixedQualityScorer:
     def score(self, _event):
         accepted = self.status == QualityStatus.ACCEPTED
         return EventQuality(
-            score=0.9 if accepted else 0.1, status=self.status,
+            score=0.9 if accepted else 0.1,
+            status=self.status,
             completeness=1.0 if accepted else 0.0,
             validity=1.0 if accepted else 0.0,
             consistency=1.0 if accepted else 0.0,
@@ -393,10 +443,14 @@ class _RecordingPreferenceExtractor:
 
     def extract(self, event):
         self.calls += 1
-        return [PreferenceMemory(
-            memory_id="pref_ingested", user_id=event.user_id,
-            text="Prefer Markdown", confidence=0.9,
-        )]
+        return [
+            PreferenceMemory(
+                memory_id="pref_ingested",
+                user_id=event.user_id,
+                text="Prefer Markdown",
+                confidence=0.9,
+            )
+        ]
 
 
 class _RecordingKnowledgeExtractor:
@@ -405,27 +459,44 @@ class _RecordingKnowledgeExtractor:
 
     def extract_from_trajectory(self, events):
         self.calls += 1
-        return [KnowledgeMemory(
-            memory_id="know_ingested", user_id=events[0].user_id,
-            name="Workflow", content="Do the steps", confidence=0.8,
-        )]
+        return [
+            KnowledgeMemory(
+                memory_id="know_ingested",
+                user_id=events[0].user_id,
+                name="Workflow",
+                content="Do the steps",
+                confidence=0.8,
+            )
+        ]
 
 
 def _ingestion_event(event_id="evt_ingest", source_hash="c" * 64):
     return MemoryEvent(
-        event_id=event_id, source_type="user_behavior",
-        event_type="preference_signal", user_id="u1",
-        session_id="s1", scene="office", task_type="office.report",
-        occurred_at="2026-08-03T12:00:00Z", text="Always use markdown",
-        payload={"status": "SUCCESS"}, source_hash=source_hash,
+        event_id=event_id,
+        source_type="user_behavior",
+        event_type="preference_signal",
+        user_id="u1",
+        session_id="s1",
+        scene="office",
+        task_type="office.report",
+        occurred_at="2026-08-03T12:00:00Z",
+        text="Always use markdown",
+        payload={"status": "SUCCESS"},
+        source_hash=source_hash,
         quality=EventQuality(
-            score=0.9, status=QualityStatus.ACCEPTED, completeness=1.0,
-            validity=1.0, consistency=1.0, freshness=1.0,
+            score=0.9,
+            status=QualityStatus.ACCEPTED,
+            completeness=1.0,
+            validity=1.0,
+            consistency=1.0,
+            freshness=1.0,
         ),
     )
 
 
-def test_event_ingestion_applies_gate_extracts_and_is_idempotent(tmp_path: Path) -> None:
+def test_event_ingestion_applies_gate_extracts_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
     db = _db(tmp_path)
     event_repo = EventRepository(db)
     pref_repo = PreferenceRepository(db)
@@ -435,9 +506,11 @@ def test_event_ingestion_applies_gate_extracts_and_is_idempotent(tmp_path: Path)
     pref_extractor = _RecordingPreferenceExtractor()
     know_extractor = _RecordingKnowledgeExtractor()
     service = EventIngestionService(
-        event_repo=event_repo, safety_gate=gate,
+        event_repo=event_repo,
+        safety_gate=gate,
         quality_scorer=_FixedQualityScorer(QualityStatus.ACCEPTED),
-        memory_write_service=writer, preference_extractor=pref_extractor,
+        memory_write_service=writer,
+        preference_extractor=pref_extractor,
         knowledge_extractor=know_extractor,
     )
 
@@ -456,17 +529,21 @@ def test_event_ingestion_applies_gate_extracts_and_is_idempotent(tmp_path: Path)
     assert know_extractor.calls == 1
 
 
-def test_event_ingestion_rejects_quality_and_review_without_storage(tmp_path: Path) -> None:
+def test_event_ingestion_rejects_quality_and_review_without_storage(
+    tmp_path: Path,
+) -> None:
     event_repo = EventRepository(_db(tmp_path))
     writer = SimpleNamespace(upsert_memory=lambda _memory: None)
     quality_gate = _FakeGate()
     low_quality = EventIngestionService(
-        event_repo=event_repo, safety_gate=quality_gate,
+        event_repo=event_repo,
+        safety_gate=quality_gate,
         quality_scorer=_FixedQualityScorer(QualityStatus.REJECTED),
         memory_write_service=writer,
     )
     reviewed = EventIngestionService(
-        event_repo=event_repo, safety_gate=_FakeGate(approved=False),
+        event_repo=event_repo,
+        safety_gate=_FakeGate(approved=False),
         quality_scorer=_FixedQualityScorer(QualityStatus.ACCEPTED),
         memory_write_service=writer,
     )
@@ -496,19 +573,29 @@ def test_forget_cascades_evidence_and_conflicts(tmp_path: Path) -> None:
     conflict_repo = ConflictRepository(db)
     evidence_store = EvidenceStore(str(tmp_path / "evidence"))
     writer = MemoryWriteService(
-        pref_repo=pref_repo, know_repo=know_repo, evidence_store=evidence_store,
+        pref_repo=pref_repo,
+        know_repo=know_repo,
+        evidence_store=evidence_store,
     )
     memory = PreferenceMemory(
-        memory_id="pref_cascade", user_id="u1", text="private",
+        memory_id="pref_cascade",
+        user_id="u1",
+        text="private",
         evidences=[Evidence(event_id="evt1", content="source")],
     )
     writer.upsert_memory(memory)
-    conflict_repo.save(ConflictRecord(
-        conflict_id="conf_cascade", old_memory_id=memory.memory_id,
-        new_memory_id="pref_new", memory_type="preference",
-    ))
+    conflict_repo.save(
+        ConflictRecord(
+            conflict_id="conf_cascade",
+            old_memory_id=memory.memory_id,
+            new_memory_id="pref_new",
+            memory_type="preference",
+        )
+    )
     forgetter = MemoryForgetter(
-        pref_repo=pref_repo, know_repo=know_repo, evidence_store=evidence_store,
+        pref_repo=pref_repo,
+        know_repo=know_repo,
+        evidence_store=evidence_store,
         conflict_repo=conflict_repo,
     )
 
@@ -518,26 +605,38 @@ def test_forget_cascades_evidence_and_conflicts(tmp_path: Path) -> None:
     assert conflict_repo.list_all() == []
 
 
-def test_preference_updater_persists_conflict_and_syncs_versions(tmp_path: Path) -> None:
+def test_preference_updater_persists_conflict_and_syncs_versions(
+    tmp_path: Path,
+) -> None:
     db = _db(tmp_path)
     pref_repo = PreferenceRepository(db)
     conflict_repo = ConflictRepository(db)
     lookup = {}
     writer = MemoryWriteService(
-        pref_repo=pref_repo, know_repo=KnowledgeRepository(db), memory_lookup=lookup,
+        pref_repo=pref_repo,
+        know_repo=KnowledgeRepository(db),
+        memory_lookup=lookup,
     )
     old = PreferenceMemory(
-        memory_id="pref_old_version", user_id="u1", text="Use JSON",
-        payload={"target": "format", "value": "json"}, confidence=0.7,
+        memory_id="pref_old_version",
+        user_id="u1",
+        text="Use JSON",
+        payload={"target": "format", "value": "json"},
+        confidence=0.7,
     )
     writer.upsert_memory(old)
     updater = PreferenceUpdater(
-        pref_repo=pref_repo, conflict_repo=conflict_repo, write_service=writer,
+        pref_repo=pref_repo,
+        conflict_repo=conflict_repo,
+        write_service=writer,
     )
     new = PreferenceMemory(
-        memory_id="pref_new_version", user_id="u1", text="Use Markdown",
+        memory_id="pref_new_version",
+        user_id="u1",
+        text="Use Markdown",
         payload={"target": "format", "value": "markdown"},
-        confidence=0.95, extract_source="explicit_feedback",
+        confidence=0.95,
+        extract_source="explicit_feedback",
     )
 
     result_id = updater.add(new)
@@ -554,18 +653,28 @@ def test_preference_updater_persists_conflict_and_syncs_versions(tmp_path: Path)
 
 
 def test_event_normalizer_emits_complete_schema_11_event() -> None:
-    event = EventNormalizer().normalize({
-        "event_id": "evt_normalized", "source_type": "user_behavior",
-        "event_type": "preference_signal", "user_id": "u1", "session_id": "s1",
-        "turn_id": "t1", "scene": "office", "task_type": "office.report",
-        "occurred_at": "2026-08-03T12:30:00Z", "text": "Use Markdown",
-        "payload": {"format": "markdown"}, "redactions": ["/payload/token"],
-    })
+    event = EventNormalizer().normalize(
+        {
+            "event_id": "evt_normalized",
+            "source_type": "user_behavior",
+            "event_type": "preference_signal",
+            "user_id": "u1",
+            "session_id": "s1",
+            "turn_id": "t1",
+            "scene": "office",
+            "task_type": "office.report",
+            "occurred_at": "2026-08-03T12:30:00Z",
+            "text": "Use Markdown",
+            "payload": {"format": "markdown"},
+            "redactions": ["/payload/token"],
+        }
+    )
     assert event.schema_version == "1.1"
     assert event.turn_id == "t1"
     assert len(event.source_hash) == 64
     assert event.redactions == ["/payload/token"]
-    assert event.quality.status == QualityStatus.ACCEPTED
+    # Normalization is deterministic; EventIngestionService owns authoritative scoring.
+    assert event.quality.status == QualityStatus.REVIEW
 
 
 def test_event_normalizer_builds_valid_tool_result() -> None:
@@ -580,14 +689,26 @@ def test_event_normalizer_builds_valid_tool_result() -> None:
 
 def test_conflict_repository_enforces_user_dimension(tmp_path: Path) -> None:
     repo = ConflictRepository(_db(tmp_path))
-    repo.save(ConflictRecord(
-        conflict_id="conf_u1", user_id="u1", old_memory_id="a", new_memory_id="b",
-    ))
-    repo.save(ConflictRecord(
-        conflict_id="conf_u2", user_id="u2", old_memory_id="c", new_memory_id="d",
-    ))
+    repo.save(
+        ConflictRecord(
+            conflict_id="conf_u1",
+            user_id="u1",
+            old_memory_id="a",
+            new_memory_id="b",
+        )
+    )
+    repo.save(
+        ConflictRecord(
+            conflict_id="conf_u2",
+            user_id="u2",
+            old_memory_id="c",
+            new_memory_id="d",
+        )
+    )
 
-    assert [item.conflict_id for item in repo.list_all("pending", user_id="u1")] == ["conf_u1"]
+    assert [item.conflict_id for item in repo.list_all("pending", user_id="u1")] == [
+        "conf_u1"
+    ]
     assert repo.resolve("conf_u2", "override", "no", user_id="u1") is False
     assert repo.resolve("conf_u2", "override", "yes", user_id="u2") is True
 
@@ -629,14 +750,20 @@ def _fact(
 
 def _fact_store(tmp_path: Path) -> FactStore:
     store = FactStore(str(tmp_path / "facts-flow.db"))
-    store.upsert_predicate(PredicateDef(
-        predicate_id="owner", canonical_name="owner", aliases=["owner"],
-        single_value=True,
-    ))
+    store.upsert_predicate(
+        PredicateDef(
+            predicate_id="owner",
+            canonical_name="owner",
+            aliases=["owner"],
+            single_value=True,
+        )
+    )
     return store
 
 
-def test_event_ingestion_runs_fact_adapter_once_for_first_safe_event(tmp_path: Path) -> None:
+def test_event_ingestion_runs_fact_adapter_once_for_first_safe_event(
+    tmp_path: Path,
+) -> None:
     event_repo = EventRepository(_db(tmp_path))
     adapter = _RecordingFactAdapter()
     service = EventIngestionService(
@@ -660,20 +787,24 @@ def test_fact_retrieval_is_owner_scoped_and_records_access(tmp_path: Path) -> No
     lookup = {}
     keyword = KeywordSearcher()
     index = FactIndexService(
-        fact_store=store, keyword_search=keyword, memory_lookup=lookup,
+        fact_store=store,
+        keyword_search=keyword,
+        memory_lookup=lookup,
     )
     fact = _fact("fact_owner_u1")
     store.insert_fact(fact)
     index.sync_fact(fact)
     retriever = HybridRetriever(
-        keyword_search=keyword, memory_lookup=lookup, fact_store=store,
+        keyword_search=keyword,
+        memory_lookup=lookup,
+        fact_store=store,
     )
 
     response = retriever.search(SearchRequest(user_id="u1", query="Alice owner"))
     assert [item.fact_id for item in response.facts] == [fact.fact_id]
-    assert retriever.search(
-        SearchRequest(user_id="u2", query="Alice owner")
-    ).facts == []
+    assert (
+        retriever.search(SearchRequest(user_id="u2", query="Alice owner")).facts == []
+    )
 
     _record_search_access(_request_with_state(fact_store=store), response)
     loaded = store.get_fact(fact.fact_id, user_id="u1")
@@ -686,34 +817,50 @@ def test_project_fact_shadows_global_fact_in_main_retrieval(tmp_path: Path) -> N
     lookup = {}
     keyword = KeywordSearcher()
     index = FactIndexService(
-        fact_store=store, keyword_search=keyword, memory_lookup=lookup,
+        fact_store=store,
+        keyword_search=keyword,
+        memory_lookup=lookup,
     )
     global_fact = _fact("fact_global", value="Alice")
     project_fact = _fact(
-        "fact_project", value="Bob", scope="project", project_id="project-a",
+        "fact_project",
+        value="Bob",
+        scope="project",
+        project_id="project-a",
     )
     store.insert_fact(global_fact)
     store.insert_fact(project_fact)
     index.sync_fact(global_fact)
     index.sync_fact(project_fact)
     retriever = HybridRetriever(
-        keyword_search=keyword, memory_lookup=lookup, fact_store=store,
+        keyword_search=keyword,
+        memory_lookup=lookup,
+        fact_store=store,
     )
 
-    response = retriever.search(SearchRequest(
-        user_id="u1", query="Project owner", project_id="project-a", top_k=10,
-    ))
+    response = retriever.search(
+        SearchRequest(
+            user_id="u1",
+            query="Project owner",
+            project_id="project-a",
+            top_k=10,
+        )
+    )
     assert [fact.fact_id for fact in response.facts] == ["fact_project"]
 
 
-def test_fact_forget_enforces_owner_and_cascades_runtime_indexes(tmp_path: Path) -> None:
+def test_fact_forget_enforces_owner_and_cascades_runtime_indexes(
+    tmp_path: Path,
+) -> None:
     store = _fact_store(tmp_path)
     fact = _fact("fact_forget")
     store.insert_fact(fact)
     lookup = {fact.fact_id: fact}
     vector = _FakeVectorStore()
     forgetter = MemoryForgetter(
-        fact_store=store, memory_lookup=lookup, vector_store=vector,
+        fact_store=store,
+        memory_lookup=lookup,
+        vector_store=vector,
     )
 
     assert forgetter.delete_memories([fact.fact_id], user_id="u2") == 0
@@ -730,7 +877,8 @@ def test_auto_forget_archives_fact_and_removes_it_from_lookup(tmp_path: Path) ->
     lookup = {fact.fact_id: fact}
     index = FactIndexService(fact_store=store, memory_lookup=lookup)
     engine = AutoForgetEngine(
-        fact_store=store, fact_index_service=index,
+        fact_store=store,
+        fact_index_service=index,
     )
 
     stats = engine.run()

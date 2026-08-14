@@ -5,7 +5,6 @@ from memoryhub.adapter.schemas import (
     EventQuality,
     MemoryEvent,
     QualityStatus,
-    SourceType,
     ToolCallStatus,
 )
 
@@ -62,7 +61,9 @@ def canonical_event(source_type: str = "tool_result") -> dict:
     }
 
 
-@pytest.mark.parametrize("source_type", ["tool_result", "user_behavior", "manual_config"])
+@pytest.mark.parametrize(
+    "source_type", ["tool_result", "user_behavior", "manual_config"]
+)
 def test_canonical_event_supports_all_ingestion_sources(source_type: str) -> None:
     event = MemoryEvent.model_validate(canonical_event(source_type))
 
@@ -113,7 +114,10 @@ def test_multiple_tool_results_keep_name_arguments_result_and_order() -> None:
 
     event = MemoryEvent.model_validate(event_data)
 
-    assert [call.tool_name for call in event.tool_calls] == ["file_search", "calendar_read"]
+    assert [call.tool_name for call in event.tool_calls] == [
+        "file_search",
+        "calendar_read",
+    ]
     assert event.tool_calls[0].result == {"files": ["weekly-report.docx"]}
     assert event.tool_calls[1].arguments["range"] == "2026-07-20/2026-07-26"
     assert event.tool_calls[0].status is ToolCallStatus.SUCCESS
@@ -269,3 +273,54 @@ def test_quality_scores_are_bounded() -> None:
 
     with pytest.raises(ValidationError):
         MemoryEvent.model_validate(event_data)
+
+
+def test_normalizer_rejects_unknown_source_type_and_ignores_supplied_hash():
+    from memoryhub.core.ingestion.normalizer import EventNormalizer
+
+    raw = canonical_event("user_behavior")
+    raw["source_hash"] = "b" * 64
+    normalized = EventNormalizer().normalize(raw)
+    assert normalized.source_hash != "b" * 64
+
+    raw["source_type"] = "untrusted_external"
+    with pytest.raises(ValueError, match="unsupported source_type"):
+        EventNormalizer().normalize(raw)
+
+
+def test_tool_normalization_is_deterministic_and_preserves_missing_event_time():
+    from memoryhub.core.ingestion.normalizer import EventNormalizer
+
+    result = {
+        "request_id": "request-1",
+        "user_id": "u-1",
+        "arguments": {"query": "report"},
+        "result": {"files": ["weekly.md"]},
+        "status": "success",
+    }
+    normalizer = EventNormalizer()
+    first = normalizer.normalize_tool_result("file_search", result)
+    second = normalizer.normalize_tool_result("file_search", result)
+    assert first.event_id == second.event_id
+    assert first.tool_calls[0].call_id == second.tool_calls[0].call_id
+    assert first.source_hash == second.source_hash
+    assert first.occurred_at == ""
+    assert first.text == '{"files": ["weekly.md"]}'
+
+
+def test_quality_scorer_caps_partial_and_rejects_failed_tool_calls():
+    from memoryhub.core.ingestion.quality import QualityScorer
+
+    partial = canonical_event()
+    partial["tool_calls"][0]["status"] = "partial"
+    partial_event = MemoryEvent.model_validate(partial)
+    partial_quality = QualityScorer().score(partial_event)
+    assert partial_quality.status is QualityStatus.REVIEW
+    assert partial_quality.score <= 0.60
+
+    failed = canonical_event()
+    failed["tool_calls"][0]["status"] = "timeout"
+    failed_event = MemoryEvent.model_validate(failed)
+    failed_quality = QualityScorer().score(failed_event)
+    assert failed_quality.status is QualityStatus.REJECTED
+    assert failed_quality.score <= QualityScorer.MIN_QUALITY_SCORE

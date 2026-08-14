@@ -1,4 +1,4 @@
-"""
+﻿"""
 数据质量评分模块
 
 对标准化后的 MemoryEvent 进行质量评分，低质量事件限制进入长期记忆。
@@ -20,9 +20,27 @@ class QualityScorer:
         consistency = self._score_consistency(event)
         freshness = self._score_freshness(event)
 
-        overall = 0.30 * completeness + 0.30 * validity + 0.20 * consistency + 0.20 * freshness
+        overall = (
+            0.30 * completeness
+            + 0.30 * validity
+            + 0.20 * consistency
+            + 0.20 * freshness
+        )
 
-        if overall < self.MIN_QUALITY_SCORE or (not event.text and not event.payload):
+        statuses = {
+            str(getattr(call.status, "value", call.status)).lower()
+            for call in event.tool_calls
+        }
+        terminal_tool_failure = bool(statuses & {"error", "timeout", "cancelled"})
+        partial_tool_result = "partial" in statuses
+
+        if terminal_tool_failure:
+            overall = min(overall, self.MIN_QUALITY_SCORE)
+            status = QualityStatus.REJECTED
+        elif partial_tool_result:
+            overall = min(overall, 0.60)
+            status = QualityStatus.REVIEW
+        elif overall < self.MIN_QUALITY_SCORE or (not event.text and not event.payload):
             # 无任何可抽取内容（无文本且无结构化载荷）直接拒绝，避免污染长期记忆
             status = QualityStatus.REJECTED
         elif overall < self.REVIEW_QUALITY_SCORE:
@@ -39,7 +57,9 @@ class QualityScorer:
             freshness=freshness,
         )
 
-    def batch_score(self, events: list[MemoryEvent]) -> list[tuple[MemoryEvent, EventQuality]]:
+    def batch_score(
+        self, events: list[MemoryEvent]
+    ) -> list[tuple[MemoryEvent, EventQuality]]:
         """批量评分，返回 (event, quality) 对"""
         return [(e, self.score(e)) for e in events]
 
@@ -87,6 +107,9 @@ class QualityScorer:
     def _score_freshness(self, event: MemoryEvent) -> float:
         """数据新鲜度评分：基于 occurred_at 距今天数"""
         from datetime import datetime, timezone
+
+        if not event.occurred_at:
+            return 0.5
         try:
             ts = datetime.fromisoformat(event.occurred_at.replace("Z", "+00:00"))
             age_days = (datetime.now(timezone.utc) - ts).total_seconds() / 86400.0

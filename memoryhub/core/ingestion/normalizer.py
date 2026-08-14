@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone
+import json
 
 from memoryhub.adapter.schemas import (
     EventQuality,
@@ -14,7 +13,6 @@ from memoryhub.adapter.schemas import (
     ToolCallStatus,
     canonical_sha256,
 )
-from memoryhub.core.ingestion.quality import QualityScorer
 
 
 class EventNormalizer:
@@ -34,7 +32,10 @@ class EventNormalizer:
     def _source_type(cls, value) -> SourceType:
         if isinstance(value, SourceType):
             return value
-        return cls._TYPE_MAP.get(str(value or "").lower(), SourceType.TOOL_RESULT)
+        normalized = str(value or "").strip().lower()
+        if normalized not in cls._TYPE_MAP:
+            raise ValueError(f"unsupported source_type: {value!r}")
+        return cls._TYPE_MAP[normalized]
 
     @staticmethod
     def _provisional_quality(value) -> EventQuality:
@@ -51,12 +52,30 @@ class EventNormalizer:
             freshness=0.0,
         )
 
+    @classmethod
+    def _hash_material(cls, cleaned: dict) -> dict:
+        """Exclude caller-controlled IDs, hashes and provisional quality from idempotency."""
+        return {
+            "source_type": cls._source_type(cleaned.get("source_type")).value,
+            "event_type": str(cleaned.get("event_type", "")),
+            "user_id": str(cleaned.get("user_id", "default")),
+            "session_id": str(cleaned.get("session_id", "")),
+            "turn_id": str(cleaned.get("turn_id", "")),
+            "scene": str(cleaned.get("scene", "")),
+            "task_type": str(cleaned.get("task_type", "")),
+            "occurred_at": str(cleaned.get("occurred_at", "")),
+            "text": str(cleaned.get("text", "")),
+            "payload": cleaned.get("payload", {}),
+            "tool_calls": cleaned.get("tool_calls", []),
+            "schema_version": str(cleaned.get("schema_version", "1.1")),
+            "redactions": cleaned.get("redactions", []),
+        }
+
     def normalize(self, cleaned: dict) -> MemoryEvent:
         """Normalize one cleaned dictionary and compute missing hash/quality fields."""
-        occurred_at = cleaned.get("occurred_at") or datetime.now(timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
-        source_hash = cleaned.get("source_hash") or canonical_sha256(cleaned)
+        # An absent occurred_at is semantically unknown, not "happened now".
+        occurred_at = str(cleaned.get("occurred_at") or "")
+        source_hash = canonical_sha256(self._hash_material(cleaned))
         provisional = self._provisional_quality(cleaned.get("quality"))
         event = MemoryEvent(
             event_id=cleaned.get("event_id", ""),
@@ -76,23 +95,46 @@ class EventNormalizer:
             redactions=cleaned.get("redactions", []),
             quality=provisional,
         )
-        if cleaned.get("quality") is not None:
-            return event
-        quality = QualityScorer().score(event)
-        return MemoryEvent.model_validate(
-            {**event.model_dump(mode="json"), "quality": quality.model_dump(mode="json")}
-        )
+        # EventIngestionService is the sole authoritative quality gate.  Keep only
+        # a provisional quality here so normalization is deterministic and replayable.
+        return event
 
     def normalize_batch(self, cleaned_list: list[dict]) -> list[MemoryEvent]:
         return [self.normalize(entry) for entry in cleaned_list]
 
     def normalize_tool_result(self, tool_name: str, result: dict) -> MemoryEvent:
-        """Construct a valid Schema 1.1 tool-result event from one tool response."""
-        call_id = str(result.get("call_id") or f"call_{uuid.uuid4().hex[:12]}")
+        """Construct a deterministic Schema 1.1 event from one tool response."""
+        if not isinstance(result, dict):
+            raise ValueError("tool result must be an object")
         raw_status = str(result.get("status", "success")).lower()
-        status = ToolCallStatus(raw_status) if raw_status in ToolCallStatus._value2member_map_ else ToolCallStatus.ERROR
+        status = (
+            ToolCallStatus(raw_status)
+            if raw_status in ToolCallStatus._value2member_map_
+            else ToolCallStatus.ERROR
+        )
+        stable_call = (
+            result.get("call_id") or result.get("request_id") or result.get("trace_id")
+        )
+        stable_material = {
+            "tool_name": tool_name,
+            "call_id": stable_call or "",
+            "user_id": result.get("user_id", "default"),
+            "session_id": result.get("session_id", ""),
+            "occurred_at": result.get("occurred_at", ""),
+            "arguments": result.get("arguments", {}),
+            "result": result.get("result", result.get("output")),
+            "status": status.value,
+        }
+        digest = canonical_sha256(stable_material)
+        call_id = str(stable_call or f"call_{digest[:16]}")
+        output = result.get("output", result.get("result", ""))
+        text = (
+            output
+            if isinstance(output, str)
+            else json.dumps(output, ensure_ascii=False, sort_keys=True, default=str)
+        )
         raw = {
-            "event_id": f"tool_{uuid.uuid4().hex[:12]}",
+            "event_id": str(result.get("event_id") or f"tool_{digest[:24]}"),
             "source_type": SourceType.TOOL_RESULT,
             "event_type": str(result.get("event_type") or tool_name),
             "user_id": str(result.get("user_id") or "default"),
@@ -101,7 +143,7 @@ class EventNormalizer:
             "scene": str(result.get("scene") or ""),
             "task_type": str(result.get("task_type") or ""),
             "occurred_at": str(result.get("occurred_at") or ""),
-            "text": str(result.get("output", result.get("result", ""))),
+            "text": text,
             "payload": result,
             "tool_calls": [
                 ToolCallResult(

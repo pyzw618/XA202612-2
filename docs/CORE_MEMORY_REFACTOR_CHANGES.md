@@ -155,3 +155,18 @@
 4. Fact LLM 冲突裁决新增 resolution action 白名单；未知动作强制降级为 `escalate` 并留下 `invalid_llm_action` 审计原因。
 
 新增回归测试验证通用 override 会归档旧版本、建立父子版本关系并合并 evidence。
+
+---
+
+## 第七轮数据接入可靠性优化（2026-08-14）
+
+本轮收敛数据接入的来源、幂等、时间与工具质量语义：
+
+1. `DataCleaner` 现在拒绝非对象事件、非对象 payload、非列表 tool_calls、非字符串 text、超长文本和超量工具调用，避免明显错误数据进入 Schema、安全与抽取链路。
+2. `EventNormalizer` 不再将未知 source_type 静默当作 tool_result；未知来源会明确失败。source_hash 始终根据规范化后的业务内容重算，不再信任调用方提供的 hash。
+3. 标准化不再把缺失的 occurred_at 伪造成当前时间；缺失事件时间保持为空，由质量层按中性 freshness 处理，并由 Fact 写入链路保留 recorded_at fallback 审计。
+4. `normalize_tool_result()` 使用稳定业务字段派生 event_id / call_id / hash；同一工具结果重复标准化得到相同标识，并以稳定 JSON 生成可检索文本。
+5. `EventNormalizer` 只生成 provisional quality，`EventIngestionService` 保持为唯一权威质量评分和接收决策点。
+6. `QualityScorer` 将 tool status 纳入质量门控：partial 强制 review 且分数不超过 0.60；error / timeout / cancelled 强制 rejected 且不超过最小质量阈值。
+
+新增测试覆盖未知来源拒绝、外部 hash 忽略、稳定工具结果幂等、缺失时间语义，以及 partial / timeout 工具调用质量状态。

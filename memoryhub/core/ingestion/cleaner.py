@@ -4,7 +4,7 @@
 负责对原始输入数据进行字段校验、去重、格式规范化。
 """
 
-from memoryhub.adapter.schemas import MemoryEvent, SensitiveLevel
+from memoryhub.adapter.schemas import MemoryEvent
 
 
 class DataCleaner:
@@ -34,7 +34,18 @@ class DataCleaner:
         cleaned.setdefault("task_type", "")
         cleaned.setdefault("text", "")
         cleaned.setdefault("payload", {})
+        cleaned.setdefault("tool_calls", [])
         cleaned.setdefault("occurred_at", "")
+        if not isinstance(cleaned["payload"], dict):
+            raise ValueError("payload must be an object")
+        if not isinstance(cleaned["tool_calls"], list):
+            raise ValueError("tool_calls must be a list")
+        if not isinstance(cleaned["text"], str):
+            raise ValueError("text must be a string")
+        if len(cleaned["text"]) > 100_000:
+            raise ValueError("text exceeds 100000 characters")
+        if len(cleaned["tool_calls"]) > 100:
+            raise ValueError("tool_calls exceeds 100 entries")
 
         return cleaned
 
