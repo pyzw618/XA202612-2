@@ -14,6 +14,7 @@ from memoryhub.adapter.schemas import (
 )
 from memoryhub.config import KnowledgeMergeConfig
 from memoryhub.core.knowledge.confidence import KnowledgeConfidenceCalculator
+from memoryhub.core.memory.evidence import EvidenceMerger
 
 
 class KnowledgeUpdater:
@@ -47,7 +48,8 @@ class KnowledgeUpdater:
             merged = self._merge(
                 exact,
                 memory,
-                add_support=has_new_evidence and not bool(incoming_events & existing_events),
+                add_support=has_new_evidence
+                and not bool(incoming_events & existing_events),
             )
             self.write_service.upsert_memory(merged)
             return merged.memory_id
@@ -104,8 +106,12 @@ class KnowledgeUpdater:
         return True
 
     def _similarity(self, left: KnowledgeMemory, right: KnowledgeMemory) -> float:
-        left_steps = {self._normalize(item) for item in left.steps if self._normalize(item)}
-        right_steps = {self._normalize(item) for item in right.steps if self._normalize(item)}
+        left_steps = {
+            self._normalize(item) for item in left.steps if self._normalize(item)
+        }
+        right_steps = {
+            self._normalize(item) for item in right.steps if self._normalize(item)
+        }
         union = left_steps | right_steps
         step_score = len(left_steps & right_steps) / len(union) if union else 0.0
         name_score = SequenceMatcher(
@@ -139,7 +145,9 @@ class KnowledgeUpdater:
         if self.conflict_repo is None:
             return
         digest = hashlib.sha256(
-            f"{existing.user_id}|{existing.memory_id}|{incoming.memory_id}".encode("utf-8")
+            f"{existing.user_id}|{existing.memory_id}|{incoming.memory_id}".encode(
+                "utf-8"
+            )
         ).hexdigest()[:24]
         record = ConflictRecord(
             conflict_id=f"conf_know_{digest}",
@@ -157,16 +165,26 @@ class KnowledgeUpdater:
     def _has_semantic_delta(
         self, existing: KnowledgeMemory, incoming: KnowledgeMemory
     ) -> bool:
-        return self._semantic_fingerprint(existing) != self._semantic_fingerprint(incoming)
+        return self._semantic_fingerprint(existing) != self._semantic_fingerprint(
+            incoming
+        )
 
     def _semantic_fingerprint(self, memory: KnowledgeMemory) -> tuple:
         return (
             self._normalize(memory.name),
             self._normalize(memory.content),
-            tuple(self._normalize(step) for step in memory.steps if self._normalize(step)),
-            tuple(self._normalize(tool) for tool in memory.tools if self._normalize(tool)),
+            tuple(
+                self._normalize(step) for step in memory.steps if self._normalize(step)
+            ),
+            tuple(
+                self._normalize(tool) for tool in memory.tools if self._normalize(tool)
+            ),
             self._normalize(memory.template_body),
-            memory.status.value if hasattr(memory.status, "value") else str(memory.status),
+            (
+                memory.status.value
+                if hasattr(memory.status, "value")
+                else str(memory.status)
+            ),
         )
 
     def _merge(
@@ -184,7 +202,9 @@ class KnowledgeUpdater:
             merged.content = incoming.content
         if len(incoming.name) > len(existing.name):
             merged.name = incoming.name
-        if incoming.template_body and len(incoming.template_body) >= len(existing.template_body):
+        if incoming.template_body and len(incoming.template_body) >= len(
+            existing.template_body
+        ):
             merged.template_body = incoming.template_body
         old_total = max(1, existing.total_count)
         if add_support:
@@ -223,13 +243,5 @@ class KnowledgeUpdater:
 
     @staticmethod
     def _merge_evidences(left, right):
-        result = []
-        seen = set()
-        for evidence in [*left, *right]:
-            key = evidence.event_id or evidence.evidence_id
-            if key and key in seen:
-                continue
-            result.append(evidence)
-            if key:
-                seen.add(key)
-        return result
+        """Compatibility wrapper around the shared deterministic evidence merger."""
+        return EvidenceMerger().normalize_and_merge([*left, *right])

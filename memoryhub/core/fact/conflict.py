@@ -1,4 +1,4 @@
-"""
+﻿"""
 冲突检测模块
 
 两阶段：
@@ -11,19 +11,18 @@
 
 import json
 import logging
-import os
-from typing import Optional
+
+from memoryhub.core.memory.llm import StructuredLLMAdapter
 
 from .llm import build_chat_client
-
 from .models import ConflictResult, Fact, Resolution
-from .store import FactStore
 from .prompts import CONFLICT_RESOLVE_SYSTEM, CONFLICT_RESOLVE_USER
+from .store import FactStore
 
 logger = logging.getLogger(__name__)
 
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-chat"
+DEFAULT_BASE_URL = ""
+DEFAULT_MODEL = ""
 
 
 class ConflictDetector:
@@ -32,7 +31,12 @@ class ConflictDetector:
     def __init__(self, store: FactStore, api_key: str = "", llm_client=None):
         self.store = store
         self._llm = build_chat_client(
-            api_key=api_key, llm_client=llm_client, base_url=DEEPSEEK_BASE_URL
+            api_key=api_key, llm_client=llm_client, base_url=DEFAULT_BASE_URL
+        )
+        self._adapter = (
+            StructuredLLMAdapter(llm_client)
+            if callable(getattr(llm_client, "generate", None))
+            else None
         )
 
     # ─── 阶段 1: 代码检测（不调 LLM）─────────────────────────────────
@@ -65,13 +69,20 @@ class ConflictDetector:
         # 多值谓词：检查完全重复，否则共存
         if not predicate.single_value:
             for old in existing:
-                if old.object_id == fact.object_id and old.object_value == fact.object_value:
+                if (
+                    old.object_id == fact.object_id
+                    and old.object_value == fact.object_value
+                ):
                     return ConflictResult(
-                        "DUPLICATE", fact, old,
+                        "DUPLICATE",
+                        fact,
+                        old,
                         reason=f"与已有事实完全相同（谓词 '{predicate.canonical_name}' 允许多值）",
                     )
             return ConflictResult(
-                "COEXIST", fact, existing[0],
+                "COEXIST",
+                fact,
+                existing[0],
                 reason=f"谓词 '{predicate.canonical_name}' 允许多值，新值可共存",
             )
 
@@ -79,14 +90,21 @@ class ConflictDetector:
         for old in existing:
             if old.object_id == fact.object_id:
                 return ConflictResult(
-                    "DUPLICATE", fact, old,
+                    "DUPLICATE",
+                    fact,
+                    old,
                     reason=f"相同主体、谓词、客体（已有: {old.object_value}）",
                 )
 
         old_strs = [f"{o.object_value} (id={o.object_id})" for o in existing]
         return ConflictResult(
-            "CONFLICT", fact, existing[0],
-            reason=f"单值谓词 '{predicate.canonical_name}' 冲突: 已有={', '.join(old_strs)}, 新={fact.object_value}",
+            "CONFLICT",
+            fact,
+            existing[0],
+            reason=(
+                f"单值谓词 '{predicate.canonical_name}' 冲突: "
+                f"已有={', '.join(old_strs)}, 新={fact.object_value}"
+            ),
         )
 
     # ─── 阶段 2: LLM 裁决（仅 CONFLICT 时调用）────────────────────────
@@ -128,21 +146,33 @@ class ConflictDetector:
         )
 
         try:
-            resp = self._llm.chat.completions.create(
-                model=DEEPSEEK_MODEL,
-                messages=[
-                    {"role": "system", "content": CONFLICT_RESOLVE_SYSTEM},
-                    {"role": "user", "content": user_msg},
-                ],
-                temperature=0.0,
-                max_tokens=256,
-            )
-            raw = resp.choices[0].message.content.strip()
-            if raw.startswith("```"):
-                raw = raw.strip("`").strip()
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            data = json.loads(raw)
+            if self._adapter is not None:
+                data = self._adapter.generate_json(
+                    task_name="fact_conflict_resolution",
+                    system_prompt=CONFLICT_RESOLVE_SYSTEM,
+                    prompt=user_msg,
+                    parser=lambda value: (
+                        value
+                        if isinstance(value, dict)
+                        else (_ for _ in ()).throw(
+                            ValueError("LLM JSON response must be an object")
+                        )
+                    ),
+                )
+            else:
+                response = self._llm.chat.completions.create(
+                    model=DEFAULT_MODEL,
+                    messages=[
+                        {"role": "system", "content": CONFLICT_RESOLVE_SYSTEM},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    temperature=0.0,
+                    max_tokens=256,
+                )
+                raw = response.choices[0].message.content.strip()
+                if raw.startswith("```"):
+                    raw = raw.strip("`").removeprefix("json").strip()
+                data = json.loads(raw)
 
             action = data.get("action", "escalate")
             reason = data.get("reason", "")

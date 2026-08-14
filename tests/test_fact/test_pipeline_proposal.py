@@ -26,17 +26,21 @@ class FakeNormalizer:
 def _pipeline(triple):
     pipeline = FactMemoryPipeline.__new__(FactMemoryPipeline)
     pipeline.store = FactStore(":memory:")
-    pipeline.store.upsert_predicate(PredicateDef(
-        predicate_id="owner",
-        canonical_name="负责人",
-        aliases=["负责人"],
-        single_value=True,
-    ))
+    pipeline.store.upsert_predicate(
+        PredicateDef(
+            predicate_id="owner",
+            canonical_name="负责人",
+            aliases=["负责人"],
+            single_value=True,
+        )
+    )
     pipeline.extractor = FakeExtractor(triple)
-    pipeline.entity_norm = FakeNormalizer({
-        "项目A": "entity:other:project_a",
-        "张三": "entity:person:zhang",
-    })
+    pipeline.entity_norm = FakeNormalizer(
+        {
+            "项目A": "entity:other:project_a",
+            "张三": "entity:person:zhang",
+        }
+    )
     pipeline.pred_norm = FakeNormalizer({"负责人": "owner"})
     pipeline.detector = ConflictDetector(pipeline.store)
     pipeline.admission = FactAdmissionPolicy()
@@ -72,22 +76,20 @@ def test_propose_does_not_write_fact():
     assert pipeline.get_facts() == []
     assert pipeline.entity_norm.calls == []
     assert pipeline.pred_norm.calls == []
-    assert pipeline.store._conn.execute(
-        "SELECT COUNT(*) FROM entities"
-    ).fetchone()[0] == entity_count_before
-    assert pipeline.store._conn.execute(
-        "SELECT COUNT(*) FROM predicates"
-    ).fetchone()[0] == predicate_count_before
+    assert (
+        pipeline.store._conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+        == entity_count_before
+    )
+    assert (
+        pipeline.store._conn.execute("SELECT COUNT(*) FROM predicates").fetchone()[0]
+        == predicate_count_before
+    )
 
 
 def test_commit_writes_explicit_project_fact():
     pipeline = _pipeline(_triple())
-    proposal = pipeline.propose(
-        "项目负责人是张三", project_id="project_a"
-    )[0]
-    result = pipeline.commit(
-        proposal, scope="project", project_id="project_a"
-    )
+    proposal = pipeline.propose("项目负责人是张三", project_id="project_a")[0]
+    result = pipeline.commit(proposal, scope="project", project_id="project_a")
     assert result.relation == "NEW"
     facts = pipeline.get_facts(scope="project", project_id="project_a")
     assert len(facts) == 1
@@ -117,3 +119,18 @@ def test_commit_requires_explicit_scope_for_pure_candidate():
         assert "明确指定 scope" in str(exc)
     else:
         raise AssertionError("未指定作用域的候选不应正式提交")
+
+
+def test_commit_preserves_event_time_and_marks_commit_time_fallback():
+    pipeline = _pipeline(_triple())
+    dated = pipeline.propose(
+        "????????",
+        metadata={"occurred_at": "2026-08-01T12:34:56Z"},
+    )[0]
+    dated_result = pipeline.commit(dated, scope="global")
+    assert dated_result.new_fact.observed_at == "2026-08-01T12:34:56Z"
+    assert not dated_result.new_fact.source_id.startswith("recorded_at_fallback")
+
+    fallback = pipeline.propose("????????")[0]
+    fallback_result = pipeline.commit(fallback, scope="global")
+    assert fallback_result.new_fact.source_id.startswith("recorded_at_fallback")

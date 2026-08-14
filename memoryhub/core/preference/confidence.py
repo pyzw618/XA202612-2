@@ -6,20 +6,28 @@
 
 import math
 from datetime import datetime, timezone
+
 from memoryhub.adapter.schemas import (
-    PreferenceMemory,
-    MemoryEvent,
-    SourceType,
-    Evidence,
     ConflictDecision,
+    Evidence,
+    MemoryEvent,
+    PreferenceMemory,
+    SourceType,
 )
+from memoryhub.core.memory.confidence import (
+    ConfidenceFactors,
+    UnifiedConfidenceCalculator,
+)
+from memoryhub.core.memory.evidence import EvidenceMerger
 
 
 def parse_occurred_at(occurred_at: str | None) -> datetime:
     """时间解析辅助函数"""
     if occurred_at:
         try:
-            return datetime.strptime(occurred_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            return datetime.strptime(occurred_at, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=timezone.utc
+            )
         except ValueError:
             pass
     return datetime.now(timezone.utc)
@@ -29,45 +37,38 @@ class ConfidenceCalculator:
     """偏好置信度计算器"""
 
     SOURCE_WEIGHTS = {
-        SourceType.USER_BEHAVIOR: 1.0,     # 用户显式行为/直接反馈
-        SourceType.MANUAL_CONFIG: 0.95,    # 手动配置
-        SourceType.TOOL_RESULT: 0.6,       # 工具执行产生的隐式偏好
+        SourceType.USER_BEHAVIOR: 1.0,  # 用户显式行为/直接反馈
+        SourceType.MANUAL_CONFIG: 0.95,  # 手动配置
+        SourceType.TOOL_RESULT: 0.6,  # 工具执行产生的隐式偏好
     }
 
     def calculate(self, preference: PreferenceMemory) -> float:
-        """基于完整证据链计算综合置信度。
-
-        公式：raw = f_source * f_time * f_consistency * (1 + 0.15 * f_count)
-        置信度 = Sigmoid(3 * (raw - 0.5)) - override_penalty，并裁剪到 [0, 1]。
-
-        无证据时按抽取来源给出可解释的初始化基线，而不是直接归零。
-        """
+        """Compatibility facade over the shared four-factor confidence formula."""
+        preference.evidences = EvidenceMerger().normalize_and_merge(
+            preference.evidences
+        )
         if not preference.evidences:
             preference.confidence = self._baseline_confidence(preference)
             return preference.confidence
 
         timestamps = [e.timestamp for e in preference.evidences]
         sources = [e.source_type for e in preference.evidences]
-
-        f_count = self._factor_evidence_count(len(preference.evidences))
-        f_source = self._factor_source_type(sources)
-        f_time = self._factor_time_decay(timestamps)
-        f_consistency = self._factor_consistency(preference)
-
-        # 基础得分计算
-        raw_score = f_source * f_time * f_consistency * (1.0 + 0.15 * f_count)
-
-        # 负向惩罚项：仅针对发生过 ConflictDecision.OVERRIDE 覆写的证据做强类型扣分
-        neg_penalty = sum(
-            0.25 * e.weight
-            for e in preference.evidences
-            if e.decision == ConflictDecision.OVERRIDE
+        evidence_quality = sum(
+            float(getattr(e, "weight", 1.0)) for e in preference.evidences
+        ) / len(preference.evidences)
+        factors = ConfidenceFactors(
+            source=self._factor_source_type(sources),
+            quality=min(
+                1.0, max(0.0, evidence_quality * self._factor_consistency(preference))
+            ),
+            support=UnifiedConfidenceCalculator.support_from_evidence_count(
+                len(preference.evidences)
+            ),
+            freshness=self._factor_time_decay(timestamps),
         )
-
-        # S型 Sigmoid 平滑并扣除惩罚项
-        final_confidence = (1.0 / (1.0 + math.exp(-3.0 * (raw_score - 0.5)))) - neg_penalty
-        preference.confidence = max(0.0, min(1.0, final_confidence))
-
+        preference.confidence = UnifiedConfidenceCalculator().calculate(
+            factors, memory_type="preference"
+        )
         return preference.confidence
 
     def update_confidence(

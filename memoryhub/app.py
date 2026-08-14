@@ -64,7 +64,9 @@ def _memory_metadata(memory) -> dict:
         "content": _memory_text(memory),
         "confidence": memory.confidence,
         "status": (
-            memory.status.value if hasattr(memory.status, "value") else str(memory.status)
+            memory.status.value
+            if hasattr(memory.status, "value")
+            else str(memory.status)
         ),
         "scope": scope,
         **fact_fields,
@@ -356,13 +358,17 @@ def create_app(
             FactIngestionAdapter,
             FactMemoryPipeline,
         )
+        from memoryhub.core.fact.handler import FactMemoryHandler
         from memoryhub.core.ingestion.extraction import ExtractionExecutor
         from memoryhub.core.ingestion.quality import QualityScorer
         from memoryhub.core.ingestion.retry import ExtractionRetryService
         from memoryhub.core.ingestion.service import EventIngestionService
         from memoryhub.core.knowledge.extractor import KnowledgeExtractor
+        from memoryhub.core.knowledge.handler import KnowledgeMemoryHandler
+        from memoryhub.core.knowledge.updater import KnowledgeUpdater
         from memoryhub.core.memory_write import MemoryWriteService
         from memoryhub.core.preference.extractor import PreferenceExtractor
+        from memoryhub.core.preference.handler import PreferenceMemoryHandler
         from memoryhub.core.preference.updater import PreferenceUpdater
         from memoryhub.core.safety.detector import SensitiveDetector
         from memoryhub.core.safety.gate import SafetyGateError, SafetyWriteGate
@@ -458,7 +464,8 @@ def create_app(
 
         if app.state.fact_pipeline is None:
             app.state.fact_pipeline = FactMemoryPipeline(
-                db_path=config.storage.db_path, llm_client=llm_client,
+                db_path=config.storage.db_path,
+                llm_client=llm_client,
             )
             app.state.owns_fact_pipeline = True
         fact_store = app.state.fact_pipeline.store
@@ -513,7 +520,9 @@ def create_app(
                         memory.memory_id, embedding_client.embed(_memory_text(memory))
                     )
                 vector_store.save()
-            vector_search_adapter = _VectorStoreSearchAdapter(vector_store, memory_lookup)
+            vector_search_adapter = _VectorStoreSearchAdapter(
+                vector_store, memory_lookup
+            )
         elif engine_provider in ("milvus", "milvus_mock"):
             engine_kwargs = {
                 "app_id": config.vector_engine.app_id,
@@ -619,6 +628,20 @@ def create_app(
         )
         knowledge_extractor = KnowledgeExtractor(llm_client=llm_client)
         fact_ingestion_adapter = FactIngestionAdapter(app.state.fact_pipeline)
+        preference_handler = PreferenceMemoryHandler(
+            preference_extractor, preference_updater
+        )
+        knowledge_handler = KnowledgeMemoryHandler(
+            knowledge_extractor,
+            KnowledgeUpdater(
+                write_service=app.state.memory_write_service,
+                merge_config=config.knowledge_merge,
+                conflict_repo=conflict_repo,
+            ),
+        )
+        fact_handler = FactMemoryHandler(
+            app.state.fact_pipeline, adapter=fact_ingestion_adapter
+        )
         extraction_executor = ExtractionExecutor(
             memory_write_service=app.state.memory_write_service,
             preference_extractor=preference_extractor,
@@ -627,6 +650,9 @@ def create_app(
             fact_ingestion_adapter=fact_ingestion_adapter,
             knowledge_merge_config=config.knowledge_merge,
             conflict_repo=conflict_repo,
+            preference_handler=preference_handler,
+            knowledge_handler=knowledge_handler,
+            fact_handler=fact_handler,
         )
         if (
             app.state.event_ingestion_service is None
@@ -702,7 +728,9 @@ def create_app(
             embedding_client=embedding_client,
             vector_engine=vector_engine,
             cache=cache,
-            retriever=retriever if isinstance(retriever, MilvusHybridRetriever) else None,
+            retriever=(
+                retriever if isinstance(retriever, MilvusHybridRetriever) else None
+            ),
             index_version=index_version,
             config=config,
             memory_write_service=app.state.memory_write_service,

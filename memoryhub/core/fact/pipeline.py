@@ -22,16 +22,19 @@
 import logging
 from typing import Optional
 
-logger = logging.getLogger(__name__)
-
-from .models import (
-    Fact, FactCandidate, FactProposal, ConflictResult, MemoryScope, Resolution,
-)
 from .admission import FactAdmissionPolicy
-from .store import FactStore
-from .extractor import TripleExtractor
-from .normalizer import EntityNormalizer, PredicateNormalizer
 from .conflict import ConflictDetector
+from .extractor import TripleExtractor
+from .models import (
+    ConflictResult,
+    Fact,
+    FactCandidate,
+    FactProposal,
+    MemoryScope,
+    Resolution,
+)
+from .normalizer import EntityNormalizer, PredicateNormalizer
+from .store import FactStore
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +79,9 @@ class FactMemoryPipeline:
             self.store, api_key=api_key, llm_client=llm_client
         )
         self.pred_norm = PredicateNormalizer(
-            self.store, ontology_path=ontology_path, api_key=api_key,
+            self.store,
+            ontology_path=ontology_path,
+            api_key=api_key,
             llm_client=llm_client,
         )
         self.detector = ConflictDetector(
@@ -105,17 +110,21 @@ class FactMemoryPipeline:
 
         for rt in raw_triples:
             admission = self.admission.evaluate(
-                rt, project_id=project_id, scope_hint=scope_hint,
-            )
-            proposals.append(FactCandidate(
-                candidate_id=FactCandidate.make_id(),
-                raw_triple=rt,
-                admission=admission,
-                source_id=source_id,
-                project_id_hint=project_id,
+                rt,
+                project_id=project_id,
                 scope_hint=scope_hint,
-                metadata=dict(metadata or {}),
-            ))
+            )
+            proposals.append(
+                FactCandidate(
+                    candidate_id=FactCandidate.make_id(),
+                    raw_triple=rt,
+                    admission=admission,
+                    source_id=source_id,
+                    project_id_hint=project_id,
+                    scope_hint=scope_hint,
+                    metadata=dict(metadata or {}),
+                )
+            )
 
         logger.info(
             f"[propose] 候选={len(proposals)}, "
@@ -152,9 +161,16 @@ class FactMemoryPipeline:
             rt.subject_text, rt.subject_type, final_user_id
         )
         pred_id = self.pred_norm.normalize(rt.predicate_text)
-        obj_id = self._normalize_entity(
-            rt.object_text, rt.object_type, final_user_id
-        )
+        obj_id = self._normalize_entity(rt.object_text, rt.object_type, final_user_id)
+        observed_at = str(proposal.metadata.get("occurred_at", "") or "")
+        source_id = proposal.source_id
+        if not observed_at:
+            observed_at = Fact.now_iso()
+            source_id = (
+                f"recorded_at_fallback:{source_id}"
+                if source_id
+                else "recorded_at_fallback"
+            )
 
         fact = Fact(
             fact_id=Fact.make_id(),
@@ -163,8 +179,8 @@ class FactMemoryPipeline:
             object_id=obj_id,
             object_value=rt.object_text,
             source_text=rt.evidence,
-            source_id=proposal.source_id,
-            observed_at=Fact.now_iso(),
+            source_id=source_id,
+            observed_at=observed_at,
             confidence=rt.confidence,
             scope=final_scope,
             project_id=final_project_id,
@@ -186,9 +202,12 @@ class FactMemoryPipeline:
 
         self._apply(result)
         self.store.save_fact_conflict(result)
-        if self.store.get_fact(
-            result.new_fact.fact_id, user_id=result.new_fact.user_id
-        ) is not None:
+        if (
+            self.store.get_fact(
+                result.new_fact.fact_id, user_id=result.new_fact.user_id
+            )
+            is not None
+        ):
             self.store.save_fact_evidence(result.new_fact)
         if getattr(self, "index_service", None) is not None:
             self.index_service.sync_result(result)
@@ -230,12 +249,14 @@ class FactMemoryPipeline:
                     f"{proposal.admission.reason}"
                 )
                 continue
-            results.append(self.commit(
-                proposal,
-                scope=commit_scope,
-                project_id=project_id,
-                user_id=user_id,
-            ))
+            results.append(
+                self.commit(
+                    proposal,
+                    scope=commit_scope,
+                    project_id=project_id,
+                    user_id=user_id,
+                )
+            )
 
         # 统计
         counts = {}
@@ -268,7 +289,8 @@ class FactMemoryPipeline:
                 # 新事实取代旧，旧事实标记 superseded
                 if result.existing_fact:
                     self.store.update_fact_status(
-                        result.existing_fact.fact_id, "superseded",
+                        result.existing_fact.fact_id,
+                        "superseded",
                         user_id=result.existing_fact.user_id,
                     )
                 self.store.insert_fact(fact)
@@ -281,7 +303,8 @@ class FactMemoryPipeline:
                 # 合并：旧事实标记 superseded，新事实写入（带合并备注）
                 if result.existing_fact:
                     self.store.update_fact_status(
-                        result.existing_fact.fact_id, "superseded",
+                        result.existing_fact.fact_id,
+                        "superseded",
                         user_id=result.existing_fact.user_id,
                     )
                 self.store.insert_fact(fact)
@@ -303,7 +326,10 @@ class FactMemoryPipeline:
         user_id: Optional[str] = None,
     ) -> list[Fact]:
         return self.store.list_facts(
-            status=status, limit=limit, scope=scope, project_id=project_id,
+            status=status,
+            limit=limit,
+            scope=scope,
+            project_id=project_id,
             user_id=user_id,
         )
 
@@ -320,7 +346,9 @@ class FactMemoryPipeline:
         项目单值事实覆盖相同 S+P 的全局事实；多值事实与全局事实合并。
         """
         global_facts = self.store.list_facts(
-            status=status, limit=limit, scope=MemoryScope.GLOBAL.value,
+            status=status,
+            limit=limit,
+            scope=MemoryScope.GLOBAL.value,
             user_id=user_id,
         )
         if not project_id:
@@ -340,7 +368,8 @@ class FactMemoryPipeline:
                 project_keys.add((fact.subject_id, fact.predicate_id))
 
         inherited = [
-            fact for fact in global_facts
+            fact
+            for fact in global_facts
             if (fact.subject_id, fact.predicate_id) not in project_keys
         ]
         return (project_facts + inherited)[:limit]

@@ -1,707 +1,632 @@
-﻿# Core 记忆模块优化与重构方案
+﻿# Core 记忆模块统一化优化方案（低侵入版）
 
-> 审视范围：`memoryhub/core/{knowledge,fact,preference,ingestion,processing}`、统一 schema/存储/检索写入路径及相关测试。  
-> 审视日期：2026-08-14。  
-> 目标：把知识（Knowledge）、事实（Fact）、偏好（Preference）从三套“各自可运行”的实现，收敛为**同一事件、同一证据、同一置信度语义、同一生命周期**下的三种记忆视图；同时保留不同记忆类型的领域差异。
-
----
-
-## 1. 执行摘要
-
-当前 MVP 已具备事件接入、抽取、冲突、落库、索引和检索的主要构件，但三类记忆还没有真正形成一个统一的 memory-core：
-
-- **知识与偏好**建立在 `MemoryEvent` / Pydantic / SQLAlchemy / `MemoryWriteService` 之上；
-- **事实**则保留独立 dataclass、独立 SQLite `FactStore`、独立冲突模型和独立 LLM 兼容层；
-- 三者都含有 `confidence` 和 `evidences`，但其含义、更新触发条件、存储位置和计算公式不同；
-- 接入端有 `EventIngestionService` 与 `ExtractionExecutor`，同时又有 `EventProcessingCoordinator` 这条面向演示的平行路径，实际行为可能因 API 入口不同而变化；
-- 事实模块把模型/端点固化为 DeepSeek 兼容调用，绕开了应用已装配的通用 LLM 配置与能力契约，是最需要优先处理的结构性问题。
-
-**建议采用“统一记忆内核 + 类型化投影（typed projection）”的增量重构路线，而不是立即把三个模块硬合并成一个大类。**
-
-核心落点：
-
-1. 用 `MemoryCandidate`、`Evidence`、`MemoryAssertion`、`ConfidenceState`、`MemoryDecision` 组成统一领域模型；
-2. 把 Knowledge / Fact / Preference 分别实现成各自的抽取器、规范化器和投影器；
-3. 将 LLM 调用收敛到系统已有 `BaseLLMClient.generate()`，并用结构化输出校验、模型策略、重试和可观测性包裹；
-4. 用证据级（而非记忆级）统计模型统一计算置信度，把“事实真伪”“偏好适用性”“知识可复用性”拆成可解释的独立维度；
-5. 通过 Outbox / 统一写入服务协调数据库、证据、向量和关键词索引，避免目前事实路径的旁路写入。
+> 审视范围：`memoryhub/core/{knowledge,fact,preference,ingestion,processing}`，以及相关 schema、存储、写入和检索链路。
+> 修订日期：2026-08-14。
+> 设计约束：**三种记忆的方法应尽量一致或继承自同一基类；算法应简单、稳定、性能可控；优先复用既有数据结构和接口输入输出，避免大规模迁移。**
 
 ---
 
-## 2. 当前实现与问题定位
+## 1. 结论与设计方向
 
-### 2.1 当前链路
+此前方案中“统一内核 + 类型化投影”的方向正确，但引入了较多新领域对象、关系表、置信度维度和统计模型。对于当前已完成 MVP 的项目，这会带来较高的实现、迁移和验证成本，不符合“统一但不过度复杂”的目标。
+
+本次调整后的推荐方案是：
+
+> **保留现有 `PreferenceMemory`、`KnowledgeMemory`、`Fact` 及已有 API；新增一套轻量的统一记忆处理抽象。三种记忆共享同一处理阶段、证据整理方式、置信度框架、状态更新规则和 LLM 调用入口，仅把“内容抽取、同类匹配、少量类型权重”留在子类。**
+
+### 1.1 要达到的统一性
+
+三类记忆都经过同一套流程：
 
 ```mermaid
 flowchart LR
-    E["MemoryEvent"] --> G["Safety / Quality Gate"]
-    G --> X["ExtractionExecutor"]
-    X --> P["PreferenceExtractor / Updater"]
-    X --> K["KnowledgeExtractor / Updater"]
-    X --> F["FactIngestionAdapter → FactMemoryPipeline"]
+    E["MemoryEvent / 输入文本"] --> A["统一抽取入口"]
+    A --> C["MemoryCandidate"]
+    C --> N["规范化与同类匹配"]
+    N --> V["统一证据整理"]
+    V --> S["统一置信度计算"]
+    S --> D["统一决策：新增 / 更新 / 共存 / 待确认"]
+    D --> W["复用现有写入与索引接口"]
 
-    P --> PS["PreferenceRow + JSON evidences"]
-    K --> KS["KnowledgeRow + JSON evidences"]
-    F --> FS["独立 FactStore / SQLite tables"]
-
-    PS --> W["MemoryWriteService / indexes"]
-    KS --> W
-    FS --> FI["FactIndexService / indexes"]
+    D --> P["PreferenceMemory"]
+    D --> K["KnowledgeMemory"]
+    D --> F["Fact"]
 ```
 
-关键实现事实：
+统一的是：
 
-- `memoryhub/core/ingestion/extraction.py` 的 `ExtractionExecutor` 已提供针对事件的幂等执行键，但事实、知识、偏好的身份与写入策略仍各不相同。
-- `memoryhub/core/processing.py` 同时提供一条“演示适配层”处理链，且其中显式将 `llm_client=None`，因此同一事件通过不同入口可能使用不同的抽取能力与行为。
-- `memoryhub/app.py` 启动时把应用级 `llm_client` 注入 `FactMemoryPipeline`，但事实子模块内部仍硬编码 `deepseek-chat` / `https://api.deepseek.com` 作为模型、端点默认值。
-- 偏好与知识把 `Evidence` 内嵌到主表 JSON 列，并额外有 JSONL `EvidenceStore`；事实另设 `fact_evidence` 类关系，等于至少存在两套证据持久化模型。
+1. 入口和处理顺序；
+2. 候选对象和处理结果；
+3. 证据提取、去重、合并、追溯规则；
+4. 置信度的因子、公式、阈值和解释格式；
+5. 新增、更新、冲突、归档等状态决策；
+6. LLM 的配置、调用、结构化校验和降级策略；
+7. 写入后的索引同步与幂等处理。
 
-### 2.2 优先级问题清单
+保留差异的是：
 
-| 优先级 | 问题 | 影响 | 证据位置 |
+- **Fact**：三元组、实体/谓词归一化、单值关系冲突；
+- **Preference**：显式/隐式偏好识别、场景匹配；
+- **Knowledge**：工作流/案例/模板提炼、复用结果更新。
+
+### 1.2 不建议在本阶段做的事情
+
+为控制复杂度，当前不建议：
+
+- 新建完整的 `MemoryAssertion`、`EvidenceLink`、`ConfidenceState` 等一组平行主数据表；
+- 立刻将 FactStore、PreferenceRepository、KnowledgeRepository 合并为一个仓储；
+- 使用 Beta-Binomial、Wilson 下界、多维向量置信度等较重的统计模型；
+- 修改既有 HTTP 接口的请求/响应格式；
+- 一次性迁移 JSON evidence、JSONL evidence、事实 evidence 的全部历史数据；
+- 用“强制大一统”替换已能工作的实体、谓词、工作流等领域模型。
+
+这些可以作为未来系统规模扩大后的演进方向，但不应成为当前重构的前置条件。
+
+---
+
+## 2. 当前问题与优先级
+
+| 优先级 | 问题 | 直接后果 | 优化原则 |
 |---|---|---|---|
-| P0 | 事实模块 LLM 调用绕开全局 LLM 配置，硬编码 DeepSeek 模型/端点 | 切换 provider、模型治理、超时/重试、审计、成本控制都不一致；非 OpenAI chat-completions 兼容 client 存在适配风险 | `core/fact/extractor.py`、`normalizer.py`、`conflict.py`、`llm.py` |
-| P0 | 三种记忆并无统一证据模型与证据写入事务 | 无法回答“这条记忆为何可信、更新由哪些新证据触发”；跨存储不一致时难修复 | `FactStore`、主表 `evidences` JSON、`storage/evidence_store.py` |
-| P0 | `confidence` 语义混杂 | LLM 置信度、事件质量、成功率、时间衰减、冲突结果被放进同一 0~1 数值；无法比较或调参 | `core/knowledge/confidence.py`、`core/preference/confidence.py`、`core/fact/models.py` |
-| P1 | 冲突机制重复且行为不统一 | 偏好/知识走通用 `ConflictRecord`/版本逻辑；事实走独立 `ConflictResult`、`Resolution`、状态机；跨类型冲突无法表达 | `core/conflict/*`、`core/fact/conflict.py` |
-| P1 | 事实作用域与时间语义不足 | 只有 `global/project`，`observed_at` 在提交时取当前时间，未区分“事件发生时间、主张生效时间、写入时间”；历史事实容易被错误覆盖 | `core/fact/models.py`、`core/fact/pipeline.py` |
-| P1 | 事实候选提取直接喂入工具序列化文本 | 工具参数、结果、日志可能被 LLM 当作自然语言事实；结构化字段、来源权威性和工具状态未参与事实得分 | `core/fact/event_adapter.py` |
-| P1 | 并行入口造成结果漂移 | 实际 API 路径与演示路径的 LLM、冲突、回退策略不一致，难以复现线上行为 | `core/processing.py`、`app.py` |
-| P2 | 事实层使用独立 SQLite 访问方式 | 与 SQLAlchemy 事务、迁移、软删除、审计、备份策略及 `MemoryWriteService` 难以统一 | `core/fact/store.py` |
-| P2 | 测试多为单模块/行为测试 | 尚缺跨记忆证据追溯、置信度校准、入口一致性、并发幂等、索引最终一致性验证 | `tests/test_fact/*`、`tests/test_knowledge/*`、`tests/test_preference_functionality.py` |
-
-> 当前定向测试基线：`93 passed, 2 skipped`（事实、知识、偏好及数据流相关测试）。这说明 MVP 的既有行为被覆盖，但并不证明三类记忆的领域语义已统一。
+| P0 | 事实模块的 LLM 调用硬编码 DeepSeek 模型/端点 | 与应用级 `LLMConfig`、`BaseLLMClient` 分叉；切模型或 provider 时行为不一致 | 统一走已有应用级 LLM client |
+| P0 | 三种记忆的置信度计算器完全独立 | 分数语义、阈值和更新方式不一致，难维护、难比较 | 共享一个简单公式，子类只提供因子权重 |
+| P0 | 证据在三处以不同方式保存和合并 | 更新后难解释置信度来源，重复证据可能重复计分 | 不改现有字段，先统一 Evidence 的构造、去重和合并方法 |
+| P1 | 处理入口存在 `EventIngestionService` 与演示 `EventProcessingCoordinator` 双轨 | 同一事件从不同入口进入可能得到不同结果 | 统一调用同一 handler；演示层只作为 façade |
+| P1 | 三类记忆的更新/冲突方法名、返回值和决策语义不同 | 上层协调和测试难复用 | 以基类定义统一阶段和统一决策对象 |
+| P1 | Fact 的 `observed_at` 取提交时刻 | 历史事实可能被误判为最新事实 | 优先使用事件发生时间，无法取得时再降级到写入时间 |
+| P2 | Fact 独立 SQLite 写入路径与其他记忆不同 | 事务、索引、证据同步策略难统一 | 先包一层适配器，后续再考虑存储合并 |
 
 ---
 
-## 3. 深度问题分析
+## 3. 目标架构：统一处理基类，不强行统一数据模型
 
-### 3.1 三套模型形成了“概念同名、实现异构”
+### 3.1 核心抽象
 
-三类记忆都包含 `memory_id`、状态、置信度、证据、作用域、版本/访问等概念，但：
-
-- **偏好**：`PreferenceMemory` 内含 `root_id`、`parent_id`、`quality_score`、`extract_source`，证据来自用户行为/手工配置/工具结果；
-- **知识**：`KnowledgeMemory` 以工作流、案例、模板表达；其置信度又结合结构、步骤、成功次数和证据数量；
-- **事实**：`Fact` 是 subject-predicate-object，使用独立实体、本体、事实状态和独立 evidence/conflict 表，但没有与通用 `Evidence`、`ConflictRecord`、`MemoryWriteService` 对齐。
-
-结果是：检索层可以把它们都当“memory”，但核心层没有一个一致的回答：**一条记忆究竟是什么、根据什么被建立、在什么条件下被强化/降级/废弃。**
-
-### 3.2 证据链不是“来源图”，而是三个不同的附件机制
-
-目前证据至少有以下表示：
-
-1. `PreferenceMemory.evidences` / `KnowledgeMemory.evidences` 的 JSON 列；
-2. `EvidenceStore` 按 memory_id 追加的 JSONL；
-3. 事实表中的 `source_text`、`source_id`，以及事实专有 evidence 保存；
-4. 事件表中的 `source_hash`、`quality`、`tool_calls`。
-
-问题不只是重复存储，还包括：
-
-- 没有一个不可变的证据主键与内容哈希，以防重复计数；
-- 记忆合并时仅按 `event_id/evidence_id` 去重，不能区分同一事件中的多条独立主张，也无法识别同源转述；
-- 没有明确的 `supports / contradicts / supersedes / derived_from` 边；
-- 无法记录 LLM 的抽取版本、prompt 模板版本、模型版本与结构化校验结果；
-- 没有“证据已撤回、来源失效、事件被遗忘”时如何级联重算记忆的机制。
-
-### 3.3 置信度目前不可横向解释，也无法可靠校准
-
-当前公式各自合理，但不可合并：
-
-- 知识使用加权因素与最弱项惩罚，并把 success/total/evidence 与旧分数混合；
-- 偏好使用来源权重、时间衰减、一致性、证据数、冲突惩罚和 sigmoid；
-- 事实基本采用抽取结果 `RawTriple.confidence`，再由冲突决策改变状态，缺少一致的证据聚合与时间有效性计算。
-
-这会造成如下风险：
-
-- “LLM 自报 0.9”可能比“多次工具成功验证”的 0.75 更高，但两者可信含义不同；
-- 事实真值、偏好当前适用性、知识复用成功率都用 `confidence` 表示，检索或写入阈值无法统一；
-- 证据增量、冲突、过期、人工确认后，不能用统一规则复算；
-- 不能做可靠的离线校准（例如置信度为 0.8 的记忆，长期真实命中率是否约为 80%）。
-
-### 3.4 事实模块的 LLM 使用方式需要重构
-
-这是最明确的技术债：
-
-1. **硬编码 Provider 语义**：提取器、归一化器、冲突检测器分别默认 `deepseek-chat` 和 DeepSeek endpoint；应用级 `LLMConfig` 的 provider/model/base URL 没有成为事实模块唯一配置来源。
-2. **协议双轨**：系统已有 `BaseLLMClient.generate(prompt, system_prompt=...)`；事实模块又自建 `chat.completions.create` shim。它能临时兼容，但让模型参数、结构化输出、错误类型、工具调用和观测指标分叉。
-3. **模型选择不可按任务治理**：三元组提取、实体消歧、谓词映射、冲突裁决的风险与成本不同，当前都隐式使用同一个硬编码模型。
-4. **非结构化 JSON 解析脆弱**：虽然有代码围栏处理和规则回退，但未以 JSON Schema/Pydantic 强制验证、未保留拒绝原因、未记录模型响应/抽取版本。
-5. **回退语义不安全**：LLM 失败后对自然语言文本做规则三元组抽取，可以保证可用性，却可能在信息不足时把候选写成客观事实。规则回退应产生低置信候选或 `review`，而非直接提升为可自动提交的事实。
-6. **事实来源未参与模型推理边界**：`FactIngestionAdapter` 将工具调用参数和结果格式化为一段文本；LLM 可误把参数中的“期望值”理解成工具返回的“观察值”。
-
-### 3.5 冲突和更新缺失事件时间/有效时间建模
-
-当前事实在 `commit()` 时将 `observed_at` 设置为当前时间。它并不等于：
-
-- 事件实际发生时间；
-- 事实开始生效时间；
-- 系统观察/获取时间；
-- 系统写入时间。
-
-所以“去年项目负责人是 A、今天改为 B”与“用户今天转述去年负责人是 A”都会获得近似的“新鲜度”。单值谓词的 replace 很容易错误处理历史记录。
-
-偏好、知识同样需要区分“最后被支持时间”和“最后被成功复用时间”；目前版本链可以保留演进，但缺乏统一的时态与证据因果关系。
-
----
-
-## 4. 目标架构：统一内核 + 类型化投影
-
-### 4.1 设计原则
-
-1. **事件是输入事实，记忆是可撤销的派生结论**：不能把 LLM 输出当作原始事实。
-2. **证据先行**：每个记忆都必须由可定位、可去重、可撤回的证据支撑。
-3. **置信度拆维度**：不再让一个数同时代表正确性、适用性、成功率和时效性。
-4. **纯决策与副作用分离**：抽取、归一化、冲突、置信度计算均输出可审计 decision；写入由一个事务编排器完成。
-5. **类型差异保留在 projection 层**：事实三元组、偏好策略、知识工作流是不同投影，不在底层重复实现生命周期。
-6. **LLM 仅负责受控的语义步骤**：LLM 生成候选/判断，代码负责 schema 校验、范围约束、置信度、持久化和状态机。
-
-### 4.2 建议领域模型
-
-```mermaid
-classDiagram
-    class MemoryEvent {
-      +event_id
-      +user_id
-      +occurred_at
-      +quality
-      +payload
-      +source_hash
-    }
-    class Evidence {
-      +evidence_id
-      +event_id
-      +claim_hash
-      +excerpt
-      +source_kind
-      +observed_at
-      +recorded_at
-      +authority
-      +quality
-      +status
-    }
-    class MemoryAssertion {
-      +assertion_id
-      +memory_kind
-      +canonical_key
-      +scope
-      +valid_time
-      +status
-      +version
-    }
-    class EvidenceLink {
-      +assertion_id
-      +evidence_id
-      +relation: supports|contradicts|supersedes
-      +weight
-      +extractor_version
-    }
-    class ConfidenceState {
-      +epistemic_confidence
-      +applicability_confidence
-      +utility_confidence
-      +freshness
-      +calibration_version
-      +explanation
-    }
-
-    MemoryEvent --> Evidence : produces / references
-    Evidence --> EvidenceLink
-    MemoryAssertion --> EvidenceLink
-    MemoryAssertion --> ConfidenceState
-```
-
-#### 关键对象说明
-
-| 对象 | 用途 | 不可变性 |
-|---|---|---|
-| `MemoryEvent` | 通过安全门和质量门后的上游记录 | 不可变；遗忘时逻辑删除/加密隔离 |
-| `Evidence` | 从 event 或可验证工具结果截取的最小支持单元 | 不可变，拥有内容哈希与来源定位 |
-| `MemoryAssertion` | 一条可查询、可版本化的记忆主张 | 有状态、有版本 |
-| `EvidenceLink` | 证据与主张的支持、反驳、替代关系 | 追加式 |
-| `ConfidenceState` | 对当前 assertion 的可复算快照 | 可覆盖，但保留计算版本和解释 |
-| `MemoryDecision` | 抽取/合并/冲突/升级人工的机器决策 | 不可变审计记录 |
-
-### 4.3 三类记忆如何映射
-
-| 类型 | `canonical_key` | 主要载荷 | 主要置信维度 | 默认更新策略 |
-|---|---|---|---|---|
-| Fact | `subject + predicate + scope` | object、实体链接、时态区间 | `epistemic + freshness` | 支持/反驳证据聚合；单值关系做时态替代 |
-| Preference | `user + preference_type + normalized target + scope` | desired value、约束、显式性 | `applicability + freshness` | 显式偏好优先；隐式证据逐步累积；可按场景并存 |
-| Knowledge | `user/org + task signature + scope + knowledge_type` | workflow/template/case | `utility + evidence + freshness` | 基于成功/失败复用事件演进版本，失败可降级/回滚 |
-
-三种记忆可共享：身份、证据、冲突、版本、审计、遗忘、索引 outbox；各自保留规范化、相似度和领域规则。
-
----
-
-## 5. 统一证据链方案
-
-### 5.1 证据表与链接表
-
-建议在现有 SQLAlchemy 数据库中新增，而不是继续扩张 JSONL/JSON/独立 SQLite 三套存储：
+建议新增一个轻量模块，例如：
 
 ```text
-memory_evidences
-- evidence_id (PK)
-- event_id (FK / 可空，允许外部受控来源)
-- source_kind: user_statement | tool_result | system_observation | manual | imported
-- content_hash
-- excerpt
-- structured_locator (JSON：tool_call_id / JSONPath / message span)
-- occurred_at / observed_at / recorded_at
-- authority_score
-- quality_score
-- status: active | retracted | invalidated
-- metadata_json
-
-memory_assertions
-- assertion_id (PK)
-- kind: fact | preference | knowledge
-- canonical_key
-- subject/predicate/object 或 payload_json
-- scope_json
-- valid_from / valid_to / transaction_time
-- status: candidate | active | review | superseded | archived | deleted
-- root_id / parent_id / version
-
-assertion_evidence_links
-- assertion_id
-- evidence_id
-- relation: supports | contradicts | derives | supersedes
-- extractor_name / extractor_version
-- model_provider / model / prompt_version
-- extraction_score
-- independent_source_group
-- created_at
+memoryhub/core/memory/
+  base.py           # BaseMemoryHandler、MemoryCandidate、MemoryDecision
+  confidence.py     # UnifiedConfidenceCalculator
+  evidence.py       # EvidenceNormalizer、EvidenceMerger
+  llm.py            # StructuredLLMAdapter（复用应用级 BaseLLMClient）
 ```
 
-约束：
-
-- `content_hash + structured_locator + event_id` 唯一，防止一次重试把同一证据重复计权；
-- `assertion_id + evidence_id + relation` 唯一；
-- 事件、证据、主张、决策都用同一 `user_id/tenant_id` 作为隔离键；
-- 事实的实体/谓词可继续独立建表，但必须由 `FactProjection` 使用统一 assertion ID 与 evidence link。
-
-### 5.2 证据独立性与权重
-
-不能简单按证据数相加。应对每条证据产生：
+不要求替换现有 `fact/`、`preference/`、`knowledge/` 文件夹。各模块只需新增/调整一个 Handler：
 
 ```text
-support_weight = source_authority
-               × event_quality
-               × extraction_entailment
-               × freshness_decay
-               × independence_discount
+FactMemoryHandler(BaseMemoryHandler)
+PreferenceMemoryHandler(BaseMemoryHandler)
+KnowledgeMemoryHandler(BaseMemoryHandler)
 ```
 
-- **authority**：用户显式陈述、成功工具结果、受信配置、模型推断、导入文本应有不同上限；
-- **extraction_entailment**：模型必须输出“证据片段是否蕴含该主张”，而不仅仅输出三元组；
-- **freshness**：与记忆类型和谓词/偏好类别相关；
-- **independence_discount**：同一 event、同一会话、同一工具调用、同一外部文档的重复转述只算一次或递减；
-- **contradiction**：不覆盖旧证据，只添加反驳边并触发状态决策。
-
-### 5.3 证据的撤回与遗忘
-
-遗忘不应只删除一条投影记忆：
-
-1. 目标事件/证据标记为 `retracted/deleted`；
-2. 查询所有 `EvidenceLink`；
-3. 对受影响 assertion 重算置信度；
-4. 若不再满足激活阈值，转为 `review` 或 `archived`；
-5. 同步更新索引 outbox；
-6. 审计中只保留不可逆摘要与受影响 ID，遵循现有安全策略。
-
----
-
-## 6. 置信度重构方案
-
-### 6.1 从一个分数改为“向量 + 派生分数”
-
-建议对外可继续返回 `confidence`（兼容 API），但内部固定存四个字段：
-
-```text
-C = {
-  epistemic: 主张为真的可信度，主要用于 Fact；
-  applicability: 当前用户/当前场景仍适用的可信度，主要用于 Preference；
-  utility: 使用后成功/有帮助的可信度，主要用于 Knowledge；
-  freshness: 未过期程度，所有类型都有。
-}
-```
-
-对外兼容字段：
-
-- Fact：`confidence = epistemic × freshness`
-- Preference：`confidence = applicability × freshness`
-- Knowledge：`confidence = utility × freshness`
-
-同时保存 `confidence_explanation_json`：支持证据数、反驳证据数、独立来源组数、最新事件、有效样本、公式/校准版本、阈值命中情况。这样能让 API、控制台和人工复核解释“为什么是 0.67”。
-
-### 6.2 推荐计算方法
-
-#### A. Fact：Beta-Binomial 证据聚合 + 冲突惩罚
-
-对于相同 canonical fact 的有效支持/反驳权重：
-
-```text
-alpha = alpha0 + Σ support_weight
-beta  = beta0  + Σ contradiction_weight
-base_epistemic = alpha / (alpha + beta)
-confidence = base_epistemic × freshness × scope_fit
-```
-
-- `alpha0/beta0` 按谓词类别设置先验：例如用户手工配置、工具查询结果、自然语言推断不能共享同一先验；
-- 同源证据经过独立性折扣；
-- 只让具备可定位证据的候选达到 `active`；
-- 单值关系发生冲突时，先形成并存的时态候选，再由规则/人工/LLM 决定 `valid_to`，不要直接依赖“新写入时间更晚”。
-
-#### B. Preference：显式性优先的适用性模型
-
-```text
-applicability = sigmoid(
-    explicit_override
-  + weighted_confirmations
-  - weighted_rejections
-  + scope_match
-  - staleness
-)
-```
-
-规则：
-
-- 用户明确指令（例如“以后全部用中文”）应创建高权重 evidence，可覆盖隐式推断；
-- 隐式行为应累计观察次数并保留上下文，不能仅因一次行为建立强全局偏好；
-- “未使用”不等于反证，明确纠正、选择另一个选项、负反馈才产生反驳；
-- 语言/格式等长期偏好与短期任务策略应有不同半衰期和默认 scope。
-
-#### C. Knowledge：Beta-Binomial / Wilson 下界衡量可复用性
-
-知识记忆应区分“抽取质量”与“实际使用效果”：
-
-```text
-utility = lower_bound(successes, failures, prior, confidence_level)
-final = min(structural_quality, evidence_support) × utility × freshness
-```
-
-- 用 Wilson lower bound 或 Beta 后验下界，而不是仅 `(success + 1)/(total + 2)`；样本少时应保守；
-- 每次检索并被执行后，必须记录 `usage/outcome` evidence；
-- 仅“被检索”不能提高 utility，成功、失败、人工采纳/拒绝才可以；
-- 将当前 `success_count/total_count` 迁移为 `outcome` 类型的证据汇总，保证可追溯。
-
-### 6.3 阈值状态机，而不是直接以分数决定覆盖
-
-```mermaid
-stateDiagram-v2
-  [*] --> candidate
-  candidate --> active: 证据、范围、置信阈值均满足
-  candidate --> review: 低证据 / 抽取不确定 / 发生冲突
-  active --> review: 有效反驳或置信度跌破降级阈值
-  active --> superseded: 新版本经时态/人工裁决替代
-  review --> active: 人工确认或新独立支持
-  review --> archived: 长期无支持且无使用
-  active --> deleted: 忘记请求 / 合规删除
-```
-
-采用**进入阈值 > 退出阈值**的滞回策略，避免少量新证据让记忆在 `active/review` 间抖动。例如：Fact 进入 active ≥0.75，退出 active <0.60。
-
----
-
-## 7. LLM 调用重构方案（事实模块优先）
-
-### 7.1 收敛到应用级 `BaseLLMClient`
-
-删除或冻结 `core/fact/llm.py` 中的 OpenAI chat compatibility shim，新增统一服务接口：
+### 3.2 建议基类接口
 
 ```python
-class StructuredLLM:
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+
+@dataclass
+class MemoryCandidate:
+    """内部统一候选；不替代现有 Fact/PreferenceMemory/KnowledgeMemory。"""
+    memory_type: Literal["fact", "preference", "knowledge"]
+    payload: Any                       # 保留原类型对象或其最小草稿
+    user_id: str
+    source_id: str = ""
+    event_id: str = ""
+    occurred_at: str = ""
+    evidences: list[Any] = field(default_factory=list)
+    quality_score: float = 1.0
+    extraction_score: float = 0.5
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class MemoryDecision:
+    """内部统一决策；可映射到现有 ConflictResult/ConflictRecord。"""
+    action: Literal["new", "update", "coexist", "duplicate", "review", "reject"]
+    reason: str
+    confidence: float
+    existing_id: str = ""
+    candidate: MemoryCandidate | None = None
+
+
+class BaseMemoryHandler(ABC):
+    """三类记忆共用的编排模板。"""
+
+    memory_type: str
+
+    def process(self, source, *, context=None) -> list[MemoryDecision]:
+        candidates = self.extract_candidates(source, context=context)
+        decisions: list[MemoryDecision] = []
+        for candidate in candidates:
+            candidate.evidences = self.evidence_merger.normalize_and_merge(
+                candidate.evidences
+            )
+            existing = self.find_similar(candidate)
+            factors = self.build_confidence_factors(candidate, existing)
+            confidence = self.confidence_calculator.calculate(factors)
+            decision = self.decide(candidate, existing, confidence)
+            decisions.append(decision)
+        return decisions
+
+    @abstractmethod
+    def extract_candidates(self, source, *, context=None) -> list[MemoryCandidate]: ...
+
+    @abstractmethod
+    def find_similar(self, candidate: MemoryCandidate): ...
+
+    @abstractmethod
+    def build_confidence_factors(self, candidate, existing): ...
+
+    @abstractmethod
+    def apply(self, decision: MemoryDecision): ...
+```
+
+说明：
+
+- `process()`、证据整理、置信度计算、决策框架统一；
+- `extract_candidates()`、`find_similar()`、`build_confidence_factors()`、`apply()`由三种记忆按自身领域差异实现；
+- `apply()`内部直接复用现有 `PreferenceUpdater`、`KnowledgeUpdater`、`FactMemoryPipeline.commit()` 或仓储接口；
+- `MemoryCandidate`、`MemoryDecision`只存在于 core 内部，不要求改动现有 API schema；
+- 现有模块可分阶段接入：先 Fact，再 Preference/Knowledge，不需要一次性重写。
+
+### 3.3 三种 Handler 的职责边界
+
+| Handler | 复用基类能力 | 自定义部分 | 复用的既有实现 |
+|---|---|---|---|
+| `FactMemoryHandler` | 证据整理、置信度、决策、LLM 入口、幂等 | 三元组抽取、实体/谓词归一化、单值关系冲突 | `TripleExtractor`、`EntityNormalizer`、`PredicateNormalizer`、`ConflictDetector`、`FactMemoryPipeline` |
+| `PreferenceMemoryHandler` | 同上 | 显式/隐式识别、偏好类型和场景匹配 | `PreferenceExtractor`、`PreferenceUpdater` |
+| `KnowledgeMemoryHandler` | 同上 | 工作流/案例/模板提取、任务相似匹配 | `KnowledgeExtractor`、`KnowledgeUpdater` |
+
+这能解决“方法不统一”的问题，同时避免将 Fact 三元组、Preference payload、Knowledge steps 强行塞进同一个持久化结构。
+
+---
+
+## 4. 统一但轻量的证据链方案
+
+### 4.1 保持现有数据结构，统一操作规则
+
+不新增强制性证据表，不改变 `PreferenceMemory.evidences` 和 `KnowledgeMemory.evidences` 的输入输出，也不立即废弃事实模块的 `source_text/source_id` 与现有事实 evidence 存储。
+
+改为新增一个统一工具类：
+
+```python
+class EvidenceMerger:
+    def normalize(self, evidence) -> Evidence: ...
+    def key(self, evidence) -> str: ...
+    def normalize_and_merge(self, evidences: list[Evidence]) -> list[Evidence]: ...
+    def summary(self, evidences: list[Evidence]) -> dict: ...
+```
+
+它统一完成：
+
+1. 读取/补齐 `event_id`、`source_type`、`timestamp`、`quality` 等已有字段；
+2. 按 `event_id + evidence_id` 去重；没有 ID 时按“来源 ID + 证据文本哈希”去重；
+3. 保持时间顺序，避免不稳定的证据合并；
+4. 限制最多保留 N 条有效证据（例如 20 条），防止主表 JSON 无限膨胀；
+5. 为所有类型生成一致的 `evidence_summary`，但作为内部元数据或可选响应字段，不改变旧字段。
+
+### 4.2 Fact 的低侵入适配
+
+Fact 当前并非通用 `Evidence` 模型。第一阶段不需要修改 Fact 的表结构：
+
+- 将 `Fact.source_id` 映射为 `event_id/source_id`；
+- 将 `Fact.source_text` 映射为证据 excerpt；
+- 将 `Fact.observed_at` 与 event 的 `occurred_at` 区分使用；
+- 在 `FactMemoryHandler` 内生成与 Preference/Knowledge 相同的 evidence summary；
+- 若后续确实需要跨类型完整审计，再新增 relation 表，而不是现在就迁移。
+
+### 4.3 简单的证据有效性规则
+
+所有类型采用相同规则：
+
+- 同一 event 的重复抽取只计一次；
+- `quality_score` 较低的事件可生成候选，但限制置信度上限；
+- 被安全模块拒绝、被撤回、失败工具调用的内容不作为正向证据；
+- 用户显式输入、手工配置、成功工具结果可以被视为更强来源；
+- 证据数量只带来有限增益，防止 100 条重复记录把分数推到 1.0。
+
+---
+
+## 5. 统一且简单的置信度算法
+
+### 5.1 目标
+
+置信度计算要统一、可解释、可测试，并且足够简单：
+
+- 一套公式；
+- 4 个标准因子；
+- 类型差异只表现为权重和个别因子的取值；
+- 不使用复杂概率模型、训练模型或多重嵌套 sigmoid；
+- 保持计算量为 `O(证据数)`，且证据数有上限。
+
+### 5.2 统一因子
+
+每条候选记忆都构造以下四个 `[0, 1]` 因子：
+
+| 因子 | 含义 | 三种记忆的取值来源 |
+|---|---|---|
+| `source` | 来源可靠性 | 显式用户输入/成功工具结果/普通行为/规则回退 |
+| `quality` | 输入和抽取质量 | `MemoryEvent.quality` 与 LLM/规则抽取分数的较保守组合 |
+| `support` | 证据支持度 | 去重后的有效证据数量，按 1、2、3+ 条分档，不线性累加 |
+| `freshness` | 当前仍有效的程度 | 距最后有效证据的时间衰减；不同类型只配置不同半衰期 |
+
+建议引入统一数据类：
+
+```python
+@dataclass(frozen=True)
+class ConfidenceFactors:
+    source: float
+    quality: float
+    support: float
+    freshness: float
+```
+
+### 5.3 统一公式
+
+使用加权平均与一个轻量的弱项保护：
+
+```text
+base = w_source × source
+     + w_quality × quality
+     + w_support × support
+     + w_freshness × freshness
+
+confidence = clamp(base × (0.85 + 0.15 × min(source, quality)), 0, 0.95)
+```
+
+默认权重：
+
+```text
+w_source = 0.35
+w_quality = 0.30
+w_support = 0.20
+w_freshness = 0.15
+```
+
+解释：
+
+- 来源和质量占主要比例；
+- 证据数量有增益但不压过来源质量；
+- 新鲜度只做温和调整，不让长期但可靠的偏好/知识瞬间失效；
+- 最弱项保护只惩罚“来源或抽取质量很差”的候选，避免一堆低质量重复证据抬高分数；
+- 上限为 `0.95`，避免系统在没有人工确认时声称绝对确定。
+
+### 5.4 因子计算保持一致，参数允许少量差异
+
+#### 来源分 `source`
+
+统一映射，可由各 Handler 传入 source type：
+
+| 来源 | 分数 |
+|---|---:|
+| 用户明确指令 / 手工配置 | 0.95 |
+| 成功且结构化的工具结果 | 0.85 |
+| 用户行为或已完成任务轨迹 | 0.75 |
+| 普通文本抽取 | 0.60 |
+| 规则回退抽取 | 0.45 |
+
+#### 质量分 `quality`
+
+```text
+quality = min(event_quality, extraction_score)
+```
+
+如果没有 event quality，使用 0.7 作为保守默认值；如果没有 LLM 抽取分数，规则路径使用 0.45～0.60 的固定分档。`min()` 比平均值更保守，也更容易理解。
+
+#### 支持分 `support`
+
+仅按有效、去重后的证据数量分档：
+
+| 独立有效证据数 | support |
+|---:|---:|
+| 0 | 0.20 |
+| 1 | 0.50 |
+| 2 | 0.70 |
+| 3 条及以上 | 0.85 |
+
+“独立”在 MVP 阶段的简化定义：不同 `event_id`；没有 event_id 时使用不同 `source_id`。无需先实现复杂来源图。
+
+#### 新鲜度 `freshness`
+
+采用简单半衰期：
+
+```text
+freshness = 0.5 ** (age_days / half_life_days)
+```
+
+仅配置半衰期，不改变公式：
+
+| 类型 | 默认半衰期 | 说明 |
+|---|---:|---|
+| Fact | 90 天 | 可被新事件或冲突更快更新 |
+| Preference | 180 天 | 偏好通常较稳定，但仍可自然衰减 |
+| Knowledge | 120 天 | 工具、流程和环境变化较快 |
+
+对于明确全局偏好、人工配置、长期静态事实，可给 `freshness` 设下限 0.70 或配置更长半衰期，避免错误遗忘。
+
+### 5.5 三类记忆仅使用轻量权重差异
+
+算法和因子完全一样，仅允许权重做小幅调整：
+
+| 类型 | source | quality | support | freshness | 原因 |
+|---|---:|---:|---:|---:|---|
+| Fact | 0.35 | 0.35 | 0.20 | 0.10 | 事实更强调证据与抽取准确性 |
+| Preference | 0.45 | 0.25 | 0.15 | 0.15 | 用户显式来源最重要 |
+| Knowledge | 0.30 | 0.30 | 0.25 | 0.15 | 多次成功轨迹/证据更重要 |
+
+权重差异应由同一个 `MemoryConfidencePolicy` 配置，而不是三份计算器各写一套公式。
+
+### 5.6 复用结果的简单更新规则
+
+现有知识的 `success_count/total_count` 很有价值，不需要改表。只需要统一把它折算为对 `support` 的有限修正：
+
+```text
+success_rate = (success_count + 1) / (total_count + 2)
+support = max(evidence_support, 0.5 + 0.35 × success_rate)
+```
+
+只用于 Knowledge；Preference 和 Fact 直接使用 evidence support。这样不会引入复杂统计模型，也能避免样本数为 0/1 时极端波动。
+
+### 5.7 统一阈值与状态决策
+
+所有类型先采用同一阈值：
+
+| 条件 | 决策 |
+|---|---|
+| `confidence >= 0.70` 且无强冲突 | `active/new/update` |
+| `0.50 <= confidence < 0.70`，或存在无法自动判断的冲突 | `review` |
+| `confidence < 0.50` | `reject` 或仅保留候选，不写入检索主路径 |
+| 与已有内容相同 | `duplicate`，只合并证据和重算分数 |
+| 作用域不同且均有效 | `coexist` |
+
+Fact 的单值谓词冲突可以额外进入 `review` 或 `replace`，但应复用同一个 `MemoryDecision.action` 名称，并将原有 `Resolution` 映射进去。这样上层不必理解两套冲突语义。
+
+---
+
+## 6. LLM 调用统一方案（Fact 优先修复）
+
+### 6.1 问题
+
+当前事实模块的 `extractor.py`、`normalizer.py`、`conflict.py` 使用 DeepSeek 默认模型与端点，并通过 `core/fact/llm.py` 自建 OpenAI Chat Completions 兼容层。应用实际已初始化通用 `llm_client`，因此这会形成配置、模型行为、异常处理和可测试性的分叉。
+
+### 6.2 低侵入改法
+
+不改上游接口，只改内部依赖：
+
+1. 新增 `StructuredLLMAdapter`，包装现有 `BaseLLMClient.generate()`；
+2. `TripleExtractor`、实体/谓词归一化、事实冲突裁决都依赖这个 Adapter；
+3. Adapter 使用应用级 `llm_client` 和 `config.llm`，不在事实子模块硬编码 provider、URL 或模型名；
+4. 调用输入仍是 `system_prompt + prompt`，输出仍解析为现有 `RawTriple` 或既有裁决对象；
+5. 对 JSON 输出做 Pydantic/基础字段校验；校验失败返回明确错误或低置信候选；
+6. 规则回退保留，但统一标记为较低 `extraction_score`，不能绕过统一阈值直接激活。
+
+建议接口：
+
+```python
+class StructuredLLMAdapter:
     def generate_json(
         self,
         *,
-        task: Literal["fact_extract", "entity_link", "predicate_map", "fact_resolve"],
+        task_name: str,
         system_prompt: str,
         prompt: str,
-        response_model: type[BaseModel],
-        policy: LLMTaskPolicy,
-    ) -> StructuredResult[T]: ...
+        parser,
+        temperature: float = 0.0,
+    ):
+        """复用 BaseLLMClient；返回经过 parser 校验的结果。"""
 ```
 
-它应：
+这里只新增内部 Adapter；`FactMemoryPipeline` 的构造参数、HTTP 接口和既有测试替身都可以继续使用 `llm_client`。
 
-- 只依赖应用启动时构造的 `BaseLLMClient`；
-- 从 `AppConfig.llm` 和新增的 `memory_tasks` 配置读取 provider、model、timeout、temperature、最大 token、重试、是否允许降级；
-- 将返回文本通过 Pydantic/JSON Schema 验证；
-- 记录 task、模型、prompt version、耗时、响应 hash、解析错误类型，但默认不记录敏感正文；
-- 输出统一错误类别（`unavailable`、`timeout`、`invalid_schema`、`policy_blocked`、`provider_error`）。
+### 6.3 工具结果处理
 
-### 7.2 任务拆分与输出契约
+FactIngestionAdapter 当前会把工具名称、参数和结果拼成文本。低侵入优化如下：
 
-| 任务 | 输入 | 输出 | 是否可直接写入 |
-|---|---|---|---|
-| `fact_extract` | 原文片段 + 来源类型 | 结构化候选、证据 span、蕴含分、时态线索 | 否，只创建 candidate |
-| `entity_link` | mention + 局部候选实体 | `existing/new/ambiguous`、候选 ID、置信度 | 否；ambiguous → review |
-| `predicate_map` | 关系文本 + 受控本体 | predicate ID / unknown | 否；unknown 默认不扩张本体 |
-| `fact_resolve` | 已归一化的冲突 assertion + 证据摘要 | `replace/coexist/review` + 理由 | 否；规则/事务层验证后执行 |
-
-所有输出均要带 `evidence_indices` 或 `evidence_span`。**没有能指回输入片段的主张，不得自动成为 active Fact。**
-
-### 7.3 工具结果的正确输入方式
-
-停止将工具调用“参数 + 结果”拼成自然语言后直接提取事实。改为：
-
-1. 工具结果保留 JSON 结构及 JSONPath；
-2. 为可信工具定义 mapper（例如 `result.owner.name → project.owner`）；
-3. 只有缺少 mapper 的工具才进入 LLM 抽取，并明确标注：哪些字段是 request，哪些字段是 response；
-4. request 参数只可作为检索上下文，**不能**作为支持事实的 evidence；
-5. `tool_status=partial` 默认只生成 candidate/review，除非 mapper 能证明目标字段完整。
-
-### 7.4 安全回退
-
-- LLM 不可用：优先走结构化 mapper 和保守规则；
-- 规则抽取成功但缺乏明确的时间/实体/谓词：只创建 `candidate`，置信上限例如 0.45；
-- 不要因为“服务不可用”而把低质量自然语言推断自动提交为强事实；
-- 提取失败必须计入可观测指标，并可写入 extraction retry，而不是由不同调用方各自吞异常。
+- 保持现有 `format_tool_call()` 返回文本的接口；
+- 在拼接文本时显式区分“调用参数（仅上下文）”和“工具返回结果（可作为证据）”；
+- `TripleExtractor` 的提示词明确规定：**只能使用“工具返回结果”字段作为事实证据，不得依据调用参数建立事实**；
+- `tool_status=partial` 的候选统一将 `quality_score` 上限限制为 0.60；
+- 后续再逐步为高频工具添加确定性 mapper，非本次重构前置条件。
 
 ---
 
-## 8. 存储、事务与检索重构
+## 7. 更新、冲突与时间规则统一
 
-### 8.1 统一写入编排器
+### 7.1 统一决策，不强制统一存储
 
-将现在的 `MemoryWriteService` 演化为 `MemoryCommandService`：
+推荐上层统一使用 `MemoryDecision`，然后映射到原逻辑：
 
-```text
-Evaluate event/candidate (pure)
-  → create MemoryDecision
-  → DB transaction:
-       upsert assertion/projection
-       insert evidence(s) and link(s)
-       append conflict/decision audit
-       insert index outbox event
-  → async idempotent worker:
-       vector / keyword / cache / fact graph sync
-```
+| `MemoryDecision.action` | Preference | Knowledge | Fact |
+|---|---|---|---|
+| `new` | `PreferenceUpdater.add()` | `KnowledgeUpdater.add()` | `FactMemoryPipeline.commit()` 的 NEW |
+| `update` | 版本更新 | 版本合并/更新 | replace 后写入新 Fact |
+| `duplicate` | 合并 evidence、重算 confidence | 同左 | 不插入重复 Fact，更新/记录证据 |
+| `coexist` | 不同 scope 共存 | 不同 scope/任务共存 | 多值谓词或不同 scope 共存 |
+| `review` | 写冲突记录/待确认 | 写冲突记录/待确认 | 映射 `ESCALATE` |
+| `reject` | 不落长期记忆 | 不落长期记忆 | 不提交 Fact |
 
-好处：
+### 7.2 统一更新顺序
 
-- Fact 不再自己提交 SQLite、证据和索引，而是与偏好/知识一起具备原子语义；
-- 索引失败不会让数据库主记录和检索状态不可判定；
-- 现有 `pending_index/index_version` 可以迁移为 outbox 消费状态；
-- `ExtractionExecutor.execution_key` 可以成为所有类型写入幂等键的一部分。
-
-### 8.2 保留投影表，逐步替代 `FactStore`
-
-不建议一次性删除事实专用表。迁移后结构可为：
-
-- 通用：`memory_assertions`、`memory_evidences`、`assertion_evidence_links`、`memory_decisions`、`memory_outbox`；
-- Fact 投影：`fact_projection`、`entities`、`predicates`；
-- Preference 投影：`preference_projection`；
-- Knowledge 投影：`knowledge_projection`。
-
-第一阶段可让 `FactStore` 仅作为读兼容仓库/迁移来源；新写入全部经过统一服务。等 API、索引、回归测试稳定后再弃用独立 sqlite connection。
-
-### 8.3 检索时应使用“置信 + 适配 + 新鲜度”
-
-检索排序不要只依赖向量相似度和单个 confidence：
+所有类型遵循：
 
 ```text
-rank = semantic_relevance
-     × scope_match
-     × status_factor
-     × confidence_for_kind
-     × freshness
-     × evidence_health
+抽取候选
+→ 标准化
+→ 查找同类已有记忆
+→ 合并新旧证据
+→ 计算统一 confidence
+→ 作出统一 MemoryDecision
+→ 复用原 updater/pipeline 写入
+→ 触发已有索引同步
 ```
 
-- Fact：当前有效、无未决强反证的断言优先；
-- Preference：scope 最精确、显式来源、适用性高的优先；
-- Knowledge：任务签名相似、utility 下界高、有近期成功复用的优先；
-- `review`、`superseded` 不应作为默认上下文直接注入 Agent，只能在调试/审计模式返回。
+重点是先合并证据、后计算置信度、再决定写入，而不是各模块分别在不同阶段计算或覆盖。
+
+### 7.3 Fact 的时间修正（不改外部结构）
+
+保留现有 `Fact.observed_at` 字段，但其赋值顺序改为：
+
+1. 优先 `MemoryEvent.occurred_at`；
+2. 其次工具结果中可解析且可信的时间；
+3. 最后才使用当前提交时间；
+4. 若用了提交时间，在 metadata 或 source_id 标记为 `recorded_at_fallback`。
+
+这不要求新增 `valid_from/valid_to` 字段，就能先避免“历史事件因今天写入而被视为最新”的主要问题。
+
+---
+
+## 8. 与既有数据结构、接口的兼容策略
+
+### 8.1 明确不改动的内容
+
+第一阶段应保持以下内容不变：
+
+- `MemoryEvent`、`PreferenceMemory`、`KnowledgeMemory`、`Fact` 的公共字段；
+- 当前 API 请求/响应主体；
+- `FactMemoryPipeline.propose()/commit()/ingest()` 的公开方法；
+- `PreferenceExtractor`、`PreferenceUpdater`、`KnowledgeExtractor`、`KnowledgeUpdater` 的主要调用方式；
+- 现有 repositories、`MemoryWriteService`、`FactIndexService` 的公开调用方式；
+- 已有 evidence JSON 字段、JSONL 存储和 Fact evidence 表的兼容读取能力。
+
+### 8.2 允许的内部新增
+
+允许新增但不强制暴露给 API 的内容：
+
+- `BaseMemoryHandler`、三个 Handler；
+- `MemoryCandidate`、`MemoryDecision`；
+- `ConfidenceFactors`、`UnifiedConfidenceCalculator`；
+- `EvidenceMerger`；
+- `StructuredLLMAdapter`；
+- 可选 metadata：`confidence_version`、`confidence_reason`、`event_id`、`occurred_at`。如果现有对象没有合适字段，可以先放在已有 `metadata` / `extra_payload` 中，而非迁移表结构。
+
+### 8.3 存储演进原则
+
+第一阶段只做“逻辑统一”，不做“物理合库”：
+
+- 偏好和知识仍走 SQLAlchemy repository；
+- 事实仍可使用 `FactStore`，但由 `FactMemoryHandler` 统一编排；
+- 证据仍存原位置，但所有写入前都用 `EvidenceMerger` 去重；
+- 只有当跨类型证据审计、复杂撤回、数据量增长已成为真实痛点时，再考虑公共证据关系表和统一仓储。
 
 ---
 
 ## 9. 分阶段实施计划
 
-### Phase 0：建立基线与防回归（约 2–4 天）
+### Phase 0：基线与统一契约测试（2–3 天）
 
-1. 为当前三类记忆补齐端到端样例：同一 `MemoryEvent` 分别产生 fact/preference/knowledge，验证 user/scope/证据/索引。
-2. 固化“入口一致性”测试：`EventIngestionService` 与 `EventProcessingCoordinator` 要么产生同等结果，要么后者明确只允许开发模式。
-3. 新增关键契约测试：
-   - 同一 event 重试不重复增加证据权重；
-   - 同一工具调用中 request 参数不会被当作事实证据；
-   - 事件被删除后关联记忆重算；
-   - 低质量规则回退不能自动激活事实；
-   - 事实的 `occurred_at/observed_at/recorded_at` 不混淆。
-4. 记录现有数据迁移数量、重复率、缺失 event_id 的事实数量和置信度分布。
+1. 新建 `MemoryDecision` 的最小实现和映射测试；
+2. 建立同一事件分别经过 Fact/Preference/Knowledge 的端到端测试；
+3. 固化重复 event、低质量 event、冲突 event、不同 scope event 的预期行为；
+4. 验证 `EventIngestionService` 与 `EventProcessingCoordinator` 不会产生不可解释的差异；必要时后者只复用正式 Handler。
 
-**验收**：当前相关测试仍通过，并新增上述行为测试；所有写入入口可输出一致的 audit trace ID。
+**验收**：不改 API，现有相关测试继续通过；新增跨类型行为测试。
 
-### Phase 1：修复事实 LLM 与事件时态（约 3–5 天，P0）
+### Phase 1：统一 LLM 和证据操作（3–5 天，P0）
 
-1. 增加应用级 `StructuredLLM`，由 `create_app()` 注入；
-2. 删除事实各子模块对 DeepSeek endpoint/model 的硬依赖，保留 provider 无关的 task policy；
-3. 抽取、归一化、冲突裁决均改为 schema 校验输出；
-4. `FactCandidate` / `Fact` 增加 `event_id`、`occurred_at`、`observed_at`、`recorded_at`、`extractor_version`；
-5. 改造 `FactIngestionAdapter`：优先 mapper，区分 request/response，保留结构化 locator；
-6. LLM/规则回退统一生成 `candidate`，由 admission + confidence 决定能否激活。
+1. 实现 `StructuredLLMAdapter`，用应用级 LLM client 替换 Fact 的硬编码 DeepSeek 路径；
+2. 实现 `EvidenceMerger`，先接入三类 memory 的写入前合并；
+3. Fact 从 event 中正确获取 `occurred_at`，并保留 fallback 标记；
+4. 调整工具调用提示词和质量限制，避免调用参数污染事实；
+5. 规则回退仅生成低分候选，统一走阈值决策。
 
-**验收**：事实模块可使用当前配置中的 OpenAI / Ollama / 其他 `BaseLLMClient`；配置模型切换无需修改事实代码；所有 fact 均能反查 event/evidence。
+**验收**：切换应用 LLM 配置无需改 Fact 代码；同一证据不会重复抬升三类记忆分数。
 
-### Phase 2：统一 Evidence 与 Decision（约 5–8 天，P0）
+### Phase 2：统一 Handler 和置信度（4–6 天，P0）
 
-1. 落地 `memory_evidences`、`assertion_evidence_links`、`memory_decisions`；
-2. 抽取器只返回 `MemoryCandidate + EvidenceDraft`；
-3. 写入服务以单事务写 projection、evidence、links、audit、outbox；
-4. 为事实建立 `FactProjection`，在新写路径不再调用独立 `FactStore.insert_fact()`；
-5. 让偏好/知识从 JSON evidence 读取路径逐步迁移到 relation 表，旧字段作为只读兼容缓存；
-6. 遗忘、撤回、重放事件均通过 evidence link 级联重算。
+1. 实现 `BaseMemoryHandler` 和三个 Handler；
+2. 实现 `UnifiedConfidenceCalculator`，先以同一公式输出新分数；
+3. 子类只提供因子和权重配置，删除/停用三套独立主公式；
+4. `MemoryDecision` 映射回已有 updater、pipeline、冲突记录；
+5. 保留现有 `confidence` 字段作为最终写入字段，不增加 API 字段；需要解释时优先写 `extra_payload/metadata`。
 
-**验收**：任意 active memory 在控制台/API 中可列出完整证据、来源、支持/反驳关系和决策；数据库与索引可通过 outbox 恢复一致。
+**验收**：三个 Handler 都有相同的 `process → decision → apply` 方法链；置信度实现只有一个核心公式。
 
-### Phase 3：置信度引擎替换（约 5–8 天，P1）
+### Phase 3：入口收敛和轻量运维优化（2–4 天，P1）
 
-1. 新建 `core/confidence/`，提供：
-   - `EvidenceAggregator`；
-   - `FactConfidencePolicy`；
-   - `PreferenceApplicabilityPolicy`；
-   - `KnowledgeUtilityPolicy`；
-   - `ConfidenceExplainer`；
-   - 统一 `recompute(assertion_id)` 接口。
-2. 双写/影子计算：保留原 `confidence`，同时生成 `confidence_v2`；
-3. 通过真实或合成标注集计算 Brier score、ECE、覆盖率、分桶准确率；
-4. 达到设定的校准目标后，用 v2 作为检索和状态转换依据；
-5. 旧计算器保留一版兼容期后删除。
+1. 生产路径统一通过 ingestion/executor/handler；
+2. 演示协调器只调用 handler，不再自己分叉抽取和写入逻辑；
+3. 将重复的冲突状态映射为 `MemoryDecision`；
+4. 在检索重排中保留现有 `confidence` 使用方式，后续可增加相同的 freshness 轻量乘子；
+5. 观察实际数据量与审计需求，再决定是否做物理存储合并。
 
-**验收**：所有置信度均可由 evidence link 和 policy version 完整复算；事实、偏好、知识可分别校准和比较，不再共享错误语义。
-
-### Phase 4：统一冲突、生命周期、检索（约 4–6 天，P1）
-
-1. 引入通用 `MemoryDecision` 状态机，事实专有裁决输出映射到通用 decision；
-2. 用 valid-time / transaction-time 支持事实历史；
-3. 将 `EventProcessingCoordinator` 收敛为测试/演示 façade，生产路径仅走 ingestion + executor；
-4. 全量检索引入 kind-aware confidence、scope 和 freshness；
-5. 清理独立 `FactStore` 写路径、重复 JSONL evidence 持久化。
-
-**验收**：任何写入、冲突、遗忘、索引同步都能在同一 trace/audit 中查询；无生产入口绕过 Safety Gate、统一写入和置信度引擎。
+**验收**：同一输入从不同入口获得一致的记忆类型、证据数量、confidence 和决策。
 
 ---
 
-## 10. 迁移与兼容策略
+## 10. 关键测试清单
 
-### 10.1 数据迁移
-
-1. 新表先上线，旧表保持只读/双写；
-2. 对 Preference/Knowledge：把 JSON `evidences` 转换为 `memory_evidences` + links；内容哈希去重；
-3. 对 Fact：将 `source_text/source_id/observed_at` 迁为证据和断言字段；缺失 `event_id` 的历史记录标记 `legacy_import`；
-4. 给全部历史断言生成 `canonical_key`、`root_id`、`confidence_policy_version`；
-5. 先离线影子重算，不立即改变 active/review 状态；
-6. 完成采样审查后再切读，保留 rollback 开关。
-
-### 10.2 API 兼容
-
-- 继续返回当前 `FactMemory`、`PreferenceMemory`、`KnowledgeMemory` 响应形态；
-- 新增只读字段：`confidence_components`、`evidence_summary`、`decision_status`、`valid_time`；
-- 保留旧 `confidence`，文档标记为派生兼容字段；
-- 新的写入 API 支持 `dry_run=true`，返回 candidate、证据、决策和预估置信度，便于前端人工确认。
+1. **基类一致性**：三个 Handler 均实现相同处理阶段，且返回 `MemoryDecision`；
+2. **接口兼容**：现有 API 及 `FactMemoryPipeline` / updater 的公开方法测试不变；
+3. **置信度一致性**：同一组 `ConfidenceFactors` 在三类记忆中得到同样分数；仅权重配置不同；
+4. **重复证据**：同一个 `event_id` 重试多次，evidence 不重复，confidence 不上升；
+5. **来源权重**：显式用户偏好高于一次隐式行为；成功工具结果高于普通文本抽取；
+6. **低质量回退**：规则抽取或 partial tool result 不能自动进入高置信 active；
+7. **Fact 时间**：历史 event 的 Fact 使用 `occurred_at`，不是当前 commit 时间；
+8. **工具参数污染**：工具调用参数不能作为 Fact 的正向证据；
+9. **冲突统一性**：三类记忆冲突都能映射为 `new/update/coexist/duplicate/review/reject`；
+10. **入口一致性**：正式接入与演示入口对同一 event 使用同一 handler 后结果一致。
 
 ---
 
-## 11. 推荐目录调整
+## 11. 推荐目录与改动范围
 
 ```text
 memoryhub/core/
   memory/
-    models.py              # Candidate / Assertion / EvidenceLink / Decision
-    service.py             # 统一命令与事务编排接口
-    state_machine.py
-    outbox.py
-  confidence/
-    base.py
-    evidence_aggregator.py
-    fact.py
-    preference.py
-    knowledge.py
-    explainer.py
-  llm/
-    structured.py          # schema validation + task policy + telemetry
-    tasks.py
+    base.py               # BaseMemoryHandler / Candidate / Decision
+    confidence.py         # 唯一核心公式与类型权重配置
+    evidence.py           # 统一证据规范化、去重、合并
+    llm.py                # 应用级 LLM 的结构化适配器
   fact/
-    projection.py          # 三元组、实体、谓词领域投影
-    extractor.py
-    normalizer.py
-    resolver.py
+    handler.py            # 新增，复用已有 extractor/normalizer/pipeline
   preference/
-    projection.py
-    extractor.py
-    policy.py
+    handler.py            # 新增，复用已有 extractor/updater
   knowledge/
-    projection.py
-    extractor.py
-    evaluator.py
-  ingestion/
-    service.py
-    extraction.py
-    mappers.py             # 可信工具结果映射器
+    handler.py            # 新增，复用已有 extractor/updater
 ```
 
-删除/迁移目标：
+优先修改的既有文件：
 
-- `core/fact/llm.py`：迁入统一 `core/llm/structured.py`；
-- 事实模块内硬编码 `DEEPSEEK_*`：删除；
-- `storage/evidence_store.py`：过渡期只读导入工具，主证据写入关系表；
-- `core/processing.py`：去除生产业务语义，保留为测试/演示适配器或直接合并至标准 ingestion 路径。
+- `memoryhub/core/fact/extractor.py`：移除硬编码模型/端点依赖，接入统一 LLM Adapter；
+- `memoryhub/core/fact/normalizer.py`、`memoryhub/core/fact/conflict.py`：同上；
+- `memoryhub/core/fact/event_adapter.py`：补充 event 时间、工具结果与参数的区分；
+- `memoryhub/core/ingestion/extraction.py`：改为调用各 Handler 的统一处理接口；
+- `memoryhub/core/processing.py`：复用 Handler，避免演示路径另行处理；
+- `memoryhub/core/preference/confidence.py`、`memoryhub/core/knowledge/confidence.py`：改为对统一计算器的兼容包装，逐步移除各自复杂主公式。
 
----
+不应在第一阶段修改：
 
-## 12. 指标与测试建议
-
-### 12.1 线上指标
-
-- 各记忆类型：candidate → active/review/archive 转化率；
-- 证据覆盖率：active memory 中有 `event_id + locator` 的比例；
-- 证据独立度：每个 active memory 的独立 source group 分布；
-- 事实冲突率、自动裁决率、人工升级率、错误覆盖率；
-- LLM：task 维度成功率、schema 失败率、重试率、P50/P95、单位候选成本；
-- Outbox：积压量、索引延迟、重放成功率；
-- 置信度：Brier score、ECE、分桶真实命中率；
-- 检索：按 memory kind 的 Recall/NDCG，以及“低置信错误注入率”。
-
-### 12.2 最关键的回归测试
-
-1. **端到端证据追溯**：给定 event，能从检索结果反查 assertion → links → evidence → event/工具字段路径。
-2. **幂等性**：同一 event 重试 N 次，assertion、evidence link、confidence 均不重复增加。
-3. **时态事实**：历史事实与当前事实可并存；当前查询只取有效区间，历史查询可复原。
-4. **工具参数污染**：请求中的“期望负责人=张三”，工具响应为“负责人=李四”，只能以李四作为事实支持。
-5. **跨类型联动**：用户明确偏好影响知识模板选择，但不得修改客观 Fact；项目事实变化可使依赖该事实的知识进入 review。
-6. **遗忘级联**：删除唯一支持证据后，相关 assertion 自动降级，索引不再默认返回。
-7. **置信校准**：固定标注集上，升级后的 policy 不得劣于旧算法的 Brier/ECE，并输出可解释差异。
-8. **入口一致性**：生产写入入口没有绕过 safety、quality、evidence、outbox 或统一 LLM task policy。
+- `memoryhub/adapter/schemas.py` 的公共模型字段；
+- 当前 REST API 的请求/响应契约；
+- 所有存储表的主结构；
+- 事实实体/谓词本体与检索索引的基本能力。
 
 ---
 
-## 13. 建议的首个开发迭代（最小切片）
+## 12. 结论
 
-为控制风险，首个迭代不直接做全量迁移，建议只完成以下可交付切片：
+三种记忆的统一，不应依赖大规模改表、增加多套复杂对象或使用难以调参的概率算法。更合适的路径是：
 
-1. 建立 `StructuredLLM` 并替换事实提取 + 冲突裁决的硬编码 DeepSeek 调用；
-2. 给 `FactCandidate/Fact` 增加 `event_id`、`event occurred_at` 和结构化证据 locator；
-3. 引入 `EvidenceDraft` 与 `MemoryDecision`（先只供 Fact 使用）；
-4. 将 Fact 写入改为通过 `MemoryWriteService` 的事务入口，同时写入统一 evidence link；
-5. 增加 `confidence_components`，先保留现有事实 confidence 作为 `extraction_score`，不直接改变检索排序；
-6. 做上述四个 Fact 重点回归测试（幂等、工具参数污染、时态、LLM schema fallback）。
+> **统一处理基类、统一证据工具、统一置信度公式、统一决策对象、统一 LLM 入口；保留三种记忆各自的内容模型、仓储和少量领域规则。**
 
-这个切片能先消除最危险的 LLM 和证据旁路问题，并为偏好/知识迁移验证统一内核是否合理；随后再迁移两者的置信度和证据存储。
+这样既能获得一致性：
 
----
+- 方法名称和处理顺序一致；
+- 置信度含义、公式、阈值一致；
+- 证据去重、合并和解释一致；
+- 冲突/更新决策一致；
+- LLM 配置和失败回退一致；
 
-## 14. 结论
+又能保持项目稳定：
 
-本项目下一阶段的重点不应是继续给三个模块分别加规则或微调公式，而应把它们共同依赖的“记忆结论形成机制”抽出来：**事件 → 证据 → 候选 → 决策 → 类型投影 → 可复算置信度 → 可恢复索引**。
+- 不要求改变现有数据结构；
+- 不要求修改接口输入输出；
+- 不要求一次性迁移事实存储；
+- 可以按 Fact → Preference → Knowledge 的顺序逐步接入；
+- 每一步都能用现有测试和新增契约测试验证。
 
-这样做能同时解决：
-
-- 知识、事实、偏好互不联动；
-- 证据链不能统一追溯/撤回；
-- 置信度无法解释、不可比较、难校准；
-- 事实 LLM 调用配置分叉、结构化输出不稳；
-- 事实更新误把写入时间当作事实时间；
-- 多入口与多存储带来的行为漂移。
-
-建议优先落地 Phase 1 与 Phase 2：先标准化事实的 LLM 与证据写入，再把统一内核扩展到偏好和知识。这样能够以较低迁移风险获得最高的架构收益。
+建议将 **Phase 1 + Phase 2** 作为下一轮开发目标：先修复事实 LLM 分叉与证据操作，再落地统一 Handler 和轻量置信度引擎。这是风险最低、收益最高、最符合当前项目阶段的重构切片。

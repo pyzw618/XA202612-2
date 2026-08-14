@@ -19,22 +19,26 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from .llm import build_chat_client
+from memoryhub.core.memory.llm import StructuredLLMAdapter
 
-from .models import Entity, PredicateDef
-from .store import FactStore
 from .embedding_index import EmbeddingIndex, bigram_containment
+from .llm import build_chat_client
+from .models import Entity, PredicateDef
 from .prompts import (
-    ENTITY_NORMALIZE_SYSTEM, ENTITY_NORMALIZE_USER,
-    PREDICATE_NORMALIZE_SYSTEM, PREDICATE_NORMALIZE_USER,
-    ALIAS_GENERATION_SYSTEM, ALIAS_GENERATION_USER,
+    ALIAS_GENERATION_SYSTEM,
+    ALIAS_GENERATION_USER,
+    ENTITY_NORMALIZE_SYSTEM,
+    ENTITY_NORMALIZE_USER,
+    PREDICATE_NORMALIZE_SYSTEM,
+    PREDICATE_NORMALIZE_USER,
 )
+from .store import FactStore
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_ONTOLOGY = Path(__file__).parent / "predicate_ontology.json"
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-chat"
+DEFAULT_BASE_URL = ""
+DEFAULT_MODEL = ""
 VECTOR_SEARCH_LIMIT = 50  # 同类型实体全量发给LLM（量小，不截断）
 
 # 关键词匹配阈值：bigram 包含度 >= 此值 → 直接命中，不调 LLM
@@ -45,11 +49,41 @@ PREDICATE_KEYWORD_THRESHOLD = 0.45  # 谓词短，阈值放低
 
 def _build_llm_client(api_key: str = "", llm_client=None):
     return build_chat_client(
-        api_key=api_key, llm_client=llm_client, base_url=DEEPSEEK_BASE_URL
+        api_key=api_key, llm_client=llm_client, base_url=DEFAULT_BASE_URL
     )
 
 
+def _parse_object(value):
+    if not isinstance(value, dict):
+        raise ValueError("LLM JSON response must be an object")
+    return value
+
+
+def _generate_json(adapter, client, *, task_name: str, system_prompt: str, prompt: str):
+    if adapter is not None:
+        return adapter.generate_json(
+            task_name=task_name,
+            system_prompt=system_prompt,
+            prompt=prompt,
+            parser=_parse_object,
+        )
+    response = client.chat.completions.create(
+        model=DEFAULT_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.0,
+        max_tokens=256,
+    )
+    raw = response.choices[0].message.content.strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`").removeprefix("json").strip()
+    return _parse_object(json.loads(raw))
+
+
 # ─── 实体归一化 ───────────────────────────────────────────────────────
+
 
 class EntityNormalizer:
     """
@@ -65,29 +99,36 @@ class EntityNormalizer:
     # 向量直接命中阈值：按嵌入模式自适应
     # sentence-transformers 语义向量分辨力强，阈值可以更高
     # char n-gram 分值整体偏低，阈值要放低但 gap 要求更严
-    VEC_THRESHOLD_ST = 0.88    # 语义向量阈值
+    VEC_THRESHOLD_ST = 0.88  # 语义向量阈值
     VEC_THRESHOLD_FALLBACK = 0.78  # char n-gram 阈值
-    VEC_MIN_GAP = 0.12         # top-1 与 top-2 的最小分差（防歧义）
+    VEC_MIN_GAP = 0.12  # top-1 与 top-2 的最小分差（防歧义）
 
     def __init__(self, store: FactStore, api_key: str = "", llm_client=None):
         self.store = store
         self._llm = _build_llm_client(api_key, llm_client)
+        self._adapter = (
+            StructuredLLMAdapter(llm_client)
+            if callable(getattr(llm_client, "generate", None))
+            else None
+        )
         self._index = EmbeddingIndex()
         self._using_st = self._check_st_available()
-        self._vec_threshold = self.VEC_THRESHOLD_ST if self._using_st else self.VEC_THRESHOLD_FALLBACK
+        self._vec_threshold = (
+            self.VEC_THRESHOLD_ST if self._using_st else self.VEC_THRESHOLD_FALLBACK
+        )
         self._build_index()
 
     @staticmethod
     def _check_st_available() -> bool:
         try:
-            from sentence_transformers import SentenceTransformer
+
             return True
         except Exception:
             return False
 
     def _build_index(self):
         """从 DB 加载已有实体到向量索引"""
-        import sqlite3
+
         rows = self.store._conn.execute("SELECT * FROM entities").fetchall()
         for row in rows:
             aliases = json.loads(row["aliases"])
@@ -133,11 +174,13 @@ class EntityNormalizer:
         # ── 4. 向量粗筛 → 高分直接命中 / 否则 LLM 精判 ──
         type_prefix = f"entity:{entity_type.lower()}:"
         candidates = self._index.search(
-            text, top_k=max(VECTOR_SEARCH_LIMIT, len(self._index)),
+            text,
+            top_k=max(VECTOR_SEARCH_LIMIT, len(self._index)),
             type_filter=[type_prefix],
         )
         candidates = [
-            item for item in candidates
+            item
+            for item in candidates
             if self.store.get_entity(item[0], user_id=user_id) is not None
         ][:VECTOR_SEARCH_LIMIT]
         if candidates:
@@ -145,7 +188,9 @@ class EntityNormalizer:
             if self._vector_confident(candidates):
                 eid = candidates[0][0]
                 self._add_alias_if_new(eid, text, user_id=user_id)
-                logger.info(f"向量直接命中: '{text}' → {eid} (score={candidates[0][1]:.3f})")
+                logger.info(
+                    f"向量直接命中: '{text}' → {eid} (score={candidates[0][1]:.3f})"
+                )
                 return eid
             # 否则 LLM 精判（低分也可能匹配，LLM 说了算）
             eid = self._llm_disambiguate(text, entity_type, candidates, user_id=user_id)
@@ -174,7 +219,9 @@ class EntityNormalizer:
                 return False
         return True
 
-    def _keyword_match(self, text: str, entity_type: str, user_id: str = "default") -> Optional[str]:
+    def _keyword_match(
+        self, text: str, entity_type: str, user_id: str = "default"
+    ) -> Optional[str]:
         """
         关键词匹配：遍历同类型实体的所有名字，
         bigram 包含度 ≥ KEYWORD_CONFIDENT_THRESHOLD 的直接返回实体 ID。
@@ -196,11 +243,16 @@ class EntityNormalizer:
             return best_eid
         return None
 
-    def _create_entity(self, text: str, entity_type: str, user_id: str = "default") -> str:
+    def _create_entity(
+        self, text: str, entity_type: str, user_id: str = "default"
+    ) -> str:
         """创建新实体，知名类型用 LLM 生成别名 + 后续归一化命中时自动追加"""
         # 只对 Organization/Location 调 LLM 生成别名（人名的别名不可靠，靠实际使用长出来）
-        guessed_aliases = self._generate_aliases(text, entity_type) \
-            if entity_type in ("Organization", "Location") else []
+        guessed_aliases = (
+            self._generate_aliases(text, entity_type)
+            if entity_type in ("Organization", "Location")
+            else []
+        )
 
         seen = {text}
         all_aliases = [text]
@@ -219,28 +271,24 @@ class EntityNormalizer:
         )
         self.store.upsert_entity(entity)
         self._index.add(entity.entity_id, entity.canonical_name, entity.aliases)
-        logger.info(f"创建新实体: {entity.entity_id} ('{text}', {entity_type}), aliases={all_aliases}")
+        logger.info(
+            f"创建新实体: {entity.entity_id} ('{text}', {entity_type}), aliases={all_aliases}"
+        )
         return entity.entity_id
 
     def _generate_aliases(self, name: str, entity_type: str) -> list[str]:
         """LLM 为知名实体生成常见别名，不确定时返回空列表"""
         try:
-            resp = self._llm.chat.completions.create(
-                model=DEEPSEEK_MODEL,
-                messages=[
-                    {"role": "system", "content": ALIAS_GENERATION_SYSTEM},
-                    {"role": "user", "content": ALIAS_GENERATION_USER.format(
-                        name=name, entity_type=entity_type,
-                    )},
-                ],
-                temperature=0.0, max_tokens=128,
+            data = _generate_json(
+                self._adapter,
+                self._llm,
+                task_name="fact_entity_alias_generation",
+                system_prompt=ALIAS_GENERATION_SYSTEM,
+                prompt=ALIAS_GENERATION_USER.format(
+                    name=name,
+                    entity_type=entity_type,
+                ),
             )
-            raw = resp.choices[0].message.content.strip()
-            if raw.startswith("```"):
-                raw = raw.strip("`").strip()
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            data = json.loads(raw)
             aliases = data.get("aliases", [])
             if isinstance(aliases, list):
                 return [a for a in aliases if isinstance(a, str) and a.strip()]
@@ -248,9 +296,13 @@ class EntityNormalizer:
             pass
         return []
 
-    def _llm_disambiguate(self, name: str, entity_type: str,
-                          candidates: list[tuple[str, float]],
-                          user_id: str = "default") -> Optional[str]:
+    def _llm_disambiguate(
+        self,
+        name: str,
+        entity_type: str,
+        candidates: list[tuple[str, float]],
+        user_id: str = "default",
+    ) -> Optional[str]:
         """只在 top-k 候选中让 LLM 判断"""
         existing_str = ""
         for cid, score in candidates:
@@ -265,23 +317,17 @@ class EntityNormalizer:
             return None
 
         try:
-            resp = self._llm.chat.completions.create(
-                model=DEEPSEEK_MODEL,
-                messages=[
-                    {"role": "system", "content": ENTITY_NORMALIZE_SYSTEM},
-                    {"role": "user", "content": ENTITY_NORMALIZE_USER.format(
-                        entity_type=entity_type, name=name,
-                        existing_entities=existing_str,
-                    )},
-                ],
-                temperature=0.0, max_tokens=256,
+            data = _generate_json(
+                self._adapter,
+                self._llm,
+                task_name="fact_entity_normalization",
+                system_prompt=ENTITY_NORMALIZE_SYSTEM,
+                prompt=ENTITY_NORMALIZE_USER.format(
+                    entity_type=entity_type,
+                    name=name,
+                    existing_entities=existing_str,
+                ),
             )
-            raw = resp.choices[0].message.content.strip()
-            if raw.startswith("```"):
-                raw = raw.strip("`").strip()
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            data = json.loads(raw)
             if data.get("is_new"):
                 return None
             eid = data.get("entity_id", "")
@@ -305,6 +351,7 @@ class EntityNormalizer:
 
 # ─── 谓词归一化 ──────────────────────────────────────────────────────
 
+
 class PredicateNormalizer:
     """
     与实体归一化同构的流水线：
@@ -316,17 +363,30 @@ class PredicateNormalizer:
     4. 创建新谓词
     """
 
-    VEC_THRESHOLD_ST = 0.90      # 语义向量高分阈值（谓词短，阈值比实体略高）
+    VEC_THRESHOLD_ST = 0.90  # 语义向量高分阈值（谓词短，阈值比实体略高）
     VEC_THRESHOLD_FALLBACK = 0.82
     VEC_MIN_GAP = 0.12
 
-    def __init__(self, store: FactStore, ontology_path: Optional[str] = None, api_key: str = "", llm_client=None):
+    def __init__(
+        self,
+        store: FactStore,
+        ontology_path: Optional[str] = None,
+        api_key: str = "",
+        llm_client=None,
+    ):
         self.store = store
         self._llm = _build_llm_client(api_key, llm_client)
+        self._adapter = (
+            StructuredLLMAdapter(llm_client)
+            if callable(getattr(llm_client, "generate", None))
+            else None
+        )
         self._alias_to_id: dict[str, str] = {}
         self._index = EmbeddingIndex()
         self._using_st = EntityNormalizer._check_st_available()
-        self._vec_threshold = self.VEC_THRESHOLD_ST if self._using_st else self.VEC_THRESHOLD_FALLBACK
+        self._vec_threshold = (
+            self.VEC_THRESHOLD_ST if self._using_st else self.VEC_THRESHOLD_FALLBACK
+        )
         self._load_ontology(ontology_path)
         self._build_index()
 
@@ -385,7 +445,9 @@ class PredicateNormalizer:
             if self._vector_confident(candidates):
                 pid = candidates[0][0]
                 self._add_alias_if_new(pid, text)
-                logger.info(f"向量直接命中谓词: '{text}' → {pid} (score={candidates[0][1]:.3f})")
+                logger.info(
+                    f"向量直接命中谓词: '{text}' → {pid} (score={candidates[0][1]:.3f})"
+                )
                 return pid
             # 否则 LLM 精判（低分也可能匹配，LLM 说了算）
             pid = self._llm_disambiguate(text, candidates)
@@ -426,8 +488,9 @@ class PredicateNormalizer:
         logger.info(f"创建新谓词: {pred.predicate_id} ('{text}')")
         return pred.predicate_id
 
-    def _llm_disambiguate(self, pred_text: str,
-                          candidates: list[tuple[str, float]]) -> Optional[str]:
+    def _llm_disambiguate(
+        self, pred_text: str, candidates: list[tuple[str, float]]
+    ) -> Optional[str]:
         existing_str = ""
         for cid, score in candidates:
             pred = self.store.get_predicate(cid)
@@ -441,22 +504,16 @@ class PredicateNormalizer:
             return None
 
         try:
-            resp = self._llm.chat.completions.create(
-                model=DEEPSEEK_MODEL,
-                messages=[
-                    {"role": "system", "content": PREDICATE_NORMALIZE_SYSTEM},
-                    {"role": "user", "content": PREDICATE_NORMALIZE_USER.format(
-                        pred_text=pred_text, existing_predicates=existing_str,
-                    )},
-                ],
-                temperature=0.0, max_tokens=256,
+            data = _generate_json(
+                self._adapter,
+                self._llm,
+                task_name="fact_predicate_normalization",
+                system_prompt=PREDICATE_NORMALIZE_SYSTEM,
+                prompt=PREDICATE_NORMALIZE_USER.format(
+                    pred_text=pred_text,
+                    existing_predicates=existing_str,
+                ),
             )
-            raw = resp.choices[0].message.content.strip()
-            if raw.startswith("```"):
-                raw = raw.strip("`").strip()
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            data = json.loads(raw)
             if data.get("is_new"):
                 return None
             pid = data.get("predicate_id", "")

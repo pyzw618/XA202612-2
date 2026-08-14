@@ -7,7 +7,12 @@ import json
 import re
 from typing import Any
 
-from memoryhub.adapter.schemas import ExtractionType, KnowledgeMemory, MemoryEvent, PreferenceMemory
+from memoryhub.adapter.schemas import (
+    ExtractionType,
+    KnowledgeMemory,
+    MemoryEvent,
+    PreferenceMemory,
+)
 from memoryhub.core.knowledge.updater import KnowledgeUpdater
 
 
@@ -24,6 +29,9 @@ class ExtractionExecutor:
         fact_ingestion_adapter=None,
         knowledge_merge_config=None,
         conflict_repo=None,
+        preference_handler=None,
+        knowledge_handler=None,
+        fact_handler=None,
     ) -> None:
         self.memory_write_service = memory_write_service
         self.preference_extractor = preference_extractor
@@ -35,10 +43,17 @@ class ExtractionExecutor:
             conflict_repo=conflict_repo,
         )
         self.fact_ingestion_adapter = fact_ingestion_adapter
+        self.preference_handler = preference_handler
+        self.knowledge_handler = knowledge_handler
+        self.fact_handler = fact_handler
 
     @staticmethod
     def execution_key(extractor_type: str, event_ids: list[str]) -> str:
-        kind = extractor_type.value if hasattr(extractor_type, "value") else str(extractor_type)
+        kind = (
+            extractor_type.value
+            if hasattr(extractor_type, "value")
+            else str(extractor_type)
+        )
         normalized = "|".join(sorted(dict.fromkeys(event_ids)))
         return hashlib.sha256(f"{kind}|{normalized}".encode("utf-8")).hexdigest()
 
@@ -83,6 +98,21 @@ class ExtractionExecutor:
         return re.fullmatch(rf"{prefix}_[0-9a-f]{{8}}", memory_id or "") is not None
 
     def run_preference(self, event: MemoryEvent) -> int:
+        if self.preference_handler is not None:
+            decisions = self.preference_handler.process(event)
+            execution_key = self.execution_key(
+                ExtractionType.PREFERENCE, [event.event_id]
+            )
+            for index, decision in enumerate(decisions):
+                candidate = decision.candidate
+                if candidate is not None and self._uses_generated_id(
+                    candidate.payload.memory_id, "pref"
+                ):
+                    candidate.payload.memory_id = self._memory_id(
+                        "pref", execution_key, index, candidate.payload
+                    )
+                self.preference_handler.apply(decision)
+            return len(decisions)
         if self.preference_extractor is None:
             return 0
         execution_key = self.execution_key(ExtractionType.PREFERENCE, [event.event_id])
@@ -102,6 +132,34 @@ class ExtractionExecutor:
         return len(memories)
 
     def run_knowledge(self, events: list[MemoryEvent]) -> int:
+        if self.knowledge_handler is not None and events:
+            decisions = self.knowledge_handler.process(events)
+            for index, decision in enumerate(decisions):
+                candidate = decision.candidate
+                if candidate is not None and self._uses_generated_id(
+                    candidate.payload.memory_id, "know"
+                ):
+                    semantic_key = self.execution_key(
+                        ExtractionType.KNOWLEDGE,
+                        [
+                            candidate.payload.user_id,
+                            str(
+                                getattr(
+                                    candidate.payload.knowledge_type,
+                                    "value",
+                                    candidate.payload.knowledge_type,
+                                )
+                            ),
+                            candidate.payload.scope.scene,
+                            candidate.payload.scope.task_type,
+                            candidate.payload.scope.app,
+                        ],
+                    )
+                    candidate.payload.memory_id = self._memory_id(
+                        "know", semantic_key, index, candidate.payload
+                    )
+                self.knowledge_handler.apply(decision)
+            return len(decisions)
         if self.knowledge_extractor is None or not events:
             return 0
         memories = list(self.knowledge_extractor.extract_from_trajectory(events))
@@ -113,7 +171,11 @@ class ExtractionExecutor:
                     ExtractionType.KNOWLEDGE,
                     [
                         memory.user_id,
-                        str(getattr(memory.knowledge_type, "value", memory.knowledge_type)),
+                        str(
+                            getattr(
+                                memory.knowledge_type, "value", memory.knowledge_type
+                            )
+                        ),
                         memory.scope.scene,
                         memory.scope.task_type,
                         memory.scope.app,
@@ -124,16 +186,29 @@ class ExtractionExecutor:
         return len(memories)
 
     def run_fact(self, event: MemoryEvent) -> int:
+        if self.fact_handler is not None:
+            return sum(
+                1
+                for decision in self.fact_handler.process_and_apply(event)
+                if decision.action not in {"reject", "review"}
+            )
         if self.fact_ingestion_adapter is None:
             return 0
         return len(self.fact_ingestion_adapter.ingest_event(event) or [])
 
     def supports(self, extractor_type: str) -> bool:
-        kind = extractor_type.value if hasattr(extractor_type, "value") else str(extractor_type)
+        kind = (
+            extractor_type.value
+            if hasattr(extractor_type, "value")
+            else str(extractor_type)
+        )
         return {
-            ExtractionType.PREFERENCE.value: self.preference_extractor is not None,
-            ExtractionType.KNOWLEDGE.value: self.knowledge_extractor is not None,
-            ExtractionType.FACT.value: self.fact_ingestion_adapter is not None,
+            ExtractionType.PREFERENCE.value: self.preference_handler is not None
+            or self.preference_extractor is not None,
+            ExtractionType.KNOWLEDGE.value: self.knowledge_handler is not None
+            or self.knowledge_extractor is not None,
+            ExtractionType.FACT.value: self.fact_handler is not None
+            or self.fact_ingestion_adapter is not None,
         }.get(kind, False)
 
     def _get_existing(self, memory: PreferenceMemory | KnowledgeMemory):

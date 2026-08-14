@@ -27,12 +27,18 @@ class FactIngestionAdapter:
 
         event_text = str(getattr(event, "text", "") or "").strip()
         if event_text:
-            candidates.extend(self.pipeline.propose(
-                event_text,
-                source_id=f"{event_id}:text" if event_id else "event:text",
-                project_id=project_id_hint,
-                metadata={**base_metadata, "content_source": "event_text"},
-            ))
+            candidates.extend(
+                self.pipeline.propose(
+                    event_text,
+                    source_id=f"{event_id}:text" if event_id else "event:text",
+                    project_id=project_id_hint,
+                    metadata={
+                        **base_metadata,
+                        "content_source": "event_text",
+                        "event_id": event_id,
+                    },
+                )
+            )
 
         for call in list(getattr(event, "tool_calls", []) or []):
             status = self._enum_value(getattr(call, "status", ""))
@@ -46,25 +52,27 @@ class FactIngestionAdapter:
             call_id = str(getattr(call, "call_id", "")).strip()
             tool_name = str(getattr(call, "tool_name", "")).strip()
             text = self.format_tool_call(call)
-            candidates.extend(self.pipeline.propose(
-                text,
-                source_id=(
-                    f"{event_id}:{call_id}"
-                    if event_id and call_id
-                    else f"{event_id or 'event'}:{tool_name or 'tool'}"
-                ),
-                project_id=project_id_hint,
-                metadata={
-                    **base_metadata,
-                    "content_source": "tool_result",
-                    "call_id": call_id,
-                    "tool_name": tool_name,
-                    "tool_status": status,
-                },
-            ))
+            candidates.extend(
+                self.pipeline.propose(
+                    text,
+                    source_id=(
+                        f"{event_id}:{call_id}"
+                        if event_id and call_id
+                        else f"{event_id or 'event'}:{tool_name or 'tool'}"
+                    ),
+                    project_id=project_id_hint,
+                    metadata={
+                        **base_metadata,
+                        "content_source": "tool_result",
+                        "call_id": call_id,
+                        "tool_name": tool_name,
+                        "tool_status": status,
+                        "event_id": event_id,
+                    },
+                )
+            )
 
         return candidates
-
 
     def ingest_event(self, event: Any):
         """Propose and commit admitted facts from one already-safe event."""
@@ -75,12 +83,14 @@ class FactIngestionAdapter:
         for candidate in self.propose_from_event(event):
             if not candidate.admission.should_remember:
                 continue
-            results.append(self.pipeline.commit(
-                candidate,
-                scope=scope,
-                project_id=project_id,
-                user_id=user_id,
-            ))
+            results.append(
+                self.pipeline.commit(
+                    candidate,
+                    scope=scope,
+                    project_id=project_id,
+                    user_id=user_id,
+                )
+            )
         return results
 
     @staticmethod
@@ -90,14 +100,18 @@ class FactIngestionAdapter:
         result = getattr(call, "result", None)
         parts = [f"工具名称：{tool_name or 'unknown'}"]
         if arguments:
-            parts.extend((
-                "调用参数：",
-                FactIngestionAdapter._json_text(arguments),
-            ))
-        parts.extend((
-            "工具返回结果：",
-            FactIngestionAdapter._json_text(result),
-        ))
+            parts.extend(
+                (
+                    "调用参数：",
+                    FactIngestionAdapter._json_text(arguments),
+                )
+            )
+        parts.extend(
+            (
+                "工具返回结果：",
+                FactIngestionAdapter._json_text(result),
+            )
+        )
         return "\n".join(parts)
 
     @staticmethod
@@ -141,6 +155,7 @@ class FactIngestionAdapter:
             "turn_id": str(getattr(event, "turn_id", "") or ""),
             "scene": str(getattr(event, "scene", "") or ""),
             "task_type": str(getattr(event, "task_type", "") or ""),
+            "occurred_at": str(getattr(event, "occurred_at", "") or ""),
             "quality_score": getattr(quality, "score", None),
             "quality_status": FactIngestionAdapter._enum_value(
                 getattr(quality, "status", "")

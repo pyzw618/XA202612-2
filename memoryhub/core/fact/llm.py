@@ -16,18 +16,24 @@ class _GenerateCompletions:
 
     def create(self, *, messages, **kwargs):
         system = "\n".join(
-            str(item.get("content", "")) for item in messages
+            str(item.get("content", ""))
+            for item in messages
             if item.get("role") == "system"
         )
         prompt = "\n".join(
-            str(item.get("content", "")) for item in messages
+            str(item.get("content", ""))
+            for item in messages
             if item.get("role") != "system"
         )
-        allowed = {key: value for key, value in kwargs.items() if key in {"temperature", "max_tokens"}}
+        allowed = {
+            key: value
+            for key, value in kwargs.items()
+            if key in {"temperature", "max_tokens"}
+        }
         response = self.client.generate(prompt, system_prompt=system, **allowed)
-        return SimpleNamespace(choices=[SimpleNamespace(
-            message=SimpleNamespace(content=response.content)
-        )])
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=response.content))]
+        )
 
 
 class _ChatWrapper:
@@ -35,7 +41,7 @@ class _ChatWrapper:
         self.chat = SimpleNamespace(completions=completions)
 
 
-def build_chat_client(*, api_key: str = "", llm_client=None, base_url: str):
+def build_chat_client(*, api_key: str = "", llm_client=None, base_url: str = ""):
     """Return an OpenAI-style chat client without requiring a remote API key at startup."""
     if llm_client is not None:
         if getattr(getattr(llm_client, "chat", None), "completions", None) is not None:
@@ -45,8 +51,14 @@ def build_chat_client(*, api_key: str = "", llm_client=None, base_url: str):
         raise TypeError("llm_client must expose generate() or chat.completions")
 
     import os
-    key = api_key or os.environ.get("DEEPSEEK_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
+
+    key = (
+        api_key
+        or os.environ.get("DEEPSEEK_API_KEY", "")
+        or os.environ.get("OPENAI_API_KEY", "")
+    )
     if not key:
         return _ChatWrapper(_UnavailableCompletions())
     from openai import OpenAI
-    return OpenAI(api_key=key, base_url=base_url)
+
+    return OpenAI(api_key=key, base_url=base_url or None)

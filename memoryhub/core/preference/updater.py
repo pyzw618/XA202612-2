@@ -6,13 +6,14 @@
 
 import json
 from datetime import datetime, timezone
+
 from memoryhub.adapter.schemas import (
     ConflictDecision,
     ConflictRecord,
-    MemoryLevel,
     MemoryStatus,
     PreferenceMemory,
 )
+from memoryhub.core.memory.evidence import EvidenceMerger
 from memoryhub.core.preference.confidence import ConfidenceCalculator
 
 
@@ -22,7 +23,9 @@ class ConflictDetector:
     def __init__(self, llm_client=None):
         self.llm_client = llm_client
 
-    def check_preference(self, old_pref: PreferenceMemory, new_pref: PreferenceMemory) -> bool:
+    def check_preference(
+        self, old_pref: PreferenceMemory, new_pref: PreferenceMemory
+    ) -> bool:
         """
         判断两条偏好是否构成冲突：
         1. scope 重叠
@@ -33,8 +36,14 @@ class ConflictDetector:
             old_pref.is_global
             or new_pref.is_global
             or (
-                (old_pref.scope.scene in ["*", new_pref.scope.scene] or new_pref.scope.scene in ["*", old_pref.scope.scene])
-                and (old_pref.scope.task_type in ["*", new_pref.scope.task_type] or new_pref.scope.task_type in ["*", old_pref.scope.task_type])
+                (
+                    old_pref.scope.scene in ["*", new_pref.scope.scene]
+                    or new_pref.scope.scene in ["*", old_pref.scope.scene]
+                )
+                and (
+                    old_pref.scope.task_type in ["*", new_pref.scope.task_type]
+                    or new_pref.scope.task_type in ["*", old_pref.scope.task_type]
+                )
             )
         )
         if not scope_overlap:
@@ -45,7 +54,9 @@ class ConflictDetector:
 
         return self._is_semantic_conflict(old_pref, new_pref)
 
-    def _is_semantic_conflict(self, old_pref: PreferenceMemory, new_pref: PreferenceMemory) -> bool:
+    def _is_semantic_conflict(
+        self, old_pref: PreferenceMemory, new_pref: PreferenceMemory
+    ) -> bool:
         """检测语义冲突"""
         if old_pref.payload.get("target") == new_pref.payload.get("target"):
             if old_pref.payload.get("value") != new_pref.payload.get("value"):
@@ -53,10 +64,11 @@ class ConflictDetector:
 
         if self.llm_client:
             prompt = (
-                f"Compare these two user preferences and return true if they logically contradict each other:\n"
+                "Compare these two user preferences and return true if they logically "
+                "contradict each other:\n"
                 f"Preference A: {old_pref.text}\n"
                 f"Preference B: {new_pref.text}\n"
-                f"Respond with JSON: {{\"conflict\": true/false}}"
+                f'Respond with JSON: {{"conflict": true/false}}'
             )
             try:
                 res = self.llm_client.generate(
@@ -77,7 +89,10 @@ class ConflictResolver:
     """冲突解决策略执行器"""
 
     def auto_resolve(
-        self, old_pref: PreferenceMemory, new_pref: PreferenceMemory, detector: ConflictDetector
+        self,
+        old_pref: PreferenceMemory,
+        new_pref: PreferenceMemory,
+        detector: ConflictDetector,
     ) -> tuple[ConflictDecision, str]:
         """
         执行决策矩阵：
@@ -92,26 +107,45 @@ class ConflictResolver:
             and old_pref.scope.task_type == new_pref.scope.task_type
         )
         if not same_scope and not old_pref.is_global and not new_pref.is_global:
-            return ConflictDecision.COEXIST, "Scopes differ; both preferences can coexist."
+            return (
+                ConflictDecision.COEXIST,
+                "Scopes differ; both preferences can coexist.",
+            )
 
         if self._is_same_content(old_pref, new_pref):
-            return ConflictDecision.MERGE, "Identical preference reinforced by new evidence."
+            return (
+                ConflictDecision.MERGE,
+                "Identical preference reinforced by new evidence.",
+            )
 
         if new_pref.extract_source == "explicit_feedback":
-            return ConflictDecision.OVERRIDE, "Explicit user feedback overrides implicit preference."
+            return (
+                ConflictDecision.OVERRIDE,
+                "Explicit user feedback overrides implicit preference.",
+            )
 
         if not detector.check_preference(old_pref, new_pref):
-            return ConflictDecision.MERGE, "Preferences are compatible and can be merged."
+            return (
+                ConflictDecision.MERGE,
+                "Preferences are compatible and can be merged.",
+            )
 
-        if new_pref.extract_source == "implicit_inference" and new_pref.confidence < 0.8:
-            return ConflictDecision.PENDING, "Implicit preference contradiction requires user confirmation."
+        if (
+            new_pref.extract_source == "implicit_inference"
+            and new_pref.confidence < 0.8
+        ):
+            return (
+                ConflictDecision.PENDING,
+                "Implicit preference contradiction requires user confirmation.",
+            )
 
-        return ConflictDecision.OVERRIDE, "Newer implicit preference overrides older record."
+        return (
+            ConflictDecision.OVERRIDE,
+            "Newer implicit preference overrides older record.",
+        )
 
     @staticmethod
-    def _is_same_content(
-        left: PreferenceMemory, right: PreferenceMemory
-    ) -> bool:
+    def _is_same_content(left: PreferenceMemory, right: PreferenceMemory) -> bool:
         """判断两条偏好是否表达相同内容（用于识别支持性证据而非冲突）。"""
         left_target = left.payload.get("target")
         right_target = right.payload.get("target")
@@ -156,7 +190,9 @@ class PreferenceUpdater:
             return preference.memory_id
 
         # 触发冲突检测与解决
-        decision, reason = self.resolver.auto_resolve(existing_pref, preference, self.detector)
+        decision, reason = self.resolver.auto_resolve(
+            existing_pref, preference, self.detector
+        )
 
         for e in preference.evidences:
             if e.decision is None:
@@ -204,7 +240,9 @@ class PreferenceUpdater:
             self._record_conflict(conflict_rec, preference.memory_id)
             return preference.memory_id
 
-    def update(self, memory_id: str, new_pref: PreferenceMemory, conflict_rec=None) -> str:
+    def update(
+        self, memory_id: str, new_pref: PreferenceMemory, conflict_rec=None
+    ) -> str:
         """更新已有偏好"""
         old_pref = self._get(memory_id)
         if old_pref is None:
@@ -225,7 +263,9 @@ class PreferenceUpdater:
         new_pref.version = old_pref.version + 1
         new_pref.updated_at = datetime.now(timezone.utc)
         # 继承旧证据链并保留新证据，交由置信度计算器基于完整证据链重算
-        new_pref.evidences = self._merge_evidences(old_pref.evidences, new_pref.evidences)
+        new_pref.evidences = self._merge_evidences(
+            old_pref.evidences, new_pref.evidences
+        )
         self.confidence_calculator.calculate(new_pref)
         self._save(new_pref)
         if conflict_rec is not None:
@@ -233,7 +273,9 @@ class PreferenceUpdater:
 
         return new_pref.memory_id
 
-    def merge(self, pref_a: PreferenceMemory, pref_b: PreferenceMemory) -> PreferenceMemory:
+    def merge(
+        self, pref_a: PreferenceMemory, pref_b: PreferenceMemory
+    ) -> PreferenceMemory:
         """Create a new active version without mutating the archived parent."""
         merged = pref_b.model_copy(deep=True)
         merged.parent_id = pref_a.memory_id
@@ -248,17 +290,8 @@ class PreferenceUpdater:
 
     @staticmethod
     def _merge_evidences(left: list, right: list) -> list:
-        """合并两条证据链，按 event_id 去重并保持先后顺序。"""
-        result: list = []
-        seen: set[str] = set()
-        for evidence in [*left, *right]:
-            key = getattr(evidence, "event_id", "") or getattr(evidence, "evidence_id", "")
-            if key and key in seen:
-                continue
-            result.append(evidence)
-            if key:
-                seen.add(key)
-        return result
+        """Compatibility wrapper around the shared deterministic evidence merger."""
+        return EvidenceMerger().normalize_and_merge([*left, *right])
 
     def archive(self, memory_id: str):
         """归档偏好"""
@@ -278,7 +311,9 @@ class PreferenceUpdater:
         while current is not None and current.memory_id not in visited:
             chain.append(current)
             visited.add(current.memory_id)
-            current = self._mock_db.get(current.parent_id) if current.parent_id else None
+            current = (
+                self._mock_db.get(current.parent_id) if current.parent_id else None
+            )
         chain.reverse()
         return chain
 
@@ -288,7 +323,8 @@ class PreferenceUpdater:
             candidates = self.pref_repo.get_active(preference.user_id)
         else:
             candidates = [
-                pref for pref in self._mock_db.values()
+                pref
+                for pref in self._mock_db.values()
                 if pref.user_id == preference.user_id
                 and pref.status == MemoryStatus.ACTIVE
             ]

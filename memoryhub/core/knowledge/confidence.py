@@ -5,6 +5,11 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from memoryhub.core.memory.confidence import (
+    ConfidenceFactors,
+    UnifiedConfidenceCalculator,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeConfidenceFactors:
@@ -17,14 +22,17 @@ class KnowledgeConfidenceFactors:
 
     def normalized(self) -> "KnowledgeConfidenceFactors":
         return KnowledgeConfidenceFactors(
-            *(_clamp(value) for value in (
-                self.event_quality,
-                self.completion,
-                self.structure,
-                self.evidence,
-                self.outcome,
-                self.consistency,
-            ))
+            *(
+                _clamp(value)
+                for value in (
+                    self.event_quality,
+                    self.completion,
+                    self.structure,
+                    self.evidence,
+                    self.outcome,
+                    self.consistency,
+                )
+            )
         )
 
 
@@ -33,20 +41,24 @@ class KnowledgeConfidenceCalculator:
 
     _WEIGHTS = (0.28, 0.20, 0.20, 0.14, 0.10, 0.08)
 
-    def score(self, factors: KnowledgeConfidenceFactors, *, ceiling: float = 0.97) -> float:
+    def score(
+        self, factors: KnowledgeConfidenceFactors, *, ceiling: float = 0.97
+    ) -> float:
+        """Compatibility facade over the shared four-factor confidence formula."""
         values = factors.normalized()
-        parts = (
-            values.event_quality,
-            values.completion,
-            values.structure,
-            values.evidence,
-            values.outcome,
-            values.consistency,
+        shared = ConfidenceFactors(
+            source=min(1.0, 0.60 + 0.25 * values.completion + 0.15 * values.outcome),
+            quality=(values.event_quality + values.structure + values.consistency)
+            / 3.0,
+            support=UnifiedConfidenceCalculator.support_from_evidence_count(
+                1 if values.evidence < 0.55 else (2 if values.evidence < 0.80 else 3)
+            ),
+            freshness=values.outcome,
         )
-        weighted = sum(value * weight for value, weight in zip(parts, self._WEIGHTS))
-        weakest = min(parts)
-        weakest_factor_penalty = 0.82 + 0.18 * weakest
-        return round(_clamp(weighted * weakest_factor_penalty, upper=ceiling), 4)
+        return min(
+            ceiling,
+            UnifiedConfidenceCalculator().calculate(shared, memory_type="knowledge"),
+        )
 
     def merge_score(
         self,
@@ -57,23 +69,35 @@ class KnowledgeConfidenceCalculator:
         total_count: int,
         evidence_count: int,
     ) -> float:
-        """Combine extraction quality, observed success and independent evidence."""
         total = max(0, int(total_count))
         successes = min(max(0, int(success_count)), total)
-        base = 0.65 * _clamp(existing_confidence) + 0.35 * _clamp(incoming_confidence)
         reliability = (successes + 1.0) / (total + 2.0)
-        support = 1.0 - math.exp(-max(total, evidence_count) / 4.0)
-        blend = min(0.35, 0.10 + 0.04 * total)
-        score = base * (1.0 - blend) + reliability * blend + 0.05 * support
-        return round(_clamp(score, upper=0.99), 4)
+        shared = ConfidenceFactors(
+            source=max(_clamp(existing_confidence), _clamp(incoming_confidence)),
+            quality=0.65 * _clamp(existing_confidence)
+            + 0.35 * _clamp(incoming_confidence),
+            support=UnifiedConfidenceCalculator.support_from_evidence_count(
+                max(total, int(evidence_count))
+            ),
+            freshness=reliability,
+        )
+        return UnifiedConfidenceCalculator().calculate(shared, memory_type="knowledge")
 
     def template_score(
         self, case_confidence: float, *, step_count: int, evidence_count: int
     ) -> float:
-        generalization = min(1.0, 0.45 + 0.08 * max(0, step_count))
-        evidence = min(1.0, max(0, evidence_count) / 3.0)
-        score = 0.78 * _clamp(case_confidence) + 0.14 * generalization + 0.08 * evidence
-        return round(_clamp(score, lower=0.35, upper=0.95), 4)
+        shared = ConfidenceFactors(
+            source=_clamp(case_confidence),
+            quality=min(1.0, 0.45 + 0.08 * max(0, step_count)),
+            support=UnifiedConfidenceCalculator.support_from_evidence_count(
+                evidence_count
+            ),
+            freshness=1.0,
+        )
+        return max(
+            0.35,
+            UnifiedConfidenceCalculator().calculate(shared, memory_type="knowledge"),
+        )
 
 
 def _clamp(value: float, *, lower: float = 0.0, upper: float = 1.0) -> float:
