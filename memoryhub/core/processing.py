@@ -1,4 +1,4 @@
-"""统一事件处理协调器（前端 agent 演示适配层）。
+﻿"""统一事件处理协调器（前端 agent 演示适配层）。
 
 把已通过安全处理并落库的 MemoryEvent 分发给偏好、知识和事实候选管线。
 本文件是便于前端联调而重建的临时适配层，复用 memoryhub 现成服务。
@@ -18,9 +18,10 @@ from memoryhub.adapter.schemas import (
     SafetyAction,
     SceneScope,
 )
-from memoryhub.core.conflict.detector import ConflictDetector
 from memoryhub.core.knowledge.extractor import KnowledgeExtractor
+from memoryhub.core.knowledge.updater import KnowledgeUpdater
 from memoryhub.core.preference.extractor import PreferenceExtractor
+from memoryhub.core.preference.updater import PreferenceUpdater
 from memoryhub.core.safety import SensitiveDetector
 
 
@@ -42,12 +43,19 @@ class EventProcessingCoordinator:
         self.fact_pipeline = fact_pipeline
         self.preference_extractor = PreferenceExtractor(llm_client=llm_client)
         self.knowledge_extractor = KnowledgeExtractor(llm_client=llm_client)
+        self.preference_updater = PreferenceUpdater(
+            llm_client=llm_client,
+            pref_repo=pref_repo,
+            conflict_repo=conflict_repo,
+            write_service=memory_write_service,
+        )
+        self.knowledge_updater = KnowledgeUpdater(
+            write_service=memory_write_service,
+            conflict_repo=conflict_repo,
+        )
         self.on_memory_written = on_memory_written
         # 写入服务：非 None 时走 MemoryWriteService（同步向量/关键词索引）
         self.memory_write_service = memory_write_service
-        # 演示适配层：确定性冲突检测（不依赖 LLM），让前端能测试冲突处理页
-        self.conflict_repo = conflict_repo
-        self.conflict_detector = ConflictDetector() if conflict_repo is not None else None
         detector_kwargs = {}
         if safety_config is not None:
             detector_kwargs = {
@@ -65,7 +73,9 @@ class EventProcessingCoordinator:
             }
         self.detector = SensitiveDetector(**detector_kwargs)
 
-    def sanitize(self, events: list[MemoryEvent]) -> tuple[list[MemoryEvent], list[str]]:
+    def sanitize(
+        self, events: list[MemoryEvent]
+    ) -> tuple[list[MemoryEvent], list[str]]:
         """返回只包含 ALLOW/MASK 分支的安全事件副本。"""
         safe_events: list[MemoryEvent] = []
         warnings: list[str] = []
@@ -76,7 +86,8 @@ class EventProcessingCoordinator:
                     safe_events.append(result.sanitized_event or event)
                 else:
                     warnings.append(
-                        f"event {event.event_id} blocked by safety action {result.decision.action.value}"
+                        f"event {event.event_id} blocked by safety action "
+                        f"{result.decision.action.value}"
                     )
             except Exception:
                 warnings.append(f"event {event.event_id} failed safety processing")
@@ -91,7 +102,9 @@ class EventProcessingCoordinator:
             try:
                 structured_preferences = event.payload.get("preferences", [])
                 preference_items = []
-                if isinstance(structured_preferences, Sequence) and not isinstance(structured_preferences, (str, bytes)):
+                if isinstance(structured_preferences, Sequence) and not isinstance(
+                    structured_preferences, (str, bytes)
+                ):
                     for _idx, raw in enumerate(structured_preferences):
                         if not isinstance(raw, Mapping):
                             continue
@@ -99,12 +112,16 @@ class EventProcessingCoordinator:
                         # 若沿用 f"pref_{event.event_id}" 会导致同轮多条偏好互相覆盖，
                         # 这里按序号生成唯一 id，保证每条偏好都能落库。
                         base_id = raw.get("memory_id") or f"pref_{event.event_id}"
-                        memory_id = base_id if raw.get("memory_id") else f"{base_id}_{_idx + 1}"
+                        memory_id = (
+                            base_id if raw.get("memory_id") else f"{base_id}_{_idx + 1}"
+                        )
                         preference_items.append(
                             PreferenceMemory(
                                 memory_id=memory_id,
                                 user_id=event.user_id or "default",
-                                preference_type=raw.get("preference_type", "output_style"),
+                                preference_type=raw.get(
+                                    "preference_type", "output_style"
+                                ),
                                 text=str(raw.get("text", "")),
                                 payload=dict(raw.get("payload", {})),
                                 scope=SceneScope(**dict(raw.get("scope", {}))),
@@ -120,18 +137,22 @@ class EventProcessingCoordinator:
                 if not preference_items:
                     preference_items = self._extract_dialogue_preferences(event)
                 for memory in preference_items:
-                    self._save_preference(memory)
-                    summary.preferences_written.append(memory.memory_id)
-                    self._detect_pref_conflict(memory, summary)
-                    self._notify(memory)
+                    result_id = self.preference_updater.add(memory)
+                    stored = self.pref_repo.get_by_id(result_id) or memory
+                    summary.preferences_written.append(result_id)
+                    self._notify(stored)
             except Exception as exc:
-                summary.warnings.append(f"preference extraction failed for {event.event_id}: {exc}")
+                summary.warnings.append(
+                    f"preference extraction failed for {event.event_id}: {exc}"
+                )
 
         try:
             knowledge_items = []
             for event in events:
                 structured_knowledge = event.payload.get("knowledge", [])
-                if not isinstance(structured_knowledge, Sequence) or isinstance(structured_knowledge, (str, bytes)):
+                if not isinstance(structured_knowledge, Sequence) or isinstance(
+                    structured_knowledge, (str, bytes)
+                ):
                     continue
                 for raw in structured_knowledge:
                     if not isinstance(raw, Mapping):
@@ -156,20 +177,27 @@ class EventProcessingCoordinator:
                 call
                 for event in events
                 for call in event.tool_calls
-                if not call.tool_name.startswith(("memory_", "preference_", "fact_", "conflict_", "template_"))
+                if not call.tool_name.startswith(
+                    ("memory_", "preference_", "fact_", "conflict_", "template_")
+                )
             ]
             if not knowledge_items and len(external_calls) >= 2:
                 try:
-                    knowledge_items = self.knowledge_extractor.extract_from_trajectory(events)
+                    knowledge_items = self.knowledge_extractor.extract_from_trajectory(
+                        events
+                    )
                 except Exception:
                     pass
             for memory in knowledge_items:
-                kind = getattr(memory.knowledge_type, "value", str(memory.knowledge_type))
+                kind = getattr(
+                    memory.knowledge_type, "value", str(memory.knowledge_type)
+                )
                 if kind not in {"workflow", "template"}:
                     continue
-                self._save_knowledge(memory)
-                summary.knowledge_written.append(memory.memory_id)
-                self._notify(memory)
+                result_id = self.knowledge_updater.add(memory)
+                stored = self.know_repo.get_by_id(result_id) or memory
+                summary.knowledge_written.append(result_id)
+                self._notify(stored)
         except Exception as exc:
             summary.warnings.append(f"knowledge extraction failed: {exc}")
 
@@ -187,7 +215,9 @@ class EventProcessingCoordinator:
                 try:
                     structured_triples = event.payload.get("fact_triples", [])
                     proposals = []
-                    if isinstance(structured_triples, Sequence) and not isinstance(structured_triples, (str, bytes)):
+                    if isinstance(structured_triples, Sequence) and not isinstance(
+                        structured_triples, (str, bytes)
+                    ):
                         from memoryhub.core.fact.models import FactCandidate, RawTriple
 
                         for raw in structured_triples:
@@ -207,7 +237,10 @@ class EventProcessingCoordinator:
                                     source_id=event.event_id,
                                     project_id_hint=event.payload.get("project_id"),
                                     scope_hint=event.payload.get("fact_scope"),
-                                    metadata={"session_id": event.session_id, "turn_id": event.turn_id},
+                                    metadata={
+                                        "session_id": event.session_id,
+                                        "turn_id": event.turn_id,
+                                    },
                                 )
                             )
                     # 演示适配层：无显式 fact_triples 时不调用 LLM 提取，
@@ -217,11 +250,15 @@ class EventProcessingCoordinator:
                     # 候选由 agent_api 暂存，供前端 FactDialog 裁决
                     self._fact_candidates = list(proposals)
                 except Exception:
-                    summary.warnings.append(f"fact proposal failed for {event.event_id}")
+                    summary.warnings.append(
+                        f"fact proposal failed for {event.event_id}"
+                    )
 
         return summary
 
-    def _extract_dialogue_preferences(self, event: MemoryEvent) -> list[PreferenceMemory]:
+    def _extract_dialogue_preferences(
+        self, event: MemoryEvent
+    ) -> list[PreferenceMemory]:
         """演示适配层：无 LLM 时从中文对话文本确定性抽取显式偏好。
 
         仅在结构化偏好与 PreferenceExtractor 均无输出时作为兜底，
@@ -236,7 +273,9 @@ class EventProcessingCoordinator:
         prefs: list[PreferenceMemory] = []
         idx = 0
 
-        def _new(text_: str, ptype: str, *, global_: bool, tags: list[str]) -> PreferenceMemory:
+        def _new(
+            text_: str, ptype: str, *, global_: bool, tags: list[str]
+        ) -> PreferenceMemory:
             nonlocal idx
             idx += 1
             return PreferenceMemory(
@@ -244,7 +283,10 @@ class EventProcessingCoordinator:
                 user_id=user_id,
                 preference_type=ptype,
                 text=text_,
-                scope=SceneScope(scene="*" if global_ else event.scene, task_type="*" if global_ else event.task_type),
+                scope=SceneScope(
+                    scene="*" if global_ else event.scene,
+                    task_type="*" if global_ else event.task_type,
+                ),
                 is_global=global_,
                 confidence=0.95,
                 quality_score=quality_score,
@@ -253,44 +295,57 @@ class EventProcessingCoordinator:
             )
 
         lang_map = {
-            "中文": "中文", "汉语": "中文",
-            "英文": "英语", "英语": "英语",
-            "法语": "法语", "日语": "日语", "德语": "德语", "韩语": "韩语",
+            "中文": "中文",
+            "汉语": "中文",
+            "英文": "英语",
+            "英语": "英语",
+            "法语": "法语",
+            "日语": "日语",
+            "德语": "德语",
+            "韩语": "韩语",
         }
         lang_match = re.search(r"使用?(中文|汉语|英文|英语|法语|日语|德语|韩语)", text)
         if lang_match:
-            prefs.append(_new(
-                f"项目材料默认使用{lang_map[lang_match.group(1)]}。",
-                "language_preference",
-                global_=True,
-                tags=["语言", lang_map[lang_match.group(1)]],
-            ))
+            prefs.append(
+                _new(
+                    f"项目材料默认使用{lang_map[lang_match.group(1)]}。",
+                    "language_preference",
+                    global_=True,
+                    tags=["语言", lang_map[lang_match.group(1)]],
+                )
+            )
 
         if re.search(r"简洁|简略|简要|精炼|紧凑|不要太详|不要啰嗦", text):
-            prefs.append(_new(
-                "内容尽量保持简洁。",
-                "output_style",
-                global_=True,
-                tags=["简洁", "风格"],
-            ))
+            prefs.append(
+                _new(
+                    "内容尽量保持简洁。",
+                    "output_style",
+                    global_=True,
+                    tags=["简洁", "风格"],
+                )
+            )
 
         has_conclusion = re.search(r"先给?结论|结论先行|先.{0,6}结论", text) is not None
         has_bullet = re.search(r"列?要点|列表|分点|条目", text) is not None
         if has_conclusion or has_bullet:
-            prefs.append(_new(
-                "先给结论，再列要点。",
-                "output_style",
-                global_=True,
-                tags=["结构", "要点"],
-            ))
+            prefs.append(
+                _new(
+                    "先给结论，再列要点。",
+                    "output_style",
+                    global_=True,
+                    tags=["结构", "要点"],
+                )
+            )
 
         if re.search(r"正式|详细|详尽|书面", text):
-            prefs.append(_new(
-                "采用正式、详细的表达方式。",
-                "scene_preference",
-                global_=False,
-                tags=["正式", "详细"],
-            ))
+            prefs.append(
+                _new(
+                    "采用正式、详细的表达方式。",
+                    "scene_preference",
+                    global_=False,
+                    tags=["正式", "详细"],
+                )
+            )
 
         return prefs
 
@@ -307,19 +362,6 @@ class EventProcessingCoordinator:
             self.memory_write_service.upsert_memory(memory)
         else:
             self.know_repo.save(memory)
-
-    def _detect_pref_conflict(self, memory, summary) -> None:
-        """写入偏好后做确定性冲突检测，冲突记录存进 conflict_repo 供前端冲突页测试。"""
-        if self.conflict_detector is None:
-            return
-        try:
-            existing = self.pref_repo.list_all(status="active", user_id=memory.user_id)
-            conflict = self.conflict_detector.check_preference(memory, existing)
-            if conflict is not None:
-                self.conflict_repo.save(conflict)
-                summary.conflict_ids.append(conflict.conflict_id)
-        except Exception:
-            pass
 
     def _notify(self, memory: object) -> None:
         if self.on_memory_written is not None:

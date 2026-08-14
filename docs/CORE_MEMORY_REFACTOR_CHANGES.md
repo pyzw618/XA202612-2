@@ -142,3 +142,16 @@
 3. **Fact**：同一主体/谓词/客体的重复事实不再丢弃新来源；新来源 evidence 会绑定到保留的既有 Fact。真实冲突仍按照原有冲突裁决创建/保留对应事实状态。
 
 新增回归测试覆盖“相似但包含额外内容”的偏好输入不会覆盖原偏好，以及重复 Fact 会在保留事实上新增 evidence。
+
+---
+
+## 第六轮冲突模块收敛（2026-08-14）
+
+本轮修复冲突检测与执行链路的分叉问题：
+
+1. `EventProcessingCoordinator` 的 Preference / Knowledge 写入不再直接 `upsert` 后再检测；改为分别交由 `PreferenceUpdater` 和 `KnowledgeUpdater` 完成冲突判断、证据合并、版本处理和索引同步。
+2. 通用 `ConflictResolver` 的 override 现在构造版本化后继：归档旧记忆、设置 `parent_id` / 可用的 `root_id`、递增版本、合并并去重 evidence，再写入新版本；不再产生无版本关系的裸覆盖。
+3. 通用 Preference ConflictDetector 改为优先使用结构化 `payload.target` / `payload.value` 判断同一偏好目标的冲突；仅在双方缺少 target 时才回退到文本否定规则。
+4. Fact LLM 冲突裁决新增 resolution action 白名单；未知动作强制降级为 `escalate` 并留下 `invalid_llm_action` 审计原因。
+
+新增回归测试验证通用 override 会归档旧版本、建立父子版本关系并合并 evidence。

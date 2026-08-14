@@ -174,8 +174,12 @@ class ConflictDetector:
                     raw = raw.strip("`").removeprefix("json").strip()
                 data = json.loads(raw)
 
-            action = data.get("action", "escalate")
-            reason = data.get("reason", "")
+            action = str(data.get("action", Resolution.ESCALATE.value)).strip()
+            reason = str(data.get("reason", "")).strip()
+            allowed_actions = {item.value for item in Resolution}
+            if action not in allowed_actions:
+                action = Resolution.ESCALATE.value
+                reason = f"invalid_llm_action; {reason}".strip()
             result.resolution = action
             result.reason = f"[LLM裁决] {reason}"
             logger.info(f"冲突裁决: {action} — {reason}")

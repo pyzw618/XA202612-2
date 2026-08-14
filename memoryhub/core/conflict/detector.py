@@ -1,4 +1,4 @@
-"""Deterministic conflict detection for preference and knowledge memories."""
+﻿"""Deterministic conflict detection for preference and knowledge memories."""
 
 from __future__ import annotations
 
@@ -19,8 +19,20 @@ class ConflictDetector:
         self, new_pref: PreferenceMemory, existing: list[PreferenceMemory]
     ) -> ConflictRecord | None:
         candidates = self._find_similar_preferences(new_pref, existing)
+        new_target = str(new_pref.payload.get("target", "")).strip()
+        new_value = str(new_pref.payload.get("value", "")).strip()
         for old in candidates:
-            if self._semantic_contradiction(self._text(old), self._text(new_pref)):
+            old_target = str(old.payload.get("target", "")).strip()
+            old_value = str(old.payload.get("value", "")).strip()
+            structured_conflict = bool(
+                new_target and old_target == new_target and new_value != old_value
+            )
+            fallback_conflict = (
+                not new_target
+                and not old_target
+                and self._semantic_contradiction(self._text(old), self._text(new_pref))
+            )
+            if structured_conflict or fallback_conflict:
                 return ConflictRecord(
                     user_id=new_pref.user_id,
                     old_memory_id=old.memory_id,
@@ -36,17 +48,24 @@ class ConflictDetector:
     def check_knowledge(
         self, new_know: KnowledgeMemory, existing: list[KnowledgeMemory]
     ) -> ConflictRecord | None:
-        new_type = str(getattr(new_know.knowledge_type, "value", new_know.knowledge_type))
+        new_type = str(
+            getattr(new_know.knowledge_type, "value", new_know.knowledge_type)
+        )
         new_text = " ".join([new_know.name, new_know.content, *new_know.steps])
         for old in existing:
             if old.user_id != new_know.user_id:
                 continue
             old_type = str(getattr(old.knowledge_type, "value", old.knowledge_type))
-            if old_type != new_type or not self._is_same_scope(old.scope, new_know.scope):
+            if old_type != new_type or not self._is_same_scope(
+                old.scope, new_know.scope
+            ):
                 continue
             old_text = " ".join([old.name, old.content, *old.steps])
             similarity = self._similarity(old_text, new_text)
-            if similarity >= self.similarity_threshold and self._semantic_contradiction(old_text, new_text):
+            if (
+                similarity >= self.similarity_threshold
+                and self._semantic_contradiction(old_text, new_text)
+            ):
                 return ConflictRecord(
                     user_id=new_know.user_id,
                     old_memory_id=old.memory_id,
@@ -55,7 +74,10 @@ class ConflictDetector:
                     old_content=old_text,
                     new_content=new_text,
                     conflict_field="content/steps",
-                    reason=f"same knowledge scope with contradictory procedure (similarity={similarity:.3f})",
+                    reason=(
+                        "same knowledge scope with contradictory procedure "
+                        f"(similarity={similarity:.3f})"
+                    ),
                 )
         return None
 
@@ -88,7 +110,11 @@ class ConflictDetector:
                 continue
             if candidate.preference_type != pref.preference_type:
                 continue
-            if self._is_same_scope(candidate.scope, pref.scope) or candidate.is_global or pref.is_global:
+            if (
+                self._is_same_scope(candidate.scope, pref.scope)
+                or candidate.is_global
+                or pref.is_global
+            ):
                 result.append(candidate)
         return result
 
@@ -107,8 +133,12 @@ class ConflictDetector:
 
     @classmethod
     def _similarity(cls, left: str, right: str) -> float:
-        return SequenceMatcher(None, cls._normalize(left), cls._normalize(right)).ratio()
+        return SequenceMatcher(
+            None, cls._normalize(left), cls._normalize(right)
+        ).ratio()
 
     @staticmethod
     def _has_negation(text: str) -> bool:
-        return bool(re.search(r"\b(?:not|never|no|禁止|不要|不能|不应|拒绝|否)\b", text.lower()))
+        return bool(
+            re.search(r"\b(?:not|never|no|禁止|不要|不能|不应|拒绝|否)\b", text.lower())
+        )
