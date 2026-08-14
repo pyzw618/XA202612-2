@@ -34,7 +34,7 @@ Kylin-MemoryHub 是一个面向麒麟操作系统 OS Agent 的**可插拔本地�
 | **精准遗忘** | 自然语言驱动 + 关键词匹配 + scope 定位，软删除 + 向量索引清理 + 审计日志 |
 | **安全过滤** | 多层敏感信息检测 + 用户自定义规则 + AES-256-GCM 加密 + HMAC 审计链 |
 | **生命周期管理** | SHORT → MID → LONG 记忆升级/降级/过期，基于健康度的被动遗忘 |
-| **管理控制台** | PyQt6 桌面前端，UKUI 风格，支持 Mock/实时双模式 |
+| **管理控制台** | Qt 5 原生桌面客户端（desktop-client），UKUI 风格，21 个页面 |
 
 ---
 
@@ -43,7 +43,7 @@ Kylin-MemoryHub 是一个面向麒麟操作系统 OS Agent 的**可插拔本地�
 ```mermaid
 graph LR
     subgraph 前端层
-        A[PyQt6] --> B[UKUI 风格桌面控制台]
+        A[Qt 5 Widgets] --> B[UKUI 风格桌面控制台 desktop-client]
     end
     subgraph 服务层
         C[FastAPI] --> D[REST API]
@@ -83,7 +83,7 @@ graph LR
 | **关键词检索** | BM25 (rank_bm25) | 纯 Python 实现，增量重建 |
 | **LLM 客户端** | OpenAI SDK / Ollama API | 双后端支持（云端 + 本地） |
 | **Embedding** | Sentence-Transformers / 麒麟 SDK | 语义向量生成，Mock 回退 |
-| **前端** | PyQt6 | 桌面原生控制台，无边框 UKUI 风格 |
+| **前端** | Qt 5 Widgets (C++17) | 桌面原生控制台，UKUI 风格，21 页面 |
 | **加密** | AES-256-GCM + HMAC-SHA256 | 敏感规则加密 + 审计防篡改 |
 | **配置** | YAML + 环境变量 | dataclass 强类型配置 |
 
@@ -135,7 +135,7 @@ graph TB
     end
 
     subgraph Frontend["前端层"]
-        Console[管理控制台<br/>console/]
+        Console[Qt 桌面客户端<br/>desktop-client/]
         Eval[评测模块<br/>evaluation/]
     end
 
@@ -168,7 +168,10 @@ XA202612-2/
 │   ├── config.py                       #   全局配置（dataclass），YAML + 环境变量
 │   │
 │   ├── adapter/                        # ── 接入适配层 ──
-│   │   ├── api.py                      #   18 个 REST 端点（记忆 CRUD/检索/遗忘/安全规则/评测）
+│   │   ├── api.py                      #   标准记忆 REST 端点（/api/memory，含 status 过滤）
+│   │   ├── management_api.py           #   管理后台 API（状态流转/批量/健康/审计/隔离区/系统状态）
+│   │   ├── agent_api.py                #   Agent 演示适配层（step/replay/裁决，/api/agent）
+│   │   ├── service.py                  #   MemoryService 最小垂直切片（无 LLM 降级路径）
 │   │   ├── schemas.py                  #   50+ Pydantic 数据模型定义
 │   │   ├── user_rule_schemas.py        #   用户自定义敏感规则 DTO
 │   │   └── simulator.py                #   OS Agent 模拟器（集成测试用）
@@ -261,24 +264,19 @@ XA202612-2/
 │       ├── errors.py                   #   错误类型定义
 │       └── data/                       #   内置规则 JSON 数据
 │
-├── console/                            # 🖥️ 管理控制台前端
-│   ├── main.py                         #   应用入口
-│   ├── main_window.py                  #   UKUI 风格主窗口（无边框/毛玻璃/拖拽/缩放）
-│   ├── api_client.py                   #   MemoryHub REST API 客户端
-│   ├── mock_data.py                    #   Mock 数据控制器（离线演示用）
-│   ├── models.py                       #   前端数据模型
-│   ├── pages/                          #   7 个功能页面
-│   │   ├── base.py                     #     页面基类
-│   │   ├── dashboard.py                #     仪表盘（统计卡片）
-│   │   ├── preferences.py              #     偏好管理（表格+版本链+证据）
-│   │   ├── knowledge.py                #     知识管理
-│   │   ├── conflicts.py                #     冲突处理
-│   │   ├── search_test.py              #     检索测试
-│   │   ├── forget.py                   #     遗忘管理
-│   │   └── evaluation.py               #     评测报告
-│   └── widgets/                        #   可复用组件
-│       ├── sidebar.py                  #     侧边栏导航
-│       └── stat_card.py                #     统计卡片
+├── desktop-client/                     # 🖥️ Qt 5 原生桌面控制台（银河麒麟/Windows）
+│   ├── CMakeLists.txt                  #   Qt5 Widgets/Network/Charts，C++17
+│   ├── src/
+│   │   ├── main.cpp                    #   入口（高 DPI、加载 QSS）
+│   │   ├── AppContext.h/.cpp           #   全局上下文：ApiClient + user_id + baseUrl
+│   │   ├── MainWindow.h/.cpp           #   侧边栏导航 + 顶栏 + 内容栈
+│   │   ├── api/ApiClient.h/.cpp        #   REST 客户端（baseUrl http://127.0.0.1:8099）
+│   │   ├── widgets/                    #   PageHeader/StatCard/ScoreRing/StatusTag/JsonViewer…
+│   │   └── pages/                      #   21 个页面（按《前端页面规划.md》实现）
+│   ├── resources/                      #   app.qrc + kylin.qss + 22 个 SVG 图标
+│   └── tests/ApiClientTest.cpp         #   QtTest 单测（6 用例）
+│
+│   # 注：早期 PySide6 QML / PyQt6 console 前端已移除，统一收敛到 desktop-client
 │
 ├── evaluation/                         # 📊 评测模块
 │   ├── run_retrieval_eval.py           #   检索评测 v2 驱动（消融实验：5 组权重 × 4 难度）
@@ -298,8 +296,11 @@ XA202612-2/
 │   ├── ARCHITECTURE.md                 #   架构可视化
 │   ├── INTERFACE.md                    #   数据契约与接口规范
 │   ├── CONFIGURATION.md                #   配置指南
-│   ├── SAFETY_MODULE_TECHNICAL.md      #   安全模块技术文档
-│   └── forget_module_v1.md             #   遗忘模块设计文档
+│   ├── PROJECT_ANALYSIS.md             #   深入浅出讲解
+│   ├── 前端页面规划.md                  #   前端设计规格（desktop-client 依据）
+│   ├── 麒麟数据库原生化过程.md          #   数据库原生化过程记录
+│   ├── 0805数据流测试/ 0811功能性测试/   #   测试计划与验收结果
+│   └── retrieval/                      #   检索/向量引擎/Kylin 技术方案
 │
 ├── config.example.yaml                 # 配置文件模板
 ├── pyproject.toml                      # Python 项目配置
@@ -503,7 +504,7 @@ class ConflictRecord(BaseModel):
 
 ## 7. API 接口设计
 
-**Base URL**: `http://localhost:8000/api/memory`
+**Base URL**: `http://localhost:8099/api/memory`
 
 ### 7.1 端点全览
 

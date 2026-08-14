@@ -129,7 +129,7 @@
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `MEMORYHUB_API_URL` | `http://127.0.0.1:8000` | REST 服务地址 |
+| `MEMORYHUB_API_URL` | `http://127.0.0.1:8099` | REST 服务地址 |
 | `MEMORYHUB_USER_ID` | `opencode` | 写入事件的 user_id |
 | `MEMORYHUB_AUTO_RECORD` | `true` | 设为 `false` 关闭自动沉淀 |
 | `MEMORYHUB_SCENE` | `code` | 事件 scene |
@@ -149,7 +149,7 @@
 
 ```bash
 # 进入本文件夹的父目录（仓库根）
-python opencode-integration/scripts/start_memoryhub_server.py --port 8000
+python opencode-integration/scripts/start_memoryhub_server.py --port 8099
 ```
 
 默认 dev 模式：embedding=mock、向量引擎=faiss、user_rules 关闭；安全密钥首次启动
@@ -171,7 +171,7 @@ python opencode-integration/scripts/start_memoryhub_server.py --port 8000
       "command": ["python", "-m", "memoryhub_mcp"],
       "cwd": "opencode-integration/mcp-server",
       "environment": {
-        "MEMORYHUB_API_URL": "http://127.0.0.1:8000",
+        "MEMORYHUB_API_URL": "http://127.0.0.1:8099",
         "MEMORYHUB_USER_ID": "opencode"
       },
       "enabled": true

@@ -54,7 +54,7 @@ powershell -ExecutionPolicy Bypass -File build-win.ps1
 
 ## 使用
 
-1. 先启动后端（仓库根目录）：`python -m uvicorn memoryhub.app:app --host 0.0.0.0 --port 8000`
+1. 先启动后端（仓库根目录）：`python -m uvicorn memoryhub.app:app --host 0.0.0.0 --port 8099`
 2. 启动客户端，顶栏绿色圆点表示后端已连接。
 3. 顶栏可切换 `user_id`（默认 `default`），切换后各页自动刷新。
 4. 顶栏全局搜索框输入查询回车 → 跳转检索测试页并自动执行。
@@ -85,10 +85,9 @@ src/
 
 ## 备注
 
-- **知识列表接口限制**：后端 `GET /knowledge` 仅支持 scene / knowledge_type 过滤，**不支持按 status 过滤**
-  （始终返回 active）。因此知识记忆的非 active 状态不会出现在"待审查/归档/回收站"列表里；
-  但状态流转操作（PATCH status）对知识记忆仍然生效。如需完整支持，需后端为 knowledge 增加
-  `status` 参数（见后端 `api.py:list_knowledge`）。
+- **知识列表接口已支持 status 过滤**：后端 `GET /api/memory/knowledge` 支持
+  `scene` / `knowledge_type` / `status` 三种过滤，非 active 状态的知识会出现在
+  待审查 / 归档 / 回收站列表中；`status` 传空串时兼容返回 active。
 - 审计日志 / 隔离区需 `config.yaml` 中 `safety.audit.enabled` / `safety.quarantine.enabled` 为 `true`，
   否则页面显示"待开启"提示（后端返回 `safety.audit_disabled` / `safety.quarantine_disabled`）。
 - 遗忘设置页的权重 / 阈值为**代码常量**（只读展示）；自动遗忘扫描与生命周期检查可手动触发。

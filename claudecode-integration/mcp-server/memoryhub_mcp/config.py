@@ -54,7 +54,7 @@ def _project_root() -> str:
 
 @dataclass
 class McpConfig:
-    api_url: str = field(default_factory=lambda: _env("MEMORYHUB_API_URL", "http://127.0.0.1:8000"))
+    api_url: str = field(default_factory=lambda: _env("MEMORYHUB_API_URL", "http://127.0.0.1:8099"))
     api_timeout: float = field(default_factory=lambda: float(_env("MEMORYHUB_API_TIMEOUT", "30")))
     user_id: str = field(default_factory=lambda: _env("MEMORYHUB_USER_ID", "default"))
     repo_root: str = field(default_factory=_find_repo_root)

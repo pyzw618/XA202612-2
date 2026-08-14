@@ -97,7 +97,7 @@
       "env": {
         "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/mcp-server",
         "MEMORYHUB_REPO_ROOT": "${CLAUDE_PROJECT_DIR}",
-        "MEMORYHUB_API_URL": "${MEMORYHUB_API_URL:-http://127.0.0.1:8000}",
+        "MEMORYHUB_API_URL": "${MEMORYHUB_API_URL:-http://127.0.0.1:8099}",
         "MEMORYHUB_USER_ID": "${MEMORYHUB_USER_ID:-claudecode}",
         "MEMORYHUB_TOP_K": "${MEMORYHUB_TOP_K:-5}"
       }
@@ -180,7 +180,7 @@
 ### 4.1 启动 MemoryHub REST（本地开发）
 
 ```bash
-D:/Anaconda/envs/py12/python.exe claudecode-integration/scripts/start_memoryhub_server.py --port 8000
+D:/Anaconda/envs/py12/python.exe claudecode-integration/scripts/start_memoryhub_server.py --port 8099
 ```
 
 - dev 模式：embedding=mock、向量引擎=faiss、user_rules 关闭；

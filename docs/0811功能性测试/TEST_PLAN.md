@@ -3,9 +3,8 @@
 > 版本: v1.0
 > 日期: 2026-08-11
 > 适用对象: 测试人员
-> 依据文档: `docs/INTERFACE.md`、`docs/ARCHITECTURE.md`、`docs/SAFETY_MODULE_TECHNICAL.md`、
-> `docs/CONFIGURATION.md`、`docs/DATA_FLOW_UPDATE.md`、`docs/forget_module_v1.md`、
-> `docs/前端功能规划.md`、`docs/麒麟数据库原生化过程.md`
+> 依据文档: `docs/INTERFACE.md`、`docs/ARCHITECTURE.md`、`docs/CONFIGURATION.md`、
+> `docs/DATA_FLOW_UPDATE.md`、`docs/前端页面规划.md`、`docs/麒麟数据库原生化过程.md`
 
 ---
 
@@ -13,15 +12,15 @@
 
 MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件接入 → 质量评分 → 安全过滤 →
 偏好/知识/事实抽取 → 混合检索(向量+BM25+元数据) → SQLite + 向量引擎 + 证据链持久化**,
-以及遗忘模块、管理控制台(PyQt6)、Agent 集成(opencode / Claude Code / 千问)与评测模块。
+以及遗忘模块、管理控制台(Qt 5 桌面客户端 `desktop-client`)、Agent 集成(opencode / Claude Code / 千问)与评测模块。
 
 ## 2. 测试目标
 
-1. 验证 10 个 REST 端点组的功能正确性与契约一致性;
+1. 验证全部 REST 端点组的功能正确性与契约一致性;
 2. 重点验证安全模块的 8 项核心能力(规则库/扫描/决策/脱敏/审计/隔离/写入门禁/用户规则);
 3. 验证记忆写入 → 检索 → 遗忘全链路闭环;
 4. 验证持久化与重启恢复、向量引擎(Milvus/FAISS)切换;
-5. 验证前端控制台 7 个页面与后端 API 的对接;
+5. 验证前端 Qt 桌面客户端 21 个页面与后端 API 的对接;
 6. 验证麒麟原生 SDK 链路与评测指标。
 
 ## 3. 测试环境
@@ -31,8 +30,8 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 | 操作系统 | 银河麒麟 OS(生产目标);开发环境可用 Windows/Linux |
 | Python | >= 3.11(当前环境 3.12) |
 | 依赖 | `pip install -r requirements.txt`(含 faiss-cpu、rank-bm25、jieba、fastapi、sqlalchemy、cryptography) |
-| 服务启动 | `uvicorn memoryhub.app:app --host 127.0.0.1 --port 8000` |
-| 接口文档 | `http://127.0.0.1:8000/docs` |
+| 服务启动 | `uvicorn memoryhub.app:app --host 127.0.0.1 --port 8099` |
+| 接口文档 | `http://127.0.0.1:8099/docs` |
 | LLM | 可选(Ollama 本地 / OpenAI 兼容 API),无 key 时系统应可启动 |
 | Embedding | 开发用 mock;麒麟 SDK 需真实 `.so` 与 Milvus gRPC(端口 19530) |
 
@@ -69,7 +68,7 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 | API 契约测试 | FastAPI TestClient / curl 对全部端点做正向+异常用例 | P0 |
 | 安全专项测试 | 手工构造恶意/边界输入,验证失败关闭 | P0 |
 | 集成测试 | 写→检索→遗忘端到端、模拟重启恢复 | P1 |
-| 前端功能测试 | PyQt6 控制台 7 页面手动操作 | P1 |
+| 前端功能测试 | Qt 桌面客户端 21 页面手动操作 | P1 |
 | 性能测试 | evaluation/metrics 延迟基准、并发写入 | P2 |
 | 麒麟原生测试 | 真实 .so + Milvus 部署验收 | P2(视环境就绪) |
 
@@ -81,7 +80,7 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 
 ### 6.1 安全模块专项(SEC,最高优先级)
 
-依据:`SAFETY_MODULE_TECHNICAL.md`、`SAFETY_RULE_LIBRARY.md`、`CONFIGURATION.md`
+依据:`docs/ARCHITECTURE.md` 2、`docs/CONFIGURATION.md` 安全配置、`docs/INTERFACE.md` 3.5
 
 | 编号 | 测试项 | 关键步骤/输入 | 期望结果 |
 |------|--------|---------------|----------|
@@ -165,7 +164,7 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 
 ### 6.7 遗忘模块(FOR)
 
-依据:`forget_module_v1.md`
+依据:`docs/INTERFACE.md` 1.7、3.6/3.7、`docs/ARCHITECTURE.md` 4
 
 | 编号 | 测试项 | 关键步骤 | 期望结果 |
 |------|--------|----------|----------|
@@ -235,7 +234,8 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 
 ## 8. 前端控制台测试(CONSOLE)
 
-依据:`前端功能规划.md`。PyQt6 桌面应用,启动 `console/main.py`,手工验证:
+依据:`docs/前端页面规划.md`。Qt 5 原生桌面客户端(`desktop-client/`),按
+`desktop-client/README.md` 构建并启动客户端,手工验证:
 
 | 编号 | 页面 | 测试要点 |
 |------|------|----------|
@@ -295,7 +295,7 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 ## 13. 执行清单(建议顺序)
 
 1. 运行回归基线:`pytest tests -q`(目标 590 passed, 2 skipped);
-2. 启动服务(port 8000),冒烟:health + events + search;
+2. 启动服务(port 8099),冒烟:health + events + search;
 3. 按 6.1 安全专项 → 6.2 事件 → 6.3~6.9 核心模块 → 7 API 契约;
 4. 前端 8 项(8 章)→ 端到端 7 项(9 章);
 5. 性能与评测(10 章);

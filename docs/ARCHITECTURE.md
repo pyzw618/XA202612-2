@@ -59,7 +59,7 @@ graph TB
         EvalRet["RetrievalEvaluator"]
         EvalConf["ConflictEvaluator"]
         Bench["LatencyBenchmark"]
-        Vue["Vue 3 管理界面"]
+        Qt5["Qt 5 桌面客户端<br/>desktop-client"]
     end
 
     User --> Agent
@@ -108,7 +108,7 @@ graph TB
     EvalRet --> API
     EvalConf --> API
     Bench --> API
-    Vue --> API
+    Qt5 --> API
 
     style L1 fill:#e3f2fd,stroke:#1565c0
     style L2 fill:#e8f5e9,stroke:#2e7d32
@@ -126,9 +126,10 @@ graph TB
 > 当前 v0.1.0 已完成 Safety 数据/方法契约、版本化规则库、递归扫描、策略执行、
 > 用户自定义敏感规则 Overlay、事件脱敏、同快照复检、最小化持久审计、REVIEW
 > 加密隔离和强制写入 Gate。
-> 普通 SQLite/向量/证据实现仍是后续产品模块，但其内容写入口只能注册为 Gate
-> 的受保护 sink，不能再接收原始事件。下图是目标装配流；当前 `/events` 仍是
-> `NotImplementedError`，本次提供的动态 provider 尚待该业务端点接线。
+> `POST /api/memory/events` 已接入完整摄取管线（`EventIngestionService`）：
+> 幂等去重 → 质量评分 → 安全门禁 → 偏好/知识/事实抽取 → 失败重试队列。
+> 所有内容写入（事件、显式偏好/知识、反馈更新）都必须经 `SafetyWriteGate`
+> 签发能力后才落到受保护 sink（SQLite / Embedding / 向量 / 证据）。
 
 ```mermaid
 flowchart TD
@@ -544,44 +545,46 @@ sequenceDiagram
 
 ## 11. 前端页面与 API 对应关系
 
+前端实现为 **Qt 5 原生桌面客户端**（`desktop-client/`，21 个页面，按《前端页面规划.md》落地），
+与后端通过 REST 对接：
+
 ```mermaid
 graph LR
-    subgraph Vue3前端
-        P1["📊 Dashboard<br/>总览"]
-        P2["❤️ Preferences<br/>偏好管理"]
-        P3["📚 Knowledge<br/>知识管理"]
-        P4["⚡ Conflicts<br/>冲突处理"]
-        P5["🔍 Retrieval<br/>检索测试"]
-        P6["📈 Evaluation<br/>评测报告"]
-        P7["🛡️ Sensitive Rules<br/>用户敏感规则"]
+    subgraph Qt5桌面客户端
+        P1["📊 总览 Dashboard"]
+        P2["🧠 偏好 / 知识 / 事实"]
+        P3["🔍 检索测试 / 冲突中心"]
+        P4["🗑 遗忘与生命周期"]
+        P5["🛡 安全中心 / 系统设置"]
     end
 
     subgraph REST API
-        A1["GET /preferences"]
-        A2["GET /knowledge"]
-        A3["GET /conflicts"]
-        A4["POST /search"]
-        A5["POST /evaluate"]
-        A6["POST /forget"]
-        A7["POST /feedback"]
-        A8["CRUD /safety/user-rules"]
+        A1["GET /api/memory/preferences|knowledge|facts"]
+        A2["POST /api/memory/search | /context"]
+        A3["GET /api/memory/conflicts; POST .../resolve"]
+        A4["POST /api/memory/forget; GET /forget/history"]
+        A5["PATCH /api/memory/memories/{id}/status"]
+        A6["GET /api/memory/memories/health"]
+        A7["CRUD /api/memory/safety/user-rules"]
+        A8["GET /api/memory/safety/audit-logs"]
+        A9["GET /api/memory/system/status | /config"]
     end
 
     P1 --> A1
-    P1 --> A2
-    P1 --> A3
+    P1 --> A6
     P2 --> A1
-    P2 --> A7
-    P2 --> A6
+    P2 --> A5
     P3 --> A2
-    P4 --> A3
-    P4 --> A7
-    P5 --> A4
-    P5 --> A6
-    P6 --> A5
-    P7 --> A8
+    P3 --> A3
+    P4 --> A4
+    P4 --> A5
+    P4 --> A6
+    P5 --> A7
+    P5 --> A8
+    P5 --> A9
 ```
 
-敏感规则页面调用 `A8` 时必须携带由认证网关注入的 `X-MemoryHub-User`。matcher
-仅在创建或替换时发送；读取响应不包含 matcher。规则管理 API 已实现，图中的其他
-普通记忆业务 API 仍按各模块当前实现状态为准。
+用户规则接口（`A7`）必须携带 `X-MemoryHub-User` 请求头；matcher 仅在创建或替换时
+发送，读取响应不包含 matcher，数据库只存 AES-256-GCM 密文。其余管理类接口（审计
+验链、隔离区放行、批量状态流转、健康度、生命周期触发）由 `management_api.py`
+提供，详见 `desktop-client/README.md` 与接口文档。

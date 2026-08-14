@@ -105,7 +105,7 @@ def aggregate(results: list[dict]) -> dict:
 
 def main():
     p = argparse.ArgumentParser(description="HTTP 端到端检索评测 (P0-5)")
-    p.add_argument("--base-url", default="http://127.0.0.1:8000")
+    p.add_argument("--base-url", default="http://127.0.0.1:8099")
     p.add_argument("--dataset", required=True, help="延迟查询集路径")
     p.add_argument("--phase", default="cold", choices=["cold","vector_hot","result_hot"])
     p.add_argument("--concurrency", default="1,4,8,16")

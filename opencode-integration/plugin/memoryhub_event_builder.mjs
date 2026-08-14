@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto"
 
 export const DEFAULT_CONFIG = {
-  apiUrl: "http://127.0.0.1:8000",
+  apiUrl: "http://127.0.0.1:8099",
   userId: "opencode",
   autoRecord: true,
   scene: "code",

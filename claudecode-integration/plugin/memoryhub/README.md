@@ -39,7 +39,7 @@ powershell -ExecutionPolicy Bypass -File claudecode-integration/scripts/install_
 D:/Anaconda/envs/py12/python.exe claudecode-integration/scripts/start_memoryhub_server.py
 
 # 3. 导出环境变量
-$env:MEMORYHUB_API_URL = 'http://127.0.0.1:8000'
+$env:MEMORYHUB_API_URL = 'http://127.0.0.1:8099'
 $env:MEMORYHUB_USER_ID = 'claudecode'
 
 # 4. 重启 Claude Code，在 /plugin 中启用 memoryhub（或用 --plugin-dir 指向本目录）
@@ -53,7 +53,7 @@ PATH 上的 `python`（record.py 纯标准库，3.7+ 可跑；如需与 MCP 同�
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `MEMORYHUB_API_URL` | `http://127.0.0.1:8000` | REST 服务地址 |
+| `MEMORYHUB_API_URL` | `http://127.0.0.1:8099` | REST 服务地址 |
 | `MEMORYHUB_USER_ID` | `claudecode` | 写入事件的 user_id |
 | `MEMORYHUB_AUTO_RECORD` | `true` | 设为 `false` 关闭自动沉淀 |
 | `MEMORYHUB_SCENE` | `code` | 事件 scene |

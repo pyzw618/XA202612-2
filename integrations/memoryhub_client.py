@@ -10,7 +10,7 @@ import httpx
 class MemoryHubClient:
     def __init__(
         self,
-        base_url: str = "http://127.0.0.1:8000",
+        base_url: str = "http://127.0.0.1:8099",
         timeout: float = 30.0,
         client: httpx.Client | None = None,
     ):

@@ -16,7 +16,7 @@
  * "failed to load plugin" errors.
  *
  * Configuration (environment variables):
- *   MEMORYHUB_API_URL              default http://127.0.0.1:8000
+ *   MEMORYHUB_API_URL              default http://127.0.0.1:8099
  *   MEMORYHUB_USER_ID              default opencode
  *   MEMORYHUB_AUTO_RECORD          default true  (set to false to disable)
  *   MEMORYHUB_SCENE                default code
@@ -94,7 +94,7 @@ export const MemoryHubPlugin = async ({ client }, options = {}) => {
   }
 }
 
-function postEvents(events, apiUrl = "http://127.0.0.1:8000") {
+function postEvents(events, apiUrl = "http://127.0.0.1:8099") {
   // Portable AbortSignal (older Node < 17.3 lacks AbortSignal.timeout; Bun has it).
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 15000)

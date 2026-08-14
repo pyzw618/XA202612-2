@@ -26,7 +26,7 @@
 ├─────────────────────────────────────────────┤
 │  第 6 层 · 本地存储 (Storage)                │  ← SQLite + FAISS + JSONL 证据链
 ├─────────────────────────────────────────────┤
-│  第 7 层 · 评测 & 前端                       │  ← 准确率/延迟评测 + Vue3 管理界面
+│  第 7 层 · 评测 & 前端                       │  ← 准确率/延迟评测 + Qt 5 桌面客户端
 └─────────────────────────────────────────────┘
 ```
 
@@ -709,7 +709,7 @@ Agent 收到用户任务后，**先问 MemoryHub "关于这件事我记得什么
 OS Agent 收到任务
   │
   ▼
-POST http://localhost:8000/api/memory/search
+POST http://localhost:8099/api/memory/search
 {
   "query": "项目周报",
   "context": {"scene": "office", "task_type": "office.weekly_report"},
@@ -748,7 +748,7 @@ Agent 执行完任务后，把这次做了什么写回 MemoryHub，让系统学�
 OS Agent 完成任务
   │
   ▼
-POST http://localhost:8000/api/memory/events
+POST http://localhost:8099/api/memory/events
 {
   "events": [
     {
@@ -785,7 +785,7 @@ MemoryHub 接收 → 清洗 → 标准化 → 质量评分 → 安全检测
 用户: "忘掉我关于周报格式的偏好"
   │
   ▼
-OS Agent → POST http://localhost:8000/api/memory/forget
+OS Agent → POST http://localhost:8099/api/memory/forget
 {
   "instruction": "忘掉我关于周报格式的偏好"
 }
@@ -859,7 +859,7 @@ POST /api/memory/feedback
 | `/api/memory/events` | POST | 做完之后 | 写入事件，触发记忆学习 |
 | `/api/memory/forget` | POST | 用户要求遗忘时 | 精准删除特定记忆 |
 
-其余接口（`/preferences`, `/knowledge`, `/conflicts`, `/feedback`）是**管理接口**，供前端 Vue3 管理界面或用户手动操作使用，不是 Agent 日常调用的。
+其余接口（`/preferences`, `/knowledge`, `/conflicts`, `/feedback`，以及 `management_api.py` 提供的状态流转/健康度/审计/隔离区/系统状态等）是**管理接口**，供 Qt 5 桌面客户端（`desktop-client/`）或用户手动操作使用，不是 Agent 日常调用的。
 
 `AgentSimulator`（`adapter/simulator.py`）就是一个**模拟真实 Agent 行为的测试工具**，它内部调用 `memory_adapter`（即上面 4 个接口的客户端），模拟完整的"查记忆→做事→写记忆"流程。
 

@@ -30,6 +30,22 @@ cp config.example.yaml config.yaml
 
 ## 配置项详解
 
+### 服务监听配置
+
+| 环境变量 | YAML 路径 | 默认值 | 说明 |
+|---------|----------|-------|------|
+| — | `host` | `0.0.0.0` | 服务监听地址（`127.0.0.1` 仅本机） |
+| — | `port` | `8099` | 服务监听端口（当前仓库所有集成/客户端默认端口） |
+
+```yaml
+host: "0.0.0.0"
+port: 8099
+```
+
+FastAPI 接口文档：`http://<host>:8099/docs`。启动方式：
+`python -m uvicorn memoryhub.app:app --host <host> --port <port>`，
+或使用 `scripts/start-memoryhub-service.ps1`（Windows）/ `.sh`（Linux）。
+
 ### 运行模式配置
 
 | 环境变量 | YAML 路径 | 默认值 | 说明 |
@@ -233,8 +249,8 @@ safety:
 `false` 不会降级规则自身的 `REJECT`；`auto_mask: false` 或
 `policy.auto_sanitize: false` 会把原本的 `MASK` 提升为 `REVIEW`，不会放行
 未脱敏事件。完整默认规则与溯源见
-`memoryhub/safety_rules/data/builtin-1.0.json` 和
-[`SAFETY_RULE_LIBRARY.md`](SAFETY_RULE_LIBRARY.md)。
+`memoryhub/safety_rules/data/builtin-1.0.json`（规则集清单见
+`memoryhub/safety_rules/data/catalog.json`）。
 
 普通 `rule_overrides` / `level_overrides` 不能使用 `ALLOW`，且有效动作始终取
 覆盖值与规则建议中更严格的一项，因此 `REJECT`/`REVIEW` 基线不能被普通覆盖降级。

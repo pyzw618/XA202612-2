@@ -609,8 +609,8 @@ score = 0.40 * completeness
 每次完整替换调用还必须返回 replacement（输入已经是安全标记时允许幂等返回）。
 候选正则只负责缩小范围；例如公民身份号码随后由版本化 validator
 校验出生日期、顺序码和 MOD 11-2 校验位，IPv4 候选由 IP 解析器校验八位组。
-规则的法律、标准、RFC、安全指南和项目策略来源见
-[`SAFETY_RULE_LIBRARY.md`](SAFETY_RULE_LIBRARY.md)。
+规则的法律、标准、RFC、安全指南和项目策略来源以
+`memoryhub/safety_rules/data/builtin-1.0.json` 中的 `standard_ref` 为准。
 
 #### 安全数据契约
 
@@ -1417,6 +1417,12 @@ POST /api/memory/forget
 | POST | `/api/memory/feedback` | 提交用户反馈 |
 | POST | `/api/memory/evaluate/{task_name}` | 运行评测 |
 | GET | `/api/memory/evaluate/reports` | 列出评测报告 |
+
+> 管理后台类接口（记忆状态流转 PATCH/POST `/memories/...`、批量删除、硬删除、
+> 健康度 `GET /memories/health`、生命周期触发 `POST /lifecycle/auto-forget`、
+> 审计日志 `GET /safety/audit-logs`、隔离区 `GET /safety/quarantine`、
+> 系统状态 `GET /system/status` 等）由 `memoryhub/adapter/management_api.py`
+> 提供，供 Qt 桌面客户端（`desktop-client/`）消费。
 
 ### 5.5 用户自定义敏感规则
 

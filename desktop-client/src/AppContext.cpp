@@ -8,7 +8,7 @@ AppContext::AppContext(QObject *parent)
     : QObject(parent),
       m_api(new api::ApiClient(this)),
       m_userId(QStringLiteral("default")),
-      m_baseUrl(QStringLiteral("http://127.0.0.1:8000")) {
+      m_baseUrl(QStringLiteral("http://127.0.0.1:8099")) {
     m_api->setBaseUrl(m_baseUrl);
     m_api->setUserId(m_userId);
 }

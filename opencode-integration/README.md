@@ -13,14 +13,14 @@
 
 ```bash
 # 1. 启动 MemoryHub REST（dev 模式：mock embedding + faiss）
-python opencode-integration/scripts/start_memoryhub_server.py --port 8000
+python opencode-integration/scripts/start_memoryhub_server.py --port 8099
 # 首次启动自动创建持久安全密钥，后续重启无需配置密钥
 
 # 2. 接入 MCP Server：把 examples/opencode.json 的 mcp 段合并进项目 opencode.json
 
 # 3. 接入 Plugin（复制到 .opencode/plugins/ 并导出环境变量后重启 opencode）
 node opencode-integration/scripts/install_plugin.mjs
-export MEMORYHUB_API_URL=http://127.0.0.1:8000
+export MEMORYHUB_API_URL=http://127.0.0.1:8099
 export MEMORYHUB_USER_ID=opencode
 ```
 

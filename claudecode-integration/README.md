@@ -15,14 +15,14 @@
 
 ```bash
 # 1. 启动 MemoryHub REST（dev 模式）
-D:/Anaconda/envs/py12/python.exe claudecode-integration/scripts/start_memoryhub_server.py --port 8000
+D:/Anaconda/envs/py12/python.exe claudecode-integration/scripts/start_memoryhub_server.py --port 8099
 
 # 2. 安装插件到 ~/.claude/plugins/（固定解释器）
 powershell -ExecutionPolicy Bypass -File claudecode-integration/scripts/install_plugin.ps1 \
     -PythonPath D:\Anaconda\envs\py12\python.exe
 
 # 3. 导出环境变量并重启 Claude Code
-$env:MEMORYHUB_API_URL = 'http://127.0.0.1:8000'
+$env:MEMORYHUB_API_URL = 'http://127.0.0.1:8099'
 $env:MEMORYHUB_USER_ID = 'claudecode'
 ```
 

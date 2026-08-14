@@ -411,7 +411,7 @@ python evaluation/run_milvus_kylin_benchmark.py \
 
 ```bash
 python evaluation/run_kylin_http_retrieval_evaluation.py \
-  --base-url http://127.0.0.1:8000 \
+  --base-url http://127.0.0.1:8099 \
   --dataset evaluation/datasets/memoryhub_knowledge_retrieval_v1_test.json \
   --latency-dataset evaluation/datasets/memoryhub_retrieval_latency_v1.json \
   --phase cold \

@@ -47,7 +47,7 @@ if ($PythonPath) {
 
 Write-Output "[memoryhub] installed plugin to $Target"
 Write-Output "[memoryhub] before starting Claude Code, export:"
-Write-Output "    `$env:MEMORYHUB_API_URL = 'http://127.0.0.1:8000'"
+Write-Output "    `$env:MEMORYHUB_API_URL = 'http://127.0.0.1:8099'"
 Write-Output "    `$env:MEMORYHUB_USER_ID = 'claudecode'"
 Write-Output "[memoryhub] start the MemoryHub REST service:"
 Write-Output "    python claudecode-integration/scripts/start_memoryhub_server.py"

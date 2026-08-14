@@ -1,6 +1,6 @@
 #pragma once
 // HTTP 客户端封装：同步调用（阻塞 + 等待光标）与异步调用（后台轮询）并存。
-// 后端为本地 FastAPI 服务（http://127.0.0.1:8000），响应通常在百毫秒内。
+// 后端为本地 FastAPI 服务（http://127.0.0.1:8099），响应通常在百毫秒内。
 
 #include <QByteArray>
 #include <QJsonArray>

@@ -5,7 +5,8 @@
 本仓库包含：
 
 - `memoryhub`：Python/FastAPI 本地记忆服务，负责事件处理、偏好、知识、事实、检索、冲突和遗忘。
-- `desktop-client`：Qt 5 原生桌面控制台（银河麒麟/Windows），可视化审计、演示与调参（详见 `desktop-client/README.md`）。
+- `desktop-client`：Qt 5 原生桌面控制台（银河麒麟/Windows），21 个页面，可视化审计、演示与调参（详见 `desktop-client/README.md`）。
+- `integrations/`、`claudecode-integration/`、`opencode-integration/`：Qwen（LangGraph）、Claude Code、opencode 三种 Agent 接入（REST + MCP，各 12 个工具）。
 
 ## 项目定位
 
@@ -15,28 +16,28 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的"记忆系统"，让 AI 助手能�
 
 ```
 ┌──────────────────────────────────┐
-│  OS Agent / 用户                  │
+│  用户 / OS Agent / Qt 桌面客户端   │
 ├──────────────────────────────────┤
-│  REST API (FastAPI)              │
+│  REST API (FastAPI)             │
 ├──────────────────────────────────┤
-│  Embedding 抽象层        ✅ 完成  │  ← 麒麟 SDK 骨架 + Mock 降级
+│  Embedding 抽象层        ✅ 完成  │  ← 麒麟 SDK（生产）+ Mock/降级
 ├──────────────────────────────────┤
-│  混合检索引擎            ✅ 完成  │  ← BM25 + FAISS + Hybrid / Milvus
+│  混合检索引擎            ✅ 完成  │  ← Milvus（生产）BM25+FAISS（dev/test）
 ├──────────────────────────────────┤
-│  SQLite + FAISS 持久化   ✅ 完成  │  ← 重启数据不丢
+│  SQLite + Milvus/FAISS 持久化 ✅  │  ← 重启数据不丢
 └──────────────────────────────────┘
 ```
 
 职责划分：
 
 ```text
-OS Agent / 客户端
+OS Agent / Qt 桌面客户端
               │ HTTP JSON
               ▼
-       FastAPI 本地后端（127.0.0.1:8000）
+       FastAPI 本地后端（127.0.0.1:8099）
               │
               ▼
-     记忆处理、SQLite、BM25、向量索引
+     记忆处理、SQLite、检索、安全门禁、向量索引
 ```
 
 MemoryHub 负责真正的记忆读写、冲突处理和遗忘；客户端通过 REST API 访问，不应直接修改核心记忆数据库。
@@ -72,10 +73,10 @@ python -m venv .venv
 powershell.exe -ExecutionPolicy Bypass -File .\scripts\start-memoryhub-service.ps1
 ```
 
-后端默认监听 `http://127.0.0.1:8000`，FastAPI 接口文档：
+后端默认监听 `http://127.0.0.1:8099`，FastAPI 接口文档：
 
 ```text
-http://127.0.0.1:8000/docs
+http://127.0.0.1:8099/docs
 ```
 
 后端停止命令：
@@ -87,67 +88,76 @@ powershell.exe -ExecutionPolicy Bypass -File .\scripts\stop-memoryhub-service.ps
 也可手动启动：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn memoryhub.app:app --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m uvicorn memoryhub.app:app --host 127.0.0.1 --port 8099
 ```
 
 ## 项目结构
 
 ```
 memoryhub/                  # 核心 Python 包
-├── app.py                  # FastAPI 应用入口
-├── config.py               # 配置管理
+├── app.py                  # FastAPI 应用入口（create_app，4 个 router）
+├── config.py               # 配置管理（dataclass + YAML + 环境变量）
 ├── adapter/                # OS Agent 接入适配层
-│   ├── api.py              # 记忆查询和管理 REST 路由
-│   ├── agent_api.py        # Agent 回放/裁决适配路由
+│   ├── api.py              # 标准记忆 REST 路由（/api/memory）
+│   ├── management_api.py   # 管理后台 API（状态流转/批量/健康/审计/隔离区/系统状态）
+│   ├── agent_api.py        # Agent 演示适配层（step/replay/裁决，/api/agent）
+│   ├── service.py          # MemoryService 最小垂直切片（无 LLM 降级路径）
 │   ├── schemas.py          # 核心数据结构 (Pydantic)
 │   ├── user_rule_schemas.py # 用户敏感规则 REST DTO
 │   └── simulator.py        # OS Agent 模拟器
 ├── core/                   # 记忆核心逻辑
-│   ├── processing.py       # 事件处理协调器（Agent 演示适配层）
-│   ├── ingestion/          # 多源数据接入 (清洗/标准化/质量评分/重试)
+│   ├── processing.py       # 事件处理协调器（演示适配层）
+│   ├── memory_write.py     # 统一持久化与索引同步（MemoryWriteService）
+│   ├── ingestion/          # 多源数据接入 (清洗/标准化/质量评分/抽取重试)
 │   ├── preference/         # 偏好记忆 (抽取/置信度/版本管理)
-│   ├── knowledge/          # 知识记忆 (抽取/模板/工作流挖掘)
-│   ├── fact/               # 事实记忆 (提取/冲突/标准化)
-│   ├── forget/             # 精准遗忘模块
+│   ├── knowledge/          # 知识记忆 (抽取/模板/工作流挖掘/合并)
+│   ├── fact/               # 事实记忆 (三元组提取/归一化/准入/冲突)
+│   ├── forget/             # 精准遗忘 (显式/自动遗忘/健康度)
 │   ├── conflict/           # 冲突处理 (检测/解决)
-│   ├── safety/             # 安全过滤与精准遗忘
+│   ├── safety/             # 安全门禁 (检测/决策/脱敏/审计/隔离/用户规则)
 │   └── lifecycle/          # 记忆生命周期管理
 ├── retrieval/              # 混合检索引擎
-│   ├── hybrid.py           # 混合检索入口
-│   ├── milvus_hybrid.py    # Milvus 混合检索（生产）
+│   ├── milvus_hybrid.py    # Milvus 混合检索（生产唯一装配）
+│   ├── hybrid.py           # 混合检索入口（dev/test 降级）
 │   ├── vector_search.py    # FAISS 向量检索
 │   ├── keyword_search.py   # BM25 关键词检索
 │   ├── reranker.py         # 重排序
 │   └── cache.py            # LRU 缓存
 ├── storage/                # 持久化存储层
-│   ├── database.py         # SQLite + SQLAlchemy
+│   ├── database.py         # SQLite + SQLAlchemy + Repository
 │   ├── models.py           # ORM 模型
 │   ├── vector_store.py     # FAISS 索引管理
-│   ├── vector_engine/      # 向量引擎（faiss / milvus / milvus_mock）
-│   ├── sync_service.py     # 记忆写入同步
+│   ├── vector_engine/      # 向量引擎（faiss / milvus / milvus_mock / sparse）
+│   ├── sync_service.py     # SQLite ↔ Milvus 写入同步与补偿
+│   ├── compensation_task.py # pending 索引补偿任务
 │   └── evidence_store.py   # 证据链存储
 ├── llm/                    # LLM 抽象层
 │   ├── base.py             # 抽象接口
 │   ├── openai_client.py    # OpenAI 兼容 API
 │   └── ollama_client.py    # Ollama 本地推理
-└── embedding/              # Embedding 抽象层
-    ├── base.py             # 抽象接口
-    ├── kylin_client.py     # 麒麟 SDK 封装
-    └── mock_client.py      # 开发用 Mock
+├── embedding/              # Embedding 抽象层
+│   ├── base.py             # 抽象接口
+│   ├── kylin_client.py     # 麒麟 SDK 封装（生产）
+│   ├── mock_client.py      # 开发用 Mock
+│   └── ollama_embedding.py # Ollama embeddings（未接入工厂选择）
+└── safety_rules/           # 版本化声明式安全规则库（内置规则集 catalog）
+
+desktop-client/             # Qt 5 原生桌面控制台（21 页，详见 desktop-client/README.md）
 
 evaluation/                 # 评测模块
-├── metrics/
-│   ├── preference_eval.py  # 偏好提取评测
-│   ├── retrieval_eval.py   # 检索评测
-│   ├── conflict_eval.py    # 冲突处理评测
-│   └── latency_benchmark.py # 性能基准测试
+├── metrics/                # retrieval_eval / latency_benchmark / full_chain_benchmark（preference/conflict 为框架占位）
+├── datasets/               # 检索评测数据集（dev/test/golden/latency + SHA256SUMS + 标注规范）
+├── results/                # 评测结果与验收报告
+└── run_*.py                # 评测驱动脚本（HTTP/延迟/Milvus 基准等）
 
 docs/                       # 设计/验收/技术文档
-scripts/                    # 服务启动脚本
-integrations/               # Qwen Agent 等 Agent 集成
-claudecode-integration/     # Claude Code MCP 接入
-opencode-integration/       # opencode MCP 接入
-tests/                      # 后端测试
+scripts/                    # 服务启停脚本 + 环境自检（start/stop/verify）
+integrations/               # Qwen（LangGraph）Agent 集成
+claudecode-integration/     # Claude Code MCP + Hooks 接入
+opencode-integration/       # opencode MCP + Plugin 接入
+packaging/                  # systemd 服务打包
+third_party/                # 麒麟 SDK mock 动态库
+tests/                      # 后端测试（约 700 用例）
 ```
 
 ## 模块说明
@@ -192,19 +202,33 @@ vecs = client.embed_batch(["文本1", "文本2"])
 
 | 方法 | 接口 | 作用 |
 | --- | --- | --- |
+| GET | /api/health | 健康检查 |
 | POST | /api/agent/step | 执行一轮 Agent 对话 |
 | POST | /api/agent/replay | 执行 JSON 回放 |
 | POST | /api/agent/actions/{id}/decision | 用户裁决（事实/冲突/遗忘） |
-| POST | /api/memory/events | 写入标准事件 |
-| POST | /api/memory/search | 检索记忆候选 |
-| GET | /api/memory/preferences | 偏好记忆列表 |
-| GET | /api/memory/knowledge | 知识记忆列表 |
-| GET | /api/memory/facts | 事实记忆列表 |
+| POST | /api/memory/events | 写入标准事件（安全门禁 + 抽取） |
+| POST | /api/memory/search | 混合检索记忆候选 |
+| POST | /api/memory/context | 生成可直接注入 prompt 的记忆上下文 |
+| GET | /api/memory/preferences | 偏好记忆列表（scene/status 过滤） |
+| GET | /api/memory/knowledge | 知识记忆列表（scene/knowledge_type/status 过滤） |
+| GET | /api/memory/facts | 事实记忆列表（含 conflicts/evidence） |
 | GET | /api/memory/conflicts | 冲突记录列表 |
-| POST | /api/memory/forget | 执行精准遗忘 |
+| POST | /api/memory/conflicts/{id}/resolve | 冲突裁决 |
+| POST | /api/memory/forget | 执行精准遗忘（NL/范围/ID + 预览） |
 | GET | /api/memory/forget/history | 遗忘历史 |
+| PATCH | /api/memory/memories/{id}/status | 单条状态流转（待审查/归档/回收站） |
+| POST | /api/memory/memories/status | 批量状态流转 |
+| DELETE | /api/memory/memories/{id}?hard=true | 物理删除 |
+| GET | /api/memory/memories/health | 记忆健康度看板 |
+| POST | /api/memory/lifecycle/auto-forget | 立即执行自动遗忘扫描 |
+| GET | /api/memory/lifecycle/settings | 生命周期/遗忘阈值（只读） |
+| CRUD | /api/memory/safety/user-rules | 用户自定义敏感规则（需 X-MemoryHub-User） |
+| GET | /api/memory/safety/audit-logs | 安全审计日志（HMAC 哈希链） |
+| GET | /api/memory/safety/quarantine | REVIEW 隔离区 |
+| GET | /api/memory/system/status | 各子系统状态 |
+| GET | /api/memory/system/config | 后端配置（非敏感项） |
 
-详细参数以 Swagger 文档为准：`http://127.0.0.1:8000/docs`。
+详细参数以 Swagger 文档为准：`http://127.0.0.1:8099/docs`。
 
 ## 检查和测试
 
@@ -225,7 +249,9 @@ vecs = client.embed_batch(["文本1", "文本2"])
 ## 当前限制
 
 - 当前 Agent 默认以确定性规则编排，真实大模型接入沿用现有 Agent transport。
-- 自动遗忘调度、完整评测执行和部分安全看板仍在完善。
+- 自动遗忘与生命周期检查已实现，但需要手动触发或由外部定时任务调用；应用本身不含调度器。
+- 偏好/冲突评测为框架占位（`NotImplementedError`），检索评测与延迟/全链路基准已实现。
+- 生产模式（`runtime.mode=production`）强制麒麟 Embedding SDK + Milvus 向量引擎，禁止 mock/FAISS 降级。
 - 银河麒麟版本需要在目标机器上重新安装 Python 依赖。
 
 ## License

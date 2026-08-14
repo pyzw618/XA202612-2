@@ -13,7 +13,7 @@
 namespace api {
 
 ApiClient::ApiClient(QObject *parent)
-    : QObject(parent), m_baseUrl(QStringLiteral("http://127.0.0.1:8000")),
+    : QObject(parent), m_baseUrl(QStringLiteral("http://127.0.0.1:8099")),
       m_userId(QStringLiteral("default")) {}
 
 void ApiClient::setBaseUrl(const QString &url) {

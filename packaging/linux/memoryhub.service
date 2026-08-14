@@ -9,7 +9,7 @@ ExecStart=%h/.local/share/MemoryHub/app/scripts/start-memoryhub-service.sh
 Restart=on-failure
 RestartSec=3
 Environment=MEMORYHUB_HOST=127.0.0.1
-Environment=MEMORYHUB_PORT=8000
+Environment=MEMORYHUB_PORT=8099
 Environment=MEMORYHUB_DB_PATH=%h/.local/share/MemoryHub/data/memoryhub.db
 
 [Install]
