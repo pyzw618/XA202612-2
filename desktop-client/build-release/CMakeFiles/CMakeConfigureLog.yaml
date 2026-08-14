@@ -1,0 +1,144 @@
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/cmake-3.30.5-windows-x86_64/share/cmake-3.30/Modules/CMakeDetermineSystem.cmake:205 (message)"
+      - "CMakeLists.txt:7 (project)"
+    message: |
+      The system is: Windows - 10.0.26200 - AMD64
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/cmake-3.30.5-windows-x86_64/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "C:/Program Files/cmake-3.30.5-windows-x86_64/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/cmake-3.30.5-windows-x86_64/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:7 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.41.34120/bin/Hostx64/x64/cl.exe 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      用于 x64 的 Microsoft (R) C/C++ 优化编译器 19.41.34120 版
+      版权所有(C) Microsoft Corporation。保留所有权利。
+      
+      CMakeCXXCompilerId.cpp
+      Microsoft (R) Incremental Linker Version 14.41.34120.0
+      Copyright (C) Microsoft Corporation.  All rights reserved.
+      
+      /out:CMakeCXXCompilerId.exe 
+      CMakeCXXCompilerId.obj 
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.exe"
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.obj"
+      
+      The CXX compiler identification is MSVC, found in:
+        C:/Users/27190/Desktop/揭榜挂帅/技术总结/XA202612-2/desktop-client/build-release/CMakeFiles/3.30.5/CompilerIdCXX/CMakeCXXCompilerId.exe
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/cmake-3.30.5-windows-x86_64/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:1243 (message)"
+      - "C:/Program Files/cmake-3.30.5-windows-x86_64/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:250 (CMAKE_DETERMINE_MSVC_SHOWINCLUDES_PREFIX)"
+      - "C:/Program Files/cmake-3.30.5-windows-x86_64/share/cmake-3.30/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:7 (project)"
+    message: |
+      Detecting CXX compiler /showIncludes prefix:
+        main.c
+        注意: 包含文件:  C:\\Users\\27190\\Desktop\\揭榜挂帅\\技术总结\\XA202612-2\\desktop-client\\build-release\\CMakeFiles\\ShowIncludes\\foo.h
+        
+      Found prefix "注意: 包含文件:  "
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/cmake-3.30.5-windows-x86_64/share/cmake-3.30/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "C:/Program Files/cmake-3.30.5-windows-x86_64/share/cmake-3.30/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:7 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "C:/Users/27190/Desktop/\u63ed\u699c\u6302\u5e05/\u6280\u672f\u603b\u7ed3/XA202612-2/desktop-client/build-release/CMakeFiles/CMakeScratch/TryCompile-1w2e0b"
+      binary: "C:/Users/27190/Desktop/\u63ed\u699c\u6302\u5e05/\u6280\u672f\u603b\u7ed3/XA202612-2/desktop-client/build-release/CMakeFiles/CMakeScratch/TryCompile-1w2e0b"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: "/DWIN32 /D_WINDOWS /GR /EHsc"
+      CMAKE_CXX_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: 'C:/Users/27190/Desktop/揭榜挂帅/技术总结/XA202612-2/desktop-client/build-release/CMakeFiles/CMakeScratch/TryCompile-1w2e0b'
+        
+        Run Build Command(s): "C:/Program Files/cmake-3.30.5-windows-x86_64/bin/cmake.exe" -E env VERBOSE=1 nmake -f Makefile /nologo cmTC_372fd\\fast
+        	"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.41.34120\\bin\\HostX64\\x64\\nmake.exe"  -f CMakeFiles\\cmTC_372fd.dir\\build.make /nologo -L                  CMakeFiles\\cmTC_372fd.dir\\build
+        Building CXX object CMakeFiles/cmTC_372fd.dir/CMakeCXXCompilerABI.cpp.obj
+        	"C:\\Program Files\\cmake-3.30.5-windows-x86_64\\bin\\cmake.exe" -E cmake_cl_compile_depends --dep-file=CMakeFiles\\cmTC_372fd.dir\\CMakeCXXCompilerABI.cpp.obj.d --working-dir=C:\\Users\\27190\\Desktop\\揭榜挂帅\\技术总结\\XA202612-2\\desktop-client\\build-release\\CMakeFiles\\CMakeScratch\\TryCompile-1w2e0b --filter-prefix="注意: 包含文件:  " -- C:\\PROGRA~1\\MICROS~3\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1441~1.341\\bin\\Hostx64\\x64\\cl.exe @C:\\Users\\27190\\AppData\\Local\\Temp\\nmEC04.tmp
+        CMakeCXXCompilerABI.cpp
+        Linking CXX executable cmTC_372fd.exe
+        	"C:\\Program Files\\cmake-3.30.5-windows-x86_64\\bin\\cmake.exe" -E vs_link_exe --intdir=CMakeFiles\\cmTC_372fd.dir --rc=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x64\\rc.exe --mt=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x64\\mt.exe --manifests -- C:\\PROGRA~1\\MICROS~3\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1441~1.341\\bin\\Hostx64\\x64\\link.exe /nologo @CMakeFiles\\cmTC_372fd.dir\\objects1.rsp @C:\\Users\\27190\\AppData\\Local\\Temp\\nmEC91.tmp
+        Visual Studio Incremental Link with embedded manifests
+        Create CMakeFiles\\cmTC_372fd.dir/manifest.rc
+        Create empty: CMakeFiles\\cmTC_372fd.dir/embed.manifest
+        RC Pass 1:
+        C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x64\\rc.exe /fo CMakeFiles\\cmTC_372fd.dir/manifest.res CMakeFiles\\cmTC_372fd.dir/manifest.rc
+        LINK Pass 1:
+        C:\\PROGRA~1\\MICROS~3\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1441~1.341\\bin\\Hostx64\\x64\\link.exe /nologo @CMakeFiles\\cmTC_372fd.dir\\objects1.rsp /out:cmTC_372fd.exe /implib:cmTC_372fd.lib /pdb:C:\\Users\\27190\\Desktop\\?????\\???????\\XA202612-2\\desktop-client\\build-release\\CMakeFiles\\CMakeScratch\\TryCompile-1w2e0b\\cmTC_372fd.pdb /version:0.0 /machine:x64 /debug /INCREMENTAL /subsystem:console kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\\cmTC_372fd.dir/intermediate.manifest CMakeFiles\\cmTC_372fd.dir/manifest.res
+        LINK Pass 1: command "C:\\PROGRA~1\\MICROS~3\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1441~1.341\\bin\\Hostx64\\x64\\link.exe /nologo @CMakeFiles\\cmTC_372fd.dir\\objects1.rsp /out:cmTC_372fd.exe /implib:cmTC_372fd.lib /pdb:C:\\Users\\27190\\Desktop\\?????\\???????\\XA202612-2\\desktop-client\\build-release\\CMakeFiles\\CMakeScratch\\TryCompile-1w2e0b\\cmTC_372fd.pdb /version:0.0 /machine:x64 /debug /INCREMENTAL /subsystem:console kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\\cmTC_372fd.dir/intermediate.manifest CMakeFiles\\cmTC_372fd.dir/manifest.res" failed (exit code 1201) with the following output:
+        LINK : fatal error LNK1201: 写入程序数据库“C:\\Users\\27190\\Desktop\\?????\\???????\\XA202612-2\\desktop-client\\build-release\\CMakeFiles\\CMakeScratch\\TryCompile-1w2e0b\\cmTC_372fd.pdb”时出错；请检查是否是磁盘空间不足、路径无效或权限不够
+        NMAKE : fatal error U1077: “"C:\\Program Files\\cmake-3.30.5-windows-x86_64\\bin\\cmake.exe" -E vs_link_exe --intdir=CMakeFiles\\cmTC_372fd.dir --rc=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x64\\rc.exe --mt=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x64\\mt.exe --manifests -- C:\\PROGRA~1\\MICROS~3\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1441~1.341\\bin\\Hostx64\\x64\\link.exe /nologo @CMakeFiles\\cmTC_372fd.dir\\objects1.rsp @C:\\Users\\27190\\AppData\\Local\\Temp\\nmEC91.tmp”: 返回代码“0xffffffff”
+        Stop.
+        NMAKE : fatal error U1077: “"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.41.34120\\bin\\HostX64\\x64\\nmake.exe"  -f CMakeFiles\\cmTC_372fd.dir\\build.make /nologo -L                  CMakeFiles\\cmTC_372fd.dir\\build”: 返回代码“0x2”
+        Stop.
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/cmake-3.30.5-windows-x86_64/share/cmake-3.30/Modules/CMakeTestCXXCompiler.cmake:56 (try_compile)"
+      - "CMakeLists.txt:7 (project)"
+    checks:
+      - "Check for working CXX compiler: C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.41.34120/bin/Hostx64/x64/cl.exe"
+    directories:
+      source: "C:/Users/27190/Desktop/\u63ed\u699c\u6302\u5e05/\u6280\u672f\u603b\u7ed3/XA202612-2/desktop-client/build-release/CMakeFiles/CMakeScratch/TryCompile-0x6r64"
+      binary: "C:/Users/27190/Desktop/\u63ed\u699c\u6302\u5e05/\u6280\u672f\u603b\u7ed3/XA202612-2/desktop-client/build-release/CMakeFiles/CMakeScratch/TryCompile-0x6r64"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: "/DWIN32 /D_WINDOWS /GR /EHsc"
+      CMAKE_CXX_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+    buildResult:
+      variable: "CMAKE_CXX_COMPILER_WORKS"
+      cached: true
+      stdout: |
+        Change Dir: 'C:/Users/27190/Desktop/揭榜挂帅/技术总结/XA202612-2/desktop-client/build-release/CMakeFiles/CMakeScratch/TryCompile-0x6r64'
+        
+        Run Build Command(s): "C:/Program Files/cmake-3.30.5-windows-x86_64/bin/cmake.exe" -E env VERBOSE=1 nmake -f Makefile /nologo cmTC_9eee1\\fast
+        	"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.41.34120\\bin\\HostX64\\x64\\nmake.exe"  -f CMakeFiles\\cmTC_9eee1.dir\\build.make /nologo -L                  CMakeFiles\\cmTC_9eee1.dir\\build
+        Building CXX object CMakeFiles/cmTC_9eee1.dir/testCXXCompiler.cxx.obj
+        	"C:\\Program Files\\cmake-3.30.5-windows-x86_64\\bin\\cmake.exe" -E cmake_cl_compile_depends --dep-file=CMakeFiles\\cmTC_9eee1.dir\\testCXXCompiler.cxx.obj.d --working-dir=C:\\Users\\27190\\Desktop\\揭榜挂帅\\技术总结\\XA202612-2\\desktop-client\\build-release\\CMakeFiles\\CMakeScratch\\TryCompile-0x6r64 --filter-prefix="注意: 包含文件:  " -- C:\\PROGRA~1\\MICROS~3\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1441~1.341\\bin\\Hostx64\\x64\\cl.exe @C:\\Users\\27190\\AppData\\Local\\Temp\\nmEE17.tmp
+        testCXXCompiler.cxx
+        Linking CXX executable cmTC_9eee1.exe
+        	"C:\\Program Files\\cmake-3.30.5-windows-x86_64\\bin\\cmake.exe" -E vs_link_exe --intdir=CMakeFiles\\cmTC_9eee1.dir --rc=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x64\\rc.exe --mt=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x64\\mt.exe --manifests -- C:\\PROGRA~1\\MICROS~3\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1441~1.341\\bin\\Hostx64\\x64\\link.exe /nologo @CMakeFiles\\cmTC_9eee1.dir\\objects1.rsp @C:\\Users\\27190\\AppData\\Local\\Temp\\nmEEA4.tmp
+        Visual Studio Incremental Link with embedded manifests
+        Create CMakeFiles\\cmTC_9eee1.dir/manifest.rc
+        Create empty: CMakeFiles\\cmTC_9eee1.dir/embed.manifest
+        RC Pass 1:
+        C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x64\\rc.exe /fo CMakeFiles\\cmTC_9eee1.dir/manifest.res CMakeFiles\\cmTC_9eee1.dir/manifest.rc
+        LINK Pass 1:
+        C:\\PROGRA~1\\MICROS~3\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1441~1.341\\bin\\Hostx64\\x64\\link.exe /nologo @CMakeFiles\\cmTC_9eee1.dir\\objects1.rsp /out:cmTC_9eee1.exe /implib:cmTC_9eee1.lib /pdb:C:\\Users\\27190\\Desktop\\?????\\???????\\XA202612-2\\desktop-client\\build-release\\CMakeFiles\\CMakeScratch\\TryCompile-0x6r64\\cmTC_9eee1.pdb /version:0.0 /machine:x64 /debug /INCREMENTAL /subsystem:console kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\\cmTC_9eee1.dir/intermediate.manifest CMakeFiles\\cmTC_9eee1.dir/manifest.res
+        LINK Pass 1: command "C:\\PROGRA~1\\MICROS~3\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1441~1.341\\bin\\Hostx64\\x64\\link.exe /nologo @CMakeFiles\\cmTC_9eee1.dir\\objects1.rsp /out:cmTC_9eee1.exe /implib:cmTC_9eee1.lib /pdb:C:\\Users\\27190\\Desktop\\?????\\???????\\XA202612-2\\desktop-client\\build-release\\CMakeFiles\\CMakeScratch\\TryCompile-0x6r64\\cmTC_9eee1.pdb /version:0.0 /machine:x64 /debug /INCREMENTAL /subsystem:console kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\\cmTC_9eee1.dir/intermediate.manifest CMakeFiles\\cmTC_9eee1.dir/manifest.res" failed (exit code 1201) with the following output:
+        LINK : fatal error LNK1201: 写入程序数据库“C:\\Users\\27190\\Desktop\\?????\\???????\\XA202612-2\\desktop-client\\build-release\\CMakeFiles\\CMakeScratch\\TryCompile-0x6r64\\cmTC_9eee1.pdb”时出错；请检查是否是磁盘空间不足、路径无效或权限不够
+        NMAKE : fatal error U1077: “"C:\\Program Files\\cmake-3.30.5-windows-x86_64\\bin\\cmake.exe" -E vs_link_exe --intdir=CMakeFiles\\cmTC_9eee1.dir --rc=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x64\\rc.exe --mt=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100226~1.0\\x64\\mt.exe --manifests -- C:\\PROGRA~1\\MICROS~3\\2022\\COMMUN~1\\VC\\Tools\\MSVC\\1441~1.341\\bin\\Hostx64\\x64\\link.exe /nologo @CMakeFiles\\cmTC_9eee1.dir\\objects1.rsp @C:\\Users\\27190\\AppData\\Local\\Temp\\nmEEA4.tmp”: 返回代码“0xffffffff”
+        Stop.
+        NMAKE : fatal error U1077: “"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.41.34120\\bin\\HostX64\\x64\\nmake.exe"  -f CMakeFiles\\cmTC_9eee1.dir\\build.make /nologo -L                  CMakeFiles\\cmTC_9eee1.dir\\build”: 返回代码“0x2”
+        Stop.
+        
+      exitCode: 2
+...
