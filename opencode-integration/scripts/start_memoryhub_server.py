@@ -1,15 +1,6 @@
 """Start a local MemoryHub REST service for opencode integration.
 
-Local/development mode (default):
-    python scripts/start_memoryhub_server.py [--host 127.0.0.1] [--port 8000]
-
-  - Embedding provider = mock, vector engine = faiss, user rules disabled
-  - Safety keys auto-generated (see memoryhub_compat.ensure_safety_keys)
-  - Applies the two runtime compat patches (see memoryhub_compat)
-  - Data directory: default ``opencode-integration/.memoryhub-data``
-    (override with --data-dir)
-
-Config-file mode (closer to a real deployment):
+Config-file mode (recommended for Kylin deployment):
     python scripts/start_memoryhub_server.py --config /path/to/config.yaml
 
   Builds the app from your ``config.yaml`` (like ``uvicorn memoryhub.app:app``)
@@ -17,6 +8,13 @@ Config-file mode (closer to a real deployment):
   If the config enables ``safety.user_rules`` you must also wire an identity
   resolver, otherwise event ingestion stays disabled — identical to the stock
   server. Point the MCP server's ``MEMORYHUB_API_URL`` at this instance.
+
+Local mode without --config (Kylin OS only):
+  - Embedding provider = kylin (real SDK), vector engine = milvus
+  - Safety keys auto-generated (see memoryhub_compat.ensure_safety_keys)
+  - Applies the two runtime compat patches (see memoryhub_compat)
+  - Data directory: default ``opencode-integration/.memoryhub-data``
+    (override with --data-dir)
 """
 
 from __future__ import annotations
@@ -72,7 +70,7 @@ def main() -> None:
                 vector_index_path=str(data_dir / "vector_index"),
                 evidence_path=str(data_dir / "evidence"),
             ),
-            embedding=EmbeddingConfig(provider="mock", dimension=64),
+            embedding=EmbeddingConfig(provider="kylin", dimension=768),
             safety=SafetyConfig(user_rules={"enabled": False}),
         )
         from memoryhub.app import create_app

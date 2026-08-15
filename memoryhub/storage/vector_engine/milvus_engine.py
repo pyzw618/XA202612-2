@@ -2,7 +2,7 @@
 Milvus 向量引擎实现。
 
 通过 ctypes 桥接（_milvus_ctypes.py）调用
-libkysdk-vector-engine-client-capi（或项目内 mock 动态库），
+libkysdk-vector-engine-client-capi（麒麟真实动态库），
 实现 BaseVectorEngine 接口。稀疏向量由 C 侧在 insert 时根据
 content 生成；查询侧稀疏向量由调用方用 sparse.build_sparse_vector
 生成后传入 hybrid_search。
@@ -32,7 +32,7 @@ class MilvusVectorEngine(BaseVectorEngine):
 
     使用方式:
         engine = MilvusVectorEngine(
-            app_id="test-app-id", mock=True, collection="memoryhub", dimension=768
+            app_id="test-app-id", collection="memoryhub", dimension=768
         )
         engine.insert("mem_001", "文本", [0.1] * 768)
         results = engine.hybrid_search([0.1] * 768, build_sparse_vector("查询"), 5)
@@ -53,9 +53,9 @@ class MilvusVectorEngine(BaseVectorEngine):
     ):
         """
         参数:
-            so_path: 动态库显式路径；mock=True 时默认指向项目内 mock 库
+            so_path: 动态库显式路径（空则按默认路径探测）
             app_id: 部署平台提供的非空应用标识
-            mock: 是否使用项目内 mock 动态库（非麒麟环境测试用）
+            mock: 已废弃，保留兼容旧调用签名，忽略该值
             host: Milvus 服务地址
             port: Milvus 服务端口
             collection: 集合名
@@ -67,7 +67,7 @@ class MilvusVectorEngine(BaseVectorEngine):
         self._validate_app_id(app_id)
         self._validate_dimension(dimension)
         self._app_id = app_id
-        self._api = _MilvusCAPI(so_path=so_path, mock=mock)
+        self._api = _MilvusCAPI(so_path=so_path, mock=mock)  # mock 已废弃，仅保留签名兼容
         self._handle: Optional[vector_engine_t] = self._api.create()
         self.collection = collection
         self.dimension = dimension

@@ -4,11 +4,7 @@ Kylin Embedding 客户端 — 通过 ctypes 对接麒麟 C SDK。
 在 Kylin OS 上加载 libkylin-coreai-embedding.so，
 通过 DBus 与 Embedding 服务通信，获取真实语义向量。
 
-非 Linux / 无 .so 时自动降级（is_available() → False），
-工厂函数会自动回退到 MockEmbeddingClient。
-
-use_mock=True 时加载项目内 mock 动态库（libkylin-coreai-embedding-mock，
-与真实 SDK 导出相同符号，可在 Windows/Linux 开发机上跑通 ctypes 链路）。
+非 Linux / 无 .so 时 is_available() → False，调用方抛出 KylinEmbeddingError。
 
 SDK 调用流程（基于 kylin-coreai-embedding C API 公开头文件，
 见 docs/retrieval/2026-08-02_kylin_embedding_sdk_api_signatures.md）：
@@ -38,9 +34,6 @@ from .base import BaseEmbeddingClient
 DEFAULT_MODEL_NAME = "ensemble-embd_gte-base_uint8-text"
 DEFAULT_DIM = 768
 
-# mock 动态库固定输出 768 维（见 third_party/kylin-mock/embedding_mock.c）
-MOCK_DIM = 768
-
 # 最大输入字符数（查询侧）
 MAX_QUERY_CHARS = 512
 
@@ -51,17 +44,6 @@ SO_CANDIDATES = [
     "/usr/lib/libkylin-coreai-embedding.so",
     "/usr/local/lib/libkylin-coreai-embedding.so",
 ]
-
-# 项目内 mock 动态库目录（项目根/third_party/kylin-mock/build/）
-_MOCK_LIB_DIR = (
-    Path(__file__).resolve().parents[2] / "third_party" / "kylin-mock" / "build"
-)
-
-_MOCK_LIB_NAMES = {
-    "win32": "libkylin-coreai-embedding-mock.dll",
-    "linux": "libkylin-coreai-embedding-mock.so",
-    "darwin": "libkylin-coreai-embedding-mock.dylib",
-}
 
 logger = logging.getLogger(__name__)
 
@@ -95,32 +77,25 @@ class KylinEmbeddingClient(BaseEmbeddingClient):
         model_name: str = DEFAULT_MODEL_NAME,
         dim: int = DEFAULT_DIM,
         so_path: Optional[str] = None,
-        use_mock: bool = False,
-        mock_so_path: Optional[str] = None,
         query_timeout_ms: int = 250,
-        **kwargs,  # 接受但不使用 Mock 专用参数（latency, seed 等）
+        **kwargs,
     ):
         """
         参数:
-            model_name: 模型名称（真实 SDK 模式）
-            dim: 向量维度；mock 模式固定为 768，真实 SDK 模式固定为 768
+            model_name: 模型名称
+            dim: 向量维度，固定为 768
             so_path: 真实 .so 显式路径（优先于候选列表）
-            use_mock: 是否使用项目内 mock 动态库
-            mock_so_path: mock 动态库显式路径，缺省指向
-                third_party/kylin-mock/build/
             query_timeout_ms: 单次推理超时毫秒数；超时时返回稳定错误码
                 embedding.timeout；ctypes 无法真正中断 C 调用，超时返回后
                 原后台线程可能仍在运行，生产部署应依赖 SDK 原生超时。
         """
         self._model_name = model_name
-        self._use_mock = use_mock
-        # 生产链路固定输出 768 维；mock 库也只提供 768 维模型
-        self._dim = MOCK_DIM if use_mock else DEFAULT_DIM
-        if not use_mock and dim != DEFAULT_DIM:
+        self._dim = DEFAULT_DIM
+        if dim != DEFAULT_DIM:
             raise KylinEmbeddingError("embedding.dimension_mismatch")
         self._lib = None
         self._session = None
-        self._so_path = mock_so_path if use_mock else so_path
+        self._so_path = so_path
         self.query_timeout_ms = max(1, query_timeout_ms)
 
         # 常驻会话：应用生命周期内只初始化一次；__init__ 失败即不可用
@@ -182,8 +157,8 @@ class KylinEmbeddingClient(BaseEmbeddingClient):
 
     def _try_load(self):
         """尝试加载 .so 并初始化会话。失败则保持 self._lib = None。"""
-        if not self._use_mock and platform.system() != "Linux":
-            return  # 真实 SDK 仅在 Linux 上尝试；mock 库不限平台
+        if platform.system() != "Linux":
+            return  # 真实 SDK 仅在 Linux 上可用
 
         lib = self._find_and_load_so()
         if lib is None:
@@ -201,8 +176,6 @@ class KylinEmbeddingClient(BaseEmbeddingClient):
         """按候选列表搜索并加载动态库。"""
         if self._so_path:
             candidates = [self._so_path]
-        elif self._use_mock:
-            candidates = [str(_MOCK_LIB_DIR / _MOCK_LIB_NAMES[_platform_key()])]
         else:
             candidates = SO_CANDIDATES
 

@@ -2,11 +2,11 @@
 稀疏向量生成（Python 侧）。
 
 决策说明：方案文档（阶段 5）原本建议使用 jieba 分词生成稀疏向量，
-但稀疏向量的索引/权重必须与 C 桥接层（及 mock 动态库）内部对
-content 生成的稀疏向量逐位一致，否则 hybrid_search 的稀疏路对不上。
+但稀疏向量的索引/权重必须与 C 桥接层内部对 content 生成的稀疏向量
+逐位一致，否则 hybrid_search 的稀疏路对不上。
 jieba 的分词粒度与 C 侧逐字符规则无法对齐，因此放弃 jieba，
-改为与 C 实现（third_party/kylin-mock/vector_engine_mock.c 中的
-sparse_from_text）完全相同的规则：
+改为与 C 实现（capi/c_api_bridge.cpp 中的 sparse_from_text）
+完全相同的规则：
 
 - ASCII 字母/数字连写为一个 token（**保留原始大小写**，与 C 侧一致；
   C 实现直接对原始字节做 hash，不做小写转换）；

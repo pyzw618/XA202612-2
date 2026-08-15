@@ -23,15 +23,6 @@ from typing import Optional
 # 不透明引擎句柄
 vector_engine_t = c_void_p
 
-# 项目内 mock 动态库相对路径（项目根/third_party/kylin-mock/build/）
-_MOCK_LIB_DIR = Path(__file__).resolve().parents[3] / "third_party" / "kylin-mock" / "build"
-
-_MOCK_LIB_NAMES = {
-    "win32": "libkysdk-vector-engine-client-capi-mock.dll",
-    "linux": "libkysdk-vector-engine-client-capi-mock.so",
-    "darwin": "libkysdk-vector-engine-client-capi-mock.dylib",
-}
-
 _REAL_LIB_NAMES = {
     "win32": "libkysdk-vector-engine-client-capi.dll",
     "linux": "libkysdk-vector-engine-client-capi.so",
@@ -86,11 +77,12 @@ def _platform_key() -> str:
     return "win32"
 
 
-def _probe_library_path(so_path: Optional[str], mock: bool) -> str:
+def _probe_library_path(so_path: Optional[str], mock: bool = False) -> str:
     """
     确定要加载的动态库路径。
 
-    优先级：显式 so_path > mock 模式下项目内 mock 库 > 平台默认安装路径。
+    优先级：显式 so_path > 平台默认安装路径。
+    mock 参数已废弃，仅保留兼容旧调用签名。
     """
     platform = _platform_key()
 
@@ -98,14 +90,6 @@ def _probe_library_path(so_path: Optional[str], mock: bool) -> str:
         path = Path(so_path)
         if not path.exists():
             raise MilvusEngineError(f"向量引擎动态库不存在: {so_path}")
-        return str(path)
-
-    if mock:
-        path = _MOCK_LIB_DIR / _MOCK_LIB_NAMES[platform]
-        if not path.exists():
-            raise MilvusEngineError(
-                f"mock 动态库不存在: {path}，请先编译 third_party/kylin-mock"
-            )
         return str(path)
 
     lib_name = _REAL_LIB_NAMES[platform]

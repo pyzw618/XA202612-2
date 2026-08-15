@@ -105,10 +105,10 @@ class LLMConfig:
 class EmbeddingConfig:
     """Embedding 配置"""
 
-    provider: str = "mock"  # "kylin" | "kylin_mock" | "mock" | "auto"
-    dimension: int = 1024
+    provider: str = "kylin"  # 仅支持 "kylin"（麒麟真实 SDK）
+    dimension: int = 768
     model_name: str = ""
-    so_path: str = ""  # 动态库显式路径（kylin/kylin_mock 模式，空则按默认路径探测）
+    so_path: str = ""  # 动态库显式路径（空则按默认路径探测）
     query_timeout_ms: int = 250
 
 
@@ -116,8 +116,8 @@ class EmbeddingConfig:
 class VectorEngineConfig:
     """向量引擎配置"""
 
-    provider: str = "faiss"  # "faiss" | "milvus" | "milvus_mock"
-    app_id: str = ""  # 部署平台提供的应用标识（milvus/milvus_mock 必填）
+    provider: str = "milvus"  # 仅支持 "milvus"（麒麟 Vector Engine SDK）
+    app_id: str = "memoryhub"  # 部署平台提供的应用标识（milvus 必填，默认占位）
     so_path: str = ""  # Milvus C API 动态库显式路径（空则按默认路径探测）
     host: str = "127.0.0.1"
     port: int = 19530
@@ -130,7 +130,7 @@ class VectorEngineConfig:
         if not isinstance(self.app_id, str):
             raise ValueError("vector_engine.app_id must be a string")
         self.app_id = self.app_id.strip()
-        if self.provider in {"milvus", "milvus_mock"} and not self.app_id:
+        if self.provider == "milvus" and not self.app_id:
             raise ValueError(
                 "vector_engine.app_id must be a non-empty string for Milvus providers"
             )
@@ -482,13 +482,12 @@ def validate_production_gate(config: AppConfig) -> None:
             f"got {config.vector_engine.dimension}"
         )
 
-    # 禁止 mock / kylin_mock / faiss 进入生产配置
-    forbidden = {"mock", "kylin_mock", "faiss", "milvus_mock"}
-    if config.embedding.provider in forbidden:
+    # 仅允许 kylin / milvus 进入生产配置
+    if config.embedding.provider != "kylin":
         errors.append(
             f"embedding provider {config.embedding.provider!r} is not allowed in production"
         )
-    if config.vector_engine.provider in forbidden:
+    if config.vector_engine.provider != "milvus":
         errors.append(
             f"vector_engine provider {config.vector_engine.provider!r} is not allowed in production"
         )

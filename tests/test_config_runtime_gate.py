@@ -287,5 +287,5 @@ class TestLoadConfig:
         cfg = load_config()
         assert cfg.runtime.mode == "development"
         assert cfg.runtime.allow_fallback is True
-        assert cfg.embedding.provider == "mock"
-        assert cfg.vector_engine.provider == "faiss"
+        assert cfg.embedding.provider == "kylin"
+        assert cfg.vector_engine.provider == "milvus"
