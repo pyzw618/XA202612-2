@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from memoryhub.adapter.schemas import (
     ConflictDecision,
     ConflictRecord,
+    MemoryDecision,
     MemoryStatus,
     PreferenceMemory,
 )
@@ -186,7 +187,7 @@ class PreferenceUpdater:
             preference.created_at = datetime.now(timezone.utc)
             preference.updated_at = datetime.now(timezone.utc)
             self.confidence_calculator.calculate(preference)
-            self._save(preference)
+            self._save(preference, action=MemoryDecision.NEW)
             return preference.memory_id
 
         # 触发冲突检测与解决
@@ -215,12 +216,16 @@ class PreferenceUpdater:
         elif decision == ConflictDecision.MERGE:
             if ConflictResolver._is_same_content(existing_pref, preference):
                 self._reinforce(existing_pref, preference)
-                self._save(existing_pref)
+                self._save(existing_pref, action=MemoryDecision.REINFORCE)
                 self._record_conflict(conflict_rec, existing_pref.memory_id)
                 return existing_pref.memory_id
             merged = self.merge(existing_pref, preference)
-            self._save(existing_pref, new_status=MemoryStatus.ARCHIVED)
-            self._save(merged)
+            self._save(
+                existing_pref,
+                new_status=MemoryStatus.ARCHIVED,
+                action=MemoryDecision.REVISE,
+            )
+            self._save(merged, action=MemoryDecision.REVISE)
             self._record_conflict(conflict_rec, merged.memory_id)
             return merged.memory_id
 
@@ -230,7 +235,7 @@ class PreferenceUpdater:
             preference.created_at = datetime.now(timezone.utc)
             preference.updated_at = datetime.now(timezone.utc)
             self.confidence_calculator.calculate(preference)
-            self._save(preference)
+            self._save(preference, action=MemoryDecision.COEXIST)
             self._record_conflict(conflict_rec, preference.memory_id)
             return preference.memory_id
 
@@ -241,7 +246,7 @@ class PreferenceUpdater:
             preference.created_at = datetime.now(timezone.utc)
             preference.updated_at = datetime.now(timezone.utc)
             self.confidence_calculator.calculate(preference)
-            self._save(preference)
+            self._save(preference, action=MemoryDecision.REVIEW)
             self._record_conflict(conflict_rec, preference.memory_id)
             return preference.memory_id
 
@@ -266,13 +271,13 @@ class PreferenceUpdater:
             new_pref.status = MemoryStatus.ACTIVE
             new_pref.created_at = datetime.now(timezone.utc)
             new_pref.updated_at = datetime.now(timezone.utc)
-            self._save(new_pref)
+            self._save(new_pref, action=MemoryDecision.NEW)
             return new_pref.memory_id
 
         # 旧偏好归档，新偏好设为活跃
         old_pref.status = MemoryStatus.ARCHIVED
         old_pref.updated_at = datetime.now(timezone.utc)
-        self._save(old_pref)
+        self._save(old_pref, action=MemoryDecision.SUPERSEDE)
         new_pref.status = MemoryStatus.ACTIVE
         new_pref.parent_id = old_pref.memory_id
         new_pref.root_id = old_pref.root_id or old_pref.memory_id
@@ -283,7 +288,7 @@ class PreferenceUpdater:
             old_pref.evidences, new_pref.evidences
         )
         self.confidence_calculator.calculate(new_pref)
-        self._save(new_pref)
+        self._save(new_pref, action=MemoryDecision.SUPERSEDE)
         if conflict_rec is not None:
             self._record_conflict(conflict_rec, new_pref.memory_id)
 
@@ -315,7 +320,7 @@ class PreferenceUpdater:
         if pref is not None:
             pref.status = MemoryStatus.ARCHIVED
             pref.updated_at = datetime.now(timezone.utc)
-            self._save(pref)
+            self._save(pref, action=MemoryDecision.SUPERSEDE)
 
     def get_version_chain(self, memory_id: str) -> list[PreferenceMemory]:
         """获取版本链"""
@@ -393,12 +398,18 @@ class PreferenceUpdater:
         if self.conflict_repo is not None:
             self.conflict_repo.save(conflict)
 
-    def _save(self, preference: PreferenceMemory, new_status=None):
-        """Persist and synchronize one preference version."""
+    def _save(
+        self,
+        preference: PreferenceMemory,
+        new_status=None,
+        *,
+        action: MemoryDecision | str | None = None,
+    ):
+        """Persist and synchronize one preference version with its domain action."""
         if new_status is not None:
             preference.status = new_status
         if self.write_service is not None:
-            self.write_service.upsert_memory(preference)
+            self.write_service.upsert_memory(preference, action=action)
         elif self.pref_repo is not None:
             self.pref_repo.save(preference)
         else:

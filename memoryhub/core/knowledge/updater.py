@@ -10,6 +10,7 @@ from difflib import SequenceMatcher
 from memoryhub.adapter.schemas import (
     ConflictRecord,
     KnowledgeMemory,
+    MemoryDecision,
     MemoryStatus,
 )
 from memoryhub.config import KnowledgeMergeConfig
@@ -35,7 +36,7 @@ class KnowledgeUpdater:
 
     def add(self, memory: KnowledgeMemory) -> str:
         if self.know_repo is None:
-            self.write_service.upsert_memory(memory)
+            self.write_service.upsert_memory(memory, action=MemoryDecision.NEW)
             return memory.memory_id
 
         exact = self.know_repo.get_by_id(memory.memory_id)
@@ -54,7 +55,9 @@ class KnowledgeUpdater:
                 )
                 if has_new_evidence:
                     reinforced.version = max(1, exact.version) + 1
-                self.write_service.upsert_memory(reinforced)
+                self.write_service.upsert_memory(
+                    reinforced, action=MemoryDecision.REINFORCE
+                )
                 return reinforced.memory_id
             merged = self._merge(
                 exact,
@@ -67,7 +70,7 @@ class KnowledgeUpdater:
 
         existing, score = self._find_best_candidate(memory)
         if existing is None or score < self.config.equivalent_threshold:
-            self.write_service.upsert_memory(memory)
+            self.write_service.upsert_memory(memory, action=MemoryDecision.NEW)
             if existing is not None and score >= self.config.conflict_threshold:
                 self._record_ambiguous_conflict(existing, memory, score)
             return memory.memory_id
@@ -75,7 +78,7 @@ class KnowledgeUpdater:
         incoming_events = {e.event_id for e in memory.evidences if e.event_id}
         existing_events = {e.event_id for e in existing.evidences if e.event_id}
         if incoming_events and incoming_events.issubset(existing_events):
-            self.write_service.upsert_memory(existing)
+            self.write_service.upsert_memory(existing, action=MemoryDecision.DUPLICATE)
             return existing.memory_id
 
         if not self._has_semantic_delta(existing, memory):
@@ -84,7 +87,9 @@ class KnowledgeUpdater:
                 memory,
                 add_support=not bool(incoming_events & existing_events),
             )
-            self.write_service.upsert_memory(reinforced)
+            self.write_service.upsert_memory(
+                reinforced, action=MemoryDecision.REINFORCE
+            )
             return reinforced.memory_id
         merged = self._merge(
             existing,
@@ -240,8 +245,8 @@ class KnowledgeUpdater:
         archived = existing.model_copy(deep=True)
         archived.status = MemoryStatus.ARCHIVED
         archived.updated_at = datetime.now(timezone.utc)
-        self.write_service.upsert_memory(archived)
-        self.write_service.upsert_memory(successor)
+        self.write_service.upsert_memory(archived, action=MemoryDecision.REVISE)
+        self.write_service.upsert_memory(successor, action=MemoryDecision.REVISE)
 
     def _merge(
         self,

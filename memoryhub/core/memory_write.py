@@ -6,7 +6,14 @@ import json
 import time
 from typing import Any
 
-from memoryhub.adapter.schemas import KnowledgeMemory, MemoryStatus, PreferenceMemory
+from memoryhub.adapter.schemas import (
+    KnowledgeMemory,
+    MemoryDecision,
+    MemoryProvenance,
+    MemoryStatus,
+    PreferenceMemory,
+)
+from memoryhub.core.domain_writer import DomainMemoryWriter
 
 Memory = PreferenceMemory | KnowledgeMemory
 
@@ -29,6 +36,8 @@ class MemoryWriteService:
         conflict_repo=None,
         safety_gate=None,
         require_safety: bool = False,
+        domain_writer: DomainMemoryWriter | None = None,
+        project_immediately: bool = True,
     ) -> None:
         self.pref_repo = pref_repo
         self.know_repo = know_repo
@@ -42,6 +51,8 @@ class MemoryWriteService:
         self.conflict_repo = conflict_repo
         self.safety_gate = safety_gate
         self.require_safety = bool(require_safety)
+        self.project_immediately = bool(project_immediately)
+        self.domain_writer = domain_writer or self._build_domain_writer()
 
     @staticmethod
     def index_text(memory: Memory) -> str:
@@ -78,8 +89,14 @@ class MemoryWriteService:
             ),
         }
 
-    def upsert_memory(self, memory: Memory) -> None:
-        """Persist through the memory safety gate whenever active content is written."""
+    def upsert_memory(
+        self,
+        memory: Memory,
+        *,
+        action: MemoryDecision | str | None = None,
+        provenance=None,
+    ):
+        """Persist through the safety gate while preserving an explicit domain action."""
         status = (
             memory.status.value
             if hasattr(memory.status, "value")
@@ -89,31 +106,93 @@ class MemoryWriteService:
             if self.safety_gate is None:
                 if self.require_safety:
                     raise RuntimeError("memory_write.safety_gate_unavailable")
-                return self._unsafe_upsert_memory(memory)
+                return self._unsafe_upsert_memory(
+                    memory, action=action, provenance=provenance
+                )
             from memoryhub.core.safety.memory_write import guard_memory_write
 
             guarded = guard_memory_write(
                 self.safety_gate,
                 memory,
-                self._unsafe_upsert_memory,
+                lambda safe_memory: self._unsafe_upsert_memory(
+                    safe_memory,
+                    action=action,
+                    provenance=provenance,
+                ),
                 operation="memory_sync",
+                approved_sink=lambda safe_memory, approved: self._unsafe_upsert_memory(
+                    safe_memory,
+                    action=action,
+                    provenance=provenance or MemoryProvenance(
+                        event_id=approved.safe_event.event_id,
+                        source_hash=approved.safe_event.source_hash,
+                        source_type=approved.safe_event.source_type,
+                        safety_audit_id=approved.audit_id,
+                        safety_action=approved.action,
+                    ),
+                ),
             )
             if guarded.memory is None:
                 raise RuntimeError(f"memory_write.blocked:{guarded.action.value}")
             return None
-        return self._unsafe_upsert_memory(memory)
+        return self._unsafe_upsert_memory(memory, action=action, provenance=provenance)
 
-    def _unsafe_upsert_memory(self, memory: Memory) -> None:
-        """Internal sink invoked only after a verified safe projection or lifecycle action."""
+    def _unsafe_upsert_memory(
+        self,
+        memory: Memory,
+        *,
+        action: MemoryDecision | str | None = None,
+        provenance=None,
+    ):
+        """Persist first, then project; the domain writer owns authoritative DB writes."""
         repo = self.know_repo if memory.memory_type == "knowledge" else self.pref_repo
-        repo.save(memory)
+        receipt = None
+        if self.domain_writer is not None:
+            receipt = self.domain_writer.write(
+                memory,
+                action=action or self._infer_decision(memory, repo),
+                provenance=provenance,
+            )
+        else:
+            repo.save(memory)
         if self.evidence_store is not None:
-            # EvidenceStore is append-only, so rewrite the current deduplicated
-            # evidence set to make retries and in-place knowledge evolution idempotent.
+            # JSONL remains a short-term read compatibility adapter.  The SQLite
+            # MemoryEvidenceRepository is authoritative for all new writer paths.
             self.evidence_store.delete(memory.memory_id)
             if memory.evidences:
                 self.evidence_store.batch_save(memory.memory_id, memory.evidences)
-        self.sync_memory(memory)
+        if self.project_immediately:
+            self.sync_memory(memory)
+        return receipt
+
+    def _build_domain_writer(self) -> DomainMemoryWriter | None:
+        """Enable the transactional path only when both repositories share a Database."""
+        db = getattr(self.pref_repo, "db", None) or getattr(self.know_repo, "db", None)
+        if db is None:
+            return None
+        other_db = getattr(self.know_repo, "db", None)
+        if self.pref_repo is not None and self.know_repo is not None and db is not other_db:
+            return None
+        return DomainMemoryWriter(
+            db=db,
+            pref_repo=self.pref_repo,
+            know_repo=self.know_repo,
+        )
+
+    @staticmethod
+    def _infer_decision(memory: Memory, repo) -> MemoryDecision:
+        """Compatibility classification until callers pass explicit domain decisions."""
+        get_by_id = getattr(repo, "get_by_id", None)
+        existing = get_by_id(memory.memory_id) if callable(get_by_id) else None
+        if existing is None:
+            return MemoryDecision.NEW
+        if getattr(memory, "parent_id", "") and memory.parent_id != memory.memory_id:
+            return MemoryDecision.SUPERSEDE
+        if int(getattr(memory, "version", 1) or 1) > int(
+            getattr(existing, "version", 1) or 1
+        ):
+            return MemoryDecision.REVISE
+        return MemoryDecision.REINFORCE
 
     def sync_memory(self, memory: Memory, *, remove: bool = False) -> None:
         explicit_remove = remove

@@ -24,6 +24,7 @@ from memoryhub.adapter.agent_api import root_router as agent_root_router
 from memoryhub.adapter.agent_api import router as agent_router
 from memoryhub.adapter.api import router as memory_router
 from memoryhub.adapter.management_api import router as management_router
+from memoryhub.adapter.memory_v2_api import router as memory_v2_router
 from memoryhub.adapter.schemas import SearchResult
 from memoryhub.adapter.service import MemoryService
 from memoryhub.config import AppConfig, load_config, validate_production_runtime
@@ -270,6 +271,7 @@ def create_app(
     app.include_router(agent_router)
     app.include_router(agent_root_router)
     app.include_router(management_router)
+    app.include_router(memory_v2_router)
 
     # 注册生命周期
     async def startup():
@@ -467,6 +469,7 @@ def create_app(
                 db_path=config.storage.db_path,
                 llm_client=llm_client,
                 safety_gate=app.state.safety_gate,
+                project_immediately=not config.runtime.is_production,
             )
             app.state.owns_fact_pipeline = True
         fact_store = app.state.fact_pipeline.store
@@ -606,6 +609,10 @@ def create_app(
             conflict_repo=conflict_repo,
             safety_gate=app.state.safety_gate,
             require_safety=config.runtime.is_production,
+            # Production persistence ends at the durable outbox; the worker owns
+            # vector/keyword/cache projection. Development keeps synchronous
+            # projection for interactive diagnostics and legacy tests.
+            project_immediately=not config.runtime.is_production,
         )
         pref_repo.write_service = app.state.memory_write_service
         know_repo.write_service = app.state.memory_write_service
@@ -739,15 +746,28 @@ def create_app(
             memory_write_service=app.state.memory_write_service,
         )
 
-        # 启动时仅同步 pending_index 记录，禁止全量重建
+        # 可靠 outbox 先补投影；pending_index 仍作为历史写入的短期恢复兼容。
+        from memoryhub.storage.projection_outbox import ProjectionOutboxWorker
+
+        projection_outbox_worker = ProjectionOutboxWorker(
+            pref_repo=pref_repo,
+            know_repo=know_repo,
+            memory_write_service=app.state.memory_write_service,
+            fact_store=fact_store,
+            fact_index_service=app.state.fact_index_service,
+        )
+        projection_outbox_worker.run_once()
+
+        # 启动时仅同步历史 pending_index 记录，禁止全量重建。
         sync_service.repair_at_startup()
 
-        # 启动异步补偿任务，持续扫描 pending_index 并重试
+        # 后台任务优先 drain durable outbox，再补偿历史 pending_index。
         compensation_task = PendingIndexCompensationTask(
             sync_service=sync_service,
             interval_seconds=30.0,
             enabled=vector_engine is not None or keyword_search is not None,
             fact_index_service=app.state.fact_index_service,
+            projection_outbox_worker=projection_outbox_worker,
         )
         compensation_task.start()
 
@@ -760,6 +780,7 @@ def create_app(
         app.state.cache = cache
         app.state.retriever = retriever
         app.state.sync_service = sync_service
+        app.state.projection_outbox_worker = projection_outbox_worker
         app.state.compensation_task = compensation_task
 
     async def shutdown():

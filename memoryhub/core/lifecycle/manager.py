@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from memoryhub.adapter.schemas import (
     KnowledgeMemory,
+    MemoryDecision,
     MemoryEvent,
     MemoryLevel,
     MemoryStatus,
@@ -77,7 +78,7 @@ class LifecycleManager:
         target = promotion_map.get(self._level(memory))
         if target:
             memory.level = target
-            self._save(memory)
+            self._save(memory, action=MemoryDecision.REVISE)
         return memory
 
     def should_expire(self, memory) -> bool:
@@ -91,7 +92,7 @@ class LifecycleManager:
     def expire(self, memory):
         """归档记忆"""
         memory.status = MemoryStatus.ARCHIVED
-        self._save(memory)
+        self._save(memory, action=MemoryDecision.SUPERSEDE)
 
     def run_lifecycle_check(self) -> dict:
         """执行一次完整的生命周期检查"""
@@ -117,7 +118,7 @@ class LifecycleManager:
         logger.info(f"生命周期检查完成: {stats}")
         return stats
 
-    def _save(self, memory):
+    def _save(self, memory, *, action: MemoryDecision | str | None = None):
         if isinstance(memory, PreferenceMemory):
             repo = self.pref_repo
         elif isinstance(memory, KnowledgeMemory):
@@ -128,7 +129,7 @@ class LifecycleManager:
             try:
                 write_service = getattr(repo, "write_service", None)
                 if write_service is not None:
-                    write_service.upsert_memory(memory)
+                    write_service.upsert_memory(memory, action=action)
                 else:
                     repo.save(memory)
             except Exception as e:

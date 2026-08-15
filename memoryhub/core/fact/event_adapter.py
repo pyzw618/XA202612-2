@@ -146,6 +146,7 @@ class FactIngestionAdapter:
         quality = getattr(event, "quality", None)
         return {
             "event_id": str(getattr(event, "event_id", "") or ""),
+            "source_hash": str(getattr(event, "source_hash", "") or ""),
             "user_id": str(getattr(event, "user_id", "") or "default"),
             "source_type": FactIngestionAdapter._enum_value(
                 getattr(event, "source_type", "")

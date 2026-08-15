@@ -96,6 +96,19 @@ class ConflictDecision(str, Enum):
     PENDING = "pending"  # 待用户确认
 
 
+class MemoryDecision(str, Enum):
+    """统一 Domain Writer 使用的记忆状态迁移动作。"""
+
+    NEW = "new"
+    REINFORCE = "reinforce"
+    REVISE = "revise"
+    SUPERSEDE = "supersede"
+    COEXIST = "coexist"
+    DUPLICATE = "duplicate"
+    REVIEW = "review"
+    REJECT = "reject"
+
+
 class MemoryStatus(str, Enum):
     """记忆状态"""
 
@@ -163,6 +176,31 @@ class Evidence(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
     weight: float = 1.0  # 该证据的权重
     decision: ConflictDecision | None = None  # 如 OVERRIDE, MERGE, COEXIST, PENDING 或 None
+
+
+class MemoryProvenance(BaseModel):
+    """一次获批写入的可审计来源信息，不保存隔离区原文。"""
+
+    event_id: str = Field(min_length=1)
+    source_hash: str = Field(min_length=1, max_length=64)
+    source_type: SourceType
+    safety_audit_id: str | None = None
+    safety_review_id: str | None = None
+    safety_action: SafetyAction | None = None
+
+
+class MemoryWriteReceipt(BaseModel):
+    """Domain Writer 对一次记忆状态迁移返回的统一回执。"""
+
+    receipt_id: str = Field(default_factory=lambda: f"receipt_{uuid.uuid4().hex}")
+    memory_id: str = Field(min_length=1)
+    memory_type: str = Field(min_length=1, max_length=16)
+    action: MemoryDecision
+    lineage_id: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
+    outbox_id: str | None = None
+    provenance: MemoryProvenance
+    created_at: datetime = Field(default_factory=datetime.now)
 
 
 # ============================================================

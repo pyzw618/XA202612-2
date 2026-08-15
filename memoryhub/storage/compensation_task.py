@@ -48,6 +48,7 @@ class PendingIndexCompensationTask:
         interval_seconds: float = 30.0,
         enabled: bool = True,
         fact_index_service=None,
+        projection_outbox_worker=None,
     ):
         """
         参数:
@@ -59,6 +60,7 @@ class PendingIndexCompensationTask:
         self.interval_seconds = max(1.0, float(interval_seconds))
         self.enabled = enabled
         self.fact_index_service = fact_index_service
+        self.projection_outbox_worker = projection_outbox_worker
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._metrics = CompensationMetrics()
@@ -127,6 +129,14 @@ class PendingIndexCompensationTask:
             self._metrics.last_error = ""
         result = None
         fact_result = None
+        outbox_result = None
+        if self.projection_outbox_worker is not None:
+            try:
+                outbox_result = self.projection_outbox_worker.run_once()
+            except Exception:
+                with self._metrics_lock:
+                    self._metrics.last_error = "projection_outbox.failed"
+                logger.exception("projection outbox worker failed")
         try:
             result = self.sync_service.sync_pending()
         except Exception:
@@ -140,11 +150,15 @@ class PendingIndexCompensationTask:
                 with self._metrics_lock:
                     self._metrics.last_error = "fact_projection.failed"
                 logger.exception("fact projection compensation failed")
-        succeeded = (len(result.succeeded) if result is not None else 0) + (
-            len(fact_result.succeeded) if fact_result is not None else 0
+        succeeded = (
+            (len(outbox_result.succeeded) if outbox_result is not None else 0)
+            + (len(result.succeeded) if result is not None else 0)
+            + (len(fact_result.succeeded) if fact_result is not None else 0)
         )
-        failed_ids = (list(result.failed) if result is not None else []) + (
-            list(fact_result.failed) if fact_result is not None else []
+        failed_ids = (
+            (list(outbox_result.failed) if outbox_result is not None else [])
+            + (list(result.failed) if result is not None else [])
+            + (list(fact_result.failed) if fact_result is not None else [])
         )
         with self._metrics_lock:
             self._metrics.total_succeeded += succeeded

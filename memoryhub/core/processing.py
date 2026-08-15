@@ -350,18 +350,22 @@ class EventProcessingCoordinator:
         return prefs
 
     def _save_preference(self, memory) -> None:
-        """写偏好：优先走 MemoryWriteService（同步检索索引），否则直接落库。"""
-        if self.memory_write_service is not None:
-            self.memory_write_service.upsert_memory(memory)
-        else:
-            self.pref_repo.save(memory)
+        """Persist through Domain Writer; event processing has no direct repository bypass."""
+        self._writer().upsert_memory(memory)
 
     def _save_knowledge(self, memory) -> None:
-        """写知识：优先走 MemoryWriteService（同步检索索引），否则直接落库。"""
-        if self.memory_write_service is not None:
-            self.memory_write_service.upsert_memory(memory)
-        else:
-            self.know_repo.save(memory)
+        """Persist through Domain Writer; event processing has no direct repository bypass."""
+        self._writer().upsert_memory(memory)
+
+    def _writer(self):
+        if self.memory_write_service is None:
+            from memoryhub.core.memory_write import MemoryWriteService
+
+            self.memory_write_service = MemoryWriteService(
+                pref_repo=self.pref_repo,
+                know_repo=self.know_repo,
+            )
+        return self.memory_write_service
 
     def _notify(self, memory: object) -> None:
         if self.on_memory_written is not None:

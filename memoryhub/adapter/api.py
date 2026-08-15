@@ -17,7 +17,6 @@ from pydantic import BaseModel, Field
 
 from memoryhub.adapter import agent_api as _agent_api
 from memoryhub.adapter.schemas import (
-    ConflictRecord,
     EvalReport,
     ExtractionTask,
     ExtractionTaskRunRequest,
@@ -940,10 +939,8 @@ async def submit_feedback(req: FeedbackRequest, request: Request):
         raise HTTPException(status_code=503, detail="memory repository not initialized")
 
     memory = pref_repo.get_by_id(req.memory_id) if pref_repo is not None else None
-    repo = pref_repo
     if memory is None and know_repo is not None:
         memory = know_repo.get_by_id(req.memory_id)
-        repo = know_repo
     if memory is None or memory.user_id != req.user_id:
         raise HTTPException(status_code=404, detail="memory not found")
 
@@ -963,15 +960,24 @@ async def submit_feedback(req: FeedbackRequest, request: Request):
     write_service = getattr(request.app.state, "memory_write_service", None)
 
     def persist(selected_memory):
-        if write_service is not None:
-            write_service.upsert_memory(selected_memory)
-        else:
-            repo.save(selected_memory)
-            _sync_memory_index(
-                request,
-                selected_memory,
-                remove=selected_memory.status == MemoryStatus.ARCHIVED,
+        nonlocal write_service
+        if write_service is None:
+            from memoryhub.core.memory_write import MemoryWriteService
+
+            write_service = MemoryWriteService(
+                pref_repo=pref_repo,
+                know_repo=know_repo,
+                vector_store=getattr(request.app.state, "vector_store", None),
+                vector_engine=getattr(request.app.state, "vector_engine", None),
+                keyword_search=getattr(request.app.state, "keyword_search", None),
+                memory_lookup=getattr(request.app.state, "memory_lookup", None),
+                search_cache=getattr(request.app.state, "search_cache", None),
+                embedding_client=getattr(request.app.state, "embedding_client", None),
+                # submit_feedback already passed its content mutation through
+                # _guarded_memory_write before this fallback writer is invoked.
+                safety_gate=None,
             )
+        write_service.upsert_memory(selected_memory)
         return selected_memory.memory_id
 
     if content_update:

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -53,9 +55,13 @@ CREATE TABLE IF NOT EXISTS fact_evidence (
     evidence_id TEXT PRIMARY KEY,
     fact_id     TEXT NOT NULL,
     user_id     TEXT NOT NULL,
-    source_id   TEXT DEFAULT '',
-    source_text TEXT DEFAULT '',
-    observed_at TEXT NOT NULL
+    source_id       TEXT DEFAULT '',
+    source_text     TEXT DEFAULT '',
+    event_id        TEXT DEFAULT '',
+    source_hash     TEXT DEFAULT '',
+    safety_audit_id TEXT DEFAULT '',
+    safety_action   TEXT DEFAULT '',
+    observed_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_fact_evidence_owner_fact
     ON fact_evidence(user_id, fact_id);
@@ -71,6 +77,23 @@ CREATE TABLE IF NOT EXISTS fact_conflicts (
 );
 CREATE INDEX IF NOT EXISTS idx_fact_conflicts_owner
     ON fact_conflicts(user_id, created_at);
+CREATE TABLE IF NOT EXISTS memory_projection_outbox (
+    outbox_id      TEXT PRIMARY KEY,
+    memory_id      TEXT NOT NULL,
+    memory_type    TEXT NOT NULL,
+    operation      TEXT NOT NULL,
+    payload_hash   TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'pending',
+    attempts       INTEGER NOT NULL DEFAULT 0,
+    next_retry_at  TEXT,
+    error_code     TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_memory_projection_outbox_status_next_retry
+    ON memory_projection_outbox(status, next_retry_at);
+CREATE INDEX IF NOT EXISTS ix_memory_projection_outbox_memory_id_type
+    ON memory_projection_outbox(memory_id, memory_type);
 """
 
 
@@ -103,13 +126,49 @@ class FactStore:
             "project_id": "ALTER TABLE facts ADD COLUMN project_id TEXT",
             "user_id": "ALTER TABLE facts ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'",
             "last_accessed_at": "ALTER TABLE facts ADD COLUMN last_accessed_at TEXT",
-            "access_count_30d": "ALTER TABLE facts ADD COLUMN access_count_30d INTEGER NOT NULL DEFAULT 0",
-            "pending_index": "ALTER TABLE facts ADD COLUMN pending_index INTEGER NOT NULL DEFAULT 1",
-            "index_version": "ALTER TABLE facts ADD COLUMN index_version INTEGER NOT NULL DEFAULT 0",
+            "access_count_30d": (
+                "ALTER TABLE facts ADD COLUMN access_count_30d INTEGER NOT NULL DEFAULT 0"
+            ),
+            "pending_index": (
+                "ALTER TABLE facts ADD COLUMN pending_index INTEGER NOT NULL DEFAULT 1"
+            ),
+            "index_version": (
+                "ALTER TABLE facts ADD COLUMN index_version INTEGER NOT NULL DEFAULT 0"
+            ),
         }
         for column, sql in migrations.items():
             if column not in fact_columns:
                 self._conn.execute(sql)
+        evidence_columns = {
+            row["name"] for row in self._conn.execute("PRAGMA table_info(fact_evidence)")
+        }
+        evidence_migrations = {
+            "event_id": "ALTER TABLE fact_evidence ADD COLUMN event_id TEXT DEFAULT ''",
+            "source_hash": "ALTER TABLE fact_evidence ADD COLUMN source_hash TEXT DEFAULT ''",
+            "safety_audit_id": (
+                "ALTER TABLE fact_evidence ADD COLUMN safety_audit_id TEXT DEFAULT ''"
+            ),
+            "safety_action": "ALTER TABLE fact_evidence ADD COLUMN safety_action TEXT DEFAULT ''",
+        }
+        for column, sql in evidence_migrations.items():
+            if column not in evidence_columns:
+                self._conn.execute(sql)
+
+        for row in self._conn.execute(
+            "SELECT evidence_id, fact_id, user_id, source_id, source_text, event_id, source_hash "
+            "FROM fact_evidence"
+        ).fetchall():
+            event_id = row["event_id"] or row["source_id"] or f"legacy:{row['evidence_id']}"
+            source_hash = row["source_hash"] or hashlib.sha256(
+                f"{row['user_id']}|{row['fact_id']}|{row['source_id']}|{row['source_text']}".encode(
+                    "utf-8"
+                )
+            ).hexdigest()
+            self._conn.execute(
+                "UPDATE fact_evidence SET event_id = ?, source_hash = ? WHERE evidence_id = ?",
+                (event_id, source_hash, row["evidence_id"]),
+            )
+
         self._conn.executescript(
             """
             CREATE INDEX IF NOT EXISTS idx_facts_owner_status ON facts(user_id, status);
@@ -117,8 +176,20 @@ class FactStore:
                 ON facts(user_id, scope, project_id, subject_id, predicate_id, status);
             CREATE INDEX IF NOT EXISTS idx_entities_owner_type ON entities(user_id, entity_type);
             CREATE INDEX IF NOT EXISTS idx_entities_owner_name ON entities(user_id, canonical_name);
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_fact_evidence_fact_event_source
+                ON fact_evidence(fact_id, event_id, source_hash);
             """
         )
+
+    @contextmanager
+    def transaction(self):
+        """Run fact, conflict, and evidence writes as one SQLite transaction."""
+        try:
+            yield
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
 
     def close(self) -> None:
         self._conn.close()
@@ -232,7 +303,8 @@ class FactStore:
             single_value=bool(row["single_value"]),
         )
 
-    def insert_fact(self, fact: Fact) -> str:
+    def _insert_fact(self, fact: Fact) -> str:
+        """Private Fact persistence sink; callers must own the transaction boundary."""
         self._conn.execute(
             """INSERT OR REPLACE INTO facts
                (fact_id, subject_id, predicate_id, object_id, object_value,
@@ -249,8 +321,12 @@ class FactStore:
                 int(fact.pending_index), fact.index_version,
             ),
         )
-        self._conn.commit()
         return fact.fact_id
+
+    def insert_fact(self, fact: Fact) -> str:
+        """Legacy fixture helper; production code must use FactMemoryPipeline commits."""
+        with self.transaction():
+            return self._insert_fact(fact)
 
     def list_pending_facts(self, limit: int = 100) -> list[Fact]:
         rows = self._conn.execute(
@@ -269,19 +345,69 @@ class FactStore:
         self._conn.commit()
         return cursor.rowcount > 0
 
-    def save_fact_evidence(self, fact: Fact) -> None:
-        import hashlib
+    def _enqueue_fact_projection(self, fact: Fact) -> str:
+        """Add one Fact projection job inside the current Fact transaction."""
+        operation = "upsert" if fact.status == "active" else "delete"
+        payload = {
+            "memory_id": fact.fact_id,
+            "memory_type": "fact",
+            "operation": operation,
+            "status": fact.status,
+            "version": fact.version,
+            "index_version": fact.index_version,
+        }
+        payload_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        outbox_id = "outbox_" + hashlib.sha256(
+            f"{fact.fact_id}|fact|{operation}|{payload_hash}".encode("utf-8")
+        ).hexdigest()[:48]
+        now = datetime.now(timezone.utc).isoformat()
+        self._conn.execute(
+            """INSERT OR IGNORE INTO memory_projection_outbox
+               (outbox_id, memory_id, memory_type, operation, payload_hash, status,
+                attempts, next_retry_at, error_code, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 'pending', 0, NULL, '', ?, ?)""",
+            (outbox_id, fact.fact_id, "fact", operation, payload_hash, now, now),
+        )
+        return outbox_id
 
-        evidence_id = "fev_" + hashlib.sha256(
+    def _save_fact_evidence(self, fact: Fact, *, provenance=None) -> str:
+        """Private provenance-aware evidence sink used by approved Fact commits."""
+        event_id = str(getattr(provenance, "event_id", "") or fact.source_id or fact.fact_id)
+        source_hash = str(getattr(provenance, "source_hash", "") or hashlib.sha256(
             f"{fact.user_id}|{fact.fact_id}|{fact.source_id}|{fact.source_text}".encode("utf-8")
+        ).hexdigest())
+        audit_id = str(getattr(provenance, "safety_audit_id", "") or "")
+        safety_action = getattr(provenance, "safety_action", "")
+        safety_action = str(getattr(safety_action, "value", safety_action) or "")
+        evidence_id = "fev_" + hashlib.sha256(
+            f"{fact.fact_id}|{event_id}|{source_hash}".encode("utf-8")
         ).hexdigest()[:24]
         self._conn.execute(
-            """INSERT OR REPLACE INTO fact_evidence
-               (evidence_id, fact_id, user_id, source_id, source_text, observed_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (evidence_id, fact.fact_id, fact.user_id, fact.source_id, fact.source_text, fact.observed_at),
+            """INSERT OR IGNORE INTO fact_evidence
+               (evidence_id, fact_id, user_id, source_id, source_text, event_id,
+                source_hash, safety_audit_id, safety_action, observed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                evidence_id,
+                fact.fact_id,
+                fact.user_id,
+                fact.source_id,
+                fact.source_text,
+                event_id,
+                source_hash,
+                audit_id,
+                safety_action,
+                fact.observed_at,
+            ),
         )
-        self._conn.commit()
+        return evidence_id
+
+    def save_fact_evidence(self, fact: Fact, *, provenance=None) -> str:
+        """Compatibility helper that persists Fact evidence in its own transaction."""
+        with self.transaction():
+            return self._save_fact_evidence(fact, provenance=provenance)
 
     def list_fact_evidence(self, fact_id: str, user_id: str) -> list[dict]:
         rows = self._conn.execute(
@@ -290,9 +416,7 @@ class FactStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def save_fact_conflict(self, result) -> None:
-        import hashlib
-
+    def _save_fact_conflict(self, result) -> None:
         old_id = result.existing_fact.fact_id if result.existing_fact is not None else ""
         user_id = result.new_fact.user_id
         conflict_id = "fconf_" + hashlib.sha256(
@@ -309,7 +433,11 @@ class FactStore:
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
-        self._conn.commit()
+
+    def save_fact_conflict(self, result) -> None:
+        """Compatibility helper that persists a conflict in its own transaction."""
+        with self.transaction():
+            self._save_fact_conflict(result)
 
     def list_fact_conflicts(self, user_id: str, limit: int = 100) -> list[dict]:
         rows = self._conn.execute(
@@ -358,7 +486,7 @@ class FactStore:
         rows = self._conn.execute(query, params).fetchall()
         return [self._row_to_fact(row) for row in rows]
 
-    def update_fact_status(
+    def _update_fact_status(
         self, fact_id: str, new_status: str, user_id: Optional[str] = None
     ) -> bool:
         query = "UPDATE facts SET status = ?, pending_index = 1 WHERE fact_id = ?"
@@ -367,8 +495,69 @@ class FactStore:
             query += " AND user_id = ?"
             params.append(user_id)
         cursor = self._conn.execute(query, params)
-        self._conn.commit()
         return cursor.rowcount > 0
+
+    def transition_fact_status(
+        self,
+        fact_id: str,
+        new_status: str,
+        *,
+        user_id: Optional[str] = None,
+        transition_action: str = "supersede",
+    ) -> bool:
+        """Atomically persist a Fact lifecycle change, lineage, and projection job."""
+        with self.transaction():
+            changed = self._update_fact_status(fact_id, new_status, user_id)
+            if not changed:
+                return False
+            fact = self.get_fact(fact_id, user_id=user_id)
+            if fact is None:
+                return False
+            self._append_fact_lifecycle_lineage(fact, transition_action)
+            self._enqueue_fact_projection(fact)
+            return True
+
+    def _append_fact_lifecycle_lineage(self, fact: Fact, transition_action: str) -> None:
+        """Append Fact lifecycle lineage when the unified authority table is present."""
+        table = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memory_lineage'"
+        ).fetchone()
+        if table is None:
+            return
+        previous = self._conn.execute(
+            "SELECT MAX(evidence_revision) FROM memory_lineage "
+            "WHERE memory_id = ? AND memory_type = 'fact'",
+            (fact.fact_id,),
+        ).fetchone()[0]
+        evidence_revision = int(previous or 0) + 1
+        lineage_id = "lineage_" + hashlib.sha256(
+            (
+                f"{fact.fact_id}|fact|{fact.version}|{evidence_revision}|"
+                f"{transition_action}|{fact.status}"
+            ).encode("utf-8")
+        ).hexdigest()[:48]
+        self._conn.execute(
+            """INSERT OR IGNORE INTO memory_lineage
+               (lineage_id, memory_id, memory_type, parent_memory_id, root_memory_id,
+                semantic_version, evidence_revision, transition_action, created_at)
+               VALUES (?, ?, 'fact', NULL, ?, ?, ?, ?, ?)""",
+            (
+                lineage_id,
+                fact.fact_id,
+                fact.fact_id,
+                max(1, int(fact.version)),
+                evidence_revision,
+                transition_action,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
+    def update_fact_status(
+        self, fact_id: str, new_status: str, user_id: Optional[str] = None
+    ) -> bool:
+        """Compatibility helper; production transitions are owned by the pipeline."""
+        with self.transaction():
+            return self._update_fact_status(fact_id, new_status, user_id)
 
     def get_fact(self, fact_id: str, user_id: Optional[str] = None) -> Optional[Fact]:
         query = "SELECT * FROM facts WHERE fact_id = ?"

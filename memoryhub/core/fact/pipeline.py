@@ -21,11 +21,13 @@
 
 import copy
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from memoryhub.adapter.schemas import (
     EventQuality,
     MemoryEvent,
+    MemoryProvenance,
     QualityStatus,
     SourceType,
     canonical_sha256,
@@ -76,6 +78,7 @@ class FactMemoryPipeline:
         store: Optional[FactStore] = None,
         index_service=None,
         safety_gate=None,
+        project_immediately: bool = True,
     ):
         """
         Args:
@@ -100,6 +103,7 @@ class FactMemoryPipeline:
         self.admission = admission_policy or FactAdmissionPolicy()
         self.index_service = index_service
         self.safety_gate = safety_gate
+        self.project_immediately = bool(project_immediately)
 
     def propose(
         self,
@@ -153,7 +157,91 @@ class FactMemoryPipeline:
         force: bool = False,
         user_id: Optional[str] = None,
     ) -> ConflictResult:
-        """明确提交一个候选事实，并执行同作用域冲突检测与写入。"""
+        """Compatibility entrypoint: safety-route production commits, unsafe only without a gate."""
+        if getattr(self, "safety_gate", None) is not None:
+            approved, provenance = self._safety_checked_proposal(proposal)
+            return self.commit_approved(
+                approved,
+                scope=scope,
+                project_id=project_id,
+                resolution=resolution,
+                auto_resolve=auto_resolve,
+                force=force,
+                user_id=user_id,
+                provenance=provenance,
+            )
+        return self.commit_unsafe_for_test(
+            proposal,
+            scope=scope,
+            project_id=project_id,
+            resolution=resolution,
+            auto_resolve=auto_resolve,
+            force=force,
+            user_id=user_id,
+        )
+
+    def commit_approved(
+        self,
+        proposal: FactProposal,
+        *,
+        scope: Optional[str] = None,
+        project_id: Optional[str] = None,
+        resolution: Optional[str] = None,
+        auto_resolve: bool = True,
+        force: bool = False,
+        user_id: Optional[str] = None,
+        provenance: MemoryProvenance,
+    ) -> ConflictResult:
+        """Commit one candidate that has passed Safety Gate with auditable provenance."""
+        if not provenance.safety_audit_id:
+            raise ValueError("fact_commit.approval_provenance_required")
+        return self._commit(
+            proposal,
+            scope=scope,
+            project_id=project_id,
+            resolution=resolution,
+            auto_resolve=auto_resolve,
+            force=force,
+            user_id=user_id,
+            provenance=provenance,
+        )
+
+    def commit_unsafe_for_test(
+        self,
+        proposal: FactProposal,
+        *,
+        scope: Optional[str] = None,
+        project_id: Optional[str] = None,
+        resolution: Optional[str] = None,
+        auto_resolve: bool = True,
+        force: bool = False,
+        user_id: Optional[str] = None,
+    ) -> ConflictResult:
+        """Test-only escape hatch for deterministic unit tests without a Safety Gate."""
+        return self._commit(
+            proposal,
+            scope=scope,
+            project_id=project_id,
+            resolution=resolution,
+            auto_resolve=auto_resolve,
+            force=force,
+            user_id=user_id,
+            provenance=self._unsafe_provenance(proposal),
+        )
+
+    def _commit(
+        self,
+        proposal: FactProposal,
+        *,
+        scope: Optional[str],
+        project_id: Optional[str],
+        resolution: Optional[str],
+        auto_resolve: bool,
+        force: bool,
+        user_id: Optional[str],
+        provenance: MemoryProvenance,
+    ) -> ConflictResult:
+        """Normalize, resolve, and atomically persist one already-authorized candidate."""
         if not proposal.admission.should_remember and not force:
             raise ValueError(f"候选事实未通过准入判断: {proposal.admission.reason}")
 
@@ -211,30 +299,10 @@ class FactMemoryPipeline:
                 result.resolution = Resolution.ESCALATE.value
                 result.reason = f"[等待主Agent裁决] {result.reason}"
 
-        self._apply(result)
-        self.store.save_fact_conflict(result)
-        evidence_target = (
-            result.existing_fact
-            if result.relation == "DUPLICATE" and result.existing_fact is not None
-            else result.new_fact
-        )
-        if (
-            self.store.get_fact(
-                evidence_target.fact_id, user_id=evidence_target.user_id
-            )
-            is not None
+        self._persist_result(result, provenance=provenance)
+        if getattr(self, "index_service", None) is not None and getattr(
+            self, "project_immediately", True
         ):
-            # Rebind duplicate evidence to the retained fact instead of losing it.
-            evidence_target = Fact(
-                **{
-                    **evidence_target.__dict__,
-                    "source_id": result.new_fact.source_id,
-                    "source_text": result.new_fact.source_text,
-                    "observed_at": result.new_fact.observed_at,
-                }
-            )
-            self.store.save_fact_evidence(evidence_target)
-        if getattr(self, "index_service", None) is not None:
             self.index_service.sync_result(result)
         return result
 
@@ -294,10 +362,12 @@ class FactMemoryPipeline:
 
         return results
 
-    def _safety_checked_proposal(self, proposal: FactProposal) -> FactProposal:
-        """Sanitize direct Fact commits through the configured safety gate."""
+    def _safety_checked_proposal(
+        self, proposal: FactProposal
+    ) -> tuple[FactProposal, MemoryProvenance]:
+        """Sanitize a direct Fact commit and retain Safety Gate provenance."""
         if self.safety_gate is None:
-            return proposal
+            raise RuntimeError("fact_commit.safety_gate_unavailable")
         triple = proposal.raw_triple
         user_id = str(proposal.metadata.get("user_id", "") or "default")
         payload = {
@@ -311,12 +381,15 @@ class FactMemoryPipeline:
                 "confidence": triple.confidence,
             }
         }
+        occurred_at = str(proposal.metadata.get("occurred_at", "") or "")
+        if not occurred_at:
+            occurred_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         event = MemoryEvent(
             event_id=f"fact_commit_{proposal.candidate_id}",
             source_type=SourceType.MANUAL_CONFIG,
             event_type="fact_commit",
             user_id=user_id,
-            occurred_at=str(proposal.metadata.get("occurred_at", "") or ""),
+            occurred_at=occurred_at,
             text=triple.evidence,
             payload=payload,
             source_hash=canonical_sha256(
@@ -343,56 +416,108 @@ class FactMemoryPipeline:
             raise ValueError("fact_commit.invalid_safe_projection") from exc
         safe = copy.deepcopy(proposal)
         safe.raw_triple = sanitized
-        safe.metadata["safety_audit_id"] = str(getattr(outcome, "audit_id", "") or "")
-        return safe
+        provenance = MemoryProvenance(
+            event_id=outcome.approved.safe_event.event_id,
+            source_hash=outcome.approved.safe_event.source_hash,
+            source_type=outcome.approved.safe_event.source_type,
+            safety_audit_id=str(getattr(outcome, "audit_id", "") or ""),
+            safety_action=outcome.action,
+        )
+        safe.metadata["safety_audit_id"] = provenance.safety_audit_id
+        safe.metadata["safety_provenance"] = provenance.model_dump(mode="json")
+        return safe, provenance
+
+    @staticmethod
+    def _unsafe_provenance(proposal: FactProposal) -> MemoryProvenance:
+        source_type = proposal.metadata.get("source_type", SourceType.MANUAL_CONFIG)
+        try:
+            source_type = SourceType(source_type)
+        except ValueError:
+            source_type = SourceType.MANUAL_CONFIG
+        event_id = str(
+            proposal.metadata.get("event_id", "") or f"fact_candidate_{proposal.candidate_id}"
+        )
+        source_hash = str(proposal.metadata.get("source_hash", "") or canonical_sha256(
+            {
+                "candidate_id": proposal.candidate_id,
+                "source_id": proposal.source_id,
+                "event_id": event_id,
+                "triple": proposal.raw_triple.__dict__,
+            }
+        ))
+        return MemoryProvenance(
+            event_id=event_id,
+            source_hash=source_hash,
+            source_type=source_type,
+        )
+
+    def _persist_result(
+        self, result: ConflictResult, *, provenance: MemoryProvenance
+    ) -> None:
+        """Atomically persist Fact state, conflict audit, and deduplicated evidence."""
+        with self.store.transaction():
+            self._apply(result)
+            self.store._save_fact_conflict(result)
+            evidence_target = (
+                result.existing_fact
+                if result.relation == "DUPLICATE" and result.existing_fact is not None
+                else result.new_fact
+            )
+            if (
+                self.store.get_fact(
+                    evidence_target.fact_id, user_id=evidence_target.user_id
+                )
+                is not None
+            ):
+                evidence_target = Fact(
+                    **{
+                        **evidence_target.__dict__,
+                        "source_id": result.new_fact.source_id,
+                        "source_text": result.new_fact.source_text,
+                        "observed_at": result.new_fact.observed_at,
+                    }
+                )
+                self.store._save_fact_evidence(evidence_target, provenance=provenance)
+            affected = [result.new_fact]
+            if result.existing_fact is not None:
+                current_existing = self.store.get_fact(
+                    result.existing_fact.fact_id,
+                    user_id=result.existing_fact.user_id,
+                )
+                if current_existing is not None:
+                    affected.append(current_existing)
+            for fact in affected:
+                current = self.store.get_fact(fact.fact_id, user_id=fact.user_id)
+                if current is not None:
+                    self.store._enqueue_fact_projection(current)
 
     def _apply(self, result: ConflictResult):
-        """根据检测 + 裁决结果写入 / 更新 store"""
+        """Private Fact persistence transitions; the caller owns the transaction."""
         fact = result.new_fact
 
         if result.relation == "NEW":
-            self.store.insert_fact(fact)
-
+            self.store._insert_fact(fact)
         elif result.relation == "DUPLICATE":
-            pass  # 不重复写入
-
+            pass
         elif result.relation == "COEXIST":
-            self.store.insert_fact(fact)
-
+            self.store._insert_fact(fact)
         elif result.relation == "CONFLICT":
             action = result.resolution or Resolution.ESCALATE.value
-
-            if action == Resolution.REPLACE.value:
-                # 新事实取代旧，旧事实标记 superseded
+            if action in {Resolution.REPLACE.value, Resolution.MERGE.value}:
                 if result.existing_fact:
-                    self.store.update_fact_status(
+                    self.store._update_fact_status(
                         result.existing_fact.fact_id,
                         "superseded",
                         user_id=result.existing_fact.user_id,
                     )
-                self.store.insert_fact(fact)
-
+                self.store._insert_fact(fact)
             elif action == Resolution.KEEP_OLD.value:
-                # 丢弃新事实
                 pass
-
-            elif action == Resolution.MERGE.value:
-                # 合并：旧事实标记 superseded，新事实写入（带合并备注）
-                if result.existing_fact:
-                    self.store.update_fact_status(
-                        result.existing_fact.fact_id,
-                        "superseded",
-                        user_id=result.existing_fact.user_id,
-                    )
-                self.store.insert_fact(fact)
-
             elif action == Resolution.COEXIST.value:
-                # 都保留
-                self.store.insert_fact(fact)
-
-            else:  # escalate
+                self.store._insert_fact(fact)
+            else:
                 fact.status = "disputed"
-                self.store.insert_fact(fact)
+                self.store._insert_fact(fact)
 
     def get_facts(
         self,

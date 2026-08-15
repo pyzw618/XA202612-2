@@ -146,6 +146,7 @@ def guard_memory_write(
     sink: Callable[[Memory], SinkResult],
     *,
     operation: str = "explicit_write",
+    approved_sink: Callable[[Memory, ApprovedWrite], SinkResult] | None = None,
 ) -> GuardedMemoryWriteResult[SinkResult]:
     """Audit and sanitize a memory, then invoke its sink with only the safe projection."""
 
@@ -173,6 +174,8 @@ def guard_memory_write(
             identity=identity,
             operation=operation,
         )
+        if approved_sink is not None:
+            return approved_sink(safe_memory, approved)
         return sink(safe_memory)
 
     sink_result = gate.guarded_call(outcome.approved, guarded_sink)

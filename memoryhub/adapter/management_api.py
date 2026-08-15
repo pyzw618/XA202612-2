@@ -25,7 +25,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from memoryhub.adapter.schemas import ForgetRequest, canonical_sha256
+from memoryhub.adapter.schemas import (
+    ForgetRequest,
+    MemoryDecision,
+    MemoryStatus,
+    canonical_sha256,
+)
 from memoryhub.core.forget import MemoryForgetter
 from memoryhub.core.forget.auto_forget import AutoForgetEngine
 from memoryhub.core.forget.health import HealthCalculator
@@ -127,7 +132,7 @@ def _build_forgetter(state) -> MemoryForgetter:
 
 
 def _set_memory_status(state, memory_id: str, user_id: str, status: str) -> dict:
-    """把一条记忆置为指定状态；deleted 走遗忘器级联软删除，其余同步检索索引。"""
+    """Apply lifecycle changes through writers so lineage and outbox remain authoritative."""
     if status not in _MEMORY_STATUSES:
         raise HTTPException(
             status_code=422,
@@ -136,41 +141,29 @@ def _set_memory_status(state, memory_id: str, user_id: str, status: str) -> dict
     mtype, memory = _resolve_memory(state, memory_id, user_id)
     if memory is None:
         raise HTTPException(status_code=404, detail="memory not found")
-
     if status == "deleted":
-        forgetter = _build_forgetter(state)
-        count = forgetter.delete_memories([memory_id], cascade=True, user_id=user_id)
+        count = _build_forgetter(state).delete_memories([memory_id], cascade=True, user_id=user_id)
         return {"memory_id": memory_id, "status": "deleted", "deleted": count > 0}
-
-    write_service = getattr(state, "memory_write_service", None)
-    fact_index_service = getattr(state, "fact_index_service", None)
-
+    action = MemoryDecision.REVIEW if status == "pending" else MemoryDecision.REVISE
+    if status == "archived":
+        action = MemoryDecision.SUPERSEDE
     if mtype == "fact":
         fact_store = getattr(state, "fact_store", None)
         if fact_store is None:
             raise HTTPException(status_code=503, detail="fact store not initialized")
-        if not fact_store.update_fact_status(memory_id, status, user_id=user_id):
+        if not fact_store.transition_fact_status(
+            memory_id,
+            status,
+            user_id=user_id,
+            transition_action=action.value,
+        ):
             raise HTTPException(status_code=409, detail="fact status update failed")
-        current = fact_store.get_fact(memory_id, user_id=user_id)
-        if current is not None and fact_index_service is not None:
-            try:
-                fact_index_service.sync_fact(current)
-            except Exception:
-                # 同步失败不影响 SQLite 事实源；补偿任务会重试 pending_index 记录
-                pass
         return {"memory_id": memory_id, "status": status}
-
-    repo = state.pref_repo if mtype == "preference" else state.know_repo
-    if repo is None:
-        raise HTTPException(status_code=503, detail="memory repository not initialized")
-    if not repo.update_status(memory_id, status, user_id=user_id):
-        raise HTTPException(status_code=409, detail="memory status update failed")
-    current = repo.get_by_id(memory_id)
-    if current is not None and write_service is not None:
-        try:
-            write_service.sync_memory(current)
-        except Exception:
-            pass
+    write_service = getattr(state, "memory_write_service", None)
+    if write_service is None:
+        raise HTTPException(status_code=503, detail="memory writer not initialized")
+    memory.status = MemoryStatus(status)
+    write_service.upsert_memory(memory, action=action)
     return {"memory_id": memory_id, "status": status}
 
 

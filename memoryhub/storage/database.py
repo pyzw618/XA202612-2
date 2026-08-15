@@ -141,6 +141,25 @@ class Database:
                         f"ON {table} (index_version)"
                     )
 
+            # Base.metadata.create_all() creates newly introduced tables on both new
+            # and existing SQLite files.  Create their lookup indexes explicitly as
+            # well so databases initialized by older releases receive the same plan.
+            for index_ddl in (
+                "CREATE INDEX IF NOT EXISTS ix_memory_lineage_memory_type_created_at "
+                "ON memory_lineage (memory_id, memory_type, created_at)",
+                "CREATE INDEX IF NOT EXISTS ix_memory_lineage_root_memory_id "
+                "ON memory_lineage (root_memory_id)",
+                "CREATE INDEX IF NOT EXISTS ix_memory_evidence_memory_type_occurred_at "
+                "ON memory_evidence (memory_id, memory_type, occurred_at)",
+                "CREATE INDEX IF NOT EXISTS ix_memory_evidence_event_id "
+                "ON memory_evidence (event_id)",
+                "CREATE INDEX IF NOT EXISTS ix_memory_projection_outbox_status_next_retry "
+                "ON memory_projection_outbox (status, next_retry_at)",
+                "CREATE INDEX IF NOT EXISTS ix_memory_projection_outbox_memory_id_type "
+                "ON memory_projection_outbox (memory_id, memory_type)",
+            ):
+                conn.exec_driver_sql(index_ddl)
+
     @contextmanager
     def session(self) -> Session:
         """
@@ -387,39 +406,60 @@ class PreferenceRepository:
     def __init__(self, db: Database):
         self.db = db
 
-    def save(self, memory: PreferenceMemory) -> None:
-        """保存偏好；新写入或更新后标记为待同步到向量索引。"""
-        with self.db.session() as s:
-            row = PreferenceRow(
-                memory_id=memory.memory_id,
-                user_id=memory.user_id,
-                preference_type=memory.preference_type.value if hasattr(memory.preference_type, "value") else str(memory.preference_type),
-                content=memory.text,
-                payload=memory.payload,
-                scope_scene=memory.scope.scene,
-                scope_task_type=memory.scope.task_type,
-                scope_app=memory.scope.app,
-                is_global=memory.is_global,
-                confidence=memory.confidence,
-                quality_score=memory.quality_score,
-                extract_source=memory.extract_source,
-                status=memory.status.value if hasattr(memory.status, "value") else str(memory.status),
-                level=memory.level.value if hasattr(memory.level, "value") else memory.level,
-                version=memory.version,
-                parent_id=memory.parent_id or None,
-                root_id=memory.root_id or None,
-                evidences=[e.model_dump(mode="json") for e in memory.evidences] if memory.evidences else [],
-                tags=memory.tags,
-                extra_payload=memory.extra_payload,
-                health_score=memory.health_score,
-                stability=memory.stability,
-                last_accessed_at=memory.last_accessed_at,
-                access_count_30d=memory.access_count_30d,
-                created_at=memory.created_at,
-                updated_at=memory.updated_at,
-                pending_index=True,
-            )
-            s.merge(row)
+    def save(self, memory: PreferenceMemory, *, session: Session | None = None) -> None:
+        """保存偏好；传入 session 时由调用方控制事务边界。"""
+        if session is None:
+            with self.db.session() as managed_session:
+                self._save(managed_session, memory)
+            return
+        self._save(session, memory)
+
+    @staticmethod
+    def _save(session: Session, memory: PreferenceMemory) -> None:
+        row = PreferenceRow(
+            memory_id=memory.memory_id,
+            user_id=memory.user_id,
+            preference_type=(
+                memory.preference_type.value
+                if hasattr(memory.preference_type, "value")
+                else str(memory.preference_type)
+            ),
+            content=memory.text,
+            payload=memory.payload,
+            scope_scene=memory.scope.scene,
+            scope_task_type=memory.scope.task_type,
+            scope_app=memory.scope.app,
+            is_global=memory.is_global,
+            confidence=memory.confidence,
+            quality_score=memory.quality_score,
+            extract_source=memory.extract_source,
+            status=(
+                memory.status.value
+                if hasattr(memory.status, "value")
+                else str(memory.status)
+            ),
+            level=(
+                memory.level.value if hasattr(memory.level, "value") else memory.level
+            ),
+            version=memory.version,
+            parent_id=memory.parent_id or None,
+            root_id=memory.root_id or None,
+            evidences=(
+                [e.model_dump(mode="json") for e in memory.evidences]
+                if memory.evidences
+                else []
+            ),
+            tags=memory.tags,
+            extra_payload=memory.extra_payload,
+            health_score=memory.health_score,
+            stability=memory.stability,
+            last_accessed_at=memory.last_accessed_at,
+            access_count_30d=memory.access_count_30d,
+            created_at=memory.created_at,
+            updated_at=memory.updated_at,
+            pending_index=True,
+        )
+        session.merge(row)
 
     def list_pending(self) -> list[PreferenceMemory]:
         """列出需要同步到向量索引的偏好记忆。"""
@@ -563,53 +603,74 @@ class KnowledgeRepository:
     def __init__(self, db: Database):
         self.db = db
 
-    def save(self, memory: KnowledgeMemory) -> None:
-        """保存知识；新写入或更新后标记为待同步到向量索引。"""
-        with self.db.session() as s:
-            existing = s.get(KnowledgeRow, memory.memory_id)
-            if existing is not None and memory.version > (existing.version or 1):
-                snapshot_id = f"{memory.memory_id}:v{existing.version or 1}"
-                if s.get(KnowledgeVersionRow, snapshot_id) is None:
-                    snapshot = _know_row_to_pydantic(existing)
-                    s.add(
-                        KnowledgeVersionRow(
-                            snapshot_id=snapshot_id,
-                            memory_id=existing.memory_id,
-                            user_id=existing.user_id,
-                            version=existing.version or 1,
-                            payload=snapshot.model_dump(mode="json"),
-                            created_at=existing.updated_at or datetime.now(),
-                        )
+    def save(self, memory: KnowledgeMemory, *, session: Session | None = None) -> None:
+        """保存知识；传入 session 时由调用方控制事务边界。"""
+        if session is None:
+            with self.db.session() as managed_session:
+                self._save(managed_session, memory)
+            return
+        self._save(session, memory)
+
+    @staticmethod
+    def _save(session: Session, memory: KnowledgeMemory) -> None:
+        existing = session.get(KnowledgeRow, memory.memory_id)
+        if existing is not None and memory.version > (existing.version or 1):
+            snapshot_id = f"{memory.memory_id}:v{existing.version or 1}"
+            if session.get(KnowledgeVersionRow, snapshot_id) is None:
+                snapshot = _know_row_to_pydantic(existing)
+                session.add(
+                    KnowledgeVersionRow(
+                        snapshot_id=snapshot_id,
+                        memory_id=existing.memory_id,
+                        user_id=existing.user_id,
+                        version=existing.version or 1,
+                        payload=snapshot.model_dump(mode="json"),
+                        created_at=existing.updated_at or datetime.now(),
                     )
-            row = KnowledgeRow(
-                memory_id=memory.memory_id,
-                user_id=memory.user_id,
-                knowledge_type=memory.knowledge_type.value if hasattr(memory.knowledge_type, "value") else str(memory.knowledge_type),
-                name=memory.name,
-                content=memory.content,
-                steps=memory.steps,
-                tools=memory.tools,
-                template_body=memory.template_body or None,
-                scope_scene=memory.scope.scene,
-                scope_task_type=memory.scope.task_type,
-                scope_app=memory.scope.app,
-                confidence=memory.confidence,
-                success_count=memory.success_count,
-                total_count=memory.total_count,
-                status=memory.status.value if hasattr(memory.status, "value") else str(memory.status),
-                level=memory.level.value if hasattr(memory.level, "value") else memory.level,
-                version=memory.version,
-                parent_id=memory.parent_id or None,
-                evidences=[e.model_dump(mode="json") for e in memory.evidences] if memory.evidences else [],
-                health_score=memory.health_score,
-                stability=memory.stability,
-                last_accessed_at=memory.last_accessed_at,
-                access_count_30d=memory.access_count_30d,
-                created_at=memory.created_at,
-                updated_at=memory.updated_at,
-                pending_index=True,
-            )
-            s.merge(row)
+                )
+        row = KnowledgeRow(
+            memory_id=memory.memory_id,
+            user_id=memory.user_id,
+            knowledge_type=(
+                memory.knowledge_type.value
+                if hasattr(memory.knowledge_type, "value")
+                else str(memory.knowledge_type)
+            ),
+            name=memory.name,
+            content=memory.content,
+            steps=memory.steps,
+            tools=memory.tools,
+            template_body=memory.template_body or None,
+            scope_scene=memory.scope.scene,
+            scope_task_type=memory.scope.task_type,
+            scope_app=memory.scope.app,
+            confidence=memory.confidence,
+            success_count=memory.success_count,
+            total_count=memory.total_count,
+            status=(
+                memory.status.value
+                if hasattr(memory.status, "value")
+                else str(memory.status)
+            ),
+            level=(
+                memory.level.value if hasattr(memory.level, "value") else memory.level
+            ),
+            version=memory.version,
+            parent_id=memory.parent_id or None,
+            evidences=(
+                [e.model_dump(mode="json") for e in memory.evidences]
+                if memory.evidences
+                else []
+            ),
+            health_score=memory.health_score,
+            stability=memory.stability,
+            last_accessed_at=memory.last_accessed_at,
+            access_count_30d=memory.access_count_30d,
+            created_at=memory.created_at,
+            updated_at=memory.updated_at,
+            pending_index=True,
+        )
+        session.merge(row)
 
     def get_version_history(
         self, memory_id: str, *, user_id: str = ""

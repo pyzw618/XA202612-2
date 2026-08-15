@@ -12,6 +12,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
+    Index,
     Integer,
     String,
     Text,
@@ -165,6 +166,89 @@ class ForgetRow(Base):
     target_memory_ids = Column(JSON)
     deleted_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now)
+
+
+class MemoryLineageRow(Base):
+    """记忆版本关系的权威记录；每次状态迁移追加一条。"""
+
+    __tablename__ = "memory_lineage"
+    __table_args__ = (
+        Index(
+            "ix_memory_lineage_memory_type_created_at",
+            "memory_id",
+            "memory_type",
+            "created_at",
+        ),
+        Index("ix_memory_lineage_root_memory_id", "root_memory_id"),
+    )
+
+    lineage_id = Column(String(64), primary_key=True)
+    memory_id = Column(String(64), nullable=False, index=True)
+    memory_type = Column(String(16), nullable=False, index=True)
+    parent_memory_id = Column(String(64), nullable=True)
+    root_memory_id = Column(String(64), nullable=True)
+    semantic_version = Column(Integer, nullable=False, default=1)
+    evidence_revision = Column(Integer, nullable=False, default=1)
+    transition_action = Column(String(16), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+
+class MemoryEvidenceRow(Base):
+    """记忆证据的权威记录；同一记忆中的同一事件来源只能写入一次。"""
+
+    __tablename__ = "memory_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "memory_id",
+            "event_id",
+            "source_hash",
+            name="uq_memory_evidence_memory_event_source",
+        ),
+        Index(
+            "ix_memory_evidence_memory_type_occurred_at",
+            "memory_id",
+            "memory_type",
+            "occurred_at",
+        ),
+        Index("ix_memory_evidence_event_id", "event_id"),
+    )
+
+    evidence_id = Column(String(64), primary_key=True)
+    memory_id = Column(String(64), nullable=False, index=True)
+    memory_type = Column(String(16), nullable=False, index=True)
+    event_id = Column(String(64), nullable=False)
+    source_hash = Column(String(64), nullable=False)
+    source_type = Column(String(32), nullable=False)
+    excerpt = Column(Text, nullable=False, default="")
+    occurred_at = Column(DateTime, nullable=False, default=datetime.now)
+    quality_score = Column(Float, nullable=False, default=1.0)
+    safety_audit_id = Column(String(64), nullable=True, index=True)
+
+
+class MemoryProjectionOutboxRow(Base):
+    """异步索引和缓存投影的可靠事务 outbox。"""
+
+    __tablename__ = "memory_projection_outbox"
+    __table_args__ = (
+        Index("ix_memory_projection_outbox_status_next_retry", "status", "next_retry_at"),
+        Index(
+            "ix_memory_projection_outbox_memory_id_type",
+            "memory_id",
+            "memory_type",
+        ),
+    )
+
+    outbox_id = Column(String(64), primary_key=True)
+    memory_id = Column(String(64), nullable=False, index=True)
+    memory_type = Column(String(16), nullable=False, index=True)
+    operation = Column(String(32), nullable=False)
+    payload_hash = Column(String(64), nullable=False)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    next_retry_at = Column(DateTime, nullable=True)
+    error_code = Column(String(128), nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 
 
 class ExtractionTaskRow(Base):

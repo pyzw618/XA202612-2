@@ -4,6 +4,7 @@ import logging
 
 from memoryhub.adapter.schemas import (
     KnowledgeMemory,
+    MemoryDecision,
     MemoryLevel,
     MemoryStatus,
     PreferenceMemory,
@@ -81,8 +82,11 @@ class AutoForgetEngine:
             if self.fact_store is None:
                 return
             try:
-                changed = self.fact_store.update_fact_status(
-                    memory.fact_id, status_value, user_id=memory.user_id
+                changed = self.fact_store.transition_fact_status(
+                    memory.fact_id,
+                    status_value,
+                    user_id=memory.user_id,
+                    transition_action=MemoryDecision.SUPERSEDE.value,
                 )
                 if changed and self.fact_index_service is not None:
                     current = self.fact_store.get_fact(
@@ -103,7 +107,7 @@ class AutoForgetEngine:
                     repo, "write_service", None
                 )
                 if write_service is not None:
-                    write_service.upsert_memory(memory)
+                    write_service.upsert_memory(memory, action=MemoryDecision.SUPERSEDE)
                 else:
                     repo.update_status(
                         memory.memory_id, status_value, user_id=memory.user_id
@@ -121,7 +125,7 @@ class AutoForgetEngine:
                     repo, "write_service", None
                 )
                 if write_service is not None:
-                    write_service.upsert_memory(memory)
+                    write_service.upsert_memory(memory, action=MemoryDecision.REVISE)
                 else:
                     repo.save(memory)
             except Exception as exc:

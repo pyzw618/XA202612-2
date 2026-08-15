@@ -15,6 +15,8 @@ from memoryhub.adapter.schemas import (
     ForgetRecord,
     ForgetRequest,
     ForgetResponse,
+    MemoryDecision,
+    MemoryStatus,
     SceneScope,
 )
 
@@ -55,6 +57,7 @@ class MemoryForgetter:
         conflict_repo=None,
         fact_store=None,
         fact_index_service=None,
+        memory_write_service=None,
         db=None,
     ):
         """
@@ -81,6 +84,7 @@ class MemoryForgetter:
         self.conflict_repo = conflict_repo
         self.fact_store = fact_store
         self.fact_index_service = fact_index_service
+        self.memory_write_service = memory_write_service
         self._last_deleted_ids: list[str] = []
 
     def execute(self, request: ForgetRequest) -> ForgetResponse:
@@ -297,7 +301,7 @@ class MemoryForgetter:
     def delete_memories(
         self, memory_ids: list[str], cascade: bool = True, user_id: str = ""
     ) -> int:
-        """Soft-delete owned memories and cascade deletion through active indexes."""
+        """Soft-delete through domain writers so lineage and outbox remain authoritative."""
         deleted = 0
         self._last_deleted_ids = []
         for memory_id in memory_ids:
@@ -305,23 +309,43 @@ class MemoryForgetter:
             know_deleted = False
             fact_deleted = False
             if self.pref_repo is not None:
-                pref_deleted = self.pref_repo.update_status(
-                    memory_id, "deleted", user_id=user_id
-                )
+                memory = self.pref_repo.get_by_id(memory_id)
+                if memory is not None and (not user_id or memory.user_id == user_id):
+                    memory.status = MemoryStatus.DELETED
+                    if self.memory_write_service is not None:
+                        self.memory_write_service.upsert_memory(
+                            memory, action=MemoryDecision.SUPERSEDE
+                        )
+                        pref_deleted = True
+                    else:
+                        pref_deleted = self.pref_repo.update_status(
+                            memory_id, "deleted", user_id=user_id
+                        )
             if self.know_repo is not None:
-                know_deleted = self.know_repo.update_status(
-                    memory_id, "deleted", user_id=user_id
-                )
+                memory = self.know_repo.get_by_id(memory_id)
+                if memory is not None and (not user_id or memory.user_id == user_id):
+                    memory.status = MemoryStatus.DELETED
+                    if self.memory_write_service is not None:
+                        self.memory_write_service.upsert_memory(
+                            memory, action=MemoryDecision.SUPERSEDE
+                        )
+                        know_deleted = True
+                    else:
+                        know_deleted = self.know_repo.update_status(
+                            memory_id, "deleted", user_id=user_id
+                        )
             if self.fact_store is not None:
-                fact_deleted = self.fact_store.update_fact_status(
-                    memory_id, "deleted", user_id=user_id
+                fact_deleted = self.fact_store.transition_fact_status(
+                    memory_id,
+                    "deleted",
+                    user_id=user_id or None,
+                    transition_action=MemoryDecision.SUPERSEDE.value,
                 )
-            deleted_this = pref_deleted or know_deleted or fact_deleted
-            if not deleted_this:
+            if not (pref_deleted or know_deleted or fact_deleted):
                 continue
             deleted += 1
             self._last_deleted_ids.append(memory_id)
-            if cascade:
+            if cascade and self.memory_write_service is None:
                 if self.vector_store is not None:
                     self.vector_store.delete(memory_id)
                 if self.vector_engine is not None:
@@ -335,8 +359,6 @@ class MemoryForgetter:
                     self.conflict_repo.delete_for_memories([memory_id])
                 if fact_deleted and hasattr(self.fact_store, "delete_fact_artifacts"):
                     self.fact_store.delete_fact_artifacts([memory_id], user_id)
-                if self.cache is not None:
-                    self.cache.invalidate(memory_id)
                 projection_version = time.time_ns()
                 if pref_deleted and hasattr(self.pref_repo, "mark_indexed"):
                     self.pref_repo.mark_indexed([memory_id], projection_version)
@@ -344,9 +366,11 @@ class MemoryForgetter:
                     self.know_repo.mark_indexed([memory_id], projection_version)
                 if fact_deleted and hasattr(self.fact_store, "mark_indexed"):
                     self.fact_store.mark_indexed(memory_id, projection_version, user_id)
+                if self.cache is not None:
+                    self.cache.invalidate(memory_id)
         if deleted and self.fact_store is not None:
             self.fact_store.prune_orphan_entities(user_id)
-        if deleted and cascade:
+        if deleted and cascade and self.memory_write_service is None:
             if self.vector_store is not None and hasattr(self.vector_store, "save"):
                 self.vector_store.save()
             if self.vector_engine is not None and hasattr(self.vector_engine, "persist"):
