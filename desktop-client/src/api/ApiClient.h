@@ -60,6 +60,7 @@ public:
     Result post(const QString &path, const QJsonObject &body, bool useUserHeader = false);
     Result postRaw(const QString &path, const QJsonValue &body, bool useUserHeader = false);
     Result patch(const QString &path, const QJsonObject &body, bool useUserHeader = false);
+    Result put(const QString &path, const QJsonObject &body, bool useUserHeader = false);
     Result del(const QString &path, bool useUserHeader = false);
 
     // 无响应体的请求（如 204），返回状态码
@@ -78,6 +79,9 @@ public:
     QNetworkReply *patchAsync(const QString &path, const QJsonObject &body, Callback callback,
                               bool useUserHeader = false, QObject *context = nullptr,
                               int timeoutMs = 10000);
+    QNetworkReply *putAsync(const QString &path, const QJsonObject &body, Callback callback,
+                            bool useUserHeader = false, QObject *context = nullptr,
+                            int timeoutMs = 10000);
     QNetworkReply *deleteAsync(const QString &path, Callback callback,
                                bool useUserHeader = false, QObject *context = nullptr,
                                int timeoutMs = 10000);

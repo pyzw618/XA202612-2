@@ -4,12 +4,14 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
 #include <QTabWidget>
@@ -209,10 +211,12 @@ void FactPage::populateRow(int row, const QJsonObject &f) {
     ol->setSpacing(2);
     auto mk = [ops](const QString &t) { auto *b = new QPushButton(t, ops); b->setObjectName("textBtn"); return b; };
     auto *bDetail = mk("详情");
+    auto *bEdit = mk("编辑");
     auto *bEvidence = mk("证据");
     auto *bDelete = mk("删除");
     bDelete->setStyleSheet("color:#EF4444;");
     connect(bDetail, &QPushButton::clicked, this, [this, id]() { openDetail(id); });
+    connect(bEdit, &QPushButton::clicked, this, [this, f]() { openEditDialog(f); });
     connect(bEvidence, &QPushButton::clicked, this, [this, id]() { openDetail(id); });
     connect(bDelete, &QPushButton::clicked, this, [this, f, bDelete]() {
         if (!ConfirmDialog::confirm(this, "删除事实", "确认删除这条事实三元组？")) return;
@@ -238,6 +242,7 @@ void FactPage::populateRow(int row, const QJsonObject &f) {
             }, this);
     });
     ol->addWidget(bDetail);
+    ol->addWidget(bEdit);
     ol->addWidget(bEvidence);
     ol->addWidget(bDelete);
     m_table->setCellWidget(row, 7, ops);
@@ -311,6 +316,55 @@ void FactPage::openDetail(const QString &id) {
                     m_drawer->open(j::shortId(id), tabs);
                 }, this);
         }, this);
+}
+
+void FactPage::openEditDialog(const QJsonObject &fact) {
+    QDialog dlg(this);
+    dlg.setWindowTitle("编辑事实");
+    dlg.setMinimumWidth(460);
+    auto *form = new QFormLayout(&dlg);
+
+    auto *objectEdit = new QLineEdit(j::str(fact, "object_value"), &dlg);
+    form->addRow("客体 *", objectEdit);
+    auto *typeEdit = new QLineEdit(&dlg);
+    typeEdit->setPlaceholderText("如 Person / Location（可选）");
+    form->addRow("客体类型", typeEdit);
+    auto *confidence = new QDoubleSpinBox(&dlg);
+    confidence->setRange(0.0, 1.0);
+    confidence->setDecimals(2);
+    confidence->setSingleStep(0.05);
+    confidence->setValue(j::num(fact, "confidence", 0.7));
+    form->addRow("置信度", confidence);
+    auto *evidence = new QPlainTextEdit(&dlg);
+    evidence->setPlaceholderText("可选：为此次修改追加一条证据");
+    evidence->setFixedHeight(80);
+    form->addRow("新增证据", evidence);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, &dlg);
+    buttons->button(QDialogButtonBox::Ok)->setText("保存");
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    form->addRow(buttons);
+    if (dlg.exec() != QDialog::Accepted) return;
+    if (objectEdit->text().trimmed().isEmpty()) {
+        QMessageBox::warning(this, "提示", "客体不能为空");
+        return;
+    }
+
+    QJsonObject body;
+    body["user_id"] = AppContext::instance()->userId();
+    body["object_value"] = objectEdit->text().trimmed();
+    body["confidence"] = confidence->value();
+    body["transition_action"] = "revise";
+    if (!typeEdit->text().trimmed().isEmpty()) body["object_type"] = typeEdit->text().trimmed();
+    if (!evidence->toPlainText().trimmed().isEmpty()) body["evidence_text"] = evidence->toPlainText().trimmed();
+    const api::Result result = AppContext::instance()->api()->put(
+        "/api/memory/fact/" + j::str(fact, "fact_id"), body);
+    if (result.ok) {
+        QMessageBox::information(this, "完成", "事实已更新");
+        onRefresh();
+    } else {
+        QMessageBox::warning(this, "失败", result.errorCode + " " + result.errorMessage);
+    }
 }
 
 void FactPage::openProposeDialog() {

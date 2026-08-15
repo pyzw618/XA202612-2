@@ -7,7 +7,7 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from .models import Entity, Fact, MemoryScope, PredicateDef
 
@@ -409,6 +409,39 @@ class FactStore:
         with self.transaction():
             return self._save_fact_evidence(fact, provenance=provenance)
 
+    def _save_manual_fact_evidence(self, fact: Fact, evidence: Any) -> str:
+        """Append one caller-supplied item to the Fact's append-only evidence chain."""
+        event_id = str(getattr(evidence, "event_id", "") or fact.source_id or fact.fact_id)
+        content = str(getattr(evidence, "content", "") or "").strip()
+        source_type = str(getattr(evidence, "source_type", "manual_config") or "manual_config")
+        timestamp = getattr(evidence, "timestamp", None) or datetime.now(timezone.utc)
+        observed_at = timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp)
+        source_hash = hashlib.sha256(
+            f"{fact.user_id}|{fact.fact_id}|{event_id}|{source_type}|{content}|{observed_at}".encode("utf-8")
+        ).hexdigest()
+        evidence_id = "fev_" + hashlib.sha256(
+            f"{fact.fact_id}|{event_id}|{source_hash}".encode("utf-8")
+        ).hexdigest()[:24]
+        self._conn.execute(
+            """INSERT OR IGNORE INTO fact_evidence
+               (evidence_id, fact_id, user_id, source_id, source_text, event_id,
+                source_hash, safety_audit_id, safety_action, observed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                evidence_id,
+                fact.fact_id,
+                fact.user_id,
+                f"manual_evidence:{source_type}",
+                content,
+                event_id,
+                source_hash,
+                "",
+                "manual_update",
+                observed_at,
+            ),
+        )
+        return evidence_id
+
     def list_fact_evidence(self, fact_id: str, user_id: str) -> list[dict]:
         rows = self._conn.execute(
             "SELECT * FROM fact_evidence WHERE fact_id = ? AND user_id = ? ORDER BY observed_at",
@@ -551,6 +584,123 @@ class FactStore:
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
+
+    def update_fact(
+        self,
+        fact_id: str,
+        *,
+        user_id: str,
+        object_value: str | None = None,
+        object_type: str | None = None,
+        confidence: float | None = None,
+        status: str | None = None,
+        version: int | None = None,
+        evidence_text: str | None = None,
+        evidences: list[Any] | None = None,
+        transition_action: str = "revise",
+    ) -> Fact | None:
+        """Apply a manual Fact edit together with lineage, evidence, and an outbox job.
+
+        This is the Fact equivalent of the domain writer: the business row, optional
+        new evidence, lineage, and projection command are persisted in one transaction.
+        """
+        with self.transaction():
+            current = self.get_fact(fact_id, user_id=user_id)
+            if current is None:
+                return None
+
+            new_object_value = (
+                str(object_value).strip()
+                if object_value is not None
+                else current.object_value
+            )
+            if not new_object_value:
+                raise ValueError("fact object_value must not be empty")
+            if confidence is not None and not 0.0 <= float(confidence) <= 1.0:
+                raise ValueError("fact confidence must be within [0, 1]")
+
+            old_entity = self.get_entity(current.object_id, user_id=user_id)
+            current_object_type = str(getattr(old_entity, "entity_type", "") or "Other")
+            entity_type = str(object_type or current_object_type or "Other").strip() or "Other"
+            object_changed = (
+                new_object_value != current.object_value
+                or entity_type != current_object_type
+            )
+            new_object_id = current.object_id
+            if object_changed:
+                new_object_id = Entity.make_id(entity_type, new_object_value, user_id)
+                self._conn.execute(
+                    """INSERT OR REPLACE INTO entities
+                       (entity_id, canonical_name, entity_type, aliases, user_id)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (
+                        new_object_id,
+                        new_object_value,
+                        entity_type,
+                        json.dumps([], ensure_ascii=False),
+                        user_id,
+                    ),
+                )
+
+            semantic_changed = (
+                object_changed
+                or (confidence is not None and float(confidence) != current.confidence)
+            )
+            new_version = current.version + 1 if semantic_changed else current.version
+            if version is not None:
+                if int(version) < current.version:
+                    raise ValueError("fact version cannot move backwards")
+                new_version = max(new_version, int(version))
+            new_status = str(status or current.status)
+            if not new_status:
+                raise ValueError("fact status must not be empty")
+
+            source_text = (
+                str(evidence_text).strip()
+                if evidence_text is not None
+                else current.source_text
+            )
+            observed_at = (
+                datetime.now(timezone.utc).isoformat()
+                if evidence_text is not None
+                else current.observed_at
+            )
+            source_id = (
+                f"manual_update:{fact_id}:v{new_version}"
+                if evidence_text is not None
+                else current.source_id
+            )
+            cursor = self._conn.execute(
+                """UPDATE facts
+                   SET object_id = ?, object_value = ?, source_text = ?, source_id = ?,
+                       observed_at = ?, confidence = ?, status = ?, version = ?,
+                       pending_index = 1
+                   WHERE fact_id = ? AND user_id = ?""",
+                (
+                    new_object_id,
+                    new_object_value,
+                    source_text,
+                    source_id,
+                    observed_at,
+                    float(confidence) if confidence is not None else current.confidence,
+                    new_status,
+                    new_version,
+                    fact_id,
+                    user_id,
+                ),
+            )
+            if cursor.rowcount <= 0:
+                return None
+            updated = self.get_fact(fact_id, user_id=user_id)
+            if updated is None:
+                return None
+            if evidence_text is not None and source_text:
+                self._save_fact_evidence(updated)
+            for evidence in evidences or []:
+                self._save_manual_fact_evidence(updated, evidence)
+            self._append_fact_lifecycle_lineage(updated, transition_action)
+            self._enqueue_fact_projection(updated)
+            return updated
 
     def update_fact_status(
         self, fact_id: str, new_status: str, user_id: Optional[str] = None

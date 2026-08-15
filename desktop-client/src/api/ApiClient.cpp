@@ -164,6 +164,11 @@ Result ApiClient::patch(const QString &path, const QJsonObject &body, bool useUs
                     useUserHeader);
 }
 
+Result ApiClient::put(const QString &path, const QJsonObject &body, bool useUserHeader) {
+    return sendSync("PUT", path, QJsonDocument(body).toJson(QJsonDocument::Compact),
+                    useUserHeader);
+}
+
 Result ApiClient::del(const QString &path, bool useUserHeader) {
     return sendSync("DELETE", path, QByteArray(), useUserHeader);
 }
@@ -226,6 +231,13 @@ QNetworkReply *ApiClient::patchAsync(const QString &path, const QJsonObject &bod
                                      Callback callback, bool useUserHeader,
                                      QObject *context, int timeoutMs) {
     return sendAsync("PATCH", path, QJsonDocument(body).toJson(QJsonDocument::Compact),
+                     useUserHeader, std::move(callback), context, timeoutMs);
+}
+
+QNetworkReply *ApiClient::putAsync(const QString &path, const QJsonObject &body,
+                                   Callback callback, bool useUserHeader,
+                                   QObject *context, int timeoutMs) {
+    return sendAsync("PUT", path, QJsonDocument(body).toJson(QJsonDocument::Compact),
                      useUserHeader, std::move(callback), context, timeoutMs);
 }
 

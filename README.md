@@ -216,7 +216,8 @@ vecs = client.embed_batch(["文本1", "文本2"])
 | POST | /api/memory/conflicts/{id}/resolve | 冲突裁决 |
 | POST | /api/memory/forget | 执行精准遗忘（NL/范围/ID + 预览） |
 | GET | /api/memory/forget/history | 遗忘历史 |
-| PATCH | /api/memory/memories/{id}/status | 单条状态流转（待审查/归档/回收站） |
+| PUT | /api/memory/{type}/{id} | 统一更新偏好、知识或事实：内容/元数据、模板正文/步骤、客体、置信度、状态、版本谱系与证据链 |
+| PATCH | /api/memory/memories/{id}/status | 兼容的单条状态流转入口；新客户端请使用统一 PUT 接口 |
 | POST | /api/memory/memories/status | 批量状态流转 |
 | DELETE | /api/memory/memories/{id}?hard=true | 物理删除 |
 | GET | /api/memory/memories/health | 记忆健康度看板 |
@@ -229,6 +230,14 @@ vecs = client.embed_batch(["文本1", "文本2"])
 | GET | /api/memory/system/config | 后端配置（非敏感项） |
 
 详细参数以 Swagger 文档为准：`http://127.0.0.1:8099/docs`。
+
+### 统一记忆更新接口
+
+已有记忆的人工编辑统一使用 `PUT /api/memory/{type}/{id}`；`type` 为 `preference`、`knowledge` 或 `fact`。请求只需携带要修改的字段，写入将同步状态、置信度、版本/谱系、证据链及检索投影。
+
+- 偏好：`text`、`preference_type`、`payload`、`scope`、`is_global`、`tags`、`extra_payload`、`parent_id`、`root_id`、`evidences` 等。
+- 知识：`name`、`content`、`knowledge_type`、`steps`、`tools`、`template_body`、`parent_id`、`evidences` 等。
+- 事实：`object_value`、`object_type`、`confidence`、`evidence_text` 或 `evidences` 等。
 
 ## 检查和测试
 

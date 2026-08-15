@@ -477,10 +477,10 @@ void ForgetPendingPage::loadTable() {
             auto *b2 = new QPushButton("归档", ops); b2->setObjectName("textBtn");
             auto *b3 = new QPushButton("删除", ops); b3->setStyleSheet("color:#EF4444;");
             const QString id = memId(m, type);
-            connect(b1, &QPushButton::clicked, this, [this, id, b1]() { setSingleStatus(id, "active", b1); });
-            connect(b2, &QPushButton::clicked, this, [this, id, b2]() { setSingleStatus(id, "archived", b2); });
-            connect(b3, &QPushButton::clicked, this, [this, id, b3]() {
-                if (ConfirmDialog::confirm(this, "删除", "确认删除该记忆？")) setSingleStatus(id, "deleted", b3);
+            connect(b1, &QPushButton::clicked, this, [this, type, id, b1]() { setSingleStatus(type, id, "active", b1); });
+            connect(b2, &QPushButton::clicked, this, [this, type, id, b2]() { setSingleStatus(type, id, "archived", b2); });
+            connect(b3, &QPushButton::clicked, this, [this, type, id, b3]() {
+                if (ConfirmDialog::confirm(this, "删除", "确认删除该记忆?")) setSingleStatus(type, id, "deleted", b3);
             });
             ol->addWidget(b1); ol->addWidget(b2); ol->addWidget(b3);
             m_table->setCellWidget(row, 5, ops);
@@ -515,13 +515,14 @@ void ForgetPendingPage::loadTable() {
         [handle](const api::Result &r) { handle("fact", r); }, this);
 }
 
-void ForgetPendingPage::setSingleStatus(const QString &id, const QString &status, QPushButton *caller) {
+void ForgetPendingPage::setSingleStatus(const QString &type, const QString &id,
+                                        const QString &status, QPushButton *caller) {
     if (caller) caller->setEnabled(false);
     QJsonObject body;
     body["user_id"] = AppContext::instance()->userId();
     body["status"] = status;
-    AppContext::instance()->api()->patchAsync(
-        "/api/memory/memories/" + id + "/status", body,
+    AppContext::instance()->api()->putAsync(
+        "/api/memory/" + type + "/" + id, body,
         [this, caller](const api::Result &r) {
             if (caller) caller->setEnabled(true);
             if (r.ok) {
@@ -612,8 +613,8 @@ void ForgetArchivedPage::onRefresh() {
             auto *b1 = new QPushButton("解除归档", ops); b1->setObjectName("textBtn");
             auto *b2 = new QPushButton("删除", ops); b2->setStyleSheet("color:#EF4444;");
             const QString id = memId(m, type);
-            connect(b1, &QPushButton::clicked, this, [this, id]() { unarchive(id); });
-            connect(b2, &QPushButton::clicked, this, [this, id]() { deleteMemory(id); });
+            connect(b1, &QPushButton::clicked, this, [this, type, id]() { unarchive(type, id); });
+            connect(b2, &QPushButton::clicked, this, [this, type, id]() { deleteMemory(type, id); });
             ol->addWidget(b1); ol->addWidget(b2);
             m_table->setCellWidget(row, 5, ops);
         }
@@ -625,20 +626,20 @@ void ForgetArchivedPage::onRefresh() {
     append("fact", api->get(api::ApiClient::urlWithQuery(
         "/api/memory/facts", {{"user_id", uid}, {"status", "archived"}})).jsonArray());
 }
-void ForgetArchivedPage::unarchive(const QString &id, QPushButton *caller) {
+void ForgetArchivedPage::unarchive(const QString &type, const QString &id, QPushButton *caller) {
     QJsonObject body;
     body["user_id"] = AppContext::instance()->userId();
     body["status"] = "active";
-    const api::Result r = AppContext::instance()->api()->patch("/api/memory/memories/" + id + "/status", body);
+    const api::Result r = AppContext::instance()->api()->put("/api/memory/" + type + "/" + id, body);
     if (r.ok) onRefresh();
     else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
 }
-void ForgetArchivedPage::deleteMemory(const QString &id, QPushButton *caller) {
+void ForgetArchivedPage::deleteMemory(const QString &type, const QString &id, QPushButton *caller) {
     if (!ConfirmDialog::confirm(this, "删除", "确认删除该归档记忆？")) return;
     QJsonObject body;
     body["user_id"] = AppContext::instance()->userId();
     body["status"] = "deleted";
-    const api::Result r = AppContext::instance()->api()->patch("/api/memory/memories/" + id + "/status", body);
+    const api::Result r = AppContext::instance()->api()->put("/api/memory/" + type + "/" + id, body);
     if (r.ok) onRefresh();
     else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
 }
@@ -690,7 +691,7 @@ void ForgetRecyclePage::onRefresh() {
             auto *b1 = new QPushButton("恢复", ops); b1->setObjectName("textBtn");
             auto *b2 = new QPushButton("彻底删除", ops); b2->setStyleSheet("color:#EF4444;");
             const QString id = memId(m, type);
-            connect(b1, &QPushButton::clicked, this, [this, id]() { restore(id); });
+            connect(b1, &QPushButton::clicked, this, [this, type, id]() { restore(type, id); });
             connect(b2, &QPushButton::clicked, this, [this, id]() { hardDelete(id); });
             ol->addWidget(b1); ol->addWidget(b2);
             m_table->setCellWidget(row, 5, ops);
@@ -703,11 +704,11 @@ void ForgetRecyclePage::onRefresh() {
     append("fact", api->get(api::ApiClient::urlWithQuery(
         "/api/memory/facts", {{"user_id", uid}, {"status", "deleted"}})).jsonArray());
 }
-void ForgetRecyclePage::restore(const QString &id, QPushButton *caller) {
+void ForgetRecyclePage::restore(const QString &type, const QString &id, QPushButton *caller) {
     QJsonObject body;
     body["user_id"] = AppContext::instance()->userId();
     body["status"] = "active";
-    const api::Result r = AppContext::instance()->api()->patch("/api/memory/memories/" + id + "/status", body);
+    const api::Result r = AppContext::instance()->api()->put("/api/memory/" + type + "/" + id, body);
     if (r.ok) onRefresh();
     else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
 }

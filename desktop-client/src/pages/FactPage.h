@@ -32,6 +32,7 @@ private slots:
 
 private:
     void populateRow(int row, const QJsonObject &f);
+    void openEditDialog(const QJsonObject &fact);
     void removeCandidate(const QString &proposalId);
 
     MemoryFilterBar *m_filterBar = nullptr;

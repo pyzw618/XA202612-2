@@ -74,7 +74,8 @@ public:
 
 private slots:
     void onRefresh();
-    void setSingleStatus(const QString &id, const QString &status, QPushButton *caller = nullptr);
+    void setSingleStatus(const QString &type, const QString &id, const QString &status,
+                         QPushButton *caller = nullptr);
     void batchSetStatus(const QString &status, QPushButton *caller = nullptr);
 
 private:
@@ -98,8 +99,8 @@ public:
 
 private slots:
     void onRefresh();
-    void unarchive(const QString &id, QPushButton *caller = nullptr);
-    void deleteMemory(const QString &id, QPushButton *caller = nullptr);
+    void unarchive(const QString &type, const QString &id, QPushButton *caller = nullptr);
+    void deleteMemory(const QString &type, const QString &id, QPushButton *caller = nullptr);
 
 private:
     void loadTable();
@@ -118,7 +119,7 @@ public:
 
 private slots:
     void onRefresh();
-    void restore(const QString &id, QPushButton *caller = nullptr);
+    void restore(const QString &type, const QString &id, QPushButton *caller = nullptr);
     void hardDelete(const QString &id, QPushButton *caller = nullptr);
 
 private:

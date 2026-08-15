@@ -502,9 +502,9 @@ void PreferencePage::openEditDialog(const QJsonObject &memory, bool isNew) {
     scope["app"] = j::str(j::obj(memory, "scope"), "app");
 
     QJsonObject body;
-    if (!isNew) body["memory_id"] = j::str(memory, "memory_id");
     body["user_id"] = AppContext::instance()->userId();
-    body["memory_type"] = "preference";
+    if (!isNew) body["transition_action"] = "revise";
+    if (isNew) body["memory_type"] = "preference";
     body["preference_type"] = typeEdit->currentData().toString();
     body["text"] = textEdit->toPlainText().trimmed();
     body["payload"] = QJsonObject();
@@ -513,11 +513,15 @@ void PreferencePage::openEditDialog(const QJsonObject &memory, bool isNew) {
     body["confidence"] = confSpin->value();
     body["tags"] = QJsonArray::fromStringList(
         tagsEdit->text().split(',', Qt::SkipEmptyParts).replaceInStrings(QRegularExpression("^\\s+|\\s+$"), ""));
-    body["status"] = "active";
-    body["level"] = "mid";
+    if (isNew) {
+        body["status"] = "active";
+        body["level"] = "mid";
+    }
 
     api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->post("/api/memory/memories/preference", body);
+    const api::Result r = isNew
+        ? api->post("/api/memory/memories/preference", body)
+        : api->put("/api/memory/preference/" + j::str(memory, "memory_id"), body);
     if (r.ok) {
         QMessageBox::information(this, "完成", isNew ? "偏好已写入" : "偏好已更新");
         onRefresh();

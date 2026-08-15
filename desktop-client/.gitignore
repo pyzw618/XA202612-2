@@ -7,3 +7,7 @@
 
 # Qt 缓存
 *.autosave
+
+# 本地 Qt SDK 与安装工具
+/.qt/
+/.tools/

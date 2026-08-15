@@ -72,8 +72,6 @@ def _get_audit_log(state):
 async def get_lineage(memory_id: str, request: Request, user_id: str = Query(..., min_length=1)):
     state = request.app.state
     memory_type, memory = _owned_or_404(state, memory_id, user_id)
-    if memory_type == "fact":
-        return {"memory_id": memory_id, "memory_type": "fact", "items": []}
     repo = MemoryLineageRepository(state.db)
     rows = repo.list_for_memory(memory_id, memory_type)
     return {

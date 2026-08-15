@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from memoryhub.adapter.schemas import (
+    Evidence,
     ForgetRequest,
     MemoryDecision,
     MemoryStatus,
@@ -52,6 +53,46 @@ class MemoryStatusUpdate(BaseModel):
     user_id: str = "default"
     status: str
     reason: str = ""
+
+
+class UnifiedMemoryUpdate(BaseModel):
+    """Single mutation contract for preference, knowledge, and fact memories.
+
+    Fields are intentionally flat so clients can issue one ``PUT /{type}/{id}``
+    request while only sending the fields that need changing.
+    """
+
+    user_id: str = "default"
+    transition_action: MemoryDecision | None = None
+    status: str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    version: int | None = Field(default=None, ge=1)
+    parent_id: str | None = None
+    root_id: str | None = None
+    evidences: list[Evidence] | None = None
+    replace_evidences: bool = False
+
+    # Preference fields
+    text: str | None = None
+    preference_type: str | None = None
+    payload: dict[str, Any] | None = None
+    scope: dict[str, Any] | None = None
+    is_global: bool | None = None
+    tags: list[str] | None = None
+    extra_payload: dict[str, Any] | None = None
+
+    # Knowledge fields
+    name: str | None = None
+    content: str | None = None
+    knowledge_type: str | None = None
+    steps: list[str] | None = None
+    tools: list[str] | None = None
+    template_body: str | None = None
+
+    # Fact fields
+    object_value: str | None = None
+    object_type: str | None = None
+    evidence_text: str | None = None
 
 
 class BatchMemoryStatusUpdate(BaseModel):
@@ -167,6 +208,190 @@ def _set_memory_status(state, memory_id: str, user_id: str, status: str) -> dict
     return {"memory_id": memory_id, "status": status}
 
 
+def _update_field_is_set(body: UnifiedMemoryUpdate, name: str) -> bool:
+    return name in body.model_fields_set
+
+
+def _default_transition_action(body: UnifiedMemoryUpdate, requested: set[str]) -> MemoryDecision:
+    if "status" in requested:
+        if body.status == MemoryStatus.PENDING.value:
+            return MemoryDecision.REVIEW
+        if body.status == MemoryStatus.ARCHIVED.value:
+            return MemoryDecision.SUPERSEDE
+    if requested in ({"evidence_text"}, {"evidences"}):
+        return MemoryDecision.REINFORCE
+    return MemoryDecision.REVISE
+
+
+def _merge_evidences(existing, incoming, *, replace: bool):
+    if incoming is None:
+        return list(existing or [])
+    if replace:
+        return list(incoming)
+    merged = list(existing or [])
+    known = {
+        (str(item.evidence_id), str(item.event_id), str(item.content))
+        for item in merged
+    }
+    for item in incoming:
+        key = (str(item.evidence_id), str(item.event_id), str(item.content))
+        if key not in known:
+            merged.append(item)
+            known.add(key)
+    return merged
+
+
+def _unified_memory_update(
+    state,
+    memory_type: str,
+    memory_id: str,
+    body: UnifiedMemoryUpdate,
+) -> dict:
+    """Route every manual memory mutation through one type-aware write boundary."""
+    memory_type = str(memory_type or "").strip().lower()
+    if memory_type not in {"preference", "knowledge", "fact"}:
+        raise HTTPException(status_code=422, detail={"code": "memory.invalid_type"})
+    if body.status is not None and body.status not in _MEMORY_STATUSES:
+        raise HTTPException(status_code=422, detail={"code": "memory.invalid_status"})
+
+    actual_type, memory = _resolve_memory(state, memory_id, body.user_id)
+    if memory is None:
+        raise HTTPException(status_code=404, detail={"code": "memory.not_found"})
+    if actual_type != memory_type:
+        raise HTTPException(status_code=409, detail={"code": "memory.type_mismatch"})
+
+    requested = body.model_fields_set - {"user_id", "transition_action", "replace_evidences"}
+    if not requested:
+        raise HTTPException(status_code=422, detail={"code": "memory.empty_update"})
+
+    if memory_type == "fact":
+        disallowed = requested - {
+            "status", "confidence", "version", "object_value", "object_type", "evidence_text",
+            "evidences"
+        }
+        if disallowed:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "memory.unsupported_fact_fields", "fields": sorted(disallowed)},
+            )
+        action = body.transition_action or _default_transition_action(body, requested)
+        fact_store = getattr(state, "fact_store", None)
+        if fact_store is None:
+            raise HTTPException(status_code=503, detail={"code": "fact.store_unavailable"})
+        try:
+            updated = fact_store.update_fact(
+                memory_id,
+                user_id=body.user_id,
+                object_value=(
+                    body.object_value
+                    if _update_field_is_set(body, "object_value")
+                    else None
+                ),
+                object_type=(
+                    body.object_type
+                    if _update_field_is_set(body, "object_type")
+                    else None
+                ),
+                confidence=(
+                    body.confidence
+                    if _update_field_is_set(body, "confidence")
+                    else None
+                ),
+                status=body.status if _update_field_is_set(body, "status") else None,
+                version=body.version if _update_field_is_set(body, "version") else None,
+                evidence_text=(
+                    body.evidence_text
+                    if _update_field_is_set(body, "evidence_text")
+                    else None
+                ),
+                evidences=(
+                    body.evidences
+                    if _update_field_is_set(body, "evidences")
+                    else None
+                ),
+                transition_action=action.value,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "memory.invalid_update"}) from exc
+        if updated is None:
+            raise HTTPException(status_code=404, detail={"code": "memory.not_found"})
+        index_service = getattr(state, "fact_index_service", None)
+        pipeline = getattr(state, "fact_pipeline", None)
+        if index_service is not None and bool(getattr(pipeline, "project_immediately", True)):
+            try:
+                index_service.sync_fact(updated)
+            except Exception:
+                # The authoritative outbox remains pending for the worker to replay.
+                pass
+        from dataclasses import asdict
+
+        return {
+            "memory": asdict(updated),
+            "memory_id": memory_id,
+            "memory_type": "fact",
+            "action": action.value,
+        }
+
+    fields_by_type = {
+        "preference": {
+            "status", "confidence", "version", "parent_id", "root_id", "evidences",
+            "text", "preference_type", "payload", "scope", "is_global", "tags", "extra_payload",
+        },
+        "knowledge": {
+            "status", "confidence", "version", "parent_id", "evidences", "name", "content",
+            "knowledge_type", "steps", "tools", "template_body", "scope",
+        },
+    }
+    disallowed = requested - fields_by_type[memory_type]
+    if disallowed:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "memory.unsupported_fields", "fields": sorted(disallowed)},
+        )
+    if memory_type == "knowledge" and _update_field_is_set(body, "root_id"):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "memory.unsupported_fields", "fields": ["root_id"]},
+        )
+
+    data = memory.model_dump(mode="python")
+    for field in fields_by_type[memory_type] - {"evidences"}:
+        if _update_field_is_set(body, field):
+            data[field] = getattr(body, field)
+    data["evidences"] = _merge_evidences(
+        memory.evidences,
+        body.evidences,
+        replace=body.replace_evidences,
+    )
+    semantic_fields = {
+        "text", "preference_type", "payload", "scope", "is_global", "tags", "extra_payload",
+        "name", "content", "knowledge_type", "steps", "tools", "template_body",
+    }
+    if not _update_field_is_set(body, "version") and requested & semantic_fields:
+        data["version"] = max(1, int(memory.version)) + 1
+    if _update_field_is_set(body, "version") and int(body.version or 0) < int(memory.version):
+        raise HTTPException(status_code=422, detail={"code": "memory.version_regression"})
+    from datetime import datetime
+
+    data["updated_at"] = datetime.now()
+    memory_cls = type(memory)
+    updated = memory_cls.model_validate(data)
+    action = body.transition_action or _default_transition_action(body, requested)
+    writer = getattr(state, "memory_write_service", None)
+    if writer is None:
+        raise HTTPException(status_code=503, detail={"code": "memory.writer_unavailable"})
+    writer.upsert_memory(updated, action=action)
+    persisted = (
+        getattr(state, "pref_repo") if memory_type == "preference" else getattr(state, "know_repo")
+    ).get_by_id(memory_id)
+    return {
+        "memory": (persisted or updated).model_dump(mode="json"),
+        "memory_id": memory_id,
+        "memory_type": memory_type,
+        "action": action.value,
+    }
+
+
 def _hard_delete_memory(state, memory_id: str, user_id: str) -> dict:
     """物理删除一条记忆（回收站"彻底删除"）：先清运行时索引，再删 SQLite 行。"""
     mtype, memory = _resolve_memory(state, memory_id, user_id)
@@ -250,14 +475,33 @@ def _get_quarantine_store(request: Request):
 # ============================================================
 
 
+@router.put("/{memory_type}/{memory_id}")
+async def update_memory(
+    memory_type: str,
+    memory_id: str,
+    body: UnifiedMemoryUpdate,
+    request: Request,
+):
+    """Unified manual mutation endpoint for preference, knowledge, and fact memories."""
+    return _unified_memory_update(request.app.state, memory_type, memory_id, body)
+
+
 @router.patch("/memories/{memory_id}/status")
 async def update_memory_status(
     memory_id: str,
     body: MemoryStatusUpdate,
     request: Request,
 ):
-    """单条记忆状态流转（归档/保持/置 active/pending/deleted）。"""
-    return _set_memory_status(request.app.state, memory_id, body.user_id, body.status)
+    """兼容入口；新客户端请使用 PUT /api/memory/{type}/{id}。"""
+    memory_type, memory = _resolve_memory(request.app.state, memory_id, body.user_id)
+    if memory is None:
+        raise HTTPException(status_code=404, detail="memory not found")
+    return _unified_memory_update(
+        request.app.state,
+        memory_type,
+        memory_id,
+        UnifiedMemoryUpdate(user_id=body.user_id, status=body.status),
+    )
 
 
 @router.post("/memories/status")

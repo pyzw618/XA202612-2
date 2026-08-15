@@ -16,16 +16,18 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const PLUGIN_SRC = resolve(HERE, "../plugin/memoryhub.plugin.mjs")
+const PLUGIN_DIR = resolve(HERE, "../plugin")
+const PLUGIN_FILES = ["memoryhub.plugin.mjs", "memoryhub_event_builder.mjs"]
 
 function install() {
   const targetDir = resolve(process.argv[2] || join(process.cwd(), ".opencode", "plugins"))
-  const target = join(targetDir, "memoryhub.plugin.mjs")
 
   mkdirSync(targetDir, { recursive: true })
-  copyFileSync(PLUGIN_SRC, target)
+  for (const fileName of PLUGIN_FILES) {
+    copyFileSync(join(PLUGIN_DIR, fileName), join(targetDir, fileName))
+  }
 
-  console.log(`[memoryhub-plugin] installed to ${target}`)
+  console.log(`[memoryhub-plugin] installed ${PLUGIN_FILES.join(", ")} to ${targetDir}`)
   console.log("[memoryhub-plugin] set MEMORYHUB_API_URL / MEMORYHUB_USER_ID before starting opencode.")
 }
 

@@ -399,6 +399,12 @@ void KnowledgePage::openEditDialog(const QJsonObject &memory, bool isNew) {
     toolsEdit->setText(j::strList(memory, "tools").join(", "));
     form->addRow("工具链（逗号分隔）", toolsEdit);
 
+    auto *templateEdit = new QPlainTextEdit(&dlg);
+    templateEdit->setPlainText(j::str(memory, "template_body"));
+    templateEdit->setPlaceholderText("模板正文（template 类型可选）");
+    templateEdit->setFixedHeight(100);
+    form->addRow("模板正文", templateEdit);
+
     auto *confSpin = new QDoubleSpinBox(&dlg);
     confSpin->setRange(0, 1);
     confSpin->setDecimals(2);
@@ -428,9 +434,9 @@ void KnowledgePage::openEditDialog(const QJsonObject &memory, bool isNew) {
     scope["app"] = j::str(j::obj(memory, "scope"), "app");
 
     QJsonObject body;
-    if (!isNew) body["memory_id"] = j::str(memory, "memory_id");
     body["user_id"] = AppContext::instance()->userId();
-    body["memory_type"] = "knowledge";
+    if (!isNew) body["transition_action"] = "revise";
+    if (isNew) body["memory_type"] = "knowledge";
     body["knowledge_type"] = typeEdit->currentData().toString();
     body["name"] = nameEdit->text().trimmed();
     body["content"] = contentEdit->toPlainText().trimmed();
@@ -439,11 +445,14 @@ void KnowledgePage::openEditDialog(const QJsonObject &memory, bool isNew) {
     body["tools"] = QJsonArray::fromStringList(
         toolsEdit->text().split(',', Qt::SkipEmptyParts).replaceInStrings(
             QRegularExpression("^\\s+|\\s+$"), ""));
+    body["template_body"] = templateEdit->toPlainText().trimmed();
     body["scope"] = scope;
     body["confidence"] = confSpin->value();
-    body["status"] = "active";
+    if (isNew) body["status"] = "active";
 
-    const api::Result r = AppContext::instance()->api()->post("/api/memory/memories/knowledge", body);
+    const api::Result r = isNew
+        ? AppContext::instance()->api()->post("/api/memory/memories/knowledge", body)
+        : AppContext::instance()->api()->put("/api/memory/knowledge/" + j::str(memory, "memory_id"), body);
     if (r.ok) { QMessageBox::information(this, "完成", isNew ? "知识已写入" : "知识已更新"); onRefresh(); }
     else if (r.errorCode == "memory.safety.review_required")
         QMessageBox::warning(this, "需人工复核", "写入需人工复核。");

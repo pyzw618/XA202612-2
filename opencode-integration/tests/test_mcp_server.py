@@ -284,10 +284,11 @@ def test_write_event_agent_response(running_server):
     assert response["result"]["isError"] is False, response
     text = response["result"]["content"][0]["text"]
     assert "accepted=1" in text
-    # With fact extraction enabled, preference and fact extraction both enter
-    # the retry queue when no LLM is available; the event itself stays accepted.
-    assert "extraction_failures=2" in text
-    assert "retry_tasks_enqueued=2" in text
+    # Fact extraction now degrades immediately to deterministic rules when its
+    # LLM is unavailable.  The durable event stays accepted; only preference
+    # extraction remains queued for retry in this fixture.
+    assert "extraction_failures=1" in text
+    assert "retry_tasks_enqueued=1" in text
 
 
 def test_forget(running_server):
