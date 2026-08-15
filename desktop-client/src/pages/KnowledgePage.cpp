@@ -23,6 +23,7 @@
 #include "../api/Json.h"
 #include "../widgets/ConfirmDialog.h"
 #include "../widgets/DetailDrawer.h"
+#include "../widgets/ProvenancePanel.h"
 #include "../widgets/JsonViewer.h"
 #include "../widgets/MemoryFilterBar.h"
 #include "../widgets/PageHeader.h"
@@ -363,6 +364,8 @@ void KnowledgePage::openDetail(const QString &id) {
     sl->addWidget(stInfo);
     sl->addStretch();
     tabs->addTab(stW, "复用统计");
+
+    tabs->addTab(new ProvenancePanel(id, tabs), "统一溯源");
 
     m_drawer->open(j::str(m, "name"), tabs);
 }

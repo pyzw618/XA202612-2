@@ -16,6 +16,18 @@ from fastapi.testclient import TestClient
 
 from memoryhub.app import create_app
 from memoryhub.config import AppConfig, SafetyConfig, StorageConfig, UserRuleConfig
+from memoryhub.core.fact.pipeline import FactMemoryPipeline
+
+
+class _StaticFactLLMResponse:
+    content = '{"triples": []}'
+
+
+class _StaticFactLLM:
+    """Stable local test double: API contract tests never call a host LLM port."""
+
+    def generate(self, prompt, system_prompt="", **kwargs):
+        return _StaticFactLLMResponse()
 
 
 @pytest.fixture()
@@ -31,7 +43,11 @@ def client(tmp_path) -> TestClient:
         # gate is still provisioned and every explicit write remains gated.
         safety=SafetyConfig(user_rules=UserRuleConfig(enabled=False)),
     )
-    with TestClient(create_app(config)) as test_client:
+    fact_pipeline = FactMemoryPipeline(
+        db_path=config.storage.db_path,
+        llm_client=_StaticFactLLM(),
+    )
+    with TestClient(create_app(config, fact_pipeline=fact_pipeline)) as test_client:
         yield test_client
 
 

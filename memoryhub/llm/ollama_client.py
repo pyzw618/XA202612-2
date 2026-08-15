@@ -5,6 +5,7 @@ Ollama 本地推理客户端
 """
 
 import requests
+
 from memoryhub.llm.base import BaseLLMClient, LLMResponse
 
 
@@ -38,7 +39,7 @@ class OllamaClient(BaseLLMClient):
             },
         }
         try:
-            resp = requests.post(url, json=payload, timeout=120)
+            resp = requests.post(url, json=payload, timeout=kwargs.get("timeout", 120))
             resp.raise_for_status()
             data = resp.json()
             response = data.get("response", "")

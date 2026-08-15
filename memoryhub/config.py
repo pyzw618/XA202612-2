@@ -99,6 +99,9 @@ class LLMConfig:
     model: str = "qwen2:1.5b"
     temperature: float = 0.1
     max_tokens: int = 2048
+    # Fact extraction is an optional enrichment step.  Keep this small so an
+    # unavailable local/external LLM never delays durable event processing.
+    fact_extraction_timeout_seconds: float = 1.0
 
 
 @dataclass

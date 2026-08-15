@@ -21,6 +21,7 @@
 #include "../api/Json.h"
 #include "../widgets/ConfirmDialog.h"
 #include "../widgets/DetailDrawer.h"
+#include "../widgets/ProvenancePanel.h"
 #include "../widgets/JsonViewer.h"
 #include "../widgets/MemoryFilterBar.h"
 #include "../widgets/PageHeader.h"
@@ -306,6 +307,7 @@ void FactPage::openDetail(const QString &id) {
                     }
                     el->addWidget(evT);
                     tabs->addTab(evW, "证据");
+                    tabs->addTab(new ProvenancePanel(id, tabs), "统一溯源");
                     m_drawer->open(j::shortId(id), tabs);
                 }, this);
         }, this);

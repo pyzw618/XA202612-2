@@ -150,3 +150,25 @@ def test_duplicate_fact_adds_evidence_to_retained_fact():
     assert {
         item["source_id"].removeprefix("recorded_at_fallback:") for item in evidence
     } == {"event-one", "event-two"}
+
+
+def test_propose_treats_unavailable_fact_llm_as_degraded_empty_result():
+    class UnavailableLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, prompt, system_prompt="", **kwargs):
+            self.calls += 1
+            raise TimeoutError("simulated unavailable provider")
+
+    llm = UnavailableLLM()
+    pipeline = FactMemoryPipeline(
+        db_path=":memory:",
+        llm_client=llm,
+        llm_timeout_seconds=0.05,
+    )
+
+    assert pipeline.propose("没有可抽取结构的普通文本") == []
+    assert pipeline.propose("第二条没有可抽取结构的普通文本") == []
+    assert llm.calls == 1
+    assert pipeline.extractor.is_llm_degraded is True

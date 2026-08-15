@@ -31,6 +31,7 @@
 #include "pages/PreferencePage.h"
 #include "pages/SafetyPages.h"
 #include "pages/SearchPage.h"
+#include "pages/ProjectionPage.h"
 #include "pages/SettingsPages.h"
 #include "pages/TerminalPage.h"
 
@@ -331,6 +332,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
     registerPage("search", "检索与冲突", "检索测试", new SearchPage(m_stack));
     registerPage("conflicts", "检索与冲突", "冲突中心", new ConflictPage(m_stack));
+    registerPage("projections", "检索与冲突", "投影恢复", new ProjectionPage(m_stack));
 
     registerPage("forget/precise", "遗忘与生命周期", "精准遗忘", new ForgetPrecisePage(m_stack));
     registerPage("forget/pending", "遗忘与生命周期", "待审查队列", new ForgetPendingPage(m_stack));
@@ -423,6 +425,7 @@ void MainWindow::buildSidebar() {
     QTreeWidgetItem *g3 = addGroup("处理中心");
     addLeaf(g3, "检索测试", "search", ":/icons/search.svg");
     addLeaf(g3, "冲突中心", "conflicts", ":/icons/conflict.svg");
+    addLeaf(g3, "投影恢复", "projections", ":/icons/refresh.svg");
     addLeaf(g3, "精准遗忘", "forget/precise", ":/icons/target.svg");
     addLeaf(g3, "待审查队列", "forget/pending", ":/icons/history.svg");
     addLeaf(g3, "归档仓库", "forget/archived", ":/icons/archive.svg");

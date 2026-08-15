@@ -5,6 +5,7 @@ LLM 三元组提取器 — DeepSeek API
 import json
 import logging
 import re
+import time
 
 from memoryhub.core.memory.llm import StructuredLLMAdapter
 
@@ -32,8 +33,14 @@ class TripleExtractor:
         model: str = "",
         base_url: str = "",
         llm_client=None,
+        llm_timeout_seconds: float = 1.0,
+        unavailable_cooldown_seconds: float = 30.0,
     ):
         self.model = model
+        self.llm_timeout_seconds = max(0.05, float(llm_timeout_seconds))
+        self.unavailable_cooldown_seconds = max(0.0, float(unavailable_cooldown_seconds))
+        self._llm_unavailable_until = 0.0
+        self._llm_unavailable_error: Exception | None = None
         self._adapter = (
             StructuredLLMAdapter(llm_client)
             if callable(getattr(llm_client, "generate", None))
@@ -63,6 +70,15 @@ class TripleExtractor:
         if not text.strip():
             return []
 
+        if self.is_llm_degraded:
+            # A failed provider must not stall every following event.  Preserve a
+            # diagnostic error for callers while immediately using deterministic
+            # extraction during the cooldown window.
+            triples = self._rule_extract(text, source_id)
+            if not triples:
+                self.last_error = self._llm_unavailable_error
+            return triples
+
         user_message = EXTRACTION_USER_TEMPLATE.format(text=text)
 
         try:
@@ -72,6 +88,7 @@ class TripleExtractor:
                     system_prompt=EXTRACTION_SYSTEM_PROMPT,
                     prompt=user_message,
                     temperature=0.0,
+                    timeout=self.llm_timeout_seconds,
                 )
             else:
                 response = self._client.chat.completions.create(
@@ -82,6 +99,7 @@ class TripleExtractor:
                     ],
                     temperature=0.0,
                     max_tokens=4096,
+                    timeout=self.llm_timeout_seconds,
                 )
                 raw_output = response.choices[0].message.content or ""
             triples = self._parse_response(raw_output, source_id)
@@ -91,12 +109,26 @@ class TripleExtractor:
             return self._rule_extract(text, source_id)
 
         except Exception as e:
-            logger.error(f"LLM 提取失败: {e}")
+            self._mark_llm_unavailable(e)
+            logger.warning("fact_llm_unavailable_falling_back source=%s", source_id)
             triples = self._rule_extract(text, source_id)
             if not triples:
-                # 同时失败才上报错误，避免无 LLM 环境静默丢失事实
+                # Keep a diagnostic for direct callers.  FactMemoryPipeline treats
+                # degraded LLM extraction as a successful empty result instead of
+                # failing the already-durable event.
                 self.last_error = e
             return triples
+
+    @property
+    def is_llm_degraded(self) -> bool:
+        """Whether remote Fact LLM calls are temporarily bypassed."""
+        return time.monotonic() < self._llm_unavailable_until
+
+    def _mark_llm_unavailable(self, error: Exception) -> None:
+        self._llm_unavailable_error = error
+        self._llm_unavailable_until = (
+            time.monotonic() + self.unavailable_cooldown_seconds
+        )
 
     def _rule_extract(self, text: str, source_id: str = "") -> list[RawTriple]:
         """确定性规则抽取：识别中英文客观陈述（属性/位置/成立时间）。

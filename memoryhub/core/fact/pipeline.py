@@ -75,6 +75,7 @@ class FactMemoryPipeline:
         ontology_path: Optional[str] = None,
         admission_policy: Optional[FactAdmissionPolicy] = None,
         llm_client=None,
+        llm_timeout_seconds: float = 1.0,
         store: Optional[FactStore] = None,
         index_service=None,
         safety_gate=None,
@@ -87,7 +88,11 @@ class FactMemoryPipeline:
             ontology_path: 谓词本体 JSON 路径
         """
         self.store = store or FactStore(db_path)
-        self.extractor = TripleExtractor(api_key=api_key, llm_client=llm_client)
+        self.extractor = TripleExtractor(
+            api_key=api_key,
+            llm_client=llm_client,
+            llm_timeout_seconds=llm_timeout_seconds,
+        )
         self.entity_norm = EntityNormalizer(
             self.store, api_key=api_key, llm_client=llm_client
         )
@@ -119,7 +124,9 @@ class FactMemoryPipeline:
         logger.info(f"[propose] source={source_id}, text_len={len(text)}")
         raw_triples = self.extractor.extract(text, source_id)
         extraction_error = getattr(self.extractor, "last_error", None)
-        if extraction_error is not None:
+        if extraction_error is not None and not getattr(
+            self.extractor, "is_llm_degraded", False
+        ):
             raise RuntimeError("fact extraction failed") from extraction_error
         proposals: list[FactProposal] = []
 

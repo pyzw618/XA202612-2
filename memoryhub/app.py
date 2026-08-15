@@ -468,6 +468,7 @@ def create_app(
             app.state.fact_pipeline = FactMemoryPipeline(
                 db_path=config.storage.db_path,
                 llm_client=llm_client,
+                llm_timeout_seconds=config.llm.fact_extraction_timeout_seconds,
                 safety_gate=app.state.safety_gate,
                 project_immediately=not config.runtime.is_production,
             )

@@ -80,6 +80,9 @@ llm:
   # 最大生成 token 数
   max_tokens: 2048
 
+  # Fact 抽取的单次 LLM 超时（秒）。不可用时立即降级至规则抽取。
+  fact_extraction_timeout_seconds: 1.0
+
 # ==================== Embedding 配置 ====================
 embedding:
   # 生产模式必须使用 "kylin"（银河麒麟真实 SDK）

@@ -224,7 +224,13 @@ void SearchPage::runSearch() {
     m_searchButton->setEnabled(false);
     m_searchButton->setText("检索中…");
     m_stateView->setState(PageState::Loading, "正在检索", "正在查询真实记忆数据…");
-    AppContext::instance()->api()->postAsync("/api/memory/search", m_lastRequest,
+    const QString provenancePath = api::ApiClient::urlWithQuery(
+        "/api/memory/v2/search",
+        {{"user_id", AppContext::instance()->userId()},
+         {"query", q},
+         {"top_k", QString::number(m_topK->value())},
+         {"include_provenance", "true"}});
+    AppContext::instance()->api()->getAsync(provenancePath,
         [this, generation](const api::Result &r) {
             if (generation != m_generation) return;
             m_searchButton->setEnabled(true);
@@ -251,9 +257,27 @@ void SearchPage::renderResults(const QJsonObject &resp) {
         delete item;
     }
 
-    const QJsonArray prefs = j::arr(resp, "preferences");
-    const QJsonArray knows = j::arr(resp, "knowledge");
-    const QJsonArray facts = j::arr(resp, "facts");
+    const auto filterGroup = [this](const QJsonArray &source, const QCheckBox *enabled) {
+        QJsonArray filtered;
+        if (!enabled->isChecked()) return filtered;
+        const QString scene = m_sceneCombo->currentData().toString();
+        const QString taskType = m_taskEdit->text().trimmed();
+        const double minConfidence = m_minConf->value();
+        for (const QJsonValue &value : source) {
+            const QJsonObject item = value.toObject();
+            if (j::num(item, "confidence", 0.0) < minConfidence) continue;
+            const QJsonObject scope = j::obj(item, "scope");
+            if (!scene.isEmpty() && j::str(scope, "scene") != scene) continue;
+            if (!taskType.isEmpty() && j::str(scope, "task_type") != taskType) continue;
+            filtered.append(item);
+        }
+        return filtered;
+    };
+    // API v2 keeps the provenance-aware retrieval contract compact.  Retain the
+    // existing desktop filters locally so the UI behavior stays compatible.
+    const QJsonArray prefs = filterGroup(j::arr(resp, "preferences"), m_cbPreference);
+    const QJsonArray knows = filterGroup(j::arr(resp, "knowledge"), m_cbKnowledge);
+    const QJsonArray facts = filterGroup(j::arr(resp, "facts"), m_cbFact);
 
     const int total = prefs.size() + knows.size() + facts.size();
     if (total == 0) {
@@ -320,6 +344,22 @@ void SearchPage::renderGroup(const QString &title, const QColor &color, const QJ
             srcTag->setTag(source, "statusTag",
                            source == "vector" ? "active" : (source == "keyword" ? "pending" : "archived"));
             metaRow->addWidget(srcTag);
+        }
+        const QJsonObject provenance = j::obj(m_lastResponse, "provenance")
+                                           .value(j::str(item, "memory_id"))
+                                           .toObject();
+        if (!provenance.isEmpty()) {
+            const int evidenceCount = j::integer(provenance, "evidence_count");
+            const int lineageCount = j::integer(provenance, "lineage_count");
+            const int auditCount = j::arr(provenance, "audit_ids").size();
+            auto *provenanceLabel = new QLabel(
+                QString("证据 %1 · 谱系 %2 · 审计 %3")
+                    .arg(evidenceCount)
+                    .arg(lineageCount)
+                    .arg(auditCount));
+            provenanceLabel->setStyleSheet("color:#64748B;font-size:11px;");
+            provenanceLabel->setToolTip("来自 /api/memory/v2/search 的安全溯源摘要");
+            metaRow->addWidget(provenanceLabel);
         }
         metaRow->addStretch();
         lay->addLayout(metaRow);

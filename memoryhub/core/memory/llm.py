@@ -44,12 +44,21 @@ class StructuredLLMAdapter:
         system_prompt: str,
         prompt: str,
         temperature: float = 0.0,
+        timeout: float | None = None,
     ) -> str:
         if self.llm_client is None or not callable(
             getattr(self.llm_client, "generate", None)
         ):
             raise RuntimeError(f"{task_name} LLM client is not configured")
+        kwargs: dict[str, Any] = {"temperature": temperature}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         response = self.llm_client.generate(
-            prompt, system_prompt=system_prompt, temperature=temperature
+            prompt, system_prompt=system_prompt, **kwargs
         )
+        error = str(getattr(response, "error", "") or "").strip()
+        if error:
+            # Providers such as Ollama return transport failures in LLMResponse
+            # instead of raising.  Do not treat that as an empty model answer.
+            raise RuntimeError(f"{task_name} LLM request failed")
         return str(getattr(response, "content", response) or "")

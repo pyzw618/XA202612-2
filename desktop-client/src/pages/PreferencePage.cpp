@@ -26,6 +26,7 @@
 #include "../api/Json.h"
 #include "../widgets/ConfirmDialog.h"
 #include "../widgets/DetailDrawer.h"
+#include "../widgets/ProvenancePanel.h"
 #include "../widgets/EmptyState.h"
 #include "../widgets/JsonViewer.h"
 #include "../widgets/MemoryFilterBar.h"
@@ -425,6 +426,8 @@ void PreferencePage::openDetail(const QString &memoryId) {
     hlay->addWidget(hInfo);
     hlay->addStretch();
     tabs->addTab(hWidget, "健康度");
+
+    tabs->addTab(new ProvenancePanel(memoryId, tabs), "统一溯源");
 
     m_drawer->open(j::str(m, "preference_type") + " · " + j::shortId(memoryId), tabs);
 }

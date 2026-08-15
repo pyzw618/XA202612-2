@@ -3,11 +3,10 @@
 """
 
 import json
+
 import pytest
 
 from memoryhub.core.fact.extractor import TripleExtractor
-from memoryhub.core.fact.models import RawTriple
-
 
 MOCK_LLM_RESPONSE = {
     "triples": [
@@ -136,6 +135,35 @@ class TestTripleExtractorRuleFallback:
     def test_empty_text_no_error(self, extractor):
         assert extractor.extract("", source_id="r8") == []
         assert extractor.last_error is None
+
+
+class TestTripleExtractorAvailabilityFallback:
+    """Unavailable Fact LLMs must not keep delaying later events."""
+
+    def test_unavailable_llm_uses_timeout_and_circuit_breaker(self):
+        class UnavailableLLM:
+            def __init__(self):
+                self.calls = 0
+
+            def generate(self, prompt, system_prompt="", **kwargs):
+                self.calls += 1
+                assert kwargs["timeout"] == 0.05
+                raise TimeoutError("simulated unavailable provider")
+
+        llm = UnavailableLLM()
+        extractor = TripleExtractor(
+            llm_client=llm,
+            llm_timeout_seconds=0.05,
+            unavailable_cooldown_seconds=60.0,
+        )
+
+        first = extractor.extract("项目A的负责人是张三。", source_id="unavailable-1")
+        second = extractor.extract("项目B的负责人是李四。", source_id="unavailable-2")
+
+        assert llm.calls == 1
+        assert extractor.is_llm_degraded is True
+        assert first[0].object_text == "张三"
+        assert second[0].object_text == "李四"
 
 
 class TestTripleExtractorIntegration:

@@ -42,6 +42,7 @@ set(CLIENT_SOURCES
     src/widgets/ConfirmDialog.cpp
     src/widgets/RoundedContainer.cpp
     src/widgets/PageStateView.cpp
+    src/widgets/ProvenancePanel.cpp
     src/pages/BasePage.cpp
     src/pages/DashboardPage.cpp
     src/pages/TerminalPage.cpp
@@ -49,6 +50,7 @@ set(CLIENT_SOURCES
     src/pages/KnowledgePage.cpp
     src/pages/FactPage.cpp
     src/pages/SearchPage.cpp
+    src/pages/ProjectionPage.cpp
     src/pages/ConflictPage.cpp
     src/pages/ForgetPages.cpp
     src/pages/SafetyPages.cpp
@@ -71,6 +73,7 @@ set(CLIENT_HEADERS
     src/widgets/ConfirmDialog.h
     src/widgets/RoundedContainer.h
     src/widgets/PageStateView.h
+    src/widgets/ProvenancePanel.h
     src/pages/BasePage.h
     src/pages/DashboardPage.h
     src/pages/TerminalPage.h
@@ -78,6 +81,7 @@ set(CLIENT_HEADERS
     src/pages/KnowledgePage.h
     src/pages/FactPage.h
     src/pages/SearchPage.h
+    src/pages/ProjectionPage.h
     src/pages/ConflictPage.h
     src/pages/ForgetPages.h
     src/pages/SafetyPages.h
