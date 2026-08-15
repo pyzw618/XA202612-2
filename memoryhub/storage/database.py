@@ -416,6 +416,16 @@ class PreferenceRepository:
 
     @staticmethod
     def _save(session: Session, memory: PreferenceMemory) -> None:
+        # root_id 兜底：有 parent 但没显式传 root 时，从父记录继承
+        root_id = memory.root_id or None
+        if not root_id and memory.parent_id:
+            parent = (
+                session.query(PreferenceRow)
+                .filter(PreferenceRow.memory_id == memory.parent_id)
+                .first()
+            )
+            if parent is not None:
+                root_id = parent.root_id or parent.memory_id
         row = PreferenceRow(
             memory_id=memory.memory_id,
             user_id=memory.user_id,
@@ -443,7 +453,7 @@ class PreferenceRepository:
             ),
             version=memory.version,
             parent_id=memory.parent_id or None,
-            root_id=memory.root_id or None,
+            root_id=root_id,
             evidences=(
                 [e.model_dump(mode="json") for e in memory.evidences]
                 if memory.evidences
@@ -561,35 +571,59 @@ class PreferenceRepository:
 
 
     def get_version_chain(self, memory_id: str) -> list[PreferenceMemory]:
-        """获取版本链"""
+        """
+        获取版本链（单条 SQL）。
+
+        优先用 root_id 一次查全链；旧数据没有 root_id 时退回
+        parent 链逐级追溯（仅过渡期，新写入都会填 root_id）。
+        """
         with self.db.session() as s:
             row = s.query(PreferenceRow).filter(PreferenceRow.memory_id == memory_id).first()
             if row is None:
                 return []
 
-            # 追溯到最老版本
-            root = row
-            while root.parent_id:
-                parent = s.query(PreferenceRow).filter(PreferenceRow.memory_id == root.parent_id).first()
-                if parent is None:
-                    break
-                root = parent
-
-            # 从最老版本向下遍历
-            chain = [root]
-            current = root
-            while True:
-                child = (
+            # 快路径：有 root_id → 一条 SQL 拿整条链，按版本升序
+            if row.root_id:
+                rows = (
                     s.query(PreferenceRow)
-                    .filter(PreferenceRow.parent_id == current.memory_id)
-                    .first()
+                    .filter(PreferenceRow.root_id == row.root_id)
+                    .order_by(PreferenceRow.version)
+                    .all()
                 )
-                if child is None:
-                    break
-                chain.append(child)
-                current = child
+                if rows:
+                    return [_pref_row_to_pydantic(r) for r in rows]
 
-            return [_pref_row_to_pydantic(r) for r in chain]
+            # 慢路径（旧数据兜底）：parent 链追溯到根，再向下收集
+            chain_ids = []
+            current = row
+            seen = set()
+            while current is not None and current.memory_id not in seen:
+                seen.add(current.memory_id)
+                chain_ids.insert(0, current.memory_id)
+                current = (
+                    s.query(PreferenceRow)
+                    .filter(PreferenceRow.memory_id == current.parent_id)
+                    .first()
+                    if current.parent_id
+                    else None
+                )
+            child = (
+                s.query(PreferenceRow)
+                .filter(PreferenceRow.parent_id == row.memory_id)
+                .all()
+            )
+            for c in sorted(child, key=lambda r: r.version):
+                if c.memory_id not in seen:
+                    chain_ids.append(c.memory_id)
+            if not chain_ids:
+                return []
+            rows = (
+                s.query(PreferenceRow)
+                .filter(PreferenceRow.memory_id.in_(chain_ids))
+                .all()
+            )
+            by_id = {r.memory_id: r for r in rows}
+            return [_pref_row_to_pydantic(by_id[mid]) for mid in chain_ids if mid in by_id]
 
 
 # ============================================================

@@ -556,6 +556,19 @@ async def delete_fact(fact_id: str, request: Request, user_id: str = "default"):
     store.delete_fact_artifacts([fact_id], user_id)
     store.prune_orphan_entities(user_id)
     return {"deleted": True, "fact_id": fact_id}
+@router.post("/admin/reconcile")
+async def reconcile_memory_indexes(request: Request):
+    """
+    SQLite ↔ Milvus 漂移对账（手动触发）。
+
+    正向补写 pending 的 active 记录，反向删除 pending 的非 active 向量。
+    """
+    service = getattr(request.app.state, "sync_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="memory sync service not initialized")
+    return service.reconcile()
+
+
 @router.get("/extraction/tasks/metrics")
 async def extraction_retry_metrics(request: Request):
     task = getattr(request.app.state, "extraction_retry_task", None)
