@@ -226,6 +226,39 @@ class MemorySyncService:
         logger.info("startup repair: syncing pending_index records")
         return self.sync_pending()
 
+    def reconcile(self) -> dict:
+        """
+        SQLite ↔ Milvus 漂移对账。
+
+        正向：pending_index=True 的 active 记录 → 补写 Milvus。
+        反向：pending_index=True 的非 active（归档/删除）记录 → 删除 Milvus 向量。
+
+        注意：Milvus C API 无法枚举全部向量，无法直接检测
+        SQLite 已物理删除但 Milvus 残留的幽灵向量；这类漂移依赖
+        sync_pending 的 pending 标记路径（update_status / delete 都会置位），
+        以及物理删除前的显式 vector_engine.delete 调用。
+
+        返回:
+            对账报告 {synced, failed, still_pending, duration_ms}
+        """
+        result = self.sync_pending()
+        still_pending = len(self.pref_repo.list_pending()) + len(
+            self.know_repo.list_pending()
+        )
+        report = {
+            "synced": len(result.succeeded),
+            "failed": len(result.failed),
+            "still_pending": still_pending,
+            "duration_ms": result.duration_ms,
+        }
+        if still_pending or result.failed:
+            logger.warning(
+                "milvus reconciliation drift detected: %s", report
+            )
+        else:
+            logger.info("milvus reconciliation clean: %s", report)
+        return report
+
     # ---- 内部 ----
 
     def _save_to_sqlite(self, memory: PreferenceMemory | KnowledgeMemory) -> None:
