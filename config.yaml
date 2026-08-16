@@ -22,6 +22,10 @@ llm:
   temperature: 0.1
   max_tokens: 2048
 
+fact:
+  # user_review: 只生成候选；agent_autonomous: 重要事实自动提交
+  decision_mode: "user_review"
+
 embedding:
   provider: "mock"
   dimension: 1024

@@ -207,7 +207,11 @@ class EventProcessingCoordinator:
                                     source_id=event.event_id,
                                     project_id_hint=event.payload.get("project_id"),
                                     scope_hint=event.payload.get("fact_scope"),
-                                    metadata={"session_id": event.session_id, "turn_id": event.turn_id},
+                                    metadata={
+                                        "session_id": event.session_id,
+                                        "turn_id": event.turn_id,
+                                        "user_id": event.user_id,
+                                    },
                                 )
                             )
                     # 演示适配层：无显式 fact_triples 时不调用 LLM 提取，

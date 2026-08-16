@@ -31,6 +31,12 @@ _PREFERENCE_TYPES = [
 _KNOWLEDGE_TYPES = ["workflow", "case", "template"]
 _DECISIONS = ["override", "merge", "coexist", "pending"]
 _FEEDBACK_ACTIONS = ["update", "confirm", "reject"]
+_FACT_ENTITY_TYPES = [
+    "Person", "Organization", "Location", "Device", "Software",
+    "File", "Account", "Date", "Other",
+]
+_FACT_MODES = ["user_review", "agent_autonomous"]
+_FACT_RESOLUTIONS = ["replace", "keep_old", "merge", "coexist", "escalate"]
 
 
 def _format_write_success(label: str, result: dict[str, Any]) -> str:
@@ -294,6 +300,66 @@ class ToolRegistry:
         )
 
         self._add(
+            "memoryhub_propose_facts",
+            "Submit fact triples already extracted by the main Agent. Use this when the user "
+            "explicitly asks to remember a fact; never rewrite failed facts as knowledge. "
+            "user_review stages candidates and agent_autonomous commits admitted facts.",
+            {
+                "user_id": {"type": "string", "default": default_user},
+                "decision_mode": {"type": "string", "enum": _FACT_MODES},
+                "source_id": {"type": "string"},
+                "scope_hint": {"type": "string", "enum": ["global", "project"]},
+                "project_id": {"type": "string"},
+                "triples": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "subject_text": {"type": "string"},
+                            "subject_type": {"type": "string", "enum": _FACT_ENTITY_TYPES, "default": "Other"},
+                            "predicate_text": {"type": "string"},
+                            "object_text": {"type": "string"},
+                            "object_type": {"type": "string", "enum": _FACT_ENTITY_TYPES, "default": "Other"},
+                            "evidence": {"type": "string"},
+                            "confidence": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.8},
+                        },
+                        "required": ["subject_text", "predicate_text", "object_text"],
+                    },
+                },
+            },
+            ["triples"],
+            lambda args: self._wrap_propose_facts(args),
+        )
+
+        self._add(
+            "memoryhub_decide_facts",
+            "Commit or reject durable fact proposals after review, and resolve conflicts "
+            "returned by memoryhub_propose_facts.",
+            {
+                "user_id": {"type": "string", "default": default_user},
+                "decisions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "proposal_id": {"type": "string"},
+                            "action": {"type": "string", "enum": ["commit", "reject"]},
+                            "scope": {"type": "string", "enum": ["global", "project"]},
+                            "project_id": {"type": "string"},
+                            "resolution": {"type": "string", "enum": _FACT_RESOLUTIONS},
+                            "force": {"type": "boolean", "default": False},
+                        },
+                        "required": ["proposal_id", "action"],
+                    },
+                },
+            },
+            ["decisions"],
+            lambda args: self._wrap_decide_facts(args),
+        )
+
+        self._add(
             "memoryhub_forget",
             "Precisely forget memories. Either give a natural-language instruction (e.g. "
             "'忘掉我关于周报格式的偏好') and/or explicit memory IDs.",
@@ -439,7 +505,10 @@ class ToolRegistry:
         return (
             f"事件写入完成：accepted={result.get('accepted')} rejected={result.get('rejected')} "
             f"event_ids={result.get('event_ids')} extraction_failures={result.get('extraction_failures')} "
-            f"retry_tasks_enqueued={result.get('retry_tasks_enqueued')}"
+            f"retry_tasks_enqueued={result.get('retry_tasks_enqueued')} "
+            f"fact_proposal_ids={result.get('fact_proposal_ids', [])} "
+            f"facts_committed={result.get('facts_committed', 0)} "
+            f"facts_awaiting_decision={result.get('facts_awaiting_decision', 0)}"
         )
 
     def _wrap_write_preference(self, args: dict) -> str:
@@ -484,6 +553,54 @@ class ToolRegistry:
                 return outcome
             raise
         return _format_write_success("知识", result)
+
+    def _wrap_propose_facts(self, args: dict) -> str:
+        triples = args.get("triples")
+        if not isinstance(triples, list) or not triples:
+            raise ContractError("triples must be a non-empty array")
+        payload = {
+            "user_id": str(args.get("user_id") or self.config.user_id),
+            "source_id": str(args.get("source_id") or "mcp-agent"),
+            "scope_hint": str(args.get("scope_hint") or "global"),
+            "triples": triples,
+        }
+        if args.get("decision_mode"):
+            payload["decision_mode"] = str(args["decision_mode"])
+        if args.get("project_id"):
+            payload["project_id"] = str(args["project_id"])
+        try:
+            proposals = self.client.propose_facts(payload)
+        except MemoryHubError as exc:
+            outcome = _format_write_policy_outcome("事实候选", exc)
+            if outcome is not None:
+                return outcome
+            raise
+        lines = [f"事实候选处理完成：count={len(proposals)}"]
+        for item in proposals:
+            lines.append(
+                f"- [{item.get('proposal_id')}] {item.get('subject')} "
+                f"{item.get('predicate')} {item.get('object')} "
+                f"status={item.get('status')}"
+            )
+        return "\n".join(lines)
+
+    def _wrap_decide_facts(self, args: dict) -> str:
+        decisions = args.get("decisions")
+        if not isinstance(decisions, list) or not decisions:
+            raise ContractError("decisions must be a non-empty array")
+        results = self.client.decide_facts(
+            {
+                "user_id": str(args.get("user_id") or self.config.user_id),
+                "decisions": decisions,
+            }
+        )
+        lines = [f"事实候选裁决完成：count={len(results)}"]
+        for item in results:
+            lines.append(
+                f"- [{item.get('proposal_id')}] status={item.get('status')} "
+                f"fact_id={item.get('fact_id') or ''}"
+            )
+        return "\n".join(lines)
 
     def _wrap_forget(self, args: dict) -> str:
         scope = {}

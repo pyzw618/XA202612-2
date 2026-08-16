@@ -15,6 +15,7 @@ class RecordingPipeline:
         project_id=None,
         scope_hint=None,
         metadata=None,
+        decision_mode="user_review",
     ):
         self.calls.append({
             "text": text,
@@ -22,6 +23,7 @@ class RecordingPipeline:
             "project_id": project_id,
             "scope_hint": scope_hint,
             "metadata": metadata,
+            "decision_mode": decision_mode,
         })
         triple = RawTriple(
             subject_text="项目A",
@@ -90,14 +92,16 @@ def test_adapter_processes_text_and_successful_tool_results():
 
     candidates = adapter.propose_from_event(event)
 
-    assert len(candidates) == 2
-    assert [call["source_id"] for call in pipeline.calls] == [
-        "evt-001:text",
-        "evt-001:call-1",
-    ]
+    assert len(candidates) == 1
+    assert len(pipeline.calls) == 1
+    assert pipeline.calls[0]["source_id"] == "evt-001"
     assert all(call["project_id"] == "project-a" for call in pipeline.calls)
-    assert "工具返回结果" in pipeline.calls[1]["text"]
-    assert '"owner": "张三"' in pipeline.calls[1]["text"]
+    assert "项目A负责人是张三" in pipeline.calls[0]["text"]
+    assert '"owner": "张三"' in pipeline.calls[0]["text"]
+    assert pipeline.calls[0]["metadata"]["content_sources"] == [
+        {"kind": "event_text", "id": "text"},
+        {"kind": "tool_result", "id": "call-1"},
+    ]
 
 
 def test_adapter_ignores_quality_status_for_now():
@@ -124,7 +128,7 @@ def test_adapter_skips_failed_or_empty_tool_results():
     candidates = adapter.propose_from_event(event)
 
     assert len(candidates) == 1
-    assert pipeline.calls[0]["source_id"] == "evt-001:call-3"
+    assert pipeline.calls[0]["source_id"] == "evt-001"
 
 
 def test_adapter_does_not_decide_scope():

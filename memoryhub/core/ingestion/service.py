@@ -17,6 +17,9 @@ class EventIngestionResult:
     extraction_failures: int = 0
     retry_tasks_enqueued: int = 0
     retry_queue_failures: int = 0
+    fact_proposal_ids: list[str] = field(default_factory=list)
+    facts_committed: int = 0
+    facts_awaiting_decision: int = 0
 
 
 class EventIngestionService:
@@ -144,7 +147,13 @@ class EventIngestionService:
             return
         for event in events:
             try:
-                self.extraction_executor.run_fact(event)
+                outcome = self.extraction_executor.run_fact(event)
+                if outcome is not None:
+                    result.fact_proposal_ids.extend(outcome.proposal_ids)
+                    result.facts_committed += len(outcome.committed_fact_ids)
+                    result.facts_awaiting_decision += len(
+                        outcome.awaiting_decision_ids
+                    )
             except Exception:
                 self._record_extraction_failure(ExtractionType.FACT, [event], result)
 

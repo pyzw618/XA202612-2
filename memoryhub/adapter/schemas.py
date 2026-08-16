@@ -1619,6 +1619,9 @@ class WriteEventResponse(BaseModel):
     extraction_failures: int = 0
     retry_tasks_enqueued: int = 0
     retry_queue_failures: int = 0
+    fact_proposal_ids: list[str] = Field(default_factory=list)
+    facts_committed: int = 0
+    facts_awaiting_decision: int = 0
 
 
 class FeedbackRequest(BaseModel):

@@ -1,115 +1,187 @@
-"""把上游 MemoryEvent 契约转换为纯事实候选。"""
+"""Convert one upstream MemoryEvent into durable fact proposals."""
+
+from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .models import FactCandidate
+from .models import (
+    FactCandidate,
+    FactDecisionMode,
+    FactProposalStatus,
+    Resolution,
+)
 from .pipeline import FactMemoryPipeline
 
 
-class FactIngestionAdapter:
-    """
-    MemoryEvent 对接适配器。
+@dataclass
+class FactIngestionOutcome:
+    proposal_ids: list[str] = field(default_factory=list)
+    committed_fact_ids: list[str] = field(default_factory=list)
+    awaiting_decision_ids: list[str] = field(default_factory=list)
+    rejected_count: int = 0
 
-    当前不执行质量门控、安全处理、作用域判断或正式提交。
-    """
+
+class FactIngestionAdapter:
+    """Process one already-quality-scored and safety-approved MemoryEvent."""
 
     _USABLE_STATUSES = {"success", "partial"}
 
-    def __init__(self, pipeline: FactMemoryPipeline):
+    def __init__(
+        self,
+        pipeline: FactMemoryPipeline,
+        decision_mode: str = FactDecisionMode.USER_REVIEW.value,
+    ):
+        if decision_mode not in FactDecisionMode.choices():
+            raise ValueError(f"unsupported fact decision mode: {decision_mode}")
         self.pipeline = pipeline
+        self.decision_mode = decision_mode
 
     def propose_from_event(self, event: Any) -> list[FactCandidate]:
+        """Use one extraction call for the complete event and all usable tool results."""
         event_id = str(getattr(event, "event_id", "")).strip()
         project_id_hint = self._project_id_hint(event)
-        base_metadata = self._event_metadata(event)
-        candidates: list[FactCandidate] = []
+        text, sources = self.format_event(event)
+        if not text:
+            return []
+        return self.pipeline.propose(
+            text,
+            source_id=event_id or "event",
+            project_id=project_id_hint,
+            metadata={
+                **self._event_metadata(event),
+                "content_source": "memory_event",
+                "content_sources": sources,
+            },
+            decision_mode=self.decision_mode,
+        )
 
-        event_text = str(getattr(event, "text", "") or "").strip()
-        if event_text:
-            candidates.extend(self.pipeline.propose(
-                event_text,
-                source_id=f"{event_id}:text" if event_id else "event:text",
-                project_id=project_id_hint,
-                metadata={**base_metadata, "content_source": "event_text"},
-            ))
-
-        for call in list(getattr(event, "tool_calls", []) or []):
-            status = self._enum_value(getattr(call, "status", ""))
-            if status not in self._USABLE_STATUSES:
-                continue
-
-            result = getattr(call, "result", None)
-            if result in (None, "", [], {}):
-                continue
-
-            call_id = str(getattr(call, "call_id", "")).strip()
-            tool_name = str(getattr(call, "tool_name", "")).strip()
-            text = self.format_tool_call(call)
-            candidates.extend(self.pipeline.propose(
-                text,
-                source_id=(
-                    f"{event_id}:{call_id}"
-                    if event_id and call_id
-                    else f"{event_id or 'event'}:{tool_name or 'tool'}"
-                ),
-                project_id=project_id_hint,
-                metadata={
-                    **base_metadata,
-                    "content_source": "tool_result",
-                    "call_id": call_id,
-                    "tool_name": tool_name,
-                    "tool_status": status,
-                },
-            ))
-
-        return candidates
-
-
-    def ingest_event(self, event: Any):
-        """Propose and commit admitted facts from one already-safe event."""
+    def ingest_event(self, event: Any) -> FactIngestionOutcome:
+        """Stage candidates for review or commit admitted candidates autonomously."""
         project_id = self._project_id_hint(event)
         scope = "project" if project_id else "global"
         user_id = str(getattr(event, "user_id", "") or "default")
-        results = []
+        outcome = FactIngestionOutcome()
+
         for candidate in self.propose_from_event(event):
-            if not candidate.admission.should_remember:
+            if (
+                self.decision_mode == FactDecisionMode.AGENT_AUTONOMOUS.value
+                and not candidate.admission.should_remember
+            ):
+                outcome.rejected_count += 1
                 continue
-            results.append(self.pipeline.commit(
+
+            self.pipeline.store.save_fact_proposal(
+                candidate,
+                user_id=user_id,
+                decision_mode=self.decision_mode,
+            )
+            outcome.proposal_ids.append(candidate.proposal_id)
+
+            if self.decision_mode == FactDecisionMode.USER_REVIEW.value:
+                continue
+
+            result = self.pipeline.commit(
                 candidate,
                 scope=scope,
                 project_id=project_id,
                 user_id=user_id,
-            ))
-        return results
+            )
+            requires_decision = (
+                result.relation == "CONFLICT"
+                and result.resolution == Resolution.ESCALATE.value
+            )
+            if requires_decision:
+                proposal_status = FactProposalStatus.AWAITING_DECISION.value
+                outcome.awaiting_decision_ids.append(candidate.proposal_id)
+            else:
+                proposal_status = FactProposalStatus.COMMITTED.value
+                stored_fact = (
+                    result.existing_fact
+                    if (
+                        result.existing_fact
+                        and (
+                            result.relation == "DUPLICATE"
+                            or result.resolution == Resolution.KEEP_OLD.value
+                        )
+                    )
+                    else result.new_fact
+                )
+                if stored_fact is not None:
+                    outcome.committed_fact_ids.append(stored_fact.fact_id)
+            self.pipeline.store.update_fact_proposal_status(
+                candidate.proposal_id,
+                user_id=user_id,
+                status=proposal_status,
+                committed_fact_id=(
+                    None
+                    if requires_decision
+                    else outcome.committed_fact_ids[-1]
+                    if outcome.committed_fact_ids
+                    else None
+                ),
+            )
+        return outcome
 
-    @staticmethod
-    def format_tool_call(call: Any) -> str:
+    @classmethod
+    def format_event(cls, event: Any) -> tuple[str, list[dict[str, str]]]:
+        """Build one structured prompt while retaining source identifiers."""
+        payload: dict[str, Any] = {}
+        sources: list[dict[str, str]] = []
+        event_text = str(getattr(event, "text", "") or "").strip()
+        if event_text:
+            payload["event_text"] = event_text
+            sources.append({"kind": "event_text", "id": "text"})
+
+        calls = []
+        for call in list(getattr(event, "tool_calls", []) or []):
+            status = cls._enum_value(getattr(call, "status", ""))
+            result = getattr(call, "result", None)
+            if status not in cls._USABLE_STATUSES or result in (None, "", [], {}):
+                continue
+            call_id = str(getattr(call, "call_id", "")).strip()
+            tool_name = str(getattr(call, "tool_name", "")).strip()
+            calls.append(
+                {
+                    "call_id": call_id,
+                    "tool_name": tool_name,
+                    "arguments": getattr(call, "arguments", {}) or {},
+                    "result": result,
+                    "status": status,
+                }
+            )
+            sources.append(
+                {"kind": "tool_result", "id": call_id or tool_name or "tool"}
+            )
+        if calls:
+            payload["tool_calls"] = calls
+        return (
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+            if payload
+            else "",
+            sources,
+        )
+
+    @classmethod
+    def format_tool_call(cls, call: Any) -> str:
+        """Compatibility helper retained for callers that format one tool result."""
         tool_name = str(getattr(call, "tool_name", "")).strip()
-        arguments = getattr(call, "arguments", {}) or {}
-        result = getattr(call, "result", None)
-        parts = [f"工具名称：{tool_name or 'unknown'}"]
-        if arguments:
-            parts.extend((
+        return "\n".join(
+            (
+                f"工具名称：{tool_name or 'unknown'}",
                 "调用参数：",
-                FactIngestionAdapter._json_text(arguments),
-            ))
-        parts.extend((
-            "工具返回结果：",
-            FactIngestionAdapter._json_text(result),
-        ))
-        return "\n".join(parts)
+                cls._json_text(getattr(call, "arguments", {}) or {}),
+                "工具返回结果：",
+                cls._json_text(getattr(call, "result", None)),
+            )
+        )
 
     @staticmethod
     def _json_text(value: Any) -> str:
         if isinstance(value, str):
             return value
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            default=str,
-        )
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
     @staticmethod
     def _enum_value(value: Any) -> str:

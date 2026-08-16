@@ -43,7 +43,13 @@ class TripleExtractor:
         )
         self.last_error: Exception | None = None
 
-    def extract(self, text: str, source_id: str = "") -> list[RawTriple]:
+    def extract(
+        self,
+        text: str,
+        source_id: str = "",
+        *,
+        only_memory_worthy: bool = False,
+    ) -> list[RawTriple]:
         """
         从文本提取三元组列表。
 
@@ -63,6 +69,12 @@ class TripleExtractor:
             return []
 
         user_message = EXTRACTION_USER_TEMPLATE.format(text=text)
+        if only_memory_worthy:
+            user_message += (
+                "\n\n仅提取适合长期记忆的事实：与当前用户、其关系、设备、账号、"
+                "文件或当前项目直接相关，且未来仍可能复用。忽略公共常识、一次性状态、"
+                "新闻和与用户无关的第三方事实。"
+            )
 
         try:
             response = self._client.chat.completions.create(
@@ -79,11 +91,11 @@ class TripleExtractor:
             if triples:
                 return triples
             logger.info(f"[{source_id}] LLM 未返回三元组，回退规则抽取")
-            return self._rule_extract(text, source_id)
+            return self._rule_extract(text, source_id) if not only_memory_worthy else []
 
         except Exception as e:
             logger.error(f"LLM 提取失败: {e}")
-            triples = self._rule_extract(text, source_id)
+            triples = self._rule_extract(text, source_id) if not only_memory_worthy else []
             if not triples:
                 # 同时失败才上报错误，避免无 LLM 环境静默丢失事实
                 self.last_error = e

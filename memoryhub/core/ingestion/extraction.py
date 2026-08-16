@@ -123,10 +123,10 @@ class ExtractionExecutor:
             self.knowledge_updater.add(memory)
         return len(memories)
 
-    def run_fact(self, event: MemoryEvent) -> int:
+    def run_fact(self, event: MemoryEvent):
         if self.fact_ingestion_adapter is None:
-            return 0
-        return len(self.fact_ingestion_adapter.ingest_event(event) or [])
+            return None
+        return self.fact_ingestion_adapter.ingest_event(event)
 
     def supports(self, extractor_type: str) -> bool:
         kind = extractor_type.value if hasattr(extractor_type, "value") else str(extractor_type)

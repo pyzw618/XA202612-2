@@ -146,6 +146,19 @@ class ExtractionRetryConfig:
 
 
 @dataclass
+class FactConfig:
+    """Fact proposal and commit policy."""
+
+    decision_mode: str = "user_review"
+
+    def __post_init__(self) -> None:
+        if self.decision_mode not in {"user_review", "agent_autonomous"}:
+            raise ValueError(
+                "fact.decision_mode must be 'user_review' or 'agent_autonomous'"
+            )
+
+
+@dataclass
 class KnowledgeMergeConfig:
     """Internal knowledge equivalence and conflict thresholds."""
 
@@ -582,6 +595,7 @@ class AppConfig:
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     vector_engine: VectorEngineConfig = field(default_factory=VectorEngineConfig)
     extraction_retry: ExtractionRetryConfig = field(default_factory=ExtractionRetryConfig)
+    fact: FactConfig = field(default_factory=FactConfig)
     knowledge_merge: KnowledgeMergeConfig = field(default_factory=KnowledgeMergeConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     debug: bool = False
@@ -647,6 +661,9 @@ def load_config(config_path: str | None = None) -> AppConfig:
             config.extraction_retry = ExtractionRetryConfig(
                 **{**config.extraction_retry.__dict__, **section("extraction_retry")}
             )
+            config.fact = FactConfig(
+                **{**config.fact.__dict__, **section("fact")}
+            )
             config.knowledge_merge = KnowledgeMergeConfig(
                 **{**config.knowledge_merge.__dict__, **section("knowledge_merge")}
             )
@@ -684,6 +701,10 @@ def load_config(config_path: str | None = None) -> AppConfig:
         config.llm.api_key = os.environ["MEMORYHUB_LLM_API_KEY"]
     if os.environ.get("MEMORYHUB_LLM_MODEL"):
         config.llm.model = os.environ["MEMORYHUB_LLM_MODEL"]
+    if os.environ.get("MEMORYHUB_FACT_DECISION_MODE"):
+        config.fact = FactConfig(
+            decision_mode=os.environ["MEMORYHUB_FACT_DECISION_MODE"]
+        )
 
     # 环境变量覆盖后重新构造，以执行 provider/app_id 契约校验。
     config.vector_engine = VectorEngineConfig(**config.vector_engine.__dict__)

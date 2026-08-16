@@ -19,6 +19,7 @@ from memoryhub.adapter.schemas import (
     SearchRequest,
 )
 from memoryhub.core.forget import MemoryForgetter
+from memoryhub.core.fact.models import FactProposalStatus, Resolution
 
 router = APIRouter(prefix="/api/agent", tags=["agent-adapter"])
 
@@ -166,13 +167,9 @@ async def clear_demo_data(request: Request, user_id: str = "default"):
         except Exception:
             pass
 
-    # 清理进程内的事实候选裁决暂存区
-    _FACT_PENDING.clear()
+    if fact_store is not None:
+        counts["fact_proposals"] = fact_store.delete_fact_proposals(user_id=user_id)
     return {"deleted": counts, "user_id": user_id}
-
-# 进程内 fact 候选暂存区：proposal_id -> {"json": <dict>, "candidate": <FactCandidate>}
-# 便于前端 FactDialog 裁决（main 后端本身是自动 commit，无候选存储）
-_FACT_PENDING: dict[str, dict[str, Any]] = {}
 
 
 class ReplayRequest(BaseModel):
@@ -191,6 +188,7 @@ class AgentDecisionRequest(BaseModel):
         "conflict_resolve",
         "forget_commit",
     ]
+    user_id: str = "default"
     decision: str = ""
     payload: dict[str, Any] = Field(default_factory=dict)
 
@@ -247,7 +245,10 @@ def _candidate_to_json(proposal: Any) -> dict[str, Any]:
         "evidence": getattr(raw, "evidence", ""),
         "confidence": float(getattr(raw, "confidence", 0) or 0),
         "admission_reason": admission.reason if hasattr(admission, "reason") else "",
-        "suggested_scope": proposal.scope_hint or "project",
+        "suggested_scope": (
+            proposal.scope_hint
+            or getattr(admission, "suggested_scope", None)
+        ),
         "status": "proposed",
         "source_id": proposal.source_id,
         "metadata": dict(proposal.metadata or {}),
@@ -357,10 +358,16 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
     # fact 候选：把 processing 暂存的候选注册到进程内裁决暂存区
     fact_proposals = []
     cached_candidates = getattr(processor, "_fact_candidates", None) or []
+    fact_pipeline = getattr(request.app.state, "fact_pipeline", None)
     for proposal in cached_candidates:
         if proposal.proposal_id in processing.fact_proposal_ids:
             json_repr = _candidate_to_json(proposal)
-            _FACT_PENDING[proposal.proposal_id] = {"json": json_repr, "candidate": proposal}
+            if fact_pipeline is not None:
+                fact_pipeline.store.save_fact_proposal(
+                    proposal,
+                    user_id=str(proposal.metadata.get("user_id") or "default"),
+                    decision_mode="user_review",
+                )
             fact_proposals.append(json_repr)
 
     generated_tool_calls = [
@@ -422,19 +429,32 @@ async def decide_agent_action(
 ):
     """接收用户裁决，由 Agent 适配层执行相应 MemoryHub 操作。"""
     if body.action_type in {"fact_commit", "fact_reject"}:
-        staged = _FACT_PENDING.get(action_id)
         pipeline = getattr(request.app.state, "fact_pipeline", None)
         if pipeline is None:
             raise HTTPException(status_code=503, detail="fact pipeline not initialized")
-
-        # 从暂存区取回候选（含 FactCandidate 对象）
+        user_id = str(body.user_id or body.payload.get("user_id") or "default")
+        staged = pipeline.store.get_fact_proposal(action_id, user_id=user_id)
         if staged is None:
             raise HTTPException(status_code=404, detail="fact proposal not found")
         proposal = staged["candidate"]
 
         if body.action_type == "fact_reject":
-            staged["json"]["status"] = "rejected"
+            pipeline.store.update_fact_proposal_status(
+                action_id,
+                user_id=user_id,
+                status=FactProposalStatus.REJECTED.value,
+            )
             return {"action_id": action_id, "status": "rejected"}
+
+        if staged["status"] == FactProposalStatus.COMMITTED.value:
+            return {
+                "proposal_id": action_id,
+                "status": "committed",
+                "fact": pipeline.store.get_fact(
+                    staged["committed_fact_id"], user_id=user_id
+                ) if staged["committed_fact_id"] else None,
+                "idempotent": True,
+            }
 
         try:
             result = pipeline.commit(
@@ -444,7 +464,7 @@ async def decide_agent_action(
                 resolution=body.payload.get("resolution") or None,
                 force=bool(body.payload.get("force", False)),
                 auto_resolve=False,
-                user_id=body.payload.get("user_id", "default"),
+                user_id=user_id,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
@@ -464,7 +484,21 @@ async def decide_agent_action(
             "fact": asdict(stored_fact) if stored_fact is not None else None,
             "existing_fact": asdict(result.existing_fact) if getattr(result, "existing_fact", None) else None,
         }
-        _FACT_PENDING[action_id]["json"]["status"] = response["status"]
+        stored_fact_id = (
+            stored_fact.fact_id
+            if stored_fact is not None and not requires_decision
+            else None
+        )
+        pipeline.store.update_fact_proposal_status(
+            action_id,
+            user_id=user_id,
+            status=(
+                FactProposalStatus.AWAITING_DECISION.value
+                if requires_decision
+                else FactProposalStatus.COMMITTED.value
+            ),
+            committed_fact_id=stored_fact_id,
+        )
         return response
 
     if body.action_type == "conflict_resolve":

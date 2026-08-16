@@ -80,6 +80,11 @@ llm:
   # 最大生成 token 数
   max_tokens: 2048
 
+# ==================== 事实候选策略 ====================
+fact:
+  # user_review | agent_autonomous
+  decision_mode: "user_review"
+
 # ==================== Embedding 配置 ====================
 embedding:
   # 生产模式必须使用 "kylin"（银河麒麟真实 SDK）

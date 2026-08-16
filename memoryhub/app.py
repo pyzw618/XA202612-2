@@ -618,7 +618,10 @@ def create_app(
             write_service=app.state.memory_write_service,
         )
         knowledge_extractor = KnowledgeExtractor(llm_client=llm_client)
-        fact_ingestion_adapter = FactIngestionAdapter(app.state.fact_pipeline)
+        fact_ingestion_adapter = FactIngestionAdapter(
+            app.state.fact_pipeline,
+            decision_mode=config.fact.decision_mode,
+        )
         extraction_executor = ExtractionExecutor(
             memory_write_service=app.state.memory_write_service,
             preference_extractor=preference_extractor,

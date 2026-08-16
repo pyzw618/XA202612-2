@@ -752,6 +752,9 @@ async def system_status(request: Request):
             "provider": config.llm.provider if config is not None else None,
             "model": config.llm.model if config is not None else "",
         },
+        "fact": {
+            "decision_mode": config.fact.decision_mode if config is not None else None,
+        },
         "vector_engine": {
             "provider": config.vector_engine.provider if config is not None else None,
             "collection": config.vector_engine.collection if config is not None else "",
@@ -815,6 +818,9 @@ async def system_config(request: Request):
             "provider": config.llm.provider,
             "model": config.llm.model,
             "api_base": config.llm.api_base,
+        },
+        "fact": {
+            "decision_mode": config.fact.decision_mode,
         },
         "embedding": {
             "provider": config.embedding.provider,

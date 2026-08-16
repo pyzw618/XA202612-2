@@ -48,6 +48,24 @@ class MemoryScope(str, Enum):
         return [e.value for e in cls]
 
 
+class FactDecisionMode(str, Enum):
+    """How an extracted fact candidate reaches durable fact storage."""
+
+    USER_REVIEW = "user_review"
+    AGENT_AUTONOMOUS = "agent_autonomous"
+
+    @classmethod
+    def choices(cls) -> list[str]:
+        return [e.value for e in cls]
+
+
+class FactProposalStatus(str, Enum):
+    PROPOSED = "proposed"
+    COMMITTED = "committed"
+    REJECTED = "rejected"
+    AWAITING_DECISION = "awaiting_decision"
+
+
 # ─── 实体 ──────────────────────────────────────────────────────────────
 
 @dataclass

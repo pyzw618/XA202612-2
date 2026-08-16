@@ -364,7 +364,9 @@ def test_stdio_framing_smoke(running_server):
         )
         proc.stdin.flush()
         tools = json.loads(proc.stdout.readline())["result"]["tools"]
-        assert len(tools) == 12
+        assert len(tools) == 14
+        tool_names = {item["name"] for item in tools}
+        assert {"memoryhub_propose_facts", "memoryhub_decide_facts"} <= tool_names
     finally:
         proc.stdin.close()
         proc.terminate()

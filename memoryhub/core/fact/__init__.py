@@ -20,6 +20,7 @@ ingest() 保留为自动 propose + commit 的兼容接口。
 from .models import (
     Entity, PredicateDef, RawTriple, Fact, FactCandidate, FactProposal,
     FactAdmissionDecision, ConflictResult, EntityType, MemoryScope, Resolution,
+    FactDecisionMode, FactProposalStatus,
 )
 from .admission import FactAdmissionPolicy
 from .store import FactStore
@@ -27,13 +28,14 @@ from .extractor import TripleExtractor
 from .normalizer import EntityNormalizer, PredicateNormalizer
 from .conflict import ConflictDetector
 from .pipeline import FactMemoryPipeline
-from .event_adapter import FactIngestionAdapter
+from .event_adapter import FactIngestionAdapter, FactIngestionOutcome
 from .index_service import FactIndexService
 
 __all__ = [
     "Entity", "PredicateDef", "RawTriple", "Fact", "FactCandidate", "FactProposal",
     "FactAdmissionDecision", "ConflictResult",
-    "EntityType", "MemoryScope", "Resolution",
+    "EntityType", "MemoryScope", "Resolution", "FactDecisionMode",
+    "FactProposalStatus",
     "FactAdmissionPolicy",
     "FactStore",
     "TripleExtractor",
@@ -41,5 +43,6 @@ __all__ = [
     "ConflictDetector",
     "FactMemoryPipeline",
     "FactIngestionAdapter",
+    "FactIngestionOutcome",
     "FactIndexService",
 ]

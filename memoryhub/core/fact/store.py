@@ -4,10 +4,21 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Optional
 
-from .models import Entity, Fact, MemoryScope, PredicateDef
+from .models import (
+    Entity,
+    Fact,
+    FactAdmissionDecision,
+    FactCandidate,
+    FactDecisionMode,
+    FactProposalStatus,
+    MemoryScope,
+    PredicateDef,
+    RawTriple,
+)
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS entities (
@@ -71,6 +82,18 @@ CREATE TABLE IF NOT EXISTS fact_conflicts (
 );
 CREATE INDEX IF NOT EXISTS idx_fact_conflicts_owner
     ON fact_conflicts(user_id, created_at);
+CREATE TABLE IF NOT EXISTS fact_proposals (
+    proposal_id       TEXT PRIMARY KEY,
+    user_id           TEXT NOT NULL,
+    candidate_json    TEXT NOT NULL,
+    decision_mode     TEXT NOT NULL,
+    status            TEXT NOT NULL,
+    committed_fact_id TEXT,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fact_proposals_owner_status
+    ON fact_proposals(user_id, status, created_at);
 """
 
 
@@ -122,6 +145,138 @@ class FactStore:
 
     def close(self) -> None:
         self._conn.close()
+
+    def save_fact_proposal(
+        self,
+        proposal: FactCandidate,
+        *,
+        user_id: str,
+        decision_mode: str = FactDecisionMode.USER_REVIEW.value,
+        status: str = FactProposalStatus.PROPOSED.value,
+    ) -> str:
+        """Persist a user-owned proposal without normalizing or writing a fact."""
+        if not user_id:
+            raise ValueError("fact proposal requires user_id")
+        if decision_mode not in FactDecisionMode.choices():
+            raise ValueError(f"unsupported fact decision mode: {decision_mode}")
+        if status not in [item.value for item in FactProposalStatus]:
+            raise ValueError(f"unsupported fact proposal status: {status}")
+        now = datetime.now(timezone.utc).isoformat()
+        payload = {
+            "candidate_id": proposal.candidate_id,
+            "raw_triple": asdict(proposal.raw_triple),
+            "admission": asdict(proposal.admission),
+            "source_id": proposal.source_id,
+            "project_id_hint": proposal.project_id_hint,
+            "scope_hint": proposal.scope_hint,
+            "metadata": proposal.metadata,
+        }
+        self._conn.execute(
+            """INSERT INTO fact_proposals
+               (proposal_id, user_id, candidate_json, decision_mode, status,
+                committed_fact_id, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+               ON CONFLICT(proposal_id) DO UPDATE SET
+                   candidate_json=excluded.candidate_json,
+                   decision_mode=excluded.decision_mode,
+                   updated_at=excluded.updated_at
+               WHERE fact_proposals.user_id=excluded.user_id""",
+            (
+                proposal.proposal_id,
+                user_id,
+                json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                decision_mode,
+                status,
+                now,
+                now,
+            ),
+        )
+        self._conn.commit()
+        return proposal.proposal_id
+
+    def get_fact_proposal(
+        self, proposal_id: str, *, user_id: str
+    ) -> Optional[dict]:
+        row = self._conn.execute(
+            "SELECT * FROM fact_proposals WHERE proposal_id = ? AND user_id = ?",
+            (proposal_id, user_id),
+        ).fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row["candidate_json"])
+        proposal = FactCandidate(
+            candidate_id=payload["candidate_id"],
+            raw_triple=RawTriple(**payload["raw_triple"]),
+            admission=FactAdmissionDecision(**payload["admission"]),
+            source_id=payload.get("source_id", ""),
+            project_id_hint=payload.get("project_id_hint"),
+            scope_hint=payload.get("scope_hint"),
+            metadata=dict(payload.get("metadata") or {}),
+        )
+        return {
+            "candidate": proposal,
+            "decision_mode": row["decision_mode"],
+            "status": row["status"],
+            "committed_fact_id": row["committed_fact_id"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def update_fact_proposal_status(
+        self,
+        proposal_id: str,
+        *,
+        user_id: str,
+        status: str,
+        committed_fact_id: Optional[str] = None,
+    ) -> bool:
+        if status not in [item.value for item in FactProposalStatus]:
+            raise ValueError(f"unsupported fact proposal status: {status}")
+        cursor = self._conn.execute(
+            """UPDATE fact_proposals
+               SET status = ?, committed_fact_id = COALESCE(?, committed_fact_id),
+                   updated_at = ?
+               WHERE proposal_id = ? AND user_id = ?""",
+            (
+                status,
+                committed_fact_id,
+                datetime.now(timezone.utc).isoformat(),
+                proposal_id,
+                user_id,
+            ),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def list_fact_proposals(
+        self,
+        *,
+        user_id: str,
+        status: Optional[str] = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        query = "SELECT proposal_id FROM fact_proposals WHERE user_id = ?"
+        params: list[object] = [user_id]
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(max(1, min(int(limit), 500)))
+        rows = self._conn.execute(query, params).fetchall()
+        results = []
+        for row in rows:
+            stored = self.get_fact_proposal(row["proposal_id"], user_id=user_id)
+            if stored is not None:
+                stored["proposal_id"] = row["proposal_id"]
+                results.append(stored)
+        return results
+
+    def delete_fact_proposals(self, *, user_id: str) -> int:
+        cursor = self._conn.execute(
+            "DELETE FROM fact_proposals WHERE user_id = ?", (user_id,)
+        )
+        self._conn.commit()
+        return cursor.rowcount
 
     def upsert_entity(self, entity: Entity) -> str:
         self._conn.execute(

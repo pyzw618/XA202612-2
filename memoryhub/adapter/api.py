@@ -10,7 +10,8 @@ import hmac
 import json
 import re
 from collections.abc import Mapping
-from typing import Annotated, Any
+from datetime import datetime, timezone
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
@@ -23,18 +24,23 @@ from memoryhub.adapter.schemas import (
     ExtractionTaskRunRequest,
     ExtractionTaskRunResponse,
     ExtractionTaskStatus,
+    EventQuality,
     FeedbackRequest,
     ForgetRecord,
     ForgetRequest,
     ForgetResponse,
     KnowledgeMemory,
+    MemoryEvent,
     MemoryStatus,
     PreferenceMemory,
+    QualityStatus,
     SafetyAction,
     SearchRequest,
     SearchResponse,
+    SourceType,
     WriteEventRequest,
     WriteEventResponse,
+    canonical_sha256,
 )
 from memoryhub.adapter.user_rule_schemas import (
     CreateUserRuleRequest,
@@ -42,7 +48,15 @@ from memoryhub.adapter.user_rule_schemas import (
     UserRuleErrorResponse,
     UserRuleResponse,
 )
-from memoryhub.core.fact.models import FactCandidate, RawTriple
+from memoryhub.core.fact.models import (
+    EntityType,
+    FactCandidate,
+    FactDecisionMode,
+    FactProposalStatus,
+    MemoryScope,
+    RawTriple,
+    Resolution,
+)
 from memoryhub.core.forget import MemoryForgetter
 from memoryhub.core.safety.gate import SafetyGateError
 from memoryhub.core.safety.memory_write import (
@@ -491,6 +505,9 @@ async def write_events(req: WriteEventRequest, request: Request):
             extraction_failures=result.extraction_failures,
             retry_tasks_enqueued=result.retry_tasks_enqueued,
             retry_queue_failures=result.retry_queue_failures,
+            fact_proposal_ids=result.fact_proposal_ids,
+            facts_committed=result.facts_committed,
+            facts_awaiting_decision=result.facts_awaiting_decision,
         )
     except HTTPException:
         raise
@@ -1163,13 +1180,47 @@ class ForgetPreviewResponse(BaseModel):
     target_topic: str = ""
 
 
-class FactProposeRequest(BaseModel):
-    """手工提交事实候选（前端 demo / 竞争测试使用）。"""
+EntityTypeValue = Literal[
+    "Person", "Organization", "Location", "Device", "Software",
+    "File", "Account", "Date", "Other",
+]
 
-    source_id: str = ""
-    scope_hint: str = "global"
-    project_id: str | None = None
-    triples: list[dict[str, Any]] = Field(default_factory=list)
+
+class FactTripleInput(BaseModel):
+    """Agent-supplied fact triple; no extraction LLM is called for this input."""
+
+    subject_text: str = Field(min_length=1, max_length=500)
+    subject_type: EntityTypeValue = EntityType.OTHER.value
+    predicate_text: str = Field(min_length=1, max_length=200)
+    object_text: str = Field(min_length=1, max_length=2000)
+    object_type: EntityTypeValue = EntityType.OTHER.value
+    evidence: str = Field(default="", max_length=4000)
+    confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+
+
+class FactProposeRequest(BaseModel):
+    """Submit structured fact candidates from an Agent or review UI."""
+
+    user_id: str = Field(default="default", min_length=1, max_length=128)
+    decision_mode: Literal["user_review", "agent_autonomous"] | None = None
+    source_id: str = Field(default="", max_length=500)
+    scope_hint: Literal["global", "project"] | None = "global"
+    project_id: str | None = Field(default=None, max_length=256)
+    triples: list[FactTripleInput] = Field(default_factory=list, min_length=1, max_length=100)
+
+
+class FactDecisionInput(BaseModel):
+    proposal_id: str = Field(min_length=1, max_length=128)
+    action: Literal["commit", "reject"]
+    scope: Literal["global", "project"] | None = None
+    project_id: str | None = Field(default=None, max_length=256)
+    resolution: Literal["replace", "keep_old", "merge", "coexist", "escalate"] | None = None
+    force: bool = False
+
+
+class FactDecideRequest(BaseModel):
+    user_id: str = Field(default="default", min_length=1, max_length=128)
+    decisions: list[FactDecisionInput] = Field(min_length=1, max_length=100)
 
 
 @router.post("/forget/preview", response_model=ForgetPreviewResponse)
@@ -1203,20 +1254,130 @@ async def list_session_events(session_id: str, request: Request):
 
 @router.post("/facts/propose")
 async def propose_facts(req: FactProposeRequest, request: Request):
-    """提交手工三元组并生成事实候选，注册到 Agent 裁决暂存区。
-
-    返回候选列表，前端通过 `/api/agent/actions/{proposal_id}/decision`
-    进行 commit / reject 裁决。
-    """
+    """Stage Agent-supplied triples or autonomously commit admitted facts."""
     pipeline = getattr(request.app.state, "fact_pipeline", None)
     if pipeline is None:
         raise HTTPException(status_code=503, detail="fact pipeline not initialized")
-    proposals = []
+    mode = req.decision_mode or getattr(
+        getattr(request.app.state, "config", None),
+        "fact",
+        None,
+    )
+    if not isinstance(mode, str):
+        mode = getattr(mode, "decision_mode", FactDecisionMode.USER_REVIEW.value)
+    if req.scope_hint == MemoryScope.PROJECT.value and not req.project_id:
+        raise HTTPException(status_code=422, detail="project scope requires project_id")
+    if req.scope_hint == MemoryScope.GLOBAL.value and req.project_id:
+        raise HTTPException(status_code=422, detail="global scope cannot include project_id")
+
+    def persist_safe_request(safe_req: FactProposeRequest):
+        return _persist_fact_proposals(pipeline, safe_req, decision_mode=mode)
+
+    proposals, safety_action, audit_id = _guard_fact_proposals(
+        request, req, persist_safe_request
+    )
+    for item in proposals:
+        item["safety_action"] = safety_action
+        item["audit_id"] = audit_id
+    return proposals
+
+
+@router.post("/facts/decide")
+async def decide_facts(req: FactDecideRequest, request: Request):
+    """Apply a user or Agent decision to a batch of durable fact proposals."""
+    pipeline = getattr(request.app.state, "fact_pipeline", None)
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="fact pipeline not initialized")
+    return [
+        _decide_fact_proposal(pipeline, req.user_id, decision)
+        for decision in req.decisions
+    ]
+
+
+def _guard_fact_proposals(request: Request, req: FactProposeRequest, sink):
+    """Fail closed and persist only the gate-approved, possibly masked request."""
+    gate = _get_safety_gate(request)
+    content = req.model_dump(mode="json", exclude={"user_id"})
+    source_hash = canonical_sha256(
+        {"operation": "explicit_fact_propose", "user_id": req.user_id, "content": content}
+    )
+    event = MemoryEvent(
+        event_id=f"fact_propose_{source_hash[:24]}",
+        source_type=SourceType.MANUAL_CONFIG,
+        event_type="explicit_fact_propose",
+        user_id=req.user_id,
+        occurred_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        payload={"operation": "explicit_fact_propose", "request": content},
+        source_hash=source_hash,
+        quality=EventQuality(
+            score=1.0,
+            status=QualityStatus.ACCEPTED,
+            completeness=1.0,
+            validity=1.0,
+            consistency=1.0,
+            freshness=1.0,
+        ),
+    )
+    try:
+        outcome = gate.route(event)
+    except SafetyGateError:
+        raise HTTPException(status_code=503, detail="memory safety gate failed") from None
+    if outcome.approved is None:
+        _raise_fact_safety_outcome(outcome.action, outcome.audit_id)
+
+    def guarded_sink(approved):
+        verified = gate.verify_approved(approved)
+        safe_event = verified.safe_event
+        try:
+            if safe_event.user_id != req.user_id:
+                raise ValueError("owner mismatch")
+            payload = safe_event.payload
+            if payload.get("operation") != "explicit_fact_propose":
+                raise ValueError("operation mismatch")
+            safe_data = dict(payload["request"])
+            safe_data["user_id"] = req.user_id
+            safe_req = FactProposeRequest.model_validate(safe_data)
+        except Exception:
+            raise HTTPException(
+                status_code=503, detail="invalid safe fact projection"
+            ) from None
+        return sink(safe_req)
+
+    try:
+        result = gate.guarded_call(outcome.approved, guarded_sink)
+    except HTTPException:
+        raise
+    except SafetyGateError:
+        raise HTTPException(status_code=503, detail="memory safety gate failed") from None
+    return result, outcome.action.value, outcome.audit_id
+
+
+def _raise_fact_safety_outcome(action: SafetyAction, audit_id: str) -> None:
+    if action is SafetyAction.REVIEW:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "memory.safety.review_required",
+                "status": "review_required",
+                "safety_action": action.value,
+                "audit_id": audit_id,
+            },
+        )
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": "memory.safety.rejected",
+            "status": "rejected",
+            "safety_action": action.value,
+            "audit_id": audit_id,
+        },
+    )
+
+
+def _persist_fact_proposals(pipeline, req: FactProposeRequest, *, decision_mode: str):
+    results = []
     for raw in req.triples:
-        triple_data = dict(raw)
-        triple_data.setdefault("subject_type", "entity")
-        triple_data.setdefault("object_type", "entity")
-        triple = RawTriple(**triple_data)
+        triple = RawTriple(**raw.model_dump())
         admission = pipeline.admission.evaluate(
             triple, project_id=req.project_id, scope_hint=req.scope_hint
         )
@@ -1227,14 +1388,117 @@ async def propose_facts(req: FactProposeRequest, request: Request):
             source_id=req.source_id,
             project_id_hint=req.project_id,
             scope_hint=req.scope_hint,
-            metadata={},
+            metadata={"user_id": req.user_id, "decision_mode": decision_mode},
         )
-        _agent_api._FACT_PENDING[proposal.proposal_id] = {
-            "json": _agent_api._candidate_to_json(proposal),
-            "candidate": proposal,
+        item = _agent_api._candidate_to_json(proposal)
+        if (
+            decision_mode == FactDecisionMode.AGENT_AUTONOMOUS.value
+            and not admission.should_remember
+        ):
+            item["status"] = FactProposalStatus.REJECTED.value
+            results.append(item)
+            continue
+
+        pipeline.store.save_fact_proposal(
+            proposal,
+            user_id=req.user_id,
+            decision_mode=decision_mode,
+        )
+        if decision_mode == FactDecisionMode.AGENT_AUTONOMOUS.value:
+            decision = FactDecisionInput(
+                proposal_id=proposal.proposal_id,
+                action="commit",
+                scope=req.scope_hint,
+                project_id=req.project_id,
+            )
+            item.update(_decide_fact_proposal(pipeline, req.user_id, decision))
+        results.append(item)
+    return results
+
+
+def _decide_fact_proposal(pipeline, user_id: str, decision: FactDecisionInput) -> dict:
+    stored = pipeline.store.get_fact_proposal(
+        decision.proposal_id, user_id=user_id
+    )
+    if stored is None:
+        raise HTTPException(status_code=404, detail="fact proposal not found")
+    proposal = stored["candidate"]
+    if decision.action == "reject":
+        pipeline.store.update_fact_proposal_status(
+            proposal.proposal_id,
+            user_id=user_id,
+            status=FactProposalStatus.REJECTED.value,
+        )
+        return {"proposal_id": proposal.proposal_id, "status": "rejected"}
+
+    if stored["status"] == FactProposalStatus.COMMITTED.value:
+        return {
+            "proposal_id": proposal.proposal_id,
+            "status": "committed",
+            "fact_id": stored["committed_fact_id"],
+            "idempotent": True,
         }
-        proposals.append(_agent_api._FACT_PENDING[proposal.proposal_id]["json"])
-    return proposals
+    scope = decision.scope or proposal.scope_hint
+    if scope is None:
+        pipeline.store.update_fact_proposal_status(
+            proposal.proposal_id,
+            user_id=user_id,
+            status=FactProposalStatus.AWAITING_DECISION.value,
+        )
+        return {
+            "proposal_id": proposal.proposal_id,
+            "status": "awaiting_decision",
+            "requires_decision": True,
+            "reason": "scope is required",
+        }
+    project_id = decision.project_id or proposal.project_id_hint
+    try:
+        result = pipeline.commit(
+            proposal,
+            scope=scope,
+            project_id=project_id,
+            resolution=decision.resolution,
+            force=decision.force,
+            auto_resolve=False,
+            user_id=user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    requires_decision = (
+        result.relation == "CONFLICT"
+        and result.resolution == Resolution.ESCALATE.value
+    )
+    proposal_status = (
+        FactProposalStatus.AWAITING_DECISION.value
+        if requires_decision
+        else FactProposalStatus.COMMITTED.value
+    )
+    stored_fact = (
+        result.existing_fact
+        if result.relation == "DUPLICATE"
+        or (
+            result.relation == "CONFLICT"
+            and result.resolution == Resolution.KEEP_OLD.value
+        )
+        else result.new_fact
+    )
+    pipeline.store.update_fact_proposal_status(
+        proposal.proposal_id,
+        user_id=user_id,
+        status=proposal_status,
+        committed_fact_id=(
+            stored_fact.fact_id if stored_fact is not None and not requires_decision else None
+        ),
+    )
+    return {
+        "proposal_id": proposal.proposal_id,
+        "status": proposal_status,
+        "requires_decision": requires_decision,
+        "relation": result.relation,
+        "resolution": result.resolution,
+        "reason": result.reason,
+        "fact_id": stored_fact.fact_id if stored_fact is not None else None,
+    }
 
 
 @router.post("/forget", response_model=ForgetResponse)

@@ -156,6 +156,12 @@ class MemoryHubClient:
     def write_knowledge(self, memory: dict) -> dict:
         return self._request("POST", "/memories/knowledge", json_body=memory)
 
+    def propose_facts(self, payload: dict) -> list[dict]:
+        return self._request("POST", "/facts/propose", json_body=payload)
+
+    def decide_facts(self, payload: dict) -> list[dict]:
+        return self._request("POST", "/facts/decide", json_body=payload)
+
     def forget(self, payload: dict) -> dict:
         return self._request("POST", "/forget", json_body=payload)
 

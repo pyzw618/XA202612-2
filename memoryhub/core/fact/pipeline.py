@@ -25,7 +25,8 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 from .models import (
-    Fact, FactCandidate, FactProposal, ConflictResult, MemoryScope, Resolution,
+    Fact, FactCandidate, FactProposal, ConflictResult, FactDecisionMode,
+    MemoryScope, Resolution,
 )
 from .admission import FactAdmissionPolicy
 from .store import FactStore
@@ -92,12 +93,27 @@ class FactMemoryPipeline:
         project_id: Optional[str] = None,
         scope_hint: Optional[str] = None,
         metadata: Optional[dict] = None,
+        decision_mode: str = FactDecisionMode.USER_REVIEW.value,
     ) -> list[FactProposal]:
         """
         纯分析候选事实，不访问实体、谓词、事实表或向量索引。
         """
         logger.info(f"[propose] source={source_id}, text_len={len(text)}")
-        raw_triples = self.extractor.extract(text, source_id)
+        if decision_mode not in FactDecisionMode.choices():
+            raise ValueError(f"不支持的事实处理模式: {decision_mode}")
+        try:
+            raw_triples = self.extractor.extract(
+                text,
+                source_id,
+                only_memory_worthy=(
+                    decision_mode == FactDecisionMode.AGENT_AUTONOMOUS.value
+                ),
+            )
+        except TypeError as exc:
+            # Keep lightweight test/custom extractors compatible with the old API.
+            if "only_memory_worthy" not in str(exc):
+                raise
+            raw_triples = self.extractor.extract(text, source_id)
         extraction_error = getattr(self.extractor, "last_error", None)
         if extraction_error is not None:
             raise RuntimeError("fact extraction failed") from extraction_error
@@ -114,7 +130,7 @@ class FactMemoryPipeline:
                 source_id=source_id,
                 project_id_hint=project_id,
                 scope_hint=scope_hint,
-                metadata=dict(metadata or {}),
+                metadata={**dict(metadata or {}), "decision_mode": decision_mode},
             ))
 
         logger.info(
