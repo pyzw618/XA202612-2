@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -30,6 +31,8 @@ from memoryhub.core.knowledge.confidence import (
     KnowledgeConfidenceFactors,
 )
 from memoryhub.core.knowledge.template_builder import TemplateBuilder
+
+logger = logging.getLogger(__name__)
 
 
 class KnowledgeExtractionError(RuntimeError):
@@ -503,8 +506,9 @@ class KnowledgeExtractor:
                 },
                 system_prompt="You strictly structure task trajectories into reusable knowledge.",
             )
-        except Exception:
-            raise KnowledgeExtractionError("knowledge.enrichment_llm_failed") from None
+        except Exception as exc:
+            logger.exception("LLM trajectory enrichment failed: %s", exc)
+            raise KnowledgeExtractionError("knowledge.enrichment_llm_failed") from exc
         if not isinstance(result, dict):
             raise KnowledgeExtractionError("knowledge.enrichment_invalid")
         enriched = dict(self._event_content(events[0]))
@@ -537,8 +541,9 @@ class KnowledgeExtractor:
                 prompt=prompt,
                 system_prompt="你是任务分析专家，擅长从执行记录中提炼核心目标。",
             )
-        except Exception:
-            raise KnowledgeExtractionError("knowledge.goal_llm_failed") from None
+        except Exception as exc:
+            logger.exception("LLM goal summarization failed: %s", exc)
+            raise KnowledgeExtractionError("knowledge.goal_llm_failed") from exc
         goal = str(getattr(result, "content", "")).strip().strip("「」'\"。，")
         return goal if 2 <= len(goal) <= 20 else None
 
@@ -561,8 +566,9 @@ class KnowledgeExtractor:
                 },
                 system_prompt="你是流程分析专家。",
             )
-        except Exception:
-            raise KnowledgeExtractionError("knowledge.steps_llm_failed") from None
+        except Exception as exc:
+            logger.exception("LLM step extraction failed: %s", exc)
+            raise KnowledgeExtractionError("knowledge.steps_llm_failed") from exc
         steps = result.get("steps", []) if isinstance(result, dict) else []
         if not isinstance(steps, list):
             return []

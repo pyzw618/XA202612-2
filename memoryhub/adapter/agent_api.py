@@ -10,7 +10,7 @@ from dataclasses import asdict
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from memoryhub.adapter.schemas import (
     ForgetRequest,
@@ -224,7 +224,13 @@ def _normalize_event(raw: dict[str, Any]) -> MemoryEvent:
         data["user_id"] = "default"
     if not data.get("occurred_at"):
         data["occurred_at"] = ""
-    return MemoryEvent.model_validate(data)
+    try:
+        return MemoryEvent.model_validate(data)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"event {data.get('event_id', '?')} invalid: {exc.error_count()} validation error(s)",
+        ) from exc
 
 
 def _events_from_replay(body: ReplayRequest) -> list[MemoryEvent]:

@@ -109,6 +109,14 @@ class MemoryDecision(str, Enum):
     REJECT = "reject"
 
 
+class KnowledgeConflictResolution(str, Enum):
+    """知识冲突 LLM 裁决结果"""
+
+    EQUIVALENT = "equivalent"  # 语义等价 → 合并
+    NO_CONFLICT = "no_conflict"  # 不同但兼容 → 分别保留
+    CONCRETE_CONFLICT = "concrete_conflict"  # 真正冲突 → LLM 合并
+
+
 class MemoryStatus(str, Enum):
     """记忆状态"""
 

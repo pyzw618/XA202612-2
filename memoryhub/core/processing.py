@@ -52,6 +52,7 @@ class EventProcessingCoordinator:
         self.knowledge_updater = KnowledgeUpdater(
             write_service=memory_write_service,
             conflict_repo=conflict_repo,
+            llm_client=llm_client,
         )
         self.on_memory_written = on_memory_written
         # 写入服务：非 None 时走 MemoryWriteService（同步向量/关键词索引）

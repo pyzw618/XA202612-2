@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,6 +15,8 @@ from memoryhub.core.memory.confidence import (
     ConfidenceFactors,
     UnifiedConfidenceCalculator,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class KnowledgeMemoryHandler(BaseMemoryHandler):
@@ -75,16 +78,27 @@ class KnowledgeMemoryHandler(BaseMemoryHandler):
         )
 
     def apply(self, decision: MemoryDecision) -> Any:
-        if (
-            self.updater is None
-            or decision.action in {"reject", "review"}
-            or decision.candidate is None
-        ):
+        if self.updater is None or decision.candidate is None:
+            return None
+        action = str(getattr(decision, "action", "")).lower()
+        if action in {"reject", "review"}:
+            logger.info(
+                "knowledge apply: skipping action=%s for %s",
+                action,
+                getattr(decision.candidate.payload, "memory_id", "?"),
+            )
             return None
         memory = decision.candidate.payload
         memory.evidences = decision.candidate.evidences
         memory.confidence = decision.confidence
-        return self.updater.add(memory)
+        result = self.updater.add(memory)
+        logger.info(
+            "knowledge apply: action=%s memory=%s -> %s",
+            action,
+            getattr(memory, "memory_id", "?"),
+            result,
+        )
+        return result
 
     @staticmethod
     def _freshness(value: str) -> float:

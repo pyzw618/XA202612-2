@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from typing import Any
 
@@ -14,6 +15,8 @@ from memoryhub.adapter.schemas import (
     PreferenceMemory,
 )
 from memoryhub.core.knowledge.updater import KnowledgeUpdater
+
+logger = logging.getLogger(__name__)
 
 
 class ExtractionExecutor:
@@ -132,8 +135,19 @@ class ExtractionExecutor:
         return len(memories)
 
     def run_knowledge(self, events: list[MemoryEvent]) -> int:
+        logger.info(
+            "run_knowledge: events=%d, handler=%s, extractor=%s",
+            len(events),
+            self.knowledge_handler is not None,
+            self.knowledge_extractor is not None,
+        )
         if self.knowledge_handler is not None and events:
-            decisions = self.knowledge_handler.process(events)
+            try:
+                decisions = self.knowledge_handler.process(events)
+            except Exception:
+                logger.exception("knowledge handler.process failed")
+                raise
+            logger.info("run_knowledge: handler produced %d decisions", len(decisions))
             for index, decision in enumerate(decisions):
                 candidate = decision.candidate
                 if candidate is not None and self._uses_generated_id(
@@ -158,6 +172,12 @@ class ExtractionExecutor:
                     candidate.payload.memory_id = self._memory_id(
                         "know", semantic_key, index, candidate.payload
                     )
+                logger.info(
+                    "run_knowledge: apply decision[%d] action=%s id=%s",
+                    index,
+                    getattr(decision, "action", "?"),
+                    getattr(candidate.payload, "memory_id", "?") if candidate else "None",
+                )
                 self.knowledge_handler.apply(decision)
             return len(decisions)
         if self.knowledge_extractor is None or not events:

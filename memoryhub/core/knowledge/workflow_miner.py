@@ -5,8 +5,8 @@
 """
 from __future__ import annotations
 
+import logging
 import re
-from datetime import datetime
 
 from memoryhub.adapter.schemas import (
     Evidence,
@@ -16,8 +16,33 @@ from memoryhub.adapter.schemas import (
     MemoryLevel,
     MemoryStatus,
     SceneScope,
-    SourceType,
 )
+from memoryhub.core.knowledge._event_utils import (
+    coerce_event as _coerce_event,
+)
+from memoryhub.core.knowledge._event_utils import (
+    event_content as _event_content,
+)
+from memoryhub.core.knowledge._event_utils import (
+    event_quality_score as _event_quality_score,
+)
+from memoryhub.core.knowledge._event_utils import (
+    event_timestamp as _event_timestamp,
+)
+from memoryhub.core.knowledge._event_utils import (
+    evidence_source_type as _evidence_source_type,
+)
+from memoryhub.core.knowledge._event_utils import (
+    get_event_field as _get_event_field,
+)
+from memoryhub.core.knowledge._event_utils import (
+    get_event_type as _get_event_type,
+)
+from memoryhub.core.knowledge._event_utils import (
+    normalize_step as _normalize_step,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowMiner:
@@ -47,11 +72,11 @@ class WorkflowMiner:
         for group in task_groups:
             if not group:
                 continue
-            normalized_group = [self._coerce_event(event) for event in group]
+            normalized_group = [_coerce_event(event) for event in group]
             normalized_group = [event for event in normalized_group if event is not None]
             if not normalized_group:
                 continue
-            avg_quality = sum(self._event_quality_score(event) for event in normalized_group) / len(normalized_group)
+            avg_quality = sum(_event_quality_score(event) for event in normalized_group) / len(normalized_group)
             if avg_quality >= 0.3:
                 valid_groups.append(normalized_group)
         if not valid_groups:
@@ -67,8 +92,8 @@ class WorkflowMiner:
                 step_sequences.append(steps)
             for event in group:
                 events_for_evidence.append(event)
-                content = self._event_content(event)
-                if self._get_event_type(event) == "task_trajectory":
+                content = _event_content(event)
+                if _get_event_type(event) == "task_trajectory":
                     for tool in content.get("tools") or []:
                         value = str(tool).strip()
                         if value:
@@ -107,16 +132,16 @@ class WorkflowMiner:
 
         return [
             KnowledgeMemory(
-                user_id=self._get_event_field(first_event, "user_id", "default"),
+                user_id=_get_event_field(first_event, "user_id", "default"),
                 knowledge_type=KnowledgeType.WORKFLOW,
-                name=f"{self._get_event_field(first_event, 'task_id', '任务')}工作流",
+                name=f"{_get_event_field(first_event, 'task_id', '任务')}工作流",
                 content="从多次执行轨迹中提炼出的稳定步骤序列",
                 steps=common_pattern,
                 tools=tools,
                 scope=SceneScope(
-                    scene=self._get_event_field(first_event, "scene", ""),
-                    task_type=self._get_event_field(first_event, "task_type", ""),
-                    app=self._get_event_field(first_event, "source", self._get_event_field(first_event, "source_type", "")),
+                    scene=_get_event_field(first_event, "scene", ""),
+                    task_type=_get_event_field(first_event, "task_type", ""),
+                    app=_get_event_field(first_event, "source", _get_event_field(first_event, "source_type", "")),
                 ),
                 confidence=stability,
                 success_count=max(1, len(step_sequences)),
@@ -195,10 +220,11 @@ class WorkflowMiner:
             # 结果校验：必须是非空列表，且为字符串
             if isinstance(steps, list) and steps and all(isinstance(s, str) and s.strip() for s in steps):
                 # 做归一化处理，统一格式
-                return [self._normalize_step(s.strip()) for s in steps if s.strip()]
+                return [_normalize_step(s.strip()) for s in steps if s.strip()]
             return []
-        except Exception:
+        except Exception as exc:
             # LLM 调用异常直接返回空，外层自动降级为 LCS 结果
+            logger.warning("LLM workflow enrichment failed, falling back to LCS: %s", exc)
             return []
 
     def _align_steps(self, step_sequences: list[list[str]]) -> list[list[str]]:
@@ -280,11 +306,11 @@ class WorkflowMiner:
         steps: list[str] = []
         seen: set[str] = set()
         for event in events:
-            content = self._event_content(event)
+            content = _event_content(event)
             raw_steps = content.get("steps") or []
             if isinstance(raw_steps, list):
                 for step in raw_steps:
-                    value = self._normalize_step(str(step).strip())
+                    value = _normalize_step(str(step).strip())
                     if value and value not in seen and len(value) >= 2:
                         steps.append(value)
                         seen.add(value)
@@ -336,134 +362,14 @@ class WorkflowMiner:
     def _build_evidences(self, events: list[MemoryEvent | dict]) -> list[Evidence]:
         evidences: list[Evidence] = []
         for event in events:
-            weight = 0.85 if self._get_event_type(event) == "task_trajectory" else 0.75
+            weight = 0.85 if _get_event_type(event) == "task_trajectory" else 0.75
             evidences.append(
                 Evidence(
-                    event_id=self._get_event_field(event, "event_id", ""),
-                    content=f"轨迹 {self._get_event_field(event, 'task_id', self._get_event_field(event, 'event_id', ''))}",
-                    source_type=self._evidence_source_type(event),
-                    timestamp=self._event_timestamp(event),
+                    event_id=_get_event_field(event, "event_id", ""),
+                    content=f"轨迹 {_get_event_field(event, 'task_id', _get_event_field(event, 'event_id', ''))}",
+                    source_type=_evidence_source_type(event),
+                    timestamp=_event_timestamp(event),
                     weight=weight,
                 )
             )
         return evidences
-
-    def _coerce_event(self, event: MemoryEvent | dict) -> MemoryEvent | dict | None:
-        if isinstance(event, MemoryEvent):
-            return event
-        if isinstance(event, dict):
-            try:
-                return MemoryEvent.model_validate(event)
-            except Exception:
-                return event
-        return None
-
-    def _get_event_type(self, event: MemoryEvent | dict) -> str:
-        if isinstance(event, MemoryEvent):
-            event_type = getattr(event, "event_type", "")
-            if isinstance(event_type, str) and event_type:
-                return event_type.lower()
-            if getattr(event, "source_type", None) is SourceType.TOOL_RESULT:
-                return "tool_call"
-            return "task_trajectory"
-        if isinstance(event, dict):
-            event_type = str(event.get("event_type", "")).strip().lower()
-            if event_type in {"tool_call", "task_trajectory", "user_feedback", "user_behavior", "manual_config"}:
-                return event_type
-            source_type = str(event.get("source_type", "")).strip().lower()
-            if source_type in {"tool_result", "tool_call"}:
-                return "tool_call"
-            if source_type in {"manual_config"}:
-                return "manual_config"
-            if source_type in {"user_behavior"}:
-                return "user_behavior"
-            return "task_trajectory"
-        return "task_trajectory"
-
-    def _event_content(self, event: MemoryEvent | dict) -> dict:
-        if isinstance(event, MemoryEvent):
-            content = getattr(event, "content", None)
-            if isinstance(content, dict):
-                return content
-            payload = getattr(event, "payload", {}) or {}
-            if isinstance(payload, dict):
-                return payload
-            return {}
-        if isinstance(event, dict):
-            if isinstance(event.get("content"), dict):
-                return event.get("content")
-            if isinstance(event.get("payload"), dict):
-                return event.get("payload")
-            return {}
-        return {}
-
-    def _event_quality_score(self, event: MemoryEvent | dict) -> float:
-        if isinstance(event, MemoryEvent):
-            quality = getattr(event, "quality", None)
-            if quality is not None and hasattr(quality, "score"):
-                return float(quality.score)
-            return float(getattr(event, "quality_score", 0.5))
-        if isinstance(event, dict):
-            quality = event.get("quality")
-            if isinstance(quality, dict):
-                return float(quality.get("score", 0.5))
-            return float(event.get("quality_score", 0.5))
-        return 0.5
-
-    def _get_event_field(self, event: MemoryEvent | dict, field: str, default: str = "") -> str:
-        if isinstance(event, MemoryEvent):
-            value = getattr(event, field, None)
-            if value not in (None, ""):
-                return str(value)
-            if field == "source":
-                source_type = getattr(event, "source_type", None)
-                if source_type is not None:
-                    return str(source_type)
-            return default
-        if isinstance(event, dict):
-            value = event.get(field)
-            if value not in (None, ""):
-                return str(value)
-            if field == "source":
-                value = event.get("source_type")
-                if value not in (None, ""):
-                    return str(value)
-            return default
-        return default
-
-    def _event_timestamp(self, event: MemoryEvent | dict):
-        if isinstance(event, MemoryEvent):
-            value = getattr(event, "timestamp", None)
-            if isinstance(value, str):
-                try:
-                    return datetime.fromisoformat(value.replace("Z", "+00:00"))
-                except Exception:
-                    return datetime.now()
-            if value is not None:
-                return value
-            occurred_at = getattr(event, "occurred_at", None)
-            if isinstance(occurred_at, str):
-                try:
-                    return datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
-                except Exception:
-                    return datetime.now()
-            return datetime.now()
-        if isinstance(event, dict):
-            occurred_at = event.get("occurred_at") or event.get("timestamp")
-            if isinstance(occurred_at, str):
-                try:
-                    return datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
-                except Exception:
-                    return datetime.now()
-            return datetime.now()
-        return datetime.now()
-
-    def _evidence_source_type(self, event: MemoryEvent | dict) -> SourceType:
-        event_type = self._get_event_type(event)
-        if event_type == "tool_call":
-            return SourceType.TOOL_RESULT
-        if event_type == "user_behavior":
-            return SourceType.USER_BEHAVIOR
-        if event_type == "manual_config":
-            return SourceType.MANUAL_CONFIG
-        return SourceType.TOOL_RESULT

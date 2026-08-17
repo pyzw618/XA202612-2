@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 
 from memoryhub.adapter.schemas import (
@@ -15,6 +16,8 @@ from memoryhub.adapter.schemas import (
     SceneScope,
 )
 from memoryhub.core.knowledge.confidence import KnowledgeConfidenceCalculator
+
+logger = logging.getLogger(__name__)
 
 
 class TemplateBuilder:
@@ -196,8 +199,9 @@ class TemplateBuilder:
                     template.template_body = new_body
                     return template
             return None
-        except Exception:
+        except Exception as exc:
             # LLM 调用异常返回 None，外层沿用规则结果
+            logger.warning("LLM template enhancement failed: %s", exc)
             return None
 
     def _llm_merge_steps(self, steps: list[str]) -> list[str] | None:
@@ -223,5 +227,6 @@ class TemplateBuilder:
             if isinstance(merged, list) and 2 <= len(merged) <= len(steps):
                 return merged
             return None
-        except Exception:
+        except Exception as exc:
+            logger.warning("LLM step merging failed: %s", exc)
             return None

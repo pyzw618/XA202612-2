@@ -156,15 +156,28 @@ class EventIngestionService:
             trajectories[(event.user_id, event.session_id, event.task_type)].append(
                 event
             )
+        logger.info(
+            "_extract_knowledge: %d trajectories from %d events",
+            len(trajectories),
+            len(events),
+        )
         for (user_id, session_id, task_type), new_events in trajectories.items():
             trajectory = new_events
             if session_id:
                 loader = getattr(self.event_repo, "get_trajectory", None)
                 if loader is not None:
                     trajectory = loader(user_id, session_id, task_type)
+            logger.info(
+                "_extract_knowledge: trajectory user=%s session=%s task=%s events=%d",
+                user_id, session_id, task_type, len(trajectory),
+            )
             try:
                 self.extraction_executor.run_knowledge(trajectory)
             except Exception:
+                logger.exception(
+                    "_extract_knowledge: failed for trajectory user=%s session=%s task=%s",
+                    user_id, session_id, task_type,
+                )
                 self._record_extraction_failure(
                     ExtractionType.KNOWLEDGE, trajectory, result
                 )

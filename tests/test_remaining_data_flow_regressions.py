@@ -135,7 +135,7 @@ class _Writer:
     def __init__(self, repo) -> None:
         self.know_repo = repo
 
-    def upsert_memory(self, memory):
+    def upsert_memory(self, memory, *, action=None, **_kwargs):
         self.know_repo.items[memory.memory_id] = memory
 
 
