@@ -375,7 +375,6 @@ def create_app(
         from memoryhub.core.safety.detector import SensitiveDetector
         from memoryhub.core.safety.gate import SafetyGateError, SafetyWriteGate
         from memoryhub.embedding import create_embedding_client
-        from memoryhub.llm.ollama_client import OllamaClient
         from memoryhub.llm.openai_client import OpenAIClient
         from memoryhub.retrieval.cache import SearchCache
         from memoryhub.retrieval.hybrid import HybridRetriever
@@ -446,13 +445,8 @@ def create_app(
             "temperature": config.llm.temperature,
             "max_tokens": config.llm.max_tokens,
         }
-        llm_provider = config.llm.provider.lower()
-        if llm_provider == "openai":
-            llm_client = OpenAIClient(api_key=config.llm.api_key, **llm_kwargs)
-        elif llm_provider == "ollama":
-            llm_client = OllamaClient(**llm_kwargs)
-        else:
-            raise ValueError(f"unknown llm provider: {config.llm.provider}")
+        # Memory extraction uses a cloud OpenAI-compatible API exclusively.
+        llm_client = OpenAIClient(api_key=config.llm.api_key, **llm_kwargs)
 
         # 存储层：SQLite 是记忆记录的事实来源，VectorStore 是向量索引的事实来源
         db = Database(db_path=config.storage.db_path)
@@ -624,8 +618,8 @@ def create_app(
             pref_repo=pref_repo,
             know_repo=know_repo,
             fact_pipeline=app.state.fact_pipeline,
-            # 演示适配层：不依赖 LLM，偏好/知识提取走纯规则路径，避免 ollama 未运行时阻塞
-            llm_client=None,
+            # Use the configured cloud LLM for assisted preference/knowledge extraction.
+            llm_client=llm_client,
             safety_config=config.safety,
             conflict_repo=conflict_repo,
             memory_write_service=app.state.memory_write_service,

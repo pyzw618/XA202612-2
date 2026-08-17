@@ -133,13 +133,11 @@ memoryhub/                  # 核心 Python 包
 │   └── evidence_store.py   # 证据链存储
 ├── llm/                    # LLM 抽象层
 │   ├── base.py             # 抽象接口
-│   ├── openai_client.py    # OpenAI 兼容 API
-│   └── ollama_client.py    # Ollama 本地推理
+│   ├── openai_client.py    # 云端 OpenAI 兼容 API
 ├── embedding/              # Embedding 抽象层
 │   ├── base.py             # 抽象接口
 │   ├── kylin_client.py     # 麒麟 SDK 封装（生产）
 │   ├── mock_client.py      # 开发用 Mock
-│   └── ollama_embedding.py # Ollama embeddings（未接入工厂选择）
 └── safety_rules/           # 版本化声明式安全规则库（内置规则集 catalog）
 
 desktop-client/             # Qt 5 原生桌面控制台（21 页，详见 desktop-client/README.md）

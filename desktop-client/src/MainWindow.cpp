@@ -348,6 +348,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     registerPage("safety/quarantine", "安全中心", "隔离区", new SafetyQuarantinePage(m_stack));
 
     registerPage("settings/status", "系统设置", "后端状态", new SettingsStatusPage(m_stack));
+    registerPage("settings/llm", "系统设置", "LLM 服务", new SettingsLLMPage(m_stack));
     registerPage("settings/config", "系统设置", "参数查看", new SettingsConfigPage(m_stack));
     registerPage("settings/demo", "系统设置", "演示数据工具", new SettingsDemoPage(m_stack));
 
@@ -440,6 +441,7 @@ void MainWindow::buildSidebar() {
     addLeaf(g5, "审计日志", "safety/audit", ":/icons/history.svg");
     addLeaf(g5, "隔离区", "safety/quarantine", ":/icons/shield.svg");
     addLeaf(g5, "后端状态", "settings/status", ":/icons/database.svg");
+    addLeaf(g5, "LLM 服务", "settings/llm", ":/icons/settings.svg");
     addLeaf(g5, "参数查看", "settings/config", ":/icons/settings.svg");
     addLeaf(g5, "演示数据工具", "settings/demo", ":/icons/settings.svg");
 }

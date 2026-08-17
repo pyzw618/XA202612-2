@@ -21,7 +21,7 @@ class BaseLLMClient(ABC):
     """
     LLM 客户端抽象基类
 
-    所有 LLM 后端（OpenAI API、Ollama 等）都实现此接口。
+    所有 LLM 后端（云端 OpenAI 兼容 API）都实现此接口。
     上层模块（偏好抽取、知识抽取、冲突检测、遗忘意图解析）只依赖此接口。
 
     使用方式:

@@ -1,11 +1,13 @@
-// 系统设置 · 3 个子页完整实现
+// 系统设置 · 4 个子页完整实现
 
 #include "SettingsPages.h"
 
+#include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
@@ -122,6 +124,113 @@ void SettingsStatusPage::loadStatus() {
             .arg(AppContext::instance()->baseUrl(), j::str(storage, "db_path"), indexPath));
     }, this);
     }, this);
+}
+
+// ============================================================
+// P8.2 LLM 服务配置
+// ============================================================
+SettingsLLMPage::SettingsLLMPage(QWidget *parent) : BasePage(parent) {
+    auto *root = new QVBoxLayout(this);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(12);
+
+    auto *header = new PageHeader(this);
+    header->setTitle("LLM 服务配置");
+    header->setSubtitle("云端 OpenAI 兼容接口 · 保存后重启服务生效");
+    root->addWidget(header);
+
+    auto *card = new QFrame(this);
+    card->setObjectName("card");
+    auto *layout = new QVBoxLayout(card);
+    auto *notice = new QLabel("仅支持 HTTPS 云端 API。密钥为只写字段，读取配置时不会回显；保存后将写入当前服务使用的 config.yaml。", card);
+    notice->setWordWrap(true);
+    notice->setStyleSheet("background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;color:#1D4ED8;padding:8px;");
+    layout->addWidget(notice);
+
+    auto *form = new QFormLayout();
+    form->setLabelAlignment(Qt::AlignRight);
+    m_apiBase = new QLineEdit(card);
+    m_apiBase->setPlaceholderText("https://api.example.com/v1");
+    m_apiKey = new QLineEdit(card);
+    m_apiKey->setEchoMode(QLineEdit::Password);
+    m_apiKey->setPlaceholderText("首次配置必填；留空则保留当前密钥");
+    m_model = new QLineEdit(card);
+    m_model->setPlaceholderText("例如 gpt-4o-mini");
+    form->addRow("LLM_API_BASE", m_apiBase);
+    form->addRow("LLM_API_KEY", m_apiKey);
+    form->addRow("LLM_MODEL", m_model);
+    layout->addLayout(form);
+
+    m_keyStatus = new QLabel(card);
+    m_keyStatus->setObjectName("pageSubtitle");
+    layout->addWidget(m_keyStatus);
+    auto *actions = new QHBoxLayout();
+    m_saveButton = new QPushButton("保存 LLM 配置", card);
+    m_saveButton->setObjectName("primaryBtn");
+    connect(m_saveButton, &QPushButton::clicked, this, &SettingsLLMPage::saveConfig);
+    actions->addWidget(m_saveButton);
+    actions->addStretch();
+    layout->addLayout(actions);
+    m_resultLabel = new QLabel(card);
+    m_resultLabel->setWordWrap(true);
+    m_resultLabel->setStyleSheet("color:#16A34A;font-size:13px;");
+    layout->addWidget(m_resultLabel);
+    root->addWidget(card);
+    root->addStretch();
+}
+
+void SettingsLLMPage::refresh() { loadConfig(); }
+
+void SettingsLLMPage::loadConfig() {
+    const int generation = ++m_generation;
+    AppContext::instance()->api()->getAsync("/api/memory/system/config", [this, generation](const api::Result &r) {
+        if (generation != m_generation) return;
+        if (!r.hasJsonObject()) {
+            m_resultLabel->setStyleSheet("color:#DC2626;font-size:13px;");
+            m_resultLabel->setText("无法读取 LLM 配置：" + r.errorCode);
+            return;
+        }
+        const QJsonObject llm = j::obj(r.jsonObject(), "llm");
+        m_apiBase->setText(j::str(llm, "api_base"));
+        m_model->setText(j::str(llm, "model"));
+        m_apiKey->clear();
+        m_keyStatus->setText(j::boolean(llm, "api_key_configured")
+            ? "当前服务已配置 API Key；留空保存将保留该密钥。"
+            : "当前服务尚未配置 API Key。首次保存时必须填写。"
+        );
+        m_resultLabel->clear();
+    }, this);
+}
+
+void SettingsLLMPage::saveConfig() {
+    const QString apiBase = m_apiBase->text().trimmed();
+    const QString model = m_model->text().trimmed();
+    if (!apiBase.startsWith("https://", Qt::CaseInsensitive)) {
+        QMessageBox::warning(this, "配置无效", "LLM_API_BASE 必须是 HTTPS 云端 API 地址。");
+        return;
+    }
+    if (model.isEmpty()) {
+        QMessageBox::warning(this, "配置无效", "请填写 LLM_MODEL。");
+        return;
+    }
+    QJsonObject body;
+    body["api_base"] = apiBase;
+    body["model"] = model;
+    if (!m_apiKey->text().isEmpty()) body["api_key"] = m_apiKey->text();
+
+    m_saveButton->setEnabled(false);
+    AppContext::instance()->api()->putAsync("/api/memory/system/llm", body,
+        [this](const api::Result &r) {
+            m_saveButton->setEnabled(true);
+            if (!r.ok) {
+                QMessageBox::warning(this, "保存失败", r.errorCode + " " + r.errorMessage);
+                return;
+            }
+            m_apiKey->clear();
+            m_keyStatus->setText("当前服务已配置 API Key；留空保存将保留该密钥。");
+            m_resultLabel->setStyleSheet("color:#16A34A;font-size:13px;");
+            m_resultLabel->setText("LLM 配置已保存。请重启 MemoryHub 服务后，新的云端模型配置才会用于记忆提取。");
+        }, false, this);
 }
 
 // ============================================================

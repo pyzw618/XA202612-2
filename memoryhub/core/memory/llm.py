@@ -1,4 +1,4 @@
-﻿"""Structured adapter over the application-level BaseLLMClient."""
+"""Structured adapter over the application-level BaseLLMClient."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ class StructuredLLMAdapter:
         )
         error = str(getattr(response, "error", "") or "").strip()
         if error:
-            # Providers such as Ollama return transport failures in LLMResponse
+            # Cloud providers may return transport failures in LLMResponse
             # instead of raising.  Do not treat that as an empty model answer.
             raise RuntimeError(f"{task_name} LLM request failed")
         return str(getattr(response, "content", response) or "")

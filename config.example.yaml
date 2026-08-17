@@ -58,21 +58,14 @@ retrieval:
 
 # ==================== LLM 配置 ====================
 llm:
-  # 提供商: "openai" (兼容 OpenAI API) | "ollama" (本地推理)
-  provider: "ollama"
+  # Cloud OpenAI-compatible API endpoint. Use your provider's HTTPS /v1 URL.
+  api_base: "https://api.openai.com/v1"
 
-  # API 基础地址
-  # OpenAI 兼容: https://api.openai.com/v1 或其他兼容端点
-  # Ollama: http://localhost:11434/v1
-  api_base: "http://localhost:11434/v1"
-
-  # API 密钥 (OpenAI 兼容模式需要)
+  # API key. Prefer LLM_API_KEY / MEMORYHUB_LLM_API_KEY in deployments.
   api_key: ""
 
-  # 模型名称
-  # OpenAI: "gpt-4o-mini", "gpt-4o"
-  # Ollama: "qwen2:1.5b", "qwen2:7b", "llama3:8b"
-  model: "qwen2:7b"
+  # Provider model identifier, for example "gpt-4o-mini".
+  model: "gpt-4o-mini"
 
   # 生成温度 (0.0 - 2.0)
   temperature: 0.1

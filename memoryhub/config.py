@@ -91,12 +91,11 @@ class RetrievalConfig:
 
 @dataclass
 class LLMConfig:
-    """LLM 调用配置"""
+    """Cloud OpenAI-compatible LLM configuration."""
 
-    provider: str = "openai"  # "openai" | "ollama"
-    api_base: str = "http://localhost:11434/v1"
+    api_base: str = "https://api.openai.com/v1"
     api_key: str = ""
-    model: str = "qwen2:1.5b"
+    model: str = "gpt-4o-mini"
     temperature: float = 0.1
     max_tokens: int = 2048
     # Fact extraction is an optional enrichment step.  Keep this small so an
@@ -588,6 +587,8 @@ class AppConfig:
     knowledge_merge: KnowledgeMergeConfig = field(default_factory=KnowledgeMergeConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     debug: bool = False
+    # Populated by load_config so management APIs can persist selected settings.
+    config_path: str = field(default="", repr=False)
 
 
 def load_config(config_path: str | None = None) -> AppConfig:
@@ -640,7 +641,11 @@ def load_config(config_path: str | None = None) -> AppConfig:
             config.retrieval = RetrievalConfig(
                 **{**config.retrieval.__dict__, **section("retrieval")}
             )
-            config.llm = LLMConfig(**{**config.llm.__dict__, **section("llm")})
+            llm_data = dict(section("llm"))
+            # The service uses a cloud OpenAI-compatible API exclusively.
+            # Ignore the retired provider selector while migrating existing YAML files.
+            llm_data.pop("provider", None)
+            config.llm = LLMConfig(**{**config.llm.__dict__, **llm_data})
             config.embedding = EmbeddingConfig(
                 **{**config.embedding.__dict__, **section("embedding")}
             )
@@ -659,6 +664,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
             raise ValueError(f"invalid configuration in {yaml_path}: {exc}") from exc
         if "debug" in data:
             config.debug = bool(data["debug"])
+        config.config_path = str(Path(yaml_path).resolve())
 
     # 环境变量覆盖
     if os.environ.get("MEMORYHUB_RUNTIME_MODE"):
@@ -681,12 +687,14 @@ def load_config(config_path: str | None = None) -> AppConfig:
         config.vector_engine.provider = os.environ["MEMORYHUB_VECTOR_ENGINE_PROVIDER"]
     if "MEMORYHUB_VECTOR_ENGINE_APP_ID" in os.environ:
         config.vector_engine.app_id = os.environ["MEMORYHUB_VECTOR_ENGINE_APP_ID"]
-    if os.environ.get("MEMORYHUB_LLM_PROVIDER"):
-        config.llm.provider = os.environ["MEMORYHUB_LLM_PROVIDER"]
-    if os.environ.get("MEMORYHUB_LLM_API_KEY"):
-        config.llm.api_key = os.environ["MEMORYHUB_LLM_API_KEY"]
-    if os.environ.get("MEMORYHUB_LLM_MODEL"):
-        config.llm.model = os.environ["MEMORYHUB_LLM_MODEL"]
+    # Prefer the portable LLM_API_* names used by desktop configuration;
+    # retain MEMORYHUB_* aliases for deployed service compatibility.
+    if os.environ.get("LLM_API_BASE") or os.environ.get("MEMORYHUB_LLM_API_BASE"):
+        config.llm.api_base = os.environ.get("LLM_API_BASE") or os.environ["MEMORYHUB_LLM_API_BASE"]
+    if os.environ.get("LLM_API_KEY") or os.environ.get("MEMORYHUB_LLM_API_KEY"):
+        config.llm.api_key = os.environ.get("LLM_API_KEY") or os.environ["MEMORYHUB_LLM_API_KEY"]
+    if os.environ.get("LLM_MODEL") or os.environ.get("MEMORYHUB_LLM_MODEL"):
+        config.llm.model = os.environ.get("LLM_MODEL") or os.environ["MEMORYHUB_LLM_MODEL"]
 
     # 环境变量覆盖后重新构造，以执行 provider/app_id 契约校验。
     config.vector_engine = VectorEngineConfig(**config.vector_engine.__dict__)

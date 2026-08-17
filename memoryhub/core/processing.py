@@ -1,4 +1,4 @@
-﻿"""统一事件处理协调器（前端 agent 演示适配层）。
+"""统一事件处理协调器（前端 agent 演示适配层）。
 
 把已通过安全处理并落库的 MemoryEvent 分发给偏好、知识和事实候选管线。
 本文件是便于前端联调而重建的临时适配层，复用 memoryhub 现成服务。
@@ -244,7 +244,7 @@ class EventProcessingCoordinator:
                                 )
                             )
                     # 演示适配层：无显式 fact_triples 时不调用 LLM 提取，
-                    # 避免 ollama 未运行时阻塞 step 响应（fact 提取走确定性数据）
+                    # 避免云端 LLM 暂时不可用时阻塞 step 响应（fact 提取走确定性数据）
                     for proposal in proposals:
                         summary.fact_proposal_ids.append(proposal.proposal_id)
                     # 候选由 agent_api 暂存，供前端 FactDialog 裁决
@@ -262,7 +262,7 @@ class EventProcessingCoordinator:
         """演示适配层：无 LLM 时从中文对话文本确定性抽取显式偏好。
 
         仅在结构化偏好与 PreferenceExtractor 均无输出时作为兜底，
-        保证前端 demo 在 ollama 未运行时也能沉淀常见写作/输出偏好。
+        保证前端 demo 在云端 LLM 暂时不可用时也能沉淀常见写作/输出偏好。
         """
         text = (event.text or "").strip()
         if not text:

@@ -31,9 +31,9 @@ retrieval:
   rerank_enabled: true
   cache_ttl_seconds: 300
 llm:
-  provider: "ollama"
-  api_base: "http://localhost:11434/v1"
-  model: "qwen2:7b"
+  api_base: "https://api.openai.com/v1"
+  api_key: ""
+  model: "gpt-4o-mini"
 embedding:
   provider: "mock"
   dimension: 1024

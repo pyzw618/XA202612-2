@@ -20,7 +20,11 @@ REST API 路由定义 — 管理后台缺口补齐（供前端可视化后台使
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
+from urllib.parse import urlparse
+import os
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -93,6 +97,14 @@ class UnifiedMemoryUpdate(BaseModel):
     object_value: str | None = None
     object_type: str | None = None
     evidence_text: str | None = None
+
+
+class LLMServiceConfigUpdate(BaseModel):
+    """Cloud OpenAI-compatible LLM connection settings; API keys are write-only."""
+
+    api_base: str = Field(min_length=8, max_length=512)
+    api_key: str | None = Field(default=None, min_length=1, max_length=4096)
+    model: str = Field(min_length=1, max_length=256)
 
 
 class BatchMemoryStatusUpdate(BaseModel):
@@ -470,9 +482,79 @@ def _get_quarantine_store(request: Request):
     return store
 
 
+def _validate_cloud_llm_update(body: LLMServiceConfigUpdate, config) -> tuple[str, str, str]:
+    api_base = body.api_base.strip().rstrip("/")
+    parsed = urlparse(api_base)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise HTTPException(status_code=422, detail={"code": "llm.api_base_must_be_https"})
+    model = body.model.strip()
+    api_key = body.api_key.strip() if body.api_key is not None else str(config.llm.api_key or "")
+    if not api_key:
+        raise HTTPException(status_code=422, detail={"code": "llm.api_key_required"})
+    return api_base, api_key, model
+
+
+def _persist_cloud_llm_config(config, *, api_base: str, api_key: str, model: str) -> None:
+    """Atomically persist LLM settings to the YAML file loaded by this service."""
+    config_path = Path(str(getattr(config, "config_path", "") or "")).expanduser()
+    if not config_path.is_file():
+        raise HTTPException(status_code=409, detail={"code": "llm.config_file_unavailable"})
+    temporary_path = ""
+    try:
+        import yaml
+
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(raw, dict):
+            raise ValueError("configuration root must be a mapping")
+        llm = raw.get("llm")
+        if not isinstance(llm, dict):
+            llm = {}
+            raw["llm"] = llm
+        llm.pop("provider", None)
+        llm.update({"api_base": api_base, "api_key": api_key, "model": model})
+        with NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=config_path.parent, delete=False, suffix=".tmp"
+        ) as temporary:
+            yaml.safe_dump(raw, temporary, allow_unicode=True, sort_keys=False)
+            temporary_path = temporary.name
+        os.replace(temporary_path, config_path)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if temporary_path:
+            try:
+                Path(temporary_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise HTTPException(status_code=500, detail={"code": "llm.config_persist_failed"}) from exc
+
+
 # ============================================================
 # 记忆管理
 # ============================================================
+
+
+@router.put("/system/llm")
+async def update_llm_service_config(body: LLMServiceConfigUpdate, request: Request):
+    """Save cloud LLM connection settings. The API key is never returned."""
+    config = getattr(request.app.state, "config", None)
+    if config is None:
+        raise HTTPException(status_code=503, detail={"code": "llm.config_unavailable"})
+    api_base, api_key, model = _validate_cloud_llm_update(body, config)
+    _persist_cloud_llm_config(config, api_base=api_base, api_key=api_key, model=model)
+    config.llm.api_base = api_base
+    config.llm.api_key = api_key
+    config.llm.model = model
+    return {
+        "status": "saved",
+        "restart_required": True,
+        "llm": {
+            "provider": "openai_compatible",
+            "api_base": api_base,
+            "model": model,
+            "api_key_configured": True,
+        },
+    }
 
 
 @router.put("/{memory_type}/{memory_id}")
@@ -1038,7 +1120,7 @@ async def system_status(request: Request):
             "model_name": config.embedding.model_name if config is not None else "",
         },
         "llm": {
-            "provider": config.llm.provider if config is not None else None,
+            "provider": "openai_compatible" if config is not None else None,
             "model": config.llm.model if config is not None else "",
         },
         "vector_engine": {
@@ -1126,9 +1208,10 @@ async def system_config(request: Request):
             "target_p99_ms": config.retrieval.target_p99_ms,
         },
         "llm": {
-            "provider": config.llm.provider,
+            "provider": "openai_compatible",
             "model": config.llm.model,
             "api_base": config.llm.api_base,
+            "api_key_configured": bool(config.llm.api_key),
         },
         "embedding": {
             "provider": config.embedding.provider,

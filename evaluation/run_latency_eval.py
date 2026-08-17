@@ -5,7 +5,7 @@
     python evaluation/run_latency_eval.py \\
         --memory-dataset evaluation/datasets/memoryhub_knowledge_retrieval_v1_test.json \\
         --latency-dataset evaluation/datasets/memoryhub_retrieval_latency_v1.json \\
-        --provider kylin_ollama \\
+        --provider mock \\
         --output-json evaluation/results/latency_report.json \\
         --output-md evaluation/results/latency_report.md
 """
@@ -19,7 +19,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from memoryhub.adapter.schemas import SearchRequest
 from memoryhub.config import RetrievalConfig
-from memoryhub.embedding.ollama_embedding import OllamaEmbeddingClient
 from memoryhub.embedding import MockEmbeddingClient
 from memoryhub.retrieval.hybrid import HybridRetriever
 from memoryhub.retrieval.keyword_search import KeywordSearcher
@@ -62,9 +61,9 @@ def main():
     p = argparse.ArgumentParser(description="MemoryHub 检索延迟测试")
     p.add_argument("--memory-dataset", required=True, help="记忆数据集路径 (用于索引)")
     p.add_argument("--latency-dataset", required=True, help="延迟查询集路径")
-    p.add_argument("--provider", default="kylin_ollama", choices=["mock","kylin_ollama"])
-    p.add_argument("--embedding-model", default="nomic-embed-text")
-    p.add_argument("--embedding-endpoint", default="http://localhost:11434")
+    p.add_argument("--provider", default="mock", choices=["mock"])
+    p.add_argument("--embedding-model", default="mock-embedding")
+    p.add_argument("--embedding-endpoint", default="")
     p.add_argument("--output-json", default="evaluation/results/latency_report.json")
     p.add_argument("--output-md", default="evaluation/results/latency_report.md")
     args = p.parse_args()
@@ -83,17 +82,8 @@ def main():
     print(f"预热查询: {len(warmup_qs)}  正式查询: {len(formal_qs)}")
 
     # 构造 embedding client
-    if args.provider == "kylin_ollama":
-        ec = OllamaEmbeddingClient(model=args.embedding_model, endpoint=args.embedding_endpoint)
-        if not ec.is_available():
-            print("[!] Ollama 不可用，fallback 到 mock")
-            ec = MockEmbeddingClient(dim=768, latency=0.0)
-            provider_label = "mock (fallback)"
-        else:
-            provider_label = f"kylin_ollama ({args.embedding_model})"
-    else:
-        ec = MockEmbeddingClient(dim=768, latency=0.0)
-        provider_label = "mock"
+    ec = MockEmbeddingClient(dim=768, latency=0.0)
+    provider_label = "mock"
     dim = ec.get_dimension()
     print(f"Embedding: {provider_label}, dim={dim}")
     print("构建索引中...")

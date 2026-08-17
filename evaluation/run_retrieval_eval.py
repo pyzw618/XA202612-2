@@ -40,7 +40,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from memoryhub.adapter.schemas import SearchRequest
 from memoryhub.config import RetrievalConfig
 from memoryhub.embedding import KylinEmbeddingClient, MockEmbeddingClient
-from memoryhub.embedding.ollama_embedding import OllamaEmbeddingClient
 from memoryhub.retrieval.hybrid import HybridRetriever
 from memoryhub.retrieval.keyword_search import KeywordSearcher
 from memoryhub.retrieval.vector_search import VectorSearcher
@@ -521,17 +520,6 @@ def build_embedding_client(
     if provider == "mock":
         return MockEmbeddingClient(dim=dim, latency=0.0), "mock", ""
 
-    if provider == "kylin_ollama":
-        client = OllamaEmbeddingClient(model=model, endpoint=endpoint)
-        if client.is_available():
-            return client, "kylin_ollama", ""
-        msg = f"Ollama 不可用 (endpoint={endpoint}, model={model})"
-        if fallback_ok:
-            _FALLBACK_TO_MOCK.append(msg)
-            print(f"  [!] {msg}，fallback 到 mock embedding")
-            return MockEmbeddingClient(dim=dim, latency=0.0), "mock", msg
-        raise RuntimeError(msg)
-
     if provider == "openai_compat":
         try:
             import httpx
@@ -612,11 +600,11 @@ def main() -> None:
         description="MemoryHub 检索评测 v3 — 支持 0-3 级相关性标注 + 多 embedding provider",
     )
     parser.add_argument("--provider", default="kylin",
-                        choices=["mock", "kylin", "kylin_ollama", "openai_compat"],
+                        choices=["mock", "kylin", "openai_compat"],
                         help="embedding provider (默认 kylin)")
     parser.add_argument("--embedding-model", default="nomic-embed-text",
                         help="embedding 模型名称 (默认 nomic-embed-text)")
-    parser.add_argument("--embedding-endpoint", default="http://localhost:11434",
+    parser.add_argument("--embedding-endpoint", default="https://api.openai.com/v1",
                         help="embedding API endpoint")
     parser.add_argument("--dim", type=int, default=768,
                         help="mock 降级时的 embedding 维度 (默认 768)")

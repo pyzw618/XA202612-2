@@ -60,29 +60,20 @@ FastAPI 接口文档：`http://<host>:8099/docs`。启动方式：
 
 | 环境变量 | YAML 路径 | 默认值 | 说明 |
 |---------|----------|-------|------|
-| `LLM_PROVIDER` | `llm.provider` | `openai` | LLM 提供商 |
-| `LLM_API_BASE` | `llm.api_base` | `http://localhost:11434/v1` | API 地址 |
-| `LLM_API_KEY` | `llm.api_key` | - | API 密钥 |
-| `LLM_MODEL` | `llm.model` | `qwen2:1.5b` | 模型名称 |
+| `LLM_API_BASE` | `llm.api_base` | `https://api.openai.com/v1` | 云端 OpenAI 兼容 API 地址 |
+| `LLM_API_KEY` | `llm.api_key` | - | API 密钥（可在桌面端 LLM 服务页面配置） |
+| `LLM_MODEL` | `llm.model` | `gpt-4o-mini` | 模型名称 |
 
-**支持的 LLM 后端：**
+**LLM 后端：** 仅支持云端 OpenAI 兼容 API。
 
-- **Ollama**（本地推理）
-  ```yaml
-  llm:
-    provider: "ollama"
-    api_base: "http://localhost:11434/v1"
-    model: "qwen2:7b"
-  ```
+```yaml
+llm:
+  api_base: "https://api.openai.com/v1"
+  api_key: "sk-..."
+  model: "gpt-4o-mini"
+```
 
-- **OpenAI 兼容 API**
-  ```yaml
-  llm:
-    provider: "openai"
-    api_base: "https://api.openai.com/v1"
-    api_key: "sk-..."
-    model: "gpt-4o-mini"
-  ```
+桌面端可在 **系统 → LLM 服务** 页面保存 `LLM_API_BASE`、`LLM_API_KEY` 和 `LLM_MODEL`。API Key 为只写字段，不会通过配置查询接口返回；保存后需重启服务生效。
 
 ### Embedding 配置
 
@@ -362,13 +353,13 @@ startup 时才初始化，不会在模块 import 阶段创建数据库。resolve
 
 ## 常见配置场景
 
-### 场景 1：本地开发（Ollama）
+### 场景 1：开发环境（云端 OpenAI 兼容 API + Mock Embedding）
 
 ```yaml
 llm:
-  provider: "ollama"
-  api_base: "http://localhost:11434/v1"
-  model: "qwen2:1.5b"
+  api_base: "https://api.openai.com/v1"
+  api_key: "${LLM_API_KEY}"
+  model: "gpt-4o-mini"
 
 embedding:
   provider: "mock"
@@ -376,7 +367,7 @@ embedding:
 debug: true
 ```
 
-### 场景 2：生产环境（OpenAI + 麒麟 SDK）
+### 场景 2：生产环境（云端 OpenAI 兼容 API + 麒麟 SDK）
 
 ```yaml
 runtime:
@@ -384,9 +375,8 @@ runtime:
   allow_fallback: false
 
 llm:
-  provider: "openai"
   api_base: "https://api.openai.com/v1"
-  api_key: "${OPENAI_API_KEY}"
+  api_key: "${LLM_API_KEY}"
   model: "gpt-4o-mini"
 
 embedding:

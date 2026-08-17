@@ -15,10 +15,11 @@ retrieval:
   cache_ttl_seconds: 300
 
 llm:
-  provider: "ollama"
-  api_base: "http://localhost:11434/v1"
+  # Cloud OpenAI-compatible API. Configure the key from the desktop client
+  # or set LLM_API_BASE / LLM_API_KEY / LLM_MODEL before starting the service.
+  api_base: "https://api.openai.com/v1"
   api_key: ""
-  model: "qwen2:7b"
+  model: "gpt-4o-mini"
   temperature: 0.1
   max_tokens: 2048
 
