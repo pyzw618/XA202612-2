@@ -451,8 +451,14 @@ class SafetyWriteGate:
             raise SafetyGateError("gate.invalid_callback")
         try:
             return callback(verified)
-        except Exception:
-            raise SafetyGateError("gate.downstream_failed") from None
+        except SafetyGateError:
+            raise
+        except Exception as exc:
+            import logging as _log
+            _log.getLogger(__name__).exception(
+                "guarded_call downstream failure: %s", exc
+            )
+            raise SafetyGateError("gate.downstream_failed") from exc
 
     @staticmethod
     def _audit_identity(

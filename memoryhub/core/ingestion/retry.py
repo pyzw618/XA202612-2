@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 
 from memoryhub.adapter.schemas import ExtractionTask, ExtractionTaskStatus, ExtractionType
+
+logger = logging.getLogger(__name__)
 
 
 class ExtractionPermanentError(RuntimeError):
@@ -48,6 +51,11 @@ class ExtractionRetryService:
                 self.task_repo.mark_dead(task.task_id, error_code=exc.code, now=now)
                 result.dead_lettered += 1
             except Exception:
+                logger.exception(
+                    "extraction retry failed for task %s type=%s",
+                    task.task_id,
+                    task.extractor_type,
+                )
                 updated = self.task_repo.mark_failed(
                     task.task_id,
                     error_code=f"extraction.{task.extractor_type.value}.failed",

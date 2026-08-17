@@ -1,11 +1,8 @@
-# Kylin-MemoryHub 开发配置（最小化，用于前端联调）
-
 storage:
-  db_path: "data/memoryhub.db"
-  vector_index_path: "data/vector_index"
-  evidence_path: "data/evidence"
+  db_path: data/memoryhub.db
+  vector_index_path: data/vector_index
+  evidence_path: data/evidence
   cache_max_size: 1000
-
 retrieval:
   default_top_k: 5
   vector_weight: 0.6
@@ -13,42 +10,37 @@ retrieval:
   metadata_weight: 0.1
   rerank_enabled: true
   cache_ttl_seconds: 300
-
 llm:
-  # Cloud OpenAI-compatible API. Configure the key from the desktop client
-  # or set LLM_API_BASE / LLM_API_KEY / LLM_MODEL before starting the service.
-  api_base: "https://api.openai.com/v1"
-  api_key: ""
-  model: "gpt-4o-mini"
+  api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key: sk-ws-H.EIPEEMI.WNAR.MEYCIQDGUZ2778Niidp7woaLMej95Uv2ODI1s5-nXbBTkv4WJAIhAKDOYNwTWgIAXiZfajqDIZ7127f80JhL8pCu3ohTEdKQ
+  model: qwen-flash
   temperature: 0.1
   max_tokens: 2048
-
 embedding:
-  provider: "mock"
+  provider: mock
   dimension: 1024
-  model_name: "mock-embedding"
-
+  model_name: mock-embedding
 safety:
-  rule_set_id: "kylin-memoryhub.safety"
-  rule_set_version: "1.0"
+  rule_set_id: kylin-memoryhub.safety
+  rule_set_version: '1.0'
   policy:
-    policy_id: "default"
-    version: "1.0"
+    policy_id: default
+    version: '1.0'
     rule_overrides: []
     level_overrides: []
     exceptions: []
-    fallback_action: "review"
-    on_scan_error: "review"
-    on_unmaskable: "review"
+    fallback_action: review
+    on_scan_error: review
+    on_unmaskable: review
     auto_sanitize: true
     fail_closed: true
   auto_mask: true
   reject_on_detect: false
   audit:
     enabled: true
-    directory: "data/safety-audit"
-    hmac_key_env: "MEMORYHUB_AUDIT_HMAC_KEY"
-    key_id: "device-local-v1"
+    directory: data/safety-audit
+    hmac_key_env: MEMORYHUB_AUDIT_HMAC_KEY
+    key_id: device-local-v1
     rotate_max_bytes: 16777216
     retention_days: 180
     max_record_bytes: 65536
@@ -58,9 +50,9 @@ safety:
     fail_closed: true
   quarantine:
     enabled: true
-    directory: "data/review-quarantine"
-    encryption_key_env: "MEMORYHUB_QUARANTINE_KEY"
-    key_id: "device-local-v1"
+    directory: data/review-quarantine
+    encryption_key_env: MEMORYHUB_QUARANTINE_KEY
+    key_id: device-local-v1
     retention_days: 30
     max_record_bytes: 4194304
     strict_permissions: true
@@ -68,8 +60,8 @@ safety:
     fail_closed: true
   user_rules:
     enabled: false
-    encryption_key_env: "MEMORYHUB_USER_RULE_KEY"
-    key_id: "device-local-v1"
+    encryption_key_env: MEMORYHUB_USER_RULE_KEY
+    key_id: device-local-v1
     max_rules_per_user: 100
     max_matcher_chars: 2048
     allow_advanced_regex: false
@@ -81,8 +73,7 @@ safety:
   max_candidates: 2048
   max_findings: 1024
   max_path_chars: 4096
-
 debug: true
-log_level: "INFO"
-host: "0.0.0.0"
+log_level: INFO
+host: 0.0.0.0
 port: 8099

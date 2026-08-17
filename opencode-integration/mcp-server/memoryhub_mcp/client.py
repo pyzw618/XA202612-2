@@ -176,7 +176,7 @@ class MemoryHubClient:
             error = ""
         except MemoryHubError as exc:
             reachable = False
-            error = exc.message
+            error = str(exc)
         return {
             "reachable": reachable,
             "api_url": self.base_url,

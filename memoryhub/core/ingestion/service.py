@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 
 from memoryhub.adapter.schemas import ExtractionType, MemoryEvent, QualityStatus
 from memoryhub.core.ingestion.extraction import ExtractionExecutor
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -134,6 +137,11 @@ class EventIngestionService:
             try:
                 self.extraction_executor.run_preference(event)
             except Exception:
+                logger.exception(
+                    "preference extraction failed for event %s user=%s",
+                    event.event_id,
+                    event.user_id,
+                )
                 self._record_extraction_failure(
                     ExtractionType.PREFERENCE, [event], result
                 )

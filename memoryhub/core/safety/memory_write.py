@@ -136,8 +136,12 @@ def _memory_from_approved(
         return memory_class.model_validate(safe_memory)
     except MemoryWriteSafetyError:
         raise
-    except Exception:
-        raise MemoryWriteSafetyError("memory_write.invalid_safe_projection") from None
+    except Exception as exc:
+        import logging as _log
+        _log.getLogger(__name__).exception(
+            "safe projection failed: %s", exc
+        )
+        raise MemoryWriteSafetyError("memory_write.invalid_safe_projection") from exc
 
 
 def guard_memory_write(

@@ -5,6 +5,8 @@
 """
 
 import json
+import logging
+import re
 from datetime import datetime, timezone
 
 from memoryhub.adapter.schemas import (
@@ -16,6 +18,52 @@ from memoryhub.adapter.schemas import (
 )
 from memoryhub.core.memory.evidence import EvidenceMerger
 from memoryhub.core.preference.confidence import ConfidenceCalculator
+
+logger = logging.getLogger(__name__)
+
+
+def _normalize_target(target: str) -> str:
+    """Normalize a target string for fuzzy comparison."""
+    return re.sub(r"[_\-]+", "", target.strip().lower())
+
+
+def _fuzzy_target_match(left_target: str, right_target: str) -> bool:
+    """Check whether two target strings plausibly refer to the same domain.
+
+    Rules (in order):
+    1. Exact match after normalisation
+    2. One is a prefix of the other (e.g. "food" / "food_flavor")
+    3. Longest common root >= 60% of the shorter token
+    4. Token overlap: if the shorter target's tokens all appear in the longer one
+    """
+    ln = _normalize_target(left_target)
+    rn = _normalize_target(right_target)
+    if ln == rn:
+        return True
+    if ln.startswith(rn) or rn.startswith(ln):
+        return True
+    shorter, longer = (ln, rn) if len(ln) <= len(rn) else (rn, ln)
+    min_len = len(shorter)
+    if min_len == 0:
+        return False
+    common = 0
+    for a, b in zip(shorter, longer):
+        if a == b:
+            common += 1
+        else:
+            break
+    if common / min_len >= 0.6:
+        return True
+    left_tokens = set(re.split(r"[_\- ]+", left_target.lower()))
+    right_tokens = set(re.split(r"[_\- ]+", right_target.lower()))
+    left_tokens.discard("")
+    right_tokens.discard("")
+    if left_tokens and right_tokens:
+        shorter_tokens = left_tokens if len(left_tokens) <= len(right_tokens) else right_tokens
+        longer_tokens = right_tokens if len(left_tokens) <= len(right_tokens) else left_tokens
+        if shorter_tokens.issubset(longer_tokens):
+            return True
+    return False
 
 
 class ConflictDetector:
@@ -59,9 +107,17 @@ class ConflictDetector:
         self, old_pref: PreferenceMemory, new_pref: PreferenceMemory
     ) -> bool:
         """检测语义冲突"""
-        if old_pref.payload.get("target") == new_pref.payload.get("target"):
+        old_target = old_pref.payload.get("target", "")
+        new_target = new_pref.payload.get("target", "")
+        if old_target == new_target:
             if old_pref.payload.get("value") != new_pref.payload.get("value"):
                 return True
+        elif old_target and new_target:
+            from memoryhub.core.preference.updater import _fuzzy_target_match
+
+            if not _fuzzy_target_match(old_target, new_pref.payload.get("target", "")):
+                if not self._llm_targets_same_domain(old_pref, new_pref):
+                    return False
 
         if self.llm_client:
             prompt = (
@@ -84,6 +140,36 @@ class ConflictDetector:
         has_neg_a = any(w in old_pref.text for w in negation_words)
         has_neg_b = any(w in new_pref.text for w in negation_words)
         return has_neg_a != has_neg_b
+
+    def _llm_targets_same_domain(
+        self, old_pref: PreferenceMemory, new_pref: PreferenceMemory
+    ) -> bool:
+        """Ask LLM whether two target labels belong to the same domain."""
+        if not self.llm_client:
+            return False
+        old_target = old_pref.payload.get("target", "")
+        new_target = new_pref.payload.get("target", "")
+        prompt = (
+            "Do these two target labels refer to the same or overlapping domain?\n"
+            f"Target A: {old_target}\n"
+            f"Target B: {new_target}\n"
+            f'Context A: {old_pref.text}\n'
+            f'Context B: {new_pref.text}\n'
+            f'Respond with JSON: {{"same_domain": true/false}}'
+        )
+        try:
+            res = self.llm_client.generate(
+                prompt, system_prompt="You are a domain classification assistant."
+            )
+            content = res.content if hasattr(res, "content") else str(res)
+            result = json.loads(content).get("same_domain", False)
+            logger.debug(
+                "LLM target domain check: %s vs %s -> %s", old_target, new_target, result
+            )
+            return result
+        except Exception:
+            logger.debug("LLM target domain check failed, falling back to false")
+            return False
 
 
 class ConflictResolver:
@@ -150,8 +236,11 @@ class ConflictResolver:
         """判断两条偏好是否表达相同内容（用于识别支持性证据而非冲突）。"""
         left_target = left.payload.get("target")
         right_target = right.payload.get("target")
-        if left_target and right_target and left_target == right_target:
-            return left.payload.get("value") == right.payload.get("value")
+        if left_target and right_target:
+            if left_target == right_target:
+                return left.payload.get("value") == right.payload.get("value")
+            if _fuzzy_target_match(left_target, right_target):
+                return left.payload.get("value") == right.payload.get("value")
         return left.text.strip().lower() == right.text.strip().lower()
 
 
@@ -355,8 +444,38 @@ class PreferenceUpdater:
             if not self._scope_overlaps(pref, preference):
                 continue
             if self._same_preference_target(pref, preference):
+                logger.info(
+                    "find_existing: fuzzy match %s[%s] <-> %s[%s]",
+                    pref.memory_id,
+                    pref.payload.get("target"),
+                    preference.memory_id,
+                    preference.payload.get("target"),
+                )
                 return pref
+            if self._llm_targets_same_domain(pref, preference):
+                logger.info(
+                    "find_existing: LLM domain match %s[%s] <-> %s[%s]",
+                    pref.memory_id,
+                    pref.payload.get("target"),
+                    preference.memory_id,
+                    preference.payload.get("target"),
+                )
+                return pref
+        logger.info(
+            "find_existing: no match for %s[%s] among %d candidates",
+            preference.memory_id,
+            preference.payload.get("target"),
+            len(candidates),
+        )
         return None
+
+    def _llm_targets_same_domain(
+        self, left: PreferenceMemory, right: PreferenceMemory
+    ) -> bool:
+        """Use LLM to check whether two preferences target the same domain."""
+        if not self.detector.llm_client:
+            return False
+        return self.detector._llm_targets_same_domain(left, right)
 
     @staticmethod
     def _scope_overlaps(left: PreferenceMemory, right: PreferenceMemory) -> bool:
@@ -382,7 +501,10 @@ class PreferenceUpdater:
         left_target = str(left.payload.get("target", "")).strip()
         right_target = str(right.payload.get("target", "")).strip()
         if left_target or right_target:
-            return bool(left_target and left_target == right_target)
+            if left_target == right_target:
+                return True
+            if left_target and right_target:
+                return _fuzzy_target_match(left_target, right_target)
         return left.text.strip().casefold() == right.text.strip().casefold()
 
     def _get(self, memory_id: str):
