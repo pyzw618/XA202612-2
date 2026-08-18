@@ -845,10 +845,20 @@ async def run_memory_consolidation(request: Request, user_id: str = ""):
         )
         result["sessions_consolidated"] = session_cons.consolidate_sessions(user_id=user_id)
     if event_repo is not None and executor is not None:
+        from memoryhub.core.preference.tool_miner import ToolPreferenceMiner
+        from memoryhub.core.preference.updater import PreferenceUpdater
+
         memory_cons = MemoryConsolidator(
-            mid_term_repo=mt_repo, event_repo=event_repo, extraction_executor=executor
+            mid_term_repo=mt_repo, event_repo=event_repo, extraction_executor=executor,
+            preference_updater=PreferenceUpdater(
+                pref_repo=pref_repo,
+                conflict_repo=getattr(state, "conflict_repo", None),
+                write_service=write_service,
+            ),
+            tool_miner=ToolPreferenceMiner(),
         )
         result["episodes_consolidated"] = memory_cons.consolidate_episodes(user_id=user_id)
+        result["tool_preferences"] = memory_cons.consolidate_tool_preferences(user_id=user_id)
     if write_service is not None and pref_repo is not None and know_repo is not None:
         degrader = MemoryDegrader(
             pref_repo=pref_repo, know_repo=know_repo,

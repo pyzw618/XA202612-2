@@ -711,6 +711,7 @@ def create_app(
             from memoryhub.core.lifecycle.memory_consolidator import MemoryConsolidator
             from memoryhub.core.lifecycle.scheduler import LifecycleScheduler
             from memoryhub.core.lifecycle.session_consolidator import SessionConsolidator
+            from memoryhub.core.preference.tool_miner import ToolPreferenceMiner
 
             st_repo = ShortTermMemoryRepository(db)
             mt_repo = MidTermMemoryRepository(db)
@@ -718,7 +719,9 @@ def create_app(
                 short_term_repo=st_repo, mid_term_repo=mt_repo, event_repo=event_repo
             )
             memory_consolidator = MemoryConsolidator(
-                mid_term_repo=mt_repo, event_repo=event_repo, extraction_executor=extraction_executor
+                mid_term_repo=mt_repo, event_repo=event_repo, extraction_executor=extraction_executor,
+                preference_updater=preference_updater,
+                tool_miner=ToolPreferenceMiner(),
             )
             memory_degrader = MemoryDegrader(
                 pref_repo=pref_repo, know_repo=know_repo,
