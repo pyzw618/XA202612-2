@@ -19,8 +19,10 @@ from memoryhub.adapter.schemas import (
     SceneScope,
 )
 from memoryhub.core.knowledge.extractor import KnowledgeExtractor
+from memoryhub.core.knowledge.handler import KnowledgeMemoryHandler
 from memoryhub.core.knowledge.updater import KnowledgeUpdater
 from memoryhub.core.preference.extractor import PreferenceExtractor
+from memoryhub.core.preference.handler import PreferenceMemoryHandler
 from memoryhub.core.preference.updater import PreferenceUpdater
 from memoryhub.core.safety import SensitiveDetector
 
@@ -53,6 +55,14 @@ class EventProcessingCoordinator:
             write_service=memory_write_service,
             conflict_repo=conflict_repo,
             llm_client=llm_client,
+        )
+        # R1: 演示路径与正式链路同构——偏好/知识抽取经统一 Handler 链（同一套
+        # extract → evidence → confidence → decide → apply），不再在演示层分叉。
+        self.preference_handler = PreferenceMemoryHandler(
+            self.preference_extractor, self.preference_updater
+        )
+        self.knowledge_handler = KnowledgeMemoryHandler(
+            self.knowledge_extractor, self.knowledge_updater
         )
         self.on_memory_written = on_memory_written
         # 写入服务：非 None 时走 MemoryWriteService（同步向量/关键词索引）
@@ -133,15 +143,30 @@ class EventProcessingCoordinator:
                                 tags=[str(tag) for tag in raw.get("tags", [])],
                             )
                         )
-                if not preference_items:
-                    preference_items = self.preference_extractor.extract(event)
-                if not preference_items:
-                    preference_items = self._extract_dialogue_preferences(event)
-                for memory in preference_items:
-                    result_id = self.preference_updater.add(memory)
-                    stored = self.pref_repo.get_by_id(result_id) or memory
-                    summary.preferences_written.append(result_id)
-                    self._notify(stored)
+                written: list[str] = []
+                if preference_items:
+                    for memory in preference_items:
+                        result_id = self.preference_updater.add(memory)
+                        if result_id:
+                            written.append(result_id)
+                else:
+                    # R1: 演示路径与正式链路同构——走统一 Handler 链，不再在演示层分叉抽取
+                    decisions = self.preference_handler.process(event)
+                    for decision in decisions:
+                        result_id = self.preference_handler.apply(decision)
+                        if result_id:
+                            written.append(result_id)
+                    # 兜底：Handler 链无产出时，从中文对话确定性抽取显式偏好（无 LLM 也可用）
+                    if not written:
+                        for memory in self._extract_dialogue_preferences(event):
+                            result_id = self.preference_updater.add(memory)
+                            if result_id:
+                                written.append(result_id)
+                summary.preferences_written.extend(written)
+                for result_id in written:
+                    stored = self.pref_repo.get_by_id(result_id)
+                    if stored is not None:
+                        self._notify(stored)
             except Exception as exc:
                 summary.warnings.append(
                     f"preference extraction failed for {event.event_id}: {exc}"
@@ -182,23 +207,25 @@ class EventProcessingCoordinator:
                     ("memory_", "preference_", "fact_", "conflict_", "template_")
                 )
             ]
-            if not knowledge_items and len(external_calls) >= 2:
-                try:
-                    knowledge_items = self.knowledge_extractor.extract_from_trajectory(
-                        events
-                    )
-                except Exception:
-                    pass
-            for memory in knowledge_items:
-                kind = getattr(
-                    memory.knowledge_type, "value", str(memory.knowledge_type)
-                )
-                if kind not in {"workflow", "template"}:
-                    continue
-                result_id = self.knowledge_updater.add(memory)
-                stored = self.know_repo.get_by_id(result_id) or memory
-                summary.knowledge_written.append(result_id)
-                self._notify(stored)
+            written: list[str] = []
+            if knowledge_items:
+                for memory in knowledge_items:
+                    result_id = self.knowledge_updater.add(memory)
+                    if result_id:
+                        written.append(result_id)
+            elif external_calls:
+                # R1: 演示路径与正式链路同构——走统一 Handler 链；
+                # 修复：不再丢弃 CASE 知识（原 filter 只保留 workflow/template）。
+                decisions = self.knowledge_handler.process(events)
+                for decision in decisions:
+                    result_id = self.knowledge_handler.apply(decision)
+                    if result_id:
+                        written.append(result_id)
+            summary.knowledge_written.extend(written)
+            for result_id in written:
+                stored = self.know_repo.get_by_id(result_id)
+                if stored is not None:
+                    self._notify(stored)
         except Exception as exc:
             summary.warnings.append(f"knowledge extraction failed: {exc}")
 

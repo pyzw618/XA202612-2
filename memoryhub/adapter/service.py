@@ -9,6 +9,7 @@ from sqlalchemy import func
 
 from memoryhub.adapter.schemas import (
     KnowledgeMemory,
+    MemoryDecision,
     MemoryStatus,
     PreferenceMemory,
     QualityStatus,
@@ -38,6 +39,22 @@ class MemoryService:
         self.preferences = PreferenceRepository(self.db)
         self.knowledge = KnowledgeRepository(self.db)
         self.preference_extractor = PreferenceExtractor()
+        self._writer = None
+
+    def _write_service(self):
+        """Lazy unified write service so the degraded fallback never writes bare repos.
+
+        Both repositories share this service's Database, so DomainMemoryWriter is
+        built and preference writes get transactional lineage/evidence/outbox
+        (R6: no production write bypass via direct repository save)."""
+        if self._writer is None:
+            from memoryhub.core.memory_write import MemoryWriteService
+
+            self._writer = MemoryWriteService(
+                pref_repo=self.preferences,
+                know_repo=self.knowledge,
+            )
+        return self._writer
 
     def start(self) -> None:
         self.db.init_schema()
@@ -210,18 +227,22 @@ class MemoryService:
             for memory in existing
             if memory.preference_type == preference.preference_type
         ]
+        writer = self._write_service()
         if same_type:
             latest = max(same_type, key=lambda memory: memory.version)
             if latest.text.strip().lower() == preference.text.strip().lower():
                 return
+            # Archive superseded versions through the unified writer so lifecycle
+            # transitions are recorded in lineage and projected consistently.
             for memory in same_type:
-                self.preferences.update_status(
-                    memory.memory_id, MemoryStatus.ARCHIVED.value
-                )
+                memory.status = MemoryStatus.ARCHIVED
+                writer.upsert_memory(memory, action=MemoryDecision.SUPERSEDE)
             preference.version = latest.version + 1
             preference.parent_id = latest.memory_id
             preference.root_id = latest.root_id or latest.memory_id
-        self.preferences.save(preference)
+            writer.upsert_memory(preference, action=MemoryDecision.SUPERSEDE)
+        else:
+            writer.upsert_memory(preference, action=MemoryDecision.NEW)
 
     @staticmethod
     def _scope_matches(memory_scope: SceneScope, request_scope: SceneScope) -> bool:

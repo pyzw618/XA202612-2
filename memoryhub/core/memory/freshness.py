@@ -6,7 +6,9 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
-_HALF_LIFE_DAYS = {"fact": 30.0, "preference": 60.0, "knowledge": 90.0}
+# Aligned with REFACTOR_PLAN_V2.md §2.2 R4 / §4.5.3: slower decay for stable
+# long-term memory. Fact 90 / Preference 180 / Knowledge 120 days.
+_HALF_LIFE_DAYS = {"fact": 90.0, "preference": 180.0, "knowledge": 120.0}
 
 
 def parse_timestamp(value: Any) -> datetime | None:
@@ -43,3 +45,15 @@ def memory_timestamp(memory: Any) -> Any:
         or getattr(memory, "updated_at", None)
         or getattr(memory, "created_at", None)
     )
+
+
+def candidate_freshness(timestamp: Any, *, memory_type: str = "") -> float:
+    """Freshness for a brand-new candidate: no/unknown timestamp means 'just arrived'."""
+    if parse_timestamp(timestamp) is None:
+        return 1.0
+    return freshness_score(timestamp, memory_type=memory_type)
+
+
+def half_life_days(memory_type: str) -> float:
+    """Public half-life accessor shared by freshness, health and confidence domains."""
+    return _HALF_LIFE_DAYS.get(memory_type, 60.0)

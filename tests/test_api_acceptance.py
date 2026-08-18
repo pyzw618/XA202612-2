@@ -189,6 +189,14 @@ def test_api_06_feedback_confirm_update_reject(client: TestClient) -> None:
     )
     assert confirm.status_code == 200
     assert confirm.json()["action"] == "confirm"
+    # §4.9.2 反馈闭环：confirm 触发复习强化（访问计数/成功计数）并刷新健康度
+    confirmed = client.get(
+        f"/api/memory/knowledge/{memory_id}", params={"user_id": "u-api"}
+    ).json()
+    assert confirmed["access_count_30d"] == 1
+    assert confirmed["total_count"] == 1
+    assert confirmed["success_count"] == 1
+    assert 0.0 < confirmed["health_score"] <= 1.0
 
     update = client.post(
         "/api/memory/feedback",

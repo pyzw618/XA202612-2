@@ -62,12 +62,6 @@ class UnifiedConfidenceCalculator:
             else (0.55 if count == 1 else (0.75 if count == 2 else 0.90))
         )
 
-    @staticmethod
-    def freshness_from_age_days(
-        age_days: float, *, half_life_days: float = 30.0
-    ) -> float:
-        return _clamp(math.exp(-max(0.0, float(age_days)) / max(1.0, half_life_days)))
-
 
 def _clamp(value: float, *, upper: float = 1.0) -> float:
     try:

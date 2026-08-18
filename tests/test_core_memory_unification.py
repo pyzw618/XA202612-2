@@ -1,5 +1,7 @@
 ﻿from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from memoryhub.adapter.schemas import SearchRequest, SearchResult
 from memoryhub.core.fact.extractor import TripleExtractor
 from memoryhub.core.memory.base import BaseMemoryHandler, MemoryCandidate
@@ -137,11 +139,12 @@ def test_fact_extractor_uses_application_level_generate_client():
 
 
 def test_shared_freshness_is_bounded_and_uses_type_half_lives():
+    # Half-lives aligned to REFACTOR_PLAN_V2 §2.2 R4: fact 90 / preference 180 / knowledge 120 days.
     now = datetime(2026, 8, 14, tzinfo=timezone.utc)
     old = (now - timedelta(days=60)).isoformat()
-    assert freshness_score(old, memory_type="fact", now=now) == 0.25
-    assert freshness_score(old, memory_type="preference", now=now) == 0.5
-    assert freshness_score(old, memory_type="knowledge", now=now) > 0.5
+    assert freshness_score(old, memory_type="fact", now=now) == pytest.approx(0.5 ** (60 / 90))
+    assert freshness_score(old, memory_type="preference", now=now) == pytest.approx(0.5 ** (60 / 180))
+    assert freshness_score(old, memory_type="knowledge", now=now) == pytest.approx(0.5 ** (60 / 120))
     assert freshness_score("invalid", memory_type="fact", now=now) == 0.5
     assert 0.0 <= freshness_score(now.isoformat(), memory_type="fact", now=now) <= 1.0
 
@@ -173,3 +176,56 @@ def test_reranker_records_bounded_confidence_and_freshness_signals():
         assert 0.0 <= result.metadata["confidence_score"] <= 1.0
         assert 0.0 <= result.metadata["freshness_score"] <= 1.0
         assert 0.0 <= result.metadata["rerank_score"] <= 1.0
+
+
+def test_preference_handler_classifies_duplicate_and_supersede():
+    from memoryhub.adapter.schemas import PreferenceMemory
+    from memoryhub.core.preference.handler import PreferenceMemoryHandler
+
+    handler = PreferenceMemoryHandler(extractor=object())
+
+    def _candidate(pref):
+        return MemoryCandidate("preference", pref, "u")
+
+    base = PreferenceMemory(
+        user_id="u",
+        preference_type="output_style",
+        text="Be concise",
+        payload={"target": "style", "value": "concise"},
+    )
+    same = PreferenceMemory(
+        user_id="u",
+        preference_type="output_style",
+        text="Be concise!",
+        payload={"target": "style", "value": "concise"},
+    )
+    changed = PreferenceMemory(
+        user_id="u",
+        preference_type="output_style",
+        text="Be verbose",
+        payload={"target": "style", "value": "verbose"},
+    )
+    assert handler.classify_relation(_candidate(same), base) == "duplicate"
+    assert handler.classify_relation(_candidate(changed), base) == "supersede"
+
+
+def test_knowledge_handler_classifies_duplicate_and_update():
+    from memoryhub.adapter.schemas import KnowledgeMemory
+    from memoryhub.core.knowledge.handler import KnowledgeMemoryHandler
+
+    handler = KnowledgeMemoryHandler(extractor=object())
+    base = KnowledgeMemory(
+        user_id="u", knowledge_type="workflow", name="W", content="c", steps=["s1"]
+    )
+    same = KnowledgeMemory(
+        user_id="u", knowledge_type="workflow", name="W", content="c", steps=["s1"]
+    )
+    changed = KnowledgeMemory(
+        user_id="u",
+        knowledge_type="workflow",
+        name="W",
+        content="different",
+        steps=["s1"],
+    )
+    assert handler.classify_relation(MemoryCandidate("knowledge", same, "u"), base) == "duplicate"
+    assert handler.classify_relation(MemoryCandidate("knowledge", changed, "u"), base) == "update"

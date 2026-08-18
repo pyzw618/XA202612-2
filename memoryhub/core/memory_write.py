@@ -134,7 +134,9 @@ class MemoryWriteService:
             )
             if guarded.memory is None:
                 raise RuntimeError(f"memory_write.blocked:{guarded.action.value}")
-            return None
+            # R8: surface the MemoryWriteReceipt produced inside the approved sink
+            # instead of swallowing it in the production gated path.
+            return guarded.sink_result
         return self._unsafe_upsert_memory(memory, action=action, provenance=provenance)
 
     def _unsafe_upsert_memory(

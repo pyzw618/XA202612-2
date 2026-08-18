@@ -10,6 +10,7 @@ import hmac
 import json
 import re
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
@@ -43,6 +44,7 @@ from memoryhub.adapter.user_rule_schemas import (
 )
 from memoryhub.core.fact.models import FactCandidate, RawTriple
 from memoryhub.core.forget import MemoryForgetter
+from memoryhub.core.forget.health import HealthCalculator
 from memoryhub.core.safety.gate import SafetyGateError
 from memoryhub.core.safety.memory_write import (
     GuardedMemoryWriteResult,
@@ -964,11 +966,18 @@ async def submit_feedback(req: FeedbackRequest, request: Request):
             memory.version = max(1, memory.version) + 1
         else:
             memory.text = req.feedback_text
+    elif req.action == "confirm":
+        # §4.9.2 反馈闭环：艾宾浩斯"复习强化"——刷新访问锚点、递增使用次数，
+        # 使时间衰减曲线反弹并提升健康度；记忆越被使用越稳固。
+        memory.access_count_30d = int(getattr(memory, "access_count_30d", 0) or 0) + 1
+        memory.last_accessed_at = datetime.now(timezone.utc)
+        if memory.memory_type == "knowledge":
+            memory.total_count = int(getattr(memory, "total_count", 0) or 0) + 1
+            memory.success_count = int(getattr(memory, "success_count", 0) or 0) + 1
+        memory.health_score = HealthCalculator().calculate(memory)
     elif req.action == "reject":
         memory.status = MemoryStatus.ARCHIVED
-    elif req.action == "confirm" and memory.memory_type == "knowledge":
-        memory.total_count += 1
-        memory.success_count += 1
+        memory.health_score = 0.0
 
     write_service = getattr(request.app.state, "memory_write_service", None)
 

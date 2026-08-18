@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from memoryhub.core.memory.base import (
@@ -10,10 +9,8 @@ from memoryhub.core.memory.base import (
     MemoryCandidate,
     MemoryDecision,
 )
-from memoryhub.core.memory.confidence import (
-    ConfidenceFactors,
-    UnifiedConfidenceCalculator,
-)
+from memoryhub.core.memory.confidence import ConfidenceFactors
+from memoryhub.core.memory.freshness import candidate_freshness
 
 
 class PreferenceMemoryHandler(BaseMemoryHandler):
@@ -58,6 +55,23 @@ class PreferenceMemoryHandler(BaseMemoryHandler):
             else None
         )
 
+    def classify_relation(self, candidate: MemoryCandidate, existing: Any) -> str:
+        """Distinguish duplicate / supersede / update once a comparable target exists."""
+        new_payload = getattr(candidate.payload, "payload", {}) or {}
+        old_payload = getattr(existing, "payload", {}) or {}
+        new_target = str(new_payload.get("target", "")).strip()
+        old_target = str(old_payload.get("target", "")).strip()
+        if new_target and new_target == old_target:
+            new_value = new_payload.get("value")
+            old_value = old_payload.get("value")
+            if new_value is not None and old_value is not None:
+                return "duplicate" if new_value == old_value else "supersede"
+            if str(candidate.payload.text).strip().lower() == str(
+                existing.text
+            ).strip().lower():
+                return "duplicate"
+        return "update"
+
     def build_confidence_factors(
         self, candidate: MemoryCandidate, existing: Any
     ) -> ConfidenceFactors:
@@ -88,16 +102,5 @@ class PreferenceMemoryHandler(BaseMemoryHandler):
         memory.confidence = decision.confidence
         return self.updater.add(memory)
 
-    @staticmethod
-    def _freshness(value: str) -> float:
-        try:
-            return UnifiedConfidenceCalculator.freshness_from_age_days(
-                (
-                    datetime.now(timezone.utc)
-                    - datetime.fromisoformat(value.replace("Z", "+00:00"))
-                ).total_seconds()
-                / 86400,
-                half_life_days=60,
-            )
-        except ValueError:
-            return 1.0
+    def _freshness(self, value: str) -> float:
+        return candidate_freshness(value, memory_type=self.memory_type)

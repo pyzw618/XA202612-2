@@ -10,7 +10,18 @@ from .confidence import ConfidenceFactors, UnifiedConfidenceCalculator
 from .evidence import EvidenceMerger
 
 MemoryType = Literal["fact", "preference", "knowledge"]
-MemoryAction = Literal["new", "update", "coexist", "duplicate", "review", "reject"]
+# Aligned with adapter.schemas.MemoryDecision (REFACTOR_PLAN_V2 §4.8.5): the
+# unified 8-action decision surface shared by all three memory domains.
+MemoryAction = Literal[
+    "new",
+    "reinforce",
+    "revise",
+    "supersede",
+    "coexist",
+    "duplicate",
+    "review",
+    "reject",
+]
 
 
 @dataclass(slots=True)
@@ -98,7 +109,19 @@ class BaseMemoryHandler(ABC):
         existing_id = str(
             getattr(existing, "memory_id", getattr(existing, "fact_id", ""))
         )
-        return MemoryDecision("update", "similar memory found", confidence, existing_id)
+        action = self.classify_relation(candidate, existing)
+        return MemoryDecision(
+            action, f"similar memory found ({action})", confidence, existing_id
+        )
+
+    def classify_relation(self, candidate: MemoryCandidate, existing: Any) -> str:
+        """Classify the candidate vs an already-similar existing memory.
+
+        Subclasses refine to `duplicate`/`reinforce`/`coexist`/`supersede`/`update`.
+        The default is `update`; Fact defers matching to its pipeline, so it keeps
+        the default here.
+        """
+        return "update"
 
     @abstractmethod
     def extract_candidates(

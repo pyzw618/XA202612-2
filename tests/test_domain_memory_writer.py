@@ -16,6 +16,10 @@ from memoryhub.core.domain_writer import DomainMemoryWriter
 from memoryhub.core.knowledge.updater import KnowledgeUpdater
 from memoryhub.core.memory_write import MemoryWriteService
 from memoryhub.core.preference.updater import PreferenceUpdater
+from memoryhub.core.safety import SensitiveDetector
+from memoryhub.core.safety.audit_log import SafetyAuditLog
+from memoryhub.core.safety.gate import SafetyWriteGate
+from memoryhub.core.safety.quarantine import ReviewQuarantineStore
 from memoryhub.storage.database import Database, KnowledgeRepository, PreferenceRepository
 from memoryhub.storage.memory_metadata import MemoryProjectionOutboxRepository
 from memoryhub.storage.models import (
@@ -278,4 +282,41 @@ def test_knowledge_updater_emits_explicit_reinforce_and_revise_actions(tmp_path)
 
     assert original_actions == ["new", "reinforce", "revise"]
     assert successor_actions == ["revise"]
+    db.close()
+
+
+def _allow_gate(tmp_path):
+    return SafetyWriteGate(
+        SensitiveDetector(),
+        SafetyAuditLog(tmp_path / "audit", fingerprint_key=b"a" * 32),
+        quarantine=ReviewQuarantineStore(
+            tmp_path / "review",
+            encryption_key=b"q" * 32,
+        ),
+    )
+
+
+def test_gated_upsert_memory_returns_write_receipt(tmp_path):
+    """R8: the production safety-gated path must surface the MemoryWriteReceipt."""
+    db = Database(str(tmp_path / "memoryhub.db"))
+    db.init_schema()
+    pref_repo = PreferenceRepository(db)
+    know_repo = KnowledgeRepository(db)
+    service = MemoryWriteService(
+        pref_repo=pref_repo,
+        know_repo=know_repo,
+        safety_gate=_allow_gate(tmp_path),
+        require_safety=True,
+        project_immediately=False,
+    )
+    memory = PreferenceMemory(
+        user_id="u1",
+        text="Prefer concise reports",
+        status="active",
+    )
+    receipt = service.upsert_memory(memory, action=MemoryDecision.NEW)
+    assert receipt is not None
+    assert receipt.receipt_id
+    assert receipt.memory_id == memory.memory_id
+    assert receipt.action == MemoryDecision.NEW
     db.close()

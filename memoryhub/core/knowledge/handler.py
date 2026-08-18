@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from memoryhub.core.memory.base import (
@@ -11,10 +10,8 @@ from memoryhub.core.memory.base import (
     MemoryCandidate,
     MemoryDecision,
 )
-from memoryhub.core.memory.confidence import (
-    ConfidenceFactors,
-    UnifiedConfidenceCalculator,
-)
+from memoryhub.core.memory.confidence import ConfidenceFactors
+from memoryhub.core.memory.freshness import candidate_freshness
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +61,21 @@ class KnowledgeMemoryHandler(BaseMemoryHandler):
             else None
         )
 
+    def classify_relation(self, candidate: MemoryCandidate, existing: Any) -> str:
+        """Duplicate when the semantic content is unchanged; otherwise update."""
+
+        def _fingerprint(memory: Any) -> tuple:
+            return (
+                str(getattr(memory, "name", "") or "").strip().lower(),
+                str(getattr(memory, "content", "") or "").strip().lower(),
+                tuple(
+                    str(step).strip().lower()
+                    for step in (getattr(memory, "steps", None) or [])
+                ),
+            )
+
+        return "duplicate" if _fingerprint(candidate.payload) == _fingerprint(existing) else "update"
+
     def build_confidence_factors(
         self, candidate: MemoryCandidate, existing: Any
     ) -> ConfidenceFactors:
@@ -100,16 +112,5 @@ class KnowledgeMemoryHandler(BaseMemoryHandler):
         )
         return result
 
-    @staticmethod
-    def _freshness(value: str) -> float:
-        try:
-            return UnifiedConfidenceCalculator.freshness_from_age_days(
-                (
-                    datetime.now(timezone.utc)
-                    - datetime.fromisoformat(value.replace("Z", "+00:00"))
-                ).total_seconds()
-                / 86400,
-                half_life_days=90,
-            )
-        except ValueError:
-            return 1.0
+    def _freshness(self, value: str) -> float:
+        return candidate_freshness(value, memory_type=self.memory_type)

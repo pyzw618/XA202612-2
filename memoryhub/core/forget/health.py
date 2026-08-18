@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from memoryhub.adapter.schemas import KnowledgeMemory, PreferenceMemory
+from memoryhub.core.memory.freshness import half_life_days
 
 
 def _as_datetime(value):
@@ -50,8 +51,6 @@ class HealthCalculator:
     2. 使用频率：基于近 30 天访问次数
     """
 
-    DEFAULT_HALF_LIFE_DAYS = 30.0
-
     def calculate(self, memory: PreferenceMemory | KnowledgeMemory) -> float:
         """
         计算单条记忆的健康度
@@ -75,13 +74,33 @@ class HealthCalculator:
 
         return max(0.0, min(1.0, score))
 
+    @staticmethod
+    def _half_life(memory) -> float:
+        """Per-domain half-life shared with the unified freshness domain."""
+        mtype = str(getattr(memory, "memory_type", "") or "")
+        return half_life_days(mtype)
+
+    @staticmethod
+    def _stability_from(half_life: float, stored: float, hits: int) -> float:
+        """Ebbinghaus stability S such that retention is 0.5 at the domain half-life.
+
+        R(t) = e^(-t/S), S = half_life / ln2  =>  R(half_life) = 0.5.
+        Aligned with core/memory/freshness.py so health and freshness share one
+        forgetting curve (REFACTOR_PLAN_V2 §4.5.3). Usage frequency reinforces S,
+        i.e. "review fights forgetting".
+        """
+        base = half_life / math.log(2.0)
+        if stored and stored > base:
+            base = stored
+        return max(1.0, base * (1.0 + (hits or 0) / 10.0))
+
     def _time_decay_factor(self, memory) -> float:
         """
         基于 Ebbinghaus 遗忘曲线计算时间衰减因子。
 
         公式：R = e^(-t / S)
-        t 为距上次更新/访问的天数，S 为记忆稳定性。
-        稳定性越高，衰减越慢。
+        t 为距上次更新/访问的天数，S 为记忆稳定性（= 半衰期 / ln2）。
+        稳定性越高，衰减越慢；访问频率越高，稳定性越强（复习强化）。
         """
         now = datetime.now()
         anchor = _as_datetime(
@@ -95,11 +114,10 @@ class HealthCalculator:
         else:
             days = max(0.0, (now - anchor).total_seconds() / 86400.0)
 
-        # 使用频率越高，稳定性越强
-        stability = max(
-            1.0,
-            (getattr(memory, "stability", 1.0) or 1.0)
-            * (1 + (getattr(memory, "access_count_30d", 0) or 0) / 10.0),
+        stability = self._stability_from(
+            half_life=self._half_life(memory),
+            stored=getattr(memory, "stability", 0.0) or 0.0,
+            hits=getattr(memory, "access_count_30d", 0) or 0,
         )
 
         return math.exp(-days / stability)
@@ -125,7 +143,7 @@ class HealthCalculator:
         """
         从 SQLAlchemy Row 对象计算健康度。
         数据库相关字段：health_score, stability, last_accessed_at, updated_at,
-                       created_at, access_count_30d, confidence
+                       created_at, access_count_30d, confidence, memory_type
         """
         # 从数据库行对象计算健康度，支持 ORM Row 和 Pydantic 模型两种输入。
         now = datetime.now()
@@ -139,7 +157,12 @@ class HealthCalculator:
         if last_accessed is not None:
             days = max(0.0, (now - last_accessed).total_seconds() / 86400.0)
 
-        stability = max(1.0, (getattr(row, "stability", 1.0) or 1.0) * (1 + (getattr(row, "access_count_30d", 0) or 0) / 10.0))
+        half_life = half_life_days(str(getattr(row, "memory_type", "") or ""))
+        stability = self._stability_from(
+            half_life=half_life,
+            stored=getattr(row, "stability", 0.0) or 0.0,
+            hits=getattr(row, "access_count_30d", 0) or 0,
+        )
         time_decay = math.exp(-days / stability)
 
         hits = getattr(row, "access_count_30d", 0) or 0

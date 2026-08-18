@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from memoryhub.core.memory.base import (
@@ -10,10 +9,8 @@ from memoryhub.core.memory.base import (
     MemoryCandidate,
     MemoryDecision,
 )
-from memoryhub.core.memory.confidence import (
-    ConfidenceFactors,
-    UnifiedConfidenceCalculator,
-)
+from memoryhub.core.memory.confidence import ConfidenceFactors
+from memoryhub.core.memory.freshness import candidate_freshness
 
 
 class FactMemoryHandler(BaseMemoryHandler):
@@ -89,7 +86,7 @@ class FactMemoryHandler(BaseMemoryHandler):
             self.confidence_calculator.support_from_evidence_count(
                 len(candidate.evidences)
             ),
-            self._freshness(candidate.occurred_at, 30),
+            self._freshness(candidate.occurred_at),
         )
 
     def apply(self, decision: MemoryDecision) -> Any:
@@ -106,15 +103,5 @@ class FactMemoryHandler(BaseMemoryHandler):
             user_id=candidate.user_id,
         )
 
-    @staticmethod
-    def _freshness(occurred_at: str, half_life: float) -> float:
-        if not occurred_at:
-            return 1.0
-        try:
-            then = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
-            return UnifiedConfidenceCalculator.freshness_from_age_days(
-                (datetime.now(timezone.utc) - then).total_seconds() / 86400,
-                half_life_days=half_life,
-            )
-        except ValueError:
-            return 1.0
+    def _freshness(self, occurred_at: str) -> float:
+        return candidate_freshness(occurred_at, memory_type=self.memory_type)
