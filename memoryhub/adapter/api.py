@@ -1252,6 +1252,7 @@ def _get_forgetter(request: Request) -> MemoryForgetter:
         conflict_repo=getattr(state, "conflict_repo", None),
         fact_store=getattr(state, "fact_store", None),
         fact_index_service=getattr(state, "fact_index_service", None),
+        embedding_client=getattr(state, "embedding_client", None),
     )
 
 

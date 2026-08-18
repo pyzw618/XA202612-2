@@ -59,6 +59,7 @@ class MemoryForgetter:
         fact_index_service=None,
         memory_write_service=None,
         db=None,
+        embedding_client=None,
     ):
         """
         参数:
@@ -85,6 +86,7 @@ class MemoryForgetter:
         self.fact_store = fact_store
         self.fact_index_service = fact_index_service
         self.memory_write_service = memory_write_service
+        self.embedding_client = embedding_client
         self._last_deleted_ids: list[str] = []
 
     def execute(self, request: ForgetRequest) -> ForgetResponse:
@@ -152,7 +154,7 @@ class MemoryForgetter:
         memory_type = self._infer_memory_type(instruction)
         keywords = self._extract_keywords(instruction)
 
-        return {
+        base = {
             "memory_type": memory_type,
             "target_topic": instruction,
             "target_keywords": keywords,
@@ -161,6 +163,56 @@ class MemoryForgetter:
             "confidence_threshold": 0.0,
             "match_strategy": strategy,
         }
+
+        # LLM 语义意图解析：仅对"自然语言语义模式"启用；显式 ID/scope 跳过。
+        # 规则推断 memory_type 优先（可靠、可复现）；LLM 仅当规则关键词为空时
+        # 补充关键词/主题，避免云端 LLM 的误分类破坏原本可靠的确定性定位。
+        # 失败一律回退规则抽取，不抛出（REFACTOR_PLAN_V2 §4.5.2）。
+        if strategy == "semantic" and instruction and self.llm_client is not None:
+            llm_result = self._llm_parse_intent(instruction)
+            if llm_result is not None:
+                llm_keywords = llm_result.get("keywords") or []
+                # memory_type 仍以规则推断为准；仅补充关键词
+                if not keywords and llm_keywords:
+                    base["target_keywords"] = llm_keywords
+                if not keywords and llm_result.get("target_topic"):
+                    base["target_topic"] = llm_result["target_topic"]
+
+        return base
+
+    def _llm_parse_intent(self, instruction: str) -> dict | None:
+        """经 StructuredLLMAdapter 把遗忘指令解析为结构化意图；失败返回 None。"""
+        try:
+            from memoryhub.core.memory.llm import StructuredLLMAdapter
+
+            adapter = StructuredLLMAdapter(self.llm_client)
+            data = adapter.generate_json(
+                task_name="forget_intent_parse",
+                system_prompt=(
+                    "把用户的记忆遗忘指令解析为结构化意图。只输出 JSON："
+                    '{"memory_type": "preference"|"knowledge"|"all", '
+                    '"target_topic": "要遗忘的主题", '
+                    '"keywords": [关键词中文/英文], "negate": false}。'
+                    "keywords 应包含用于在记忆库中定位主题的具体词。"
+                ),
+                prompt=instruction,
+                parser=lambda value: (
+                    value if isinstance(value, dict) else {}
+                ),
+            )
+            if not isinstance(data, dict):
+                return None
+            mtype = str(data.get("memory_type") or "all").lower()
+            if mtype not in ("preference", "knowledge", "all"):
+                mtype = "all"
+            return {
+                "memory_type": mtype,
+                "target_topic": str(data.get("target_topic") or "").strip(),
+                "keywords": [str(k).strip() for k in (data.get("keywords") or []) if str(k).strip()],
+                "negate": bool(data.get("negate", False)),
+            }
+        except Exception:
+            return None
 
     def _infer_memory_type(self, instruction: str) -> str:
         """根据指令关键词推断记忆类型"""
@@ -266,26 +318,64 @@ class MemoryForgetter:
         return ids
 
     def _locate_by_keywords(self, intent: dict, user_id: str) -> list[str]:
-        """基于关键词匹配定位记忆"""
+        """基于关键词匹配 + 可选语义相似度定位记忆。"""
         keywords = intent.get("target_keywords", [])
         memory_type = intent.get("memory_type", "all")
+        topic = (intent.get("target_topic") or "").strip()
         matched: list[str] = []
 
-        if not keywords:
+        # 语义定位：embedding_client 可用 + 有 target_topic 时，召回语义相似候选
+        semantic_hits: list[str] = []
+        semantic_map: list[tuple[str, str]] = []  # (memory_id, text)
+        try:
+            if (
+                self.embedding_client is not None
+                and topic
+                and hasattr(self.embedding_client, "embed")
+            ):
+                topic_vec = self.embedding_client.embed(topic)
+                if memory_type in ("preference", "all") and self.pref_repo is not None:
+                    for p in self.pref_repo.get_active(user_id):
+                        semantic_map.append((p.memory_id, (p.text or "")))
+                if memory_type in ("knowledge", "all") and self.know_repo is not None:
+                    for k in self.know_repo.list_all(status="active", user_id=user_id):
+                        semantic_map.append((k.memory_id, f"{k.name or ''} {k.content or ''}"))
+                for mid, text in semantic_map:
+                    if not text:
+                        continue
+                    try:
+                        sim = self._cosine(topic_vec, self.embedding_client.embed(text))
+                        if sim >= 0.75:
+                            semantic_hits.append(mid)
+                    except Exception:
+                        continue
+        except Exception:
+            semantic_hits = []
+
+        if not keywords and not semantic_hits:
             return matched
+
+        def _text_of(pref=None, know=None):
+            if pref is not None:
+                return (pref.text or "").lower()
+            if know is not None:
+                return f"{know.name or ''} {know.content or ''}".lower()
+            return ""
 
         if memory_type in ("preference", "all") and self.pref_repo is not None:
             prefs = self.pref_repo.get_active(user_id)
             for p in prefs:
-                text = (p.text or "").lower()
-                if any(kw.lower() in text for kw in keywords):
+                text = _text_of(pref=p)
+                keyword_hit = any(kw.lower() in text for kw in keywords)
+                if keyword_hit or p.memory_id in semantic_hits:
                     matched.append(p.memory_id)
 
         if memory_type in ("knowledge", "all") and self.know_repo is not None:
             knows = self.know_repo.list_all(status="active", user_id=user_id)
             for k in knows:
-                text = f"{k.name or ''} {k.content or ''}".lower()
-                if any(kw.lower() in text for kw in keywords):
+                text = _text_of(know=k)
+                keyword_hit = any(kw.lower() in text for kw in keywords)
+                if keyword_hit or k.memory_id in semantic_hits:
                     matched.append(k.memory_id)
 
         if memory_type in ("fact", "all") and self.fact_store is not None:
@@ -296,7 +386,19 @@ class MemoryForgetter:
                 if any(kw.lower() in text for kw in keywords):
                     matched.append(fact.fact_id)
 
-        return matched
+        return list(dict.fromkeys(matched))  # 去重
+
+    @staticmethod
+    def _cosine(a, b) -> float:
+        try:
+            import math
+
+            dot = sum(x * y for x, y in zip(a, b))
+            na = math.sqrt(sum(x * x for x in a)) or 1.0
+            nb = math.sqrt(sum(y * y for y in b)) or 1.0
+            return dot / (na * nb)
+        except Exception:
+            return 0.0
 
     def delete_memories(
         self, memory_ids: list[str], cascade: bool = True, user_id: str = ""
