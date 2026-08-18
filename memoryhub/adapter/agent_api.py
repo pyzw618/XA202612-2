@@ -367,6 +367,10 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
                     proposal,
                     user_id=str(proposal.metadata.get("user_id") or "default"),
                     decision_mode="user_review",
+                    conflict_decision_mode=str(
+                        proposal.metadata.get("conflict_decision_mode")
+                        or "user_review"
+                    ),
                 )
             fact_proposals.append(json_repr)
 
@@ -457,22 +461,32 @@ async def decide_agent_action(
             }
 
         try:
+            conflict_decision_mode = str(
+                body.payload.get("conflict_decision_mode")
+                or staged.get("conflict_decision_mode")
+                or "user_review"
+            )
             result = pipeline.commit(
                 proposal,
                 scope=body.payload.get("scope") or proposal.scope_hint or "global",
                 project_id=body.payload.get("project_id") or proposal.project_id_hint,
                 resolution=body.payload.get("resolution") or None,
                 force=bool(body.payload.get("force", False)),
-                auto_resolve=False,
+                auto_resolve=conflict_decision_mode == "agent_autonomous",
                 user_id=user_id,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         requires_decision = result.relation == "CONFLICT" and result.resolution == "escalate"
         # 幂等：重复提交同一候选时（DUPLICATE）返回已存储的事实，而不是新构建的临时 fact
-        duplicate = result.relation == "DUPLICATE"
         stored_fact = (
-            result.existing_fact if duplicate and result.existing_fact else result.new_fact
+            result.existing_fact
+            if result.existing_fact
+            and (
+                result.relation == "DUPLICATE"
+                or result.resolution == "keep_old"
+            )
+            else result.new_fact
         )
         response = {
             "proposal_id": action_id,
@@ -481,6 +495,7 @@ async def decide_agent_action(
             "relation": result.relation,
             "resolution": result.resolution,
             "reason": result.reason,
+            "conflict_decision_mode": conflict_decision_mode,
             "fact": asdict(stored_fact) if stored_fact is not None else None,
             "existing_fact": asdict(result.existing_fact) if getattr(result, "existing_fact", None) else None,
         }

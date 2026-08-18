@@ -84,6 +84,7 @@ llm:
 fact:
   # user_review | agent_autonomous
   decision_mode: "user_review"
+  conflict_decision_mode: "user_review"
 
 # ==================== Embedding 配置 ====================
 embedding:

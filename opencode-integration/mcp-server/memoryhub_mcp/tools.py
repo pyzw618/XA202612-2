@@ -307,6 +307,7 @@ class ToolRegistry:
             {
                 "user_id": {"type": "string", "default": default_user},
                 "decision_mode": {"type": "string", "enum": _FACT_MODES},
+                "conflict_decision_mode": {"type": "string", "enum": _FACT_MODES},
                 "source_id": {"type": "string"},
                 "scope_hint": {"type": "string", "enum": ["global", "project"]},
                 "project_id": {"type": "string"},
@@ -349,6 +350,7 @@ class ToolRegistry:
                             "scope": {"type": "string", "enum": ["global", "project"]},
                             "project_id": {"type": "string"},
                             "resolution": {"type": "string", "enum": _FACT_RESOLUTIONS},
+                            "conflict_decision_mode": {"type": "string", "enum": _FACT_MODES},
                             "force": {"type": "boolean", "default": False},
                         },
                         "required": ["proposal_id", "action"],
@@ -566,6 +568,8 @@ class ToolRegistry:
         }
         if args.get("decision_mode"):
             payload["decision_mode"] = str(args["decision_mode"])
+        if args.get("conflict_decision_mode"):
+            payload["conflict_decision_mode"] = str(args["conflict_decision_mode"])
         if args.get("project_id"):
             payload["project_id"] = str(args["project_id"])
         try:

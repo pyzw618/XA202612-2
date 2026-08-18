@@ -25,6 +25,7 @@ llm:
 fact:
   # user_review: 只生成候选；agent_autonomous: 重要事实自动提交
   decision_mode: "user_review"
+  conflict_decision_mode: "user_review"
 
 embedding:
   provider: "mock"

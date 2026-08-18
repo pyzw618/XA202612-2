@@ -150,11 +150,17 @@ class FactConfig:
     """Fact proposal and commit policy."""
 
     decision_mode: str = "user_review"
+    conflict_decision_mode: str = "user_review"
 
     def __post_init__(self) -> None:
-        if self.decision_mode not in {"user_review", "agent_autonomous"}:
+        allowed = {"user_review", "agent_autonomous"}
+        if self.decision_mode not in allowed:
             raise ValueError(
                 "fact.decision_mode must be 'user_review' or 'agent_autonomous'"
+            )
+        if self.conflict_decision_mode not in allowed:
+            raise ValueError(
+                "fact.conflict_decision_mode must be 'user_review' or 'agent_autonomous'"
             )
 
 
@@ -703,7 +709,13 @@ def load_config(config_path: str | None = None) -> AppConfig:
         config.llm.model = os.environ["MEMORYHUB_LLM_MODEL"]
     if os.environ.get("MEMORYHUB_FACT_DECISION_MODE"):
         config.fact = FactConfig(
-            decision_mode=os.environ["MEMORYHUB_FACT_DECISION_MODE"]
+            decision_mode=os.environ["MEMORYHUB_FACT_DECISION_MODE"],
+            conflict_decision_mode=config.fact.conflict_decision_mode,
+        )
+    if os.environ.get("MEMORYHUB_FACT_CONFLICT_DECISION_MODE"):
+        config.fact = FactConfig(
+            decision_mode=config.fact.decision_mode,
+            conflict_decision_mode=os.environ["MEMORYHUB_FACT_CONFLICT_DECISION_MODE"],
         )
 
     # 环境变量覆盖后重新构造，以执行 provider/app_id 契约校验。

@@ -32,11 +32,18 @@ class FactIngestionAdapter:
         self,
         pipeline: FactMemoryPipeline,
         decision_mode: str = FactDecisionMode.USER_REVIEW.value,
+        conflict_decision_mode: str = FactDecisionMode.USER_REVIEW.value,
     ):
         if decision_mode not in FactDecisionMode.choices():
             raise ValueError(f"unsupported fact decision mode: {decision_mode}")
+        if conflict_decision_mode not in FactDecisionMode.choices():
+            raise ValueError(
+                "unsupported fact conflict decision mode: "
+                f"{conflict_decision_mode}"
+            )
         self.pipeline = pipeline
         self.decision_mode = decision_mode
+        self.conflict_decision_mode = conflict_decision_mode
 
     def propose_from_event(self, event: Any) -> list[FactCandidate]:
         """Use one extraction call for the complete event and all usable tool results."""
@@ -53,6 +60,7 @@ class FactIngestionAdapter:
                 **self._event_metadata(event),
                 "content_source": "memory_event",
                 "content_sources": sources,
+                "conflict_decision_mode": self.conflict_decision_mode,
             },
             decision_mode=self.decision_mode,
         )
@@ -76,6 +84,7 @@ class FactIngestionAdapter:
                 candidate,
                 user_id=user_id,
                 decision_mode=self.decision_mode,
+                conflict_decision_mode=self.conflict_decision_mode,
             )
             outcome.proposal_ids.append(candidate.proposal_id)
 
@@ -87,6 +96,10 @@ class FactIngestionAdapter:
                 scope=scope,
                 project_id=project_id,
                 user_id=user_id,
+                auto_resolve=(
+                    self.conflict_decision_mode
+                    == FactDecisionMode.AGENT_AUTONOMOUS.value
+                ),
             )
             requires_decision = (
                 result.relation == "CONFLICT"

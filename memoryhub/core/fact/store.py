@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS fact_proposals (
     user_id           TEXT NOT NULL,
     candidate_json    TEXT NOT NULL,
     decision_mode     TEXT NOT NULL,
+    conflict_decision_mode TEXT NOT NULL DEFAULT 'user_review',
     status            TEXT NOT NULL,
     committed_fact_id TEXT,
     created_at        TEXT NOT NULL,
@@ -120,6 +121,15 @@ class FactStore:
         fact_columns = {
             row["name"] for row in self._conn.execute("PRAGMA table_info(facts)")
         }
+        proposal_columns = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(fact_proposals)")
+        }
+        if "conflict_decision_mode" not in proposal_columns:
+            self._conn.execute(
+                "ALTER TABLE fact_proposals ADD COLUMN conflict_decision_mode "
+                "TEXT NOT NULL DEFAULT 'user_review'"
+            )
         migrations = {
             "memory_type": "ALTER TABLE facts ADD COLUMN memory_type TEXT NOT NULL DEFAULT 'fact'",
             "scope": "ALTER TABLE facts ADD COLUMN scope TEXT NOT NULL DEFAULT 'global'",
@@ -152,6 +162,7 @@ class FactStore:
         *,
         user_id: str,
         decision_mode: str = FactDecisionMode.USER_REVIEW.value,
+        conflict_decision_mode: str = FactDecisionMode.USER_REVIEW.value,
         status: str = FactProposalStatus.PROPOSED.value,
     ) -> str:
         """Persist a user-owned proposal without normalizing or writing a fact."""
@@ -159,6 +170,11 @@ class FactStore:
             raise ValueError("fact proposal requires user_id")
         if decision_mode not in FactDecisionMode.choices():
             raise ValueError(f"unsupported fact decision mode: {decision_mode}")
+        if conflict_decision_mode not in FactDecisionMode.choices():
+            raise ValueError(
+                "unsupported fact conflict decision mode: "
+                f"{conflict_decision_mode}"
+            )
         if status not in [item.value for item in FactProposalStatus]:
             raise ValueError(f"unsupported fact proposal status: {status}")
         now = datetime.now(timezone.utc).isoformat()
@@ -173,12 +189,14 @@ class FactStore:
         }
         self._conn.execute(
             """INSERT INTO fact_proposals
-               (proposal_id, user_id, candidate_json, decision_mode, status,
-                committed_fact_id, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+               (proposal_id, user_id, candidate_json, decision_mode,
+                conflict_decision_mode, status, committed_fact_id,
+                created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
                ON CONFLICT(proposal_id) DO UPDATE SET
                    candidate_json=excluded.candidate_json,
                    decision_mode=excluded.decision_mode,
+                   conflict_decision_mode=excluded.conflict_decision_mode,
                    updated_at=excluded.updated_at
                WHERE fact_proposals.user_id=excluded.user_id""",
             (
@@ -186,6 +204,7 @@ class FactStore:
                 user_id,
                 json.dumps(payload, ensure_ascii=False, sort_keys=True),
                 decision_mode,
+                conflict_decision_mode,
                 status,
                 now,
                 now,
@@ -216,6 +235,7 @@ class FactStore:
         return {
             "candidate": proposal,
             "decision_mode": row["decision_mode"],
+            "conflict_decision_mode": row["conflict_decision_mode"],
             "status": row["status"],
             "committed_fact_id": row["committed_fact_id"],
             "created_at": row["created_at"],

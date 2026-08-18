@@ -735,6 +735,8 @@ async def system_status(request: Request):
         "storage": {
             "engine": "sqlite",
             "db_path": config.storage.db_path if config is not None else "",
+            "fact_storage_shared": getattr(state, "fact_storage_shared", None),
+            "fact_db_path": getattr(state, "fact_storage_db_path", ""),
             "event_count": _count(db, EventRow, "event_id"),
             "preference_count": _count(db, PreferenceRow, "memory_id"),
             "knowledge_count": _count(db, KnowledgeRow, "memory_id"),
@@ -754,6 +756,9 @@ async def system_status(request: Request):
         },
         "fact": {
             "decision_mode": config.fact.decision_mode if config is not None else None,
+            "conflict_decision_mode": (
+                config.fact.conflict_decision_mode if config is not None else None
+            ),
         },
         "vector_engine": {
             "provider": config.vector_engine.provider if config is not None else None,
@@ -799,6 +804,8 @@ async def system_config(request: Request):
         },
         "storage": {
             "db_path": config.storage.db_path,
+            "fact_storage_shared": getattr(state, "fact_storage_shared", None),
+            "fact_db_path": getattr(state, "fact_storage_db_path", ""),
             "vector_index_path": config.storage.vector_index_path,
             "evidence_path": config.storage.evidence_path,
             "cache_max_size": config.storage.cache_max_size,
@@ -821,6 +828,7 @@ async def system_config(request: Request):
         },
         "fact": {
             "decision_mode": config.fact.decision_mode,
+            "conflict_decision_mode": config.fact.conflict_decision_mode,
         },
         "embedding": {
             "provider": config.embedding.provider,

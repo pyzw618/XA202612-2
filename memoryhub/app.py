@@ -234,6 +234,8 @@ def create_app(
     app.state.memory_write_service = None
     app.state.fact_pipeline = fact_pipeline
     app.state.fact_store = getattr(fact_pipeline, "store", None)
+    app.state.fact_storage_shared = None
+    app.state.fact_storage_db_path = ""
     app.state.fact_index_service = None
     app.state.owns_fact_pipeline = False
     app.state.memory_service = memory_service
@@ -462,6 +464,15 @@ def create_app(
             )
             app.state.owns_fact_pipeline = True
         fact_store = app.state.fact_pipeline.store
+        configured_db_path = os.path.abspath(config.storage.db_path)
+        fact_db_path = os.path.abspath(getattr(fact_store, "db_path", ""))
+        app.state.fact_storage_db_path = fact_db_path
+        app.state.fact_storage_shared = fact_db_path == configured_db_path
+        if not app.state.fact_storage_shared:
+            raise RuntimeError(
+                "fact store must use the same SQLite db_path as preference/knowledge "
+                f"storage: {fact_db_path!r} != {configured_db_path!r}"
+            )
         facts = fact_store.list_facts(status="active", limit=100000)
 
         memories = [*pref_repo.list_all(), *know_repo.list_all(), *facts]
@@ -621,6 +632,7 @@ def create_app(
         fact_ingestion_adapter = FactIngestionAdapter(
             app.state.fact_pipeline,
             decision_mode=config.fact.decision_mode,
+            conflict_decision_mode=config.fact.conflict_decision_mode,
         )
         extraction_executor = ExtractionExecutor(
             memory_write_service=app.state.memory_write_service,

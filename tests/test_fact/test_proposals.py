@@ -40,7 +40,11 @@ def test_fact_proposal_survives_restart_and_is_owner_scoped(tmp_path):
     path = tmp_path / "facts.db"
     first = FactStore(str(path))
     candidate = _candidate()
-    first.save_fact_proposal(candidate, user_id="alice")
+    first.save_fact_proposal(
+        candidate,
+        user_id="alice",
+        conflict_decision_mode="agent_autonomous",
+    )
     first.update_fact_proposal_status(
         candidate.proposal_id,
         user_id="alice",
@@ -54,6 +58,7 @@ def test_fact_proposal_survives_restart_and_is_owner_scoped(tmp_path):
     assert stored is not None
     assert stored["status"] == FactProposalStatus.COMMITTED.value
     assert stored["committed_fact_id"] == "fact_1"
+    assert stored["conflict_decision_mode"] == "agent_autonomous"
     assert reopened.get_fact_proposal(candidate.proposal_id, user_id="bob") is None
     reopened.close()
 
@@ -122,3 +127,18 @@ def test_autonomous_event_uses_one_propose_and_commits_admitted_candidate():
     assert outcome.committed_fact_ids == ["fact_new"]
     assert outcome.awaiting_decision_ids == []
     assert pipeline.store.statuses[-1][1]["status"] == FactProposalStatus.COMMITTED.value
+    assert pipeline.commit_calls[0][1]["auto_resolve"] is False
+
+
+def test_autonomous_event_can_delegate_conflicts_to_agent():
+    pipeline = _RecordingPipeline()
+    adapter = FactIngestionAdapter(
+        pipeline,
+        decision_mode="agent_autonomous",
+        conflict_decision_mode="agent_autonomous",
+    )
+
+    adapter.ingest_event(_event())
+
+    assert pipeline.commit_calls[0][1]["auto_resolve"] is True
+    assert pipeline.store.saved[0][1]["conflict_decision_mode"] == "agent_autonomous"

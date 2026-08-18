@@ -1203,6 +1203,7 @@ class FactProposeRequest(BaseModel):
 
     user_id: str = Field(default="default", min_length=1, max_length=128)
     decision_mode: Literal["user_review", "agent_autonomous"] | None = None
+    conflict_decision_mode: Literal["user_review", "agent_autonomous"] | None = None
     source_id: str = Field(default="", max_length=500)
     scope_hint: Literal["global", "project"] | None = "global"
     project_id: str | None = Field(default=None, max_length=256)
@@ -1215,6 +1216,7 @@ class FactDecisionInput(BaseModel):
     scope: Literal["global", "project"] | None = None
     project_id: str | None = Field(default=None, max_length=256)
     resolution: Literal["replace", "keep_old", "merge", "coexist", "escalate"] | None = None
+    conflict_decision_mode: Literal["user_review", "agent_autonomous"] | None = None
     force: bool = False
 
 
@@ -1265,13 +1267,29 @@ async def propose_facts(req: FactProposeRequest, request: Request):
     )
     if not isinstance(mode, str):
         mode = getattr(mode, "decision_mode", FactDecisionMode.USER_REVIEW.value)
+    conflict_mode = req.conflict_decision_mode or getattr(
+        getattr(request.app.state, "config", None),
+        "fact",
+        None,
+    )
+    if not isinstance(conflict_mode, str):
+        conflict_mode = getattr(
+            conflict_mode,
+            "conflict_decision_mode",
+            FactDecisionMode.USER_REVIEW.value,
+        )
     if req.scope_hint == MemoryScope.PROJECT.value and not req.project_id:
         raise HTTPException(status_code=422, detail="project scope requires project_id")
     if req.scope_hint == MemoryScope.GLOBAL.value and req.project_id:
         raise HTTPException(status_code=422, detail="global scope cannot include project_id")
 
     def persist_safe_request(safe_req: FactProposeRequest):
-        return _persist_fact_proposals(pipeline, safe_req, decision_mode=mode)
+        return _persist_fact_proposals(
+            pipeline,
+            safe_req,
+            decision_mode=mode,
+            conflict_decision_mode=conflict_mode,
+        )
 
     proposals, safety_action, audit_id = _guard_fact_proposals(
         request, req, persist_safe_request
@@ -1374,7 +1392,13 @@ def _raise_fact_safety_outcome(action: SafetyAction, audit_id: str) -> None:
     )
 
 
-def _persist_fact_proposals(pipeline, req: FactProposeRequest, *, decision_mode: str):
+def _persist_fact_proposals(
+    pipeline,
+    req: FactProposeRequest,
+    *,
+    decision_mode: str,
+    conflict_decision_mode: str = FactDecisionMode.USER_REVIEW.value,
+):
     results = []
     for raw in req.triples:
         triple = RawTriple(**raw.model_dump())
@@ -1388,7 +1412,11 @@ def _persist_fact_proposals(pipeline, req: FactProposeRequest, *, decision_mode:
             source_id=req.source_id,
             project_id_hint=req.project_id,
             scope_hint=req.scope_hint,
-            metadata={"user_id": req.user_id, "decision_mode": decision_mode},
+            metadata={
+                "user_id": req.user_id,
+                "decision_mode": decision_mode,
+                "conflict_decision_mode": conflict_decision_mode,
+            },
         )
         item = _agent_api._candidate_to_json(proposal)
         if (
@@ -1403,6 +1431,7 @@ def _persist_fact_proposals(pipeline, req: FactProposeRequest, *, decision_mode:
             proposal,
             user_id=req.user_id,
             decision_mode=decision_mode,
+            conflict_decision_mode=conflict_decision_mode,
         )
         if decision_mode == FactDecisionMode.AGENT_AUTONOMOUS.value:
             decision = FactDecisionInput(
@@ -1410,6 +1439,7 @@ def _persist_fact_proposals(pipeline, req: FactProposeRequest, *, decision_mode:
                 action="commit",
                 scope=req.scope_hint,
                 project_id=req.project_id,
+                conflict_decision_mode=conflict_decision_mode,
             )
             item.update(_decide_fact_proposal(pipeline, req.user_id, decision))
         results.append(item)
@@ -1438,6 +1468,11 @@ def _decide_fact_proposal(pipeline, user_id: str, decision: FactDecisionInput) -
             "fact_id": stored["committed_fact_id"],
             "idempotent": True,
         }
+    conflict_decision_mode = (
+        decision.conflict_decision_mode
+        or stored.get("conflict_decision_mode")
+        or FactDecisionMode.USER_REVIEW.value
+    )
     scope = decision.scope or proposal.scope_hint
     if scope is None:
         pipeline.store.update_fact_proposal_status(
@@ -1459,7 +1494,10 @@ def _decide_fact_proposal(pipeline, user_id: str, decision: FactDecisionInput) -
             project_id=project_id,
             resolution=decision.resolution,
             force=decision.force,
-            auto_resolve=False,
+            auto_resolve=(
+                conflict_decision_mode
+                == FactDecisionMode.AGENT_AUTONOMOUS.value
+            ),
             user_id=user_id,
         )
     except ValueError as exc:
@@ -1497,6 +1535,7 @@ def _decide_fact_proposal(pipeline, user_id: str, decision: FactDecisionInput) -
         "relation": result.relation,
         "resolution": result.resolution,
         "reason": result.reason,
+        "conflict_decision_mode": conflict_decision_mode,
         "fact_id": stored_fact.fact_id if stored_fact is not None else None,
     }
 
