@@ -168,14 +168,21 @@ class MemoryForgetter:
         # 规则推断 memory_type 优先（可靠、可复现）；LLM 仅当规则关键词为空时
         # 补充关键词/主题，避免云端 LLM 的误分类破坏原本可靠的确定性定位。
         # 失败一律回退规则抽取，不抛出（REFACTOR_PLAN_V2 §4.5.2）。
-        if strategy == "semantic" and instruction and self.llm_client is not None:
+        # 规则关键词非空时 LLM 结果会被整体丢弃，故此时直接跳过云端调用
+        # （避免每次遗忘请求都付出一次被浪费的阻塞式 LLM 往返）。
+        if (
+            strategy == "semantic"
+            and instruction
+            and self.llm_client is not None
+            and not keywords
+        ):
             llm_result = self._llm_parse_intent(instruction)
             if llm_result is not None:
                 llm_keywords = llm_result.get("keywords") or []
                 # memory_type 仍以规则推断为准；仅补充关键词
-                if not keywords and llm_keywords:
+                if llm_keywords:
                     base["target_keywords"] = llm_keywords
-                if not keywords and llm_result.get("target_topic"):
+                if llm_result.get("target_topic"):
                     base["target_topic"] = llm_result["target_topic"]
 
         return base

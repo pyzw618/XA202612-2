@@ -85,11 +85,27 @@ def test_parse_intent_uses_llm_when_available_and_falls_back(tmp_path):
 
 
 def test_llm_supplements_keywords_when_rule_empty():
-    # 规则关键词为空（无名词可切）时，LLM 补充
+    # 规则关键词为空（整句全是停用词）时，LLM 补充关键词与主题
     llm = _StructuredLLM('{"memory_type":"preference","target_topic":"old setting","keywords":["old","setting"],"negate":false}')
     forgetter = MemoryForgetter(llm_client=llm)
-    intent = forgetter.parse_intent(ForgetRequest(instruction="forget the old thing"))
-    assert "old" in intent["target_keywords"]
+    intent = forgetter.parse_intent(ForgetRequest(instruction="forget the about my"))
+    assert intent["target_keywords"] == ["old", "setting"]
+    assert intent["target_topic"] == "old setting"
+
+    # 规则关键词非空时 LLM 结果整体弃用（规则优先），且不应发起云端调用
+    class _Counting:
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, prompt, system_prompt="", **kwargs):
+            self.calls += 1
+            raise RuntimeError("unreachable")
+
+    counting = _Counting()
+    forgetter3 = MemoryForgetter(llm_client=counting)
+    intent3 = forgetter3.parse_intent(ForgetRequest(instruction="忘掉周报格式偏好"))
+    assert counting.calls == 0, "规则关键词非空时不应调用 LLM"
+    assert "周报" in intent3["target_keywords"]
 
 
 def test_exact_and_scope_skip_llm(tmp_path):
