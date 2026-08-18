@@ -32,6 +32,9 @@ eval = [
     "scikit-learn>=1.4",
 ]
 
+[project.scripts]
+memoryhub = "memoryhub_cli.cli:main"
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
@@ -47,6 +50,11 @@ asyncio_mode = "auto"
 "memoryhub.safety_rules.data" = ["*.json"]
 "memoryhub.core.fact" = ["predicate_ontology.json"]
 
+[tool.setuptools.package-dir]
+memoryhub_client = "agent-integration/memoryhub_client"
+memoryhub_cli = "agent-integration/memoryhub_cli"
+memoryhub_mcp = "agent-integration/memoryhub_mcp"
+
 [tool.setuptools.packages.find]
-include = ["memoryhub*", "evaluation*"]
+include = ["memoryhub*", "evaluation*", "memoryhub_client*", "memoryhub_cli*", "memoryhub_mcp*"]
 exclude = ["idea*", "tests*", "docs*"]

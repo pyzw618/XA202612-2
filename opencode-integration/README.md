@@ -34,3 +34,4 @@ export MEMORYHUB_USER_ID=opencode
 D:/Anaconda/envs/py12/python.exe -m pytest opencode-integration/tests/test_mcp_server.py -v
 node opencode-integration/tests/test_plugin_event_builder.mjs
 ```
+> 新接入请使用仓库根目录的 `agent-integration/`。这里保留旧版兼容脚本；维护中的 opencode Plugin 已转发到 `agent-integration/plugin/opencode/`，唯一 MCP 入口为 `python -m memoryhub_mcp`。
