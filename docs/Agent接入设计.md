@@ -9,6 +9,11 @@
 >   `md/` 下 opencode 开发者文档的 `plugins / skills / commands / mcp-servers / custom-tools /
 >   tools / config / agents` 八篇校准）；所有能力映射到真实代码/接口；两条链路共享同一份记忆与同一套配置。
 > - **代码基线**：`main` @ `8c04b4d`（opencode MCP 实际已 14 工具，文档仍写 12，见 §1 诊断）。
+> - **与核心重构同步（2026-08-18 更新）**：核心记忆模块重构（`docs/refactor/REFACTOR_PLAN_V2.md`）
+>   对本接入设计产生以下影响——**统一 API 契约**取代旧工具/方法表（§14）；**事实记忆并入知识**
+>   （`KnowledgeType.FACT`，`propose_facts/decide_facts` 并入知识面）；**记忆分层**（short/mid/long）
+>   暴露为检索/上下文可过滤维度；**自反馈闭环**与**艾宾浩斯遗忘曲线**成为"记忆越用越懂"的引擎
+>   （§6.4、§14.4）。凡与 §14 冲突的旧表述以 §14 为准。
 > - 本文档是**设计稿**（标注【建议】【规划】），落地后按 §12 迁移清单执行。
 
 ---
@@ -28,6 +33,7 @@
 11. [交互模式（Profile）与切换机制：默认 Plugin，可切换](#11-交互模式profile与切换机制默认-plugin可切换)
 12. [落地路线与迁移清单](#12-落地路线与迁移清单)
 13. [与现状的对照表](#13-与现状的对照表)
+14. [与核心重构 V2 的同步：统一 API 契约](#14-与核心重构-v2-的同步统一-api-契约)
 
 ---
 
@@ -252,16 +258,21 @@ agent-integration/
 | `get_context()` | `POST /api/memory/context` | 可注入上下文文本 |
 | `write_events()` | `POST /api/memory/events` | 批量写入事件 |
 | `write_preference()` | `POST /api/memory/memories/preference` | 显式写偏好 |
-| `write_knowledge()` | `POST /api/memory/memories/knowledge` | 显式写知识 |
-| `propose_facts()` | `POST /api/memory/facts/propose` | 事实候选 |
-| `decide_facts()` | `POST /api/memory/facts/decide` | 事实裁决 |
-| `forget()` / `forget_preview()` | `POST /api/memory/forget` `/forget/preview` | 遗忘 |
-| `list_preferences()` 等 | `GET /api/memory/preferences|knowledge|facts` | 列表 |
+| `write_knowledge()` | `POST /api/memory/memories/knowledge` | 显式写知识（`knowledge_type` 支持 workflow/case/template/**fact**） |
+| `propose_knowledge_fact()` | `POST /api/memory/knowledge` （`knowledge_type=fact`） | 三元组知识候选（替代 `propose_facts`） |
+| `decide_knowledge_fact()` | `POST /api/memory/knowledge/{id}/resolve` | 三元组知识裁决（替代 `decide_facts`） |
+| `forget()` / `forget_preview()` | `POST /api/memory/forget` `/forget/preview` | 遗忘（艾宾浩斯健康度参与优先级） |
+| `list_preferences()` 等 | `GET /api/memory/preferences|knowledge`（facts 兼容转发） | 列表（返回含 `memory_level`） |
 | `get_preference()` 等 | `GET /api/memory/{type}/{id}` | 详情 |
-| `feedback()` | `POST /api/memory/feedback` | 反馈 |
+| `update_memory()` | `PUT /api/memory/{type}/{id}` | 统一记忆更新（偏好/知识/FACT） |
+| `feedback()` | `POST /api/memory/feedback` | 反馈强化（confirm/reject → 置信度/健康度，艾宾浩斯复习） |
+| `provenance()` | `GET /api/memory/v2/memories/{id}/lineage|evidence|audit` | 溯源（新增，v2） |
+| `list_projections()` / `replay_projection()` | `GET /api/memory/v2/projections` `/replay` | 投影恢复（新增，v2） |
 | `list_conflicts()` / `resolve_conflict()` | `GET/POST /api/memory/conflicts...` | 冲突 |
 | `export()` / `import_()` | 组合多个 GET + `write_events`/`memories/*` | 导出/导入 |
 | `system_status()` | `GET /api/memory/system/status` | 健康/状态 |
+
+> 注：§14 为统一契约权威；`search`/`context` 均支持 `level`（short/mid/long）与 `project` 过滤参数。
 
 所有方法统一：超时、`user_id` 默认、`HTTPError → MemoryHubError`（含 `status_code /
 code / safety_action / audit_id`），与 MCP 工具 `handle_tool_error` 的语义对齐。
@@ -462,25 +473,30 @@ memoryhub [全局选项] <子命令>
     search <query>                    混合检索（--top-k/--memory-types/--min-confidence/--scene）
     context <query>                   取可直接注入 prompt 的上下文文本（--max-chars）
   写入
-    remember <text> [--type preference|knowledge|fact] [--scene]
+    remember <text> [--type preference|knowledge:workflow|knowledge:case|knowledge:template|knowledge:fact] [--scene] [--project]
     event <file.jsonl>                批量写入 MemoryEvent（从 stdin 读 "-"）
+  更新
+    update <memory_id> [--text ...] [--scope ...] [--knowledge-type ...]   统一记忆更新（PUT /{type}/{id}）
   遗忘
-    forget <指令|ID> [--preview] [--cascade]    带预览的精准遗忘
+    forget <指令|ID> [--preview] [--cascade]    带预览的精准遗忘（艾宾浩斯健康度参与优先级）
   查看
-    list [--type all|preference|knowledge|fact] [--status active|archived|trash|review]
-    get <memory_id>                   单条详情
+    list [--type all|preference|knowledge] [--level short|mid|long] [--status active|archived|trash|review]
+    get <memory_id>                   单条详情（含 memory_level、health）
+  溯源 / 投影
+    provenance <memory_id> [lineage|evidence|audit]   溯源链/证据/安全审计（v2）
+    projection list [--status pending|failed] [--user] ; projection replay <outbox_id...>
   反馈 / 裁决
-    feedback <id> confirm|reject|update <text>
-    review [facts|conflicts]          待裁决队列
+    feedback <id> confirm|reject|update <text>         confirm → 艾宾浩斯复习强化 + 置信度/健康度刷新
+    review [knowledge|conflicts]        待裁决队列（含 FACT 知识冲突）
     decide <proposal_id> commit|reject [--scope global|project]
     resolve <conflict_id> override|merge|coexist|pending [--reason ...]
-  事实
-    fact propose <triples.json> [--mode user_review|agent_autonomous]
+  知识事实（原事实子命令并入知识）
+    knowledge fact propose <triples.json> [--mode user_review|agent_autonomous]
   导出 / 导入
     export [--type all] > memoryhub-backup.jsonl
     import <file.jsonl> [--dry-run]
   服务 / 状态
-    status                          健康度 + 记忆统计（偏好/知识/事实计数、延迟、安全状态）
+    status                          健康度 + 记忆统计（偏好/知识/FACT 计数、延迟、安全状态）
     service start|stop|status       本地服务管理（对应 packaging/linux/memoryhub.service）
   其它
     completion [bash|zsh]           生成 shell 补全
@@ -713,15 +729,74 @@ token 敏感项目把 `tools.memoryhub_*` 关掉并靠 CLI/command 读取。**�
 | 自动沉淀 | `session.idle` 整会话一次 | `tool.execute.after` 累积 → `session.status` 冲刷 → `session.deleted` 兜底 | 细粒度、可恢复、官方推荐事件 |
 | 压缩期记忆 | 无 | `experimental.session.compacting` 注入记忆 | 持久记忆熬过压缩 |
 | CLI | 无 | `memoryhub` 全 REST 命令面 + `--json/--compact/--quiet` | 零插件、可脚本、省 token |
-| 自反馈 | `used_memory_ids` 未接 | skill 提示模型 `memoryhub feedback confirm` | 命中反哺置信度 |
-| 项目隔离 | 仅 scene/task/app | + `project_root/project_name` | opencode 多项目不串味 |
+| 自反馈 | `used_memory_ids` 未接 | skill 提示模型 `memoryhub feedback confirm` → 核心刷新 `stability`/置信度/健康度 | 命中反哺置信度 + **艾宾浩斯复习强化**（越用越懂） |
+| 记忆分层 | 无 level 维度 | `search/context` 支持 `level`(short/mid/long)；context 按"会话短期→中期→长期"级联 | Agent 区分"本会话刚发生/历史沉淀" |
+| 溯源/投影 | 无 | CLI `provenance <id>`、`projection list/replay`（v2 接口） | 可回答"这条记忆为什么/从哪来、索引同步没有" |
+| 项目隔离 | 仅 scene/task/app | + `project_root/project_name` + 检索 `project` 过滤 | opencode 多项目不串味 |
+| 事实接入 | 独立 `propose_facts/decide_facts` | 并入 `knowledge_type=fact`（统一知识面） | 消灭独立事实工具/存储（V2 §4.8） |
 | 配置 | 散落环境变量 | env（`{env:}` 原生支持） + `.memoryhub/config.json` + 全局 | 单一解析、三层优先级 |
 | 交互模式 | 无（14 工具常驻） | Profile：`plugin`（默认）/ `cli`，agent→项目→设备级三层覆盖，前端可切 | 默认协助、按需极简 |
 | 文档 | 12 工具漂移 | 契约表统一在 `CONTRACT.md` | 文档零漂移 |
 
 ---
 
+## 14. 与核心重构 V2 的同步：统一 API 契约（取代旧工具/方法表）
+
+> 依据：`docs/refactor/REFACTOR_PLAN_V2.md` §4.9（Agent 接入与统一 API 面）、§4.5.3（艾宾浩斯遗忘曲线）。
+> 本节是接入层与核心层**双向优化**后的统一契约；**凡 §5.2、§7.2、§13 与本节冲突处，以本节为准**。
+
+### 14.1 统一 API 契约（CLI / MCP / Agent 共用一套 REST 面）
+
+原则不变：**CLI 是记忆能力的"母语"，Plugin 的 custom tools/commands 与 MCP 工具都是 CLI 薄壳**。
+核心重构后暴露的统一契约如下（与 `REFACTOR_PLAN_V2.md` §4.9.4 逐行对应）：
+
+| 核心能力 | REST 统一面 | CLI（母语） | MCP/工具（低频走 CLI） |
+|---|---|---|---|
+| 多源事件写入（工具/行为/配置） | `POST /api/memory/events` | `event` | `write_event` |
+| 混合检索（+level/project/provenance） | `POST /api/memory/search` | `search` | `search` |
+| 上下文注入（分层级联） | `POST /api/memory/context` | `context` | `get_context` |
+| 显式写偏好/知识（含 FACT） | `POST /memories/preference\|knowledge` | `remember --type` | `remember` |
+| 统一记忆更新 | `PUT /api/memory/{type}/{id}` | `update <id>` | 低频 → CLI |
+| 反馈强化（艾宾浩斯复习） | `POST /api/memory/feedback` | `feedback` | `feedback` |
+| NL 精准遗忘（先预览） | `POST /forget` + `/forget/preview` | `forget --preview` | `forget` |
+| 溯源 lineage/evidence/audit | `GET /api/memory/v2/memories/{id}/...` | `provenance <id>` | 低频 → CLI |
+| 投影恢复 | `GET/POST /api/memory/v2/projections` | `projection list/replay` | 管理 → CLI |
+| 健康/状态 | `GET /api/memory/system/status` | `status` | 运维 → CLI |
+
+### 14.2 相对旧设计的关键变更
+
+1. **事实并入知识**：核心决策"事实不再独立成类，降格为 `KnowledgeType.FACT`"（V2 §4.8）。接入侧——
+   `propose_facts/decide_facts` 不再独立；三元组以 `knowledge_type=fact` 承载；CLI `fact propose` →
+   `remember --type knowledge:fact`（或 `knowledge fact propose`）；MCP 工具面无 `*_facts`。
+2. **记忆分层暴露**：`search`/`context` 支持 `level`（short/mid/long）过滤与返回标注；`context` 注入按
+   "会话短期（工作记忆）→ 近期中期（情景）→ 长期（全局）"级联（V2 §4.4.3），响应标注 `memory_level`。
+3. **project 隔离**：`search`/`context` 增加 `project` 参数（原 §12.3 的【规划】升级为必做），配合自动沉淀
+   写入的 `payload.project_root/project_name`（§6.4），多项目互不串味。
+4. **统一记忆更新**：`PUT /api/memory/{type}/{id}` 覆盖偏好/知识（含 FACT），替代散落的"改偏好/改知识"细节。
+5. **自反馈闭环（记忆越用越懂）**：`feedback confirm/reject` 驱动 `access_count/stability`（艾宾浩斯复习强化，
+   `health.py:98-105`）与置信度/健康度更新；skill 引导模型"使用某条记忆后 `feedback confirm`"（§6.3 规则 4）。
+6. **溯源与投影**：CLI 新增 `provenance <id>`（lineage/evidence/audit）与 `projection list/replay`，对应 v2 只读接口。
+
+### 14.3 旧表述 → 新表述映射
+
+| 旧表述（§1/§5/§7/§13） | 新表述 |
+|---|---|
+| 14 个 MCP 工具（含 `propose_facts`/`decide_facts`） | 收敛后的统一工具面（§14.1），事实并入 `knowledge` |
+| `write_preference` / `write_knowledge` 分别写 | `remember --type` + 统一 `PUT /{type}/{id}` |
+| `list_memories / get_memory` 按类型分开 | `list [--type]` / `get`（返回含 `memory_level`） |
+| 无溯源/投影入口 | `provenance <id>`、`projection list/replay` |
+| 检索无 level/project 维度 | `search/context` 支持 `level`/`project`（返回 `memory_level`） |
+
+### 14.4 与艾宾浩斯遗忘机制的关系
+
+接入层是"记忆越用越懂"闭环的**触发端**：模型使用记忆 → `feedback confirm` → 核心按艾宾浩斯曲线增强
+`stability`（`health.py:98-105` 的 `S × (1 + hits/10)`）并刷新健康度 → 记忆更不易被遗忘/降级（V2 §4.5.3）。
+接入侧无需感知公式，只负责**如实上报"用了哪条记忆、用户认不认可"**——`agent_api.step` 已有 `used_memory_ids`
+概念（§1.6），接入层需把它接通到 `feedback confirm`。
+
+---
+
 *本文档为接入重构设计稿；落地状态、接口映射与已知问题将随开发更新。*
 *依据：`md/`（opencode 官方文档 plugins/skills/commands/mcp-servers/custom-tools/tools/config/agents）。*
 *关联：`docs/产品形态与使用方案.md`、`opencode-integration/docs/INTEGRATION.md`（旧）、
-`docs/ARCHITECTURE.md`、`docs/INTERFACE.md`。*
+`docs/refactor/REFACTOR_PLAN_V2.md`（核心重构 V2）、`docs/ARCHITECTURE.md`、`docs/INTERFACE.md`。*
