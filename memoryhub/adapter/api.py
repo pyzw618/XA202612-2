@@ -509,54 +509,129 @@ async def write_events(req: WriteEventRequest, request: Request):
 # Facts management
 # ============================================================
 
+def _fact_memory_to_dict(memory: KnowledgeMemory) -> dict:
+    """knowledge(FACT) → fact 风格响应（/facts 兼容转发，REFACTOR_PLAN_V2 §4.8.8）。"""
+    return {
+        "fact_id": memory.memory_id,
+        "memory_id": memory.memory_id,
+        "user_id": memory.user_id,
+        "subject": memory.subject,
+        "predicate": memory.predicate,
+        "object_value": memory.object_value,
+        "object_type": memory.object_type,
+        "source_text": memory.content,
+        "source_id": "",
+        "confidence": memory.confidence,
+        "status": (
+            memory.status.value if hasattr(memory.status, "value") else str(memory.status)
+        ),
+        "version": memory.version,
+        "memory_type": "fact",
+    }
+
+
+def _legacy_fact_to_dict(fact) -> dict:
+    """legacy Fact dataclass → dict（迁移期 /facts 双读兼容）。"""
+    return {
+        "fact_id": fact.fact_id,
+        "memory_id": fact.fact_id,
+        "user_id": fact.user_id,
+        "subject": fact.subject_id,
+        "subject_id": fact.subject_id,
+        "predicate": fact.predicate_id,
+        "predicate_id": fact.predicate_id,
+        "object_value": fact.object_value,
+        "source_text": fact.source_text,
+        "source_id": fact.source_id,
+        "confidence": fact.confidence,
+        "status": fact.status,
+        "version": fact.version,
+        "memory_type": "fact",
+    }
+
+
+def _fact_knowledge_lookup(request: Request, fact_id: str, user_id: str):
+    """knowledge(FACT) 或 legacy fact 双读定位。"""
+    know_repo = getattr(request.app.state, "know_repo", None)
+    if know_repo is not None:
+        memory = know_repo.get_by_id(fact_id)
+        if memory is not None and memory.user_id == user_id and (
+            getattr(memory.knowledge_type, "value", str(memory.knowledge_type)) == "fact"
+        ):
+            return ("knowledge", memory)
+    store = getattr(request.app.state, "fact_store", None)
+    if store is not None:
+        fact = store.get_fact(fact_id, user_id=user_id)
+        if fact is not None:
+            return ("legacy", fact)
+    return (None, None)
+
+
 @router.get("/facts")
 async def list_facts(request: Request, user_id: str = "default", status: str | None = "active", limit: int = Query(default=100, ge=1, le=500)):
+    """FACT 双读：knowledge(FACT) + legacy facts（迁移期兼容，§4.8.8）。"""
+    out: dict[str, dict] = {}
+    know_repo = getattr(request.app.state, "know_repo", None)
+    if know_repo is not None:
+        for m in know_repo.get_by_type(user_id, knowledge_type="fact", status=status or "active"):
+            out[m.memory_id] = _fact_memory_to_dict(m)
     store = getattr(request.app.state, "fact_store", None)
-    if store is None:
-        raise HTTPException(status_code=503, detail="fact store not initialized")
-    return store.list_facts(status=status, user_id=user_id, limit=limit)
+    if store is not None:
+        for f in store.list_facts(status=status, user_id=user_id, limit=limit):
+            out[f.fact_id] = _legacy_fact_to_dict(f)
+    return list(out.values())[:limit]
 
 @router.get("/facts/conflicts")
 async def list_fact_conflicts(request: Request, user_id: str = "default", limit: int = Query(default=100, ge=1, le=500)):
+    """FACT 冲突：knowledge 冲突 + legacy fact 冲突 并集。"""
+    out: list[dict] = []
+    conflict_repo = getattr(request.app.state, "conflict_repo", None)
+    if conflict_repo is not None:
+        out.extend(
+            r for r in conflict_repo.list_all(user_id=user_id)
+            if getattr(r, "memory_type", "") == "knowledge"
+        )
     store = getattr(request.app.state, "fact_store", None)
-    if store is None:
-        raise HTTPException(status_code=503, detail="fact store not initialized")
-    return store.list_fact_conflicts(user_id=user_id, limit=limit)
+    if store is not None:
+        out.extend(store.list_fact_conflicts(user_id=user_id, limit=limit))
+    return out[:limit]
 
 @router.get("/facts/{fact_id}")
 async def get_fact(fact_id: str, request: Request, user_id: str = "default"):
-    store = getattr(request.app.state, "fact_store", None)
-    fact = store.get_fact(fact_id, user_id=user_id) if store is not None else None
-    if fact is None:
-        raise HTTPException(status_code=404, detail="fact not found")
-    return fact
+    kind, obj = _fact_knowledge_lookup(request, fact_id, user_id)
+    if kind == "knowledge":
+        return _fact_memory_to_dict(obj)
+    if kind == "legacy":
+        return _legacy_fact_to_dict(obj)
+    raise HTTPException(status_code=404, detail="fact not found")
 
 @router.get("/facts/{fact_id}/evidence")
 async def get_fact_evidence(fact_id: str, request: Request, user_id: str = "default"):
-    store = getattr(request.app.state, "fact_store", None)
-    fact = store.get_fact(fact_id, user_id=user_id) if store is not None else None
-    if fact is None:
+    kind, obj = _fact_knowledge_lookup(request, fact_id, user_id)
+    if kind is None:
         raise HTTPException(status_code=404, detail="fact not found")
-    return store.list_fact_evidence(fact_id, user_id)
+    if kind == "knowledge":
+        return [e.model_dump(mode="json") for e in obj.evidences]
+    store = getattr(request.app.state, "fact_store", None)
+    return store.list_fact_evidence(fact_id, user_id) if store is not None else []
 
 @router.delete("/facts/{fact_id}")
 async def delete_fact(fact_id: str, request: Request, user_id: str = "default"):
-    store = getattr(request.app.state, "fact_store", None)
-    index_service = getattr(request.app.state, "fact_index_service", None)
-    fact = store.get_fact(fact_id, user_id=user_id) if store is not None else None
-    if fact is None:
+    kind, obj = _fact_knowledge_lookup(request, fact_id, user_id)
+    if kind is None:
         raise HTTPException(status_code=404, detail="fact not found")
-    if not store.update_fact_status(fact_id, "deleted", user_id=user_id):
-        raise HTTPException(status_code=409, detail="fact delete failed")
-    fact.status = "deleted"
-    fact.pending_index = True
-    if index_service is not None:
-        try:
-            index_service.sync_fact(fact, remove=True)
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail="fact projection delete pending") from exc
-    store.delete_fact_artifacts([fact_id], user_id)
-    store.prune_orphan_entities(user_id)
+    if kind == "knowledge":
+        write_service = getattr(request.app.state, "memory_write_service", None)
+        if write_service is None:
+            raise HTTPException(status_code=503, detail="memory write service not initialized")
+        obj.status = MemoryStatus.DELETED
+        write_service.sync_memory(obj, remove=True)
+    else:
+        store = getattr(request.app.state, "fact_store", None)
+        if store is None:
+            raise HTTPException(status_code=503, detail="fact store not initialized")
+        store.update_fact_status(fact_id, "deleted", user_id=user_id)
+        store.delete_fact_artifacts([fact_id], user_id)
     return {"deleted": True, "fact_id": fact_id}
 @router.post("/admin/reconcile")
 async def reconcile_memory_indexes(request: Request):

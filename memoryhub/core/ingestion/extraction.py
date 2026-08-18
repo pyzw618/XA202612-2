@@ -35,6 +35,7 @@ class ExtractionExecutor:
         preference_handler=None,
         knowledge_handler=None,
         fact_handler=None,
+        fact_mode: str = "legacy",
     ) -> None:
         self.memory_write_service = memory_write_service
         self.preference_extractor = preference_extractor
@@ -49,6 +50,8 @@ class ExtractionExecutor:
         self.preference_handler = preference_handler
         self.knowledge_handler = knowledge_handler
         self.fact_handler = fact_handler
+        # "knowledge" 模式：事实以 knowledge(FACT) 产出（run_knowledge 内），run_fact 停用
+        self.fact_mode = fact_mode
 
     @staticmethod
     def execution_key(extractor_type: str, event_ids: list[str]) -> str:
@@ -203,9 +206,17 @@ class ExtractionExecutor:
                 )
                 memory.memory_id = self._memory_id("know", semantic_key, index, memory)
             self.knowledge_updater.add(memory)
+
+        # fact_mode="knowledge"：事实以 knowledge(FACT) 产出（复用 §4.8.3 extract_facts +
+        # §4.8.5 冲突 matcher），与旧 Fact 管线彻底隔离，避免双写。
+        if self.fact_mode == "knowledge" and self.knowledge_extractor is not None:
+            for fact in self.knowledge_extractor.extract_facts(events):
+                self.knowledge_updater.add(fact)
         return len(memories)
 
     def run_fact(self, event: MemoryEvent) -> int:
+        if self.fact_mode == "knowledge":
+            return 0  # FACT 已由 run_knowledge 产出，跳过旧 Fact 管线
         if self.fact_handler is not None:
             return sum(
                 1

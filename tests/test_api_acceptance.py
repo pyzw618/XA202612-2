@@ -303,6 +303,31 @@ def test_api_fact_knowledge_write_and_search(client: TestClient) -> None:
     assert memory_id in hit_ids or detail["content"] in str(search.json())
 
 
+def test_api_facts_forward_to_knowledge_fact(client: TestClient) -> None:
+    """/facts 兼容转发：knowledge(FACT) 经 GET /facts 与 GET /facts/{id} 可查。"""
+    resp = client.post(
+        "/api/memory/memories/knowledge",
+        json={
+            "user_id": "u-api",
+            "knowledge_type": "fact",
+            "subject": "项目B",
+            "predicate": "负责人",
+            "object_value": "李四",
+            "object_type": "Person",
+            "content": "项目B 负责人 李四",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    memory_id = resp.json()["memory_id"]
+
+    listed = client.get("/api/memory/facts", params={"user_id": "u-api"}).json()
+    assert any(item["fact_id"] == memory_id and item["subject"] == "项目B" for item in listed)
+
+    detail = client.get(f"/api/memory/facts/{memory_id}", params={"user_id": "u-api"}).json()
+    assert detail["object_value"] == "李四"
+    assert detail["status"] == "active"
+
+
 def test_api_09_facts_crud(client: TestClient) -> None:
     """GET /facts、/facts/conflicts、/facts/{id}、/facts/{id}/evidence、DELETE /facts/{id}"""
     pipeline = client.app.state.fact_pipeline

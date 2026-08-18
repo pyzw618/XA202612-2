@@ -658,6 +658,7 @@ def create_app(
             preference_handler=preference_handler,
             knowledge_handler=knowledge_handler,
             fact_handler=fact_handler,
+            fact_mode=config.runtime.fact_mode,
         )
         if (
             app.state.event_ingestion_service is None

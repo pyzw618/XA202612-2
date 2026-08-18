@@ -59,6 +59,9 @@ class RuntimeConfig:
 
     mode: str = "development"  # "production" | "development" | "test"
     allow_fallback: bool = True  # development/test 默认可降级；生产强制 false
+    # 事实抽取模式（REFACTOR_PLAN_V2 §4.8）："legacy" 走旧 Fact 管线；
+    # "knowledge" 走 knowledge(FACT)（run_knowledge 产 FACT 知识，run_fact 停用）。
+    fact_mode: str = "legacy"
 
     def __post_init__(self) -> None:
         if self.mode not in _RUNTIME_MODES:
@@ -67,6 +70,10 @@ class RuntimeConfig:
             )
         if type(self.allow_fallback) is not bool:
             raise ValueError("runtime.allow_fallback must be a boolean")
+        if self.fact_mode not in ("legacy", "knowledge"):
+            raise ValueError(
+                f"runtime.fact_mode must be 'legacy' or 'knowledge', got {self.fact_mode!r}"
+            )
 
     @property
     def is_production(self) -> bool:
