@@ -328,6 +328,59 @@ def test_api_facts_forward_to_knowledge_fact(client: TestClient) -> None:
     assert detail["status"] == "active"
 
 
+def test_api_memory_tiers_short_and_mid_term(client: TestClient) -> None:
+    """记忆分层：事件→短期缓冲；consolidate 聚合为中期情景。"""
+    source_hash = hashlib.sha256(b"tier-event-1").hexdigest()
+    write = client.post(
+        "/api/memory/events",
+        json={
+            "events": [
+                {
+                    "event_id": "tier-e1",
+                    "user_id": "u-api",
+                    "session_id": "tier-s1",
+                    "turn_id": "tier-t1",
+                    "task_type": "tier-task",
+                    "scene": "office",
+                    "source_type": "user_behavior",
+                    "event_type": "user_message",
+                    "text": "分层测试事件内容",
+                    "occurred_at": "2026-08-18T00:00:00Z",
+                    "payload": {"action": "message"},
+                    "tool_calls": [],
+                    "schema_version": "1.1",
+                    "source_hash": source_hash,
+                    "redactions": [],
+                    "quality": {
+                        "score": 1.0,
+                        "status": "accepted",
+                        "completeness": 1.0,
+                        "validity": 1.0,
+                        "consistency": 1.0,
+                        "freshness": 1.0,
+                        "issues": [],
+                    },
+                }
+            ]
+        },
+    )
+    assert write.status_code == 200, write.text
+
+    short = client.get(
+        "/api/memory/short-term",
+        params={"user_id": "u-api", "session_id": "tier-s1"},
+    )
+    assert short.status_code == 200
+    assert any(r["event_id"] == "tier-e1" for r in short.json())
+
+    cons = client.post("/api/memory/lifecycle/consolidate", params={"user_id": "u-api"})
+    assert cons.status_code == 200, cons.text
+
+    mid = client.get("/api/memory/mid-term", params={"user_id": "u-api"})
+    assert mid.status_code == 200
+    assert any(ep["session_ids"] == ["tier-s1"] for ep in mid.json())
+
+
 def test_api_09_facts_crud(client: TestClient) -> None:
     """GET /facts、/facts/conflicts、/facts/{id}、/facts/{id}/evidence、DELETE /facts/{id}"""
     pipeline = client.app.state.fact_pipeline

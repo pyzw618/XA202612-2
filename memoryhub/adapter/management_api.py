@@ -815,6 +815,76 @@ async def get_lifecycle_settings():
     }
 
 
+@router.post("/lifecycle/consolidate")
+async def run_memory_consolidation(request: Request, user_id: str = ""):
+    """立即执行一轮记忆分层流转：session→mid→long + 降级 + 生命周期检查。
+
+    对应 REFACTOR_PLAN_V2 §4.4.2 的 MemoryConsolidator/SessionConsolidator/MemoryDegrader。
+    """
+    from memoryhub.core.lifecycle.degrader import MemoryDegrader
+    from memoryhub.core.lifecycle.memory_consolidator import MemoryConsolidator
+    from memoryhub.core.lifecycle.session_consolidator import SessionConsolidator
+    from memoryhub.storage.database import MidTermMemoryRepository, ShortTermMemoryRepository
+
+    state = request.app.state
+    db = getattr(state, "db", None)
+    if db is None:
+        raise HTTPException(status_code=503, detail="database not initialized")
+    st_repo = ShortTermMemoryRepository(db)
+    mt_repo = MidTermMemoryRepository(db)
+    event_repo = getattr(state, "event_repo", None)
+    executor = getattr(state, "extraction_executor", None)
+    write_service = getattr(state, "memory_write_service", None)
+    pref_repo = getattr(state, "pref_repo", None)
+    know_repo = getattr(state, "know_repo", None)
+
+    result: dict = {}
+    if event_repo is not None:
+        session_cons = SessionConsolidator(
+            short_term_repo=st_repo, mid_term_repo=mt_repo, event_repo=event_repo
+        )
+        result["sessions_consolidated"] = session_cons.consolidate_sessions(user_id=user_id)
+    if event_repo is not None and executor is not None:
+        memory_cons = MemoryConsolidator(
+            mid_term_repo=mt_repo, event_repo=event_repo, extraction_executor=executor
+        )
+        result["episodes_consolidated"] = memory_cons.consolidate_episodes(user_id=user_id)
+    if write_service is not None and pref_repo is not None and know_repo is not None:
+        degrader = MemoryDegrader(
+            pref_repo=pref_repo, know_repo=know_repo,
+            mid_term_repo=mt_repo, write_service=write_service,
+        )
+        result["degraded"] = degrader.degrade_low_health(user_id=user_id)
+    return result
+
+
+@router.get("/mid-term")
+async def list_mid_term_memories(request: Request, user_id: str = "", status: str = ""):
+    """列出中期记忆（情景）—— 记忆分层流转的中间层。"""
+    from memoryhub.storage.database import MidTermMemoryRepository
+
+    db = getattr(request.app.state, "db", None)
+    if db is None:
+        raise HTTPException(status_code=503, detail="database not initialized")
+    return MidTermMemoryRepository(db).list_all(user_id=user_id, status=status)
+
+
+@router.get("/short-term")
+async def list_short_term_memories(
+    request: Request, user_id: str = "default", session_id: str = ""
+):
+    """列出短期记忆（工作记忆）：按 session 返回会话内事件缓冲。"""
+    from memoryhub.storage.database import ShortTermMemoryRepository
+
+    db = getattr(request.app.state, "db", None)
+    if db is None:
+        raise HTTPException(status_code=503, detail="database not initialized")
+    repo = ShortTermMemoryRepository(db)
+    if session_id:
+        return repo.list_by_session(user_id, session_id)
+    return repo.list_all(user_id=user_id)
+
+
 # ============================================================
 # 事件列表
 # ============================================================

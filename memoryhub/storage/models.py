@@ -286,3 +286,40 @@ class ExtractionTaskRow(Base):
     last_error_code = Column(String(128), nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=datetime.now)
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+
+class ShortTermMemoryRow(Base):
+    """短期记忆（工作记忆）：会话内事件缓冲，TTL 到期清理（REFACTOR_PLAN_V2 §4.4）。"""
+    __tablename__ = "short_term_memory"
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(64), index=True)
+    session_id = Column(String(128), index=True)
+    event_id = Column(String(64), index=True)
+    source_type = Column(String(32), default="")
+    text = Column(Text, default="")
+    payload = Column(JSON)
+    scene = Column(String(64), default="")
+    task_type = Column(String(128), default="")
+    created_at = Column(DateTime, default=datetime.now)
+    ttl_until = Column(DateTime, nullable=True, index=True)
+
+
+class MidTermMemoryRow(Base):
+    """中期记忆（情景记忆）：完成任务轨迹/事件序列，健康度衰减（REFACTOR_PLAN_V2 §4.4）。"""
+    __tablename__ = "mid_term_memory"
+
+    episode_id = Column(String(64), primary_key=True)
+    user_id = Column(String(64), index=True)
+    session_ids = Column(JSON)
+    scene = Column(String(64), default="")
+    task_type = Column(String(128), default="")
+    event_ids = Column(JSON)
+    trajectory_summary = Column(Text, default="")
+    tools = Column(JSON)
+    outcome = Column(String(16), default="success")
+    occurred_at = Column(DateTime, nullable=True)
+    last_accessed_at = Column(DateTime, nullable=True)
+    decay_score = Column(Float, default=1.0)
+    status = Column(String(16), default="active", index=True)  # active | consolidated | archived
+    created_at = Column(DateTime, default=datetime.now)

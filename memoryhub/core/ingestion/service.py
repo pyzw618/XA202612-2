@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
 from memoryhub.adapter.schemas import ExtractionType, MemoryEvent, QualityStatus
 from memoryhub.core.ingestion.extraction import ExtractionExecutor
@@ -39,6 +40,8 @@ class EventIngestionService:
         extraction_task_repo=None,
         extraction_executor=None,
         extraction_max_attempts: int = 3,
+        short_term_repo=None,
+        short_ttl_hours: float = 24.0,
     ) -> None:
         self.event_repo = event_repo
         self.safety_gate = safety_gate
@@ -50,6 +53,8 @@ class EventIngestionService:
         self.fact_ingestion_adapter = fact_ingestion_adapter
         self.extraction_task_repo = extraction_task_repo
         self.extraction_max_attempts = max(1, int(extraction_max_attempts))
+        self.short_term_repo = short_term_repo
+        self.short_ttl_hours = float(short_ttl_hours)
         self.extraction_executor = extraction_executor or ExtractionExecutor(
             memory_write_service=memory_write_service,
             preference_extractor=preference_extractor,
@@ -122,11 +127,36 @@ class EventIngestionService:
 
         if newly_saved:
             self.event_repo.batch_save(newly_saved)
+            if self.short_term_repo is not None:
+                self._buffer_short_term(newly_saved)
 
         self._extract_preferences(newly_saved, result)
         self._extract_knowledge(newly_saved, result)
         self._extract_facts(newly_saved, result)
         return result
+
+    def _buffer_short_term(self, events: list[MemoryEvent]) -> None:
+        """短期记忆缓冲：把安全事件写一份到 short_term_memory（TTL 到期清理）。"""
+        ttl = datetime.now(timezone.utc) + timedelta(hours=self.short_ttl_hours)
+        for event in events:
+            try:
+                self.short_term_repo.add(
+                    user_id=event.user_id or "default",
+                    session_id=event.session_id or "",
+                    event_id=event.event_id,
+                    source_type=(
+                        event.source_type.value
+                        if hasattr(event.source_type, "value")
+                        else str(event.source_type or "")
+                    ),
+                    text=event.text or "",
+                    payload=dict(event.payload or {}),
+                    scene=event.scene or "",
+                    task_type=event.task_type or "",
+                    ttl_until=ttl,
+                )
+            except Exception:
+                logger.exception("short-term buffer write failed for %s", event.event_id)
 
     def _extract_preferences(
         self, events: list[MemoryEvent], result: EventIngestionResult

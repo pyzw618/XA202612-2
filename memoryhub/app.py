@@ -391,7 +391,9 @@ def create_app(
             ExtractionTaskRepository,
             ForgetRepository,
             KnowledgeRepository,
+            MidTermMemoryRepository,
             PreferenceRepository,
+            ShortTermMemoryRepository,
         )
         from memoryhub.storage.evidence_store import EvidenceStore
         from memoryhub.storage.sync_service import MemorySyncService
@@ -675,6 +677,12 @@ def create_app(
                 fact_ingestion_adapter=fact_ingestion_adapter,
                 extraction_task_repo=extraction_task_repo,
                 extraction_executor=extraction_executor,
+                short_term_repo=(
+                    ShortTermMemoryRepository(db)
+                    if config.memory_tier.enabled
+                    else None
+                ),
+                short_ttl_hours=config.memory_tier.short_ttl_hours,
             )
         retry_executor = getattr(
             app.state.event_ingestion_service,
@@ -695,6 +703,39 @@ def create_app(
             enabled=config.extraction_retry.enabled,
         )
         app.state.extraction_retry_task.start()
+
+        # 记忆分层流转调度（REFACTOR_PLAN_V2 §4.4）：session→mid→long + 降级 + 生命周期检查
+        if config.memory_tier.enabled:
+            from memoryhub.core.lifecycle.degrader import MemoryDegrader
+            from memoryhub.core.lifecycle.manager import LifecycleManager
+            from memoryhub.core.lifecycle.memory_consolidator import MemoryConsolidator
+            from memoryhub.core.lifecycle.scheduler import LifecycleScheduler
+            from memoryhub.core.lifecycle.session_consolidator import SessionConsolidator
+
+            st_repo = ShortTermMemoryRepository(db)
+            mt_repo = MidTermMemoryRepository(db)
+            session_consolidator = SessionConsolidator(
+                short_term_repo=st_repo, mid_term_repo=mt_repo, event_repo=event_repo
+            )
+            memory_consolidator = MemoryConsolidator(
+                mid_term_repo=mt_repo, event_repo=event_repo, extraction_executor=extraction_executor
+            )
+            memory_degrader = MemoryDegrader(
+                pref_repo=pref_repo, know_repo=know_repo,
+                mid_term_repo=mt_repo, write_service=app.state.memory_write_service,
+                threshold=config.memory_tier.degrade_health_threshold,
+            )
+            app.state.lifecycle_scheduler = LifecycleScheduler(
+                session_consolidator=session_consolidator,
+                memory_consolidator=memory_consolidator,
+                memory_degrader=memory_degrader,
+                lifecycle_manager=LifecycleManager(
+                    pref_repo=pref_repo, know_repo=know_repo
+                ),
+                interval_seconds=config.memory_tier.consolidate_interval_seconds,
+                enabled=config.memory_tier.scheduler_enabled,
+            )
+            app.state.lifecycle_scheduler.start()
 
         if config.runtime.is_production or vector_engine is not None:
             # 生产路径：仅装配 MilvusHybridRetriever，不构建 KeywordSearcher / HybridRetriever
@@ -809,6 +850,15 @@ def create_app(
             except Exception:
                 pass
             app.state.compensation_task = None
+
+        # 停止记忆分层流转调度
+        lifecycle_scheduler = getattr(app.state, "lifecycle_scheduler", None)
+        if lifecycle_scheduler is not None:
+            try:
+                lifecycle_scheduler.stop()
+            except Exception:
+                pass
+            app.state.lifecycle_scheduler = None
 
         # 关闭最小 Memory Service
         if app.state.owns_memory_service:

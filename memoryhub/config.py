@@ -155,6 +155,17 @@ class ExtractionRetryConfig:
 
 
 @dataclass
+class MemoryTierConfig:
+    """记忆分层（短期/中期/长期）流转配置（REFACTOR_PLAN_V2 §4.4）。"""
+
+    enabled: bool = True
+    short_ttl_hours: float = 24.0  # 短期记忆 TTL
+    scheduler_enabled: bool = True
+    consolidate_interval_seconds: float = 300.0  # 生命周期调度周期
+    degrade_health_threshold: float = 0.3  # 低健康度长期 → 中期情景阈值
+
+
+@dataclass
 class KnowledgeMergeConfig:
     """Internal knowledge equivalence and conflict thresholds."""
 
@@ -592,6 +603,7 @@ class AppConfig:
     vector_engine: VectorEngineConfig = field(default_factory=VectorEngineConfig)
     extraction_retry: ExtractionRetryConfig = field(default_factory=ExtractionRetryConfig)
     knowledge_merge: KnowledgeMergeConfig = field(default_factory=KnowledgeMergeConfig)
+    memory_tier: MemoryTierConfig = field(default_factory=MemoryTierConfig)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     debug: bool = False
     # Populated by load_config so management APIs can persist selected settings.
@@ -664,6 +676,9 @@ def load_config(config_path: str | None = None) -> AppConfig:
             )
             config.knowledge_merge = KnowledgeMergeConfig(
                 **{**config.knowledge_merge.__dict__, **section("knowledge_merge")}
+            )
+            config.memory_tier = MemoryTierConfig(
+                **{**config.memory_tier.__dict__, **section("memory_tier")}
             )
             if section("safety"):
                 config.safety = SafetyConfig(**dict(section("safety")))

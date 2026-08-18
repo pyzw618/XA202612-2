@@ -37,7 +37,9 @@ from memoryhub.storage.models import (
     ForgetRow,
     KnowledgeRow,
     KnowledgeVersionRow,
+    MidTermMemoryRow,
     PreferenceRow,
+    ShortTermMemoryRow,
 )
 
 # ============================================================
@@ -1343,3 +1345,160 @@ class ExtractionTaskRepository:
             row.updated_at = current
             session.flush()
             return _extraction_task_row_to_pydantic(row)
+
+
+# ============================================================
+# 记忆分层仓储（短期工作记忆 / 中期情景，REFACTOR_PLAN_V2 §4.4）
+# ============================================================
+
+
+class ShortTermMemoryRepository:
+    """短期记忆（工作记忆）仓储：会话内事件缓冲，TTL 到期清理。"""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    def add(self, *, user_id: str, session_id: str, event_id: str,
+            source_type: str = "", text: str = "", payload: dict | None = None,
+            scene: str = "", task_type: str = "", ttl_until=None) -> str:
+        row_id = f"stm_{hashlib.sha256(f'{user_id}:{session_id}:{event_id}'.encode()).hexdigest()[:24]}"
+        with self.db.session() as s:
+            if s.get(ShortTermMemoryRow, row_id) is None:
+                s.add(
+                    ShortTermMemoryRow(
+                        id=row_id, user_id=user_id, session_id=session_id,
+                        event_id=event_id, source_type=source_type, text=text,
+                        payload=payload or {}, scene=scene, task_type=task_type,
+                        created_at=datetime.now(), ttl_until=ttl_until,
+                    )
+                )
+        return row_id
+
+    def list_by_session(self, user_id: str, session_id: str) -> list[dict]:
+        with self.db.session() as s:
+            rows = (
+                s.query(ShortTermMemoryRow)
+                .filter(
+                    ShortTermMemoryRow.user_id == user_id,
+                    ShortTermMemoryRow.session_id == session_id,
+                )
+                .order_by(ShortTermMemoryRow.created_at.asc())
+                .all()
+            )
+            return [self._to_dict(r) for r in rows]
+
+    def list_all(self, user_id: str = "") -> list[dict]:
+        with self.db.session() as s:
+            q = s.query(ShortTermMemoryRow)
+            if user_id:
+                q = q.filter(ShortTermMemoryRow.user_id == user_id)
+            rows = q.order_by(ShortTermMemoryRow.created_at.asc()).all()
+            return [self._to_dict(r) for r in rows]
+
+    def delete_for_session(self, user_id: str, session_id: str, task_type: str = "") -> int:
+        with self.db.session() as s:
+            q = s.query(ShortTermMemoryRow).filter(
+                ShortTermMemoryRow.user_id == user_id,
+                ShortTermMemoryRow.session_id == session_id,
+            )
+            if task_type:
+                q = q.filter(ShortTermMemoryRow.task_type == task_type)
+            count = q.delete(synchronize_session=False)
+        return count
+
+    def delete_expired(self, now=None) -> int:
+        now = now or datetime.now()
+        with self.db.session() as s:
+            count = (
+                s.query(ShortTermMemoryRow)
+                .filter(ShortTermMemoryRow.ttl_until.isnot(None),
+                        ShortTermMemoryRow.ttl_until < now)
+                .delete(synchronize_session=False)
+            )
+        return count
+
+    @staticmethod
+    def _to_dict(row: ShortTermMemoryRow) -> dict:
+        return {
+            "id": row.id, "user_id": row.user_id, "session_id": row.session_id,
+            "event_id": row.event_id, "source_type": row.source_type, "text": row.text,
+            "payload": row.payload, "scene": row.scene, "task_type": row.task_type,
+            "created_at": row.created_at,
+        }
+
+
+class MidTermMemoryRepository:
+    """中期记忆（情景）仓储。"""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    def add(self, *, episode_id: str, user_id: str, session_ids: list[str],
+            scene: str = "", task_type: str = "", event_ids: list[str] | None = None,
+            trajectory_summary: str = "", tools: list[str] | None = None,
+            outcome: str = "success", occurred_at=None, decay_score: float = 1.0,
+            status: str = "active") -> str:
+        with self.db.session() as s:
+            if s.get(MidTermMemoryRow, episode_id) is None:
+                s.add(
+                    MidTermMemoryRow(
+                        episode_id=episode_id, user_id=user_id, session_ids=session_ids,
+                        scene=scene, task_type=task_type, event_ids=event_ids or [],
+                        trajectory_summary=trajectory_summary, tools=tools or [],
+                        outcome=outcome, occurred_at=occurred_at,
+                        last_accessed_at=None, decay_score=decay_score,
+                        status=status, created_at=datetime.now(),
+                    )
+                )
+        return episode_id
+
+    def get_by_id(self, episode_id: str) -> dict | None:
+        with self.db.session() as s:
+            row = s.get(MidTermMemoryRow, episode_id)
+            return self._to_dict(row) if row is not None else None
+
+    def list_active(self, user_id: str = "") -> list[dict]:
+        with self.db.session() as s:
+            q = s.query(MidTermMemoryRow).filter(MidTermMemoryRow.status == "active")
+            if user_id:
+                q = q.filter(MidTermMemoryRow.user_id == user_id)
+            rows = q.order_by(MidTermMemoryRow.occurred_at.asc()).all()
+            return [self._to_dict(r) for r in rows]
+
+    def list_all(self, user_id: str = "", status: str = "") -> list[dict]:
+        with self.db.session() as s:
+            q = s.query(MidTermMemoryRow)
+            if user_id:
+                q = q.filter(MidTermMemoryRow.user_id == user_id)
+            if status:
+                q = q.filter(MidTermMemoryRow.status == status)
+            rows = q.order_by(MidTermMemoryRow.occurred_at.desc()).all()
+            return [self._to_dict(r) for r in rows]
+
+    def mark_consolidated(self, episode_id: str, status: str = "consolidated") -> bool:
+        with self.db.session() as s:
+            row = s.get(MidTermMemoryRow, episode_id)
+            if row is None:
+                return False
+            row.status = status
+            return True
+
+    def delete(self, episode_id: str) -> bool:
+        with self.db.session() as s:
+            row = s.get(MidTermMemoryRow, episode_id)
+            if row is None:
+                return False
+            s.delete(row)
+            return True
+
+    @staticmethod
+    def _to_dict(row: MidTermMemoryRow) -> dict:
+        return {
+            "episode_id": row.episode_id, "user_id": row.user_id,
+            "session_ids": row.session_ids or [], "scene": row.scene,
+            "task_type": row.task_type, "event_ids": row.event_ids or [],
+            "trajectory_summary": row.trajectory_summary, "tools": row.tools or [],
+            "outcome": row.outcome, "occurred_at": row.occurred_at,
+            "last_accessed_at": row.last_accessed_at, "decay_score": row.decay_score,
+            "status": row.status, "created_at": row.created_at,
+        }

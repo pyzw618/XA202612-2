@@ -1571,6 +1571,8 @@ class SearchRequest(BaseModel):
     top_k: int = 5
     memory_types: list[str] = Field(default_factory=list)  # 过滤记忆类型
     min_confidence: float = 0.0
+    level: str = ""  # 记忆分层过滤：short / mid / long（REFACTOR_PLAN_V2 §4.4.3）
+    session_id: str = ""  # 会话上下文（短期工作记忆定位）
 
 
 class SearchResult(BaseModel):
