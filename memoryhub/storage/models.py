@@ -89,6 +89,14 @@ class PreferenceRow(Base):
 class KnowledgeRow(Base):
     """知识记忆表 — 对应 KnowledgeMemory"""
     __tablename__ = "knowledge"
+    __table_args__ = (
+        Index(
+            "ix_knowledge_fact_subject_predicate",
+            "user_id",
+            "subject",
+            "predicate",
+        ),
+    )
 
     memory_id = Column(String(32), primary_key=True)
     user_id = Column(String(64), index=True)
@@ -99,6 +107,12 @@ class KnowledgeRow(Base):
     steps = Column(JSON)
     tools = Column(JSON)
     template_body = Column(Text)
+    # --- 事实性知识（knowledge_type=FACT，见 REFACTOR_PLAN_V2 §4.8）---
+    subject = Column(String(256))
+    predicate = Column(String(256))
+    object_value = Column(Text)
+    object_type = Column(String(32))
+    single_value = Column(Boolean, nullable=True)
     scope_scene = Column(String(64), index=True)
     scope_task_type = Column(String(128), index=True)
     scope_app = Column(String(64))

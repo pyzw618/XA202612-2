@@ -77,6 +77,7 @@ class KnowledgeType(str, Enum):
     WORKFLOW = "workflow"  # 工作流知识
     CASE = "case"  # 历史案例
     TEMPLATE = "template"  # 可复用模板
+    FACT = "fact"  # 客观关系事实（并入知识的子类型，替代独立 Fact，见 REFACTOR_PLAN_V2 §4.8）
 
 
 class MemoryLevel(str, Enum):
@@ -1439,6 +1440,14 @@ class KnowledgeMemory(BaseModel):
     steps: list[str] = Field(default_factory=list)  # 工作流步骤
     tools: list[str] = Field(default_factory=list)  # 涉及的工具链
     template_body: str = ""  # 模板正文（仅 template 类型）
+
+    # --- 事实性知识（仅 knowledge_type=FACT 时使用，替代独立 Fact，见 §4.8）---
+    subject: str = ""  # 主语规范化名（经实体归一）
+    predicate: str = ""  # 谓词（归一化后的关系名；无法归一可空 = 自由谓词）
+    object_value: str = ""  # 客体值（原始文本）
+    object_type: str = ""  # 客体实体类型（复用 EntityType 取值，如 Person/Location）
+    single_value: bool | None = None  # 单值互斥（True 时同 subject+predicate 异 object 触发 supersede）
+
     scope: SceneScope = Field(default_factory=SceneScope)
 
     # --- 质量指标 ---

@@ -63,6 +63,9 @@ class MemoryWriteService:
                 *memory.steps,
                 *memory.tools,
                 memory.template_body,
+                memory.subject,
+                memory.predicate,
+                memory.object_value,
             ]
             return " ".join(str(part).strip() for part in parts if str(part).strip())
         return memory.text
@@ -84,6 +87,8 @@ class MemoryWriteService:
             "updated_at": str(getattr(memory, "updated_at", "") or ""),
             "created_at": str(getattr(memory, "created_at", "") or ""),
             "evidence_count": len(getattr(memory, "evidences", []) or []),
+            "subject": getattr(memory, "subject", "") or "",
+            "predicate": getattr(memory, "predicate", "") or "",
             "safety": dict(
                 getattr(memory, "extra_payload", {}).get("safety", {}) or {}
             ),

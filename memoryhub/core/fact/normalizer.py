@@ -103,6 +103,19 @@ class EntityNormalizer:
     VEC_THRESHOLD_FALLBACK = 0.78  # char n-gram 阈值
     VEC_MIN_GAP = 0.12  # top-1 与 top-2 的最小分差（防歧义）
 
+    # 角色/亲属关系词：绝不作为实体同指别名并入既有实体，也不互相合并。
+    # 修复"隔壁老王家有两个小孩，大的是哥哥，小的是妹妹"——哥哥/妹妹被并入老王
+    # 或互为别名导致性别等事实误判冲突（REFACTOR_PLAN_V2 §4.8.4）。
+    RELATION_WORDS = frozenset(
+        {
+            "哥哥", "弟弟", "姐姐", "妹妹", "爸爸", "妈妈", "父亲", "母亲",
+            "儿子", "女儿", "孩子", "小孩", "负责人", "主管", "经理", "老板",
+            "成员", "成员们", "同事", "上级", "下属", "领导",
+            "ceo", "founder", "owner", "manager", "boss", "member",
+            "parent", "child", "brother", "sister", "father", "mother",
+        }
+    )
+
     def __init__(self, store: FactStore, api_key: str = "", llm_client=None):
         self.store = store
         self._llm = _build_llm_client(api_key, llm_client)
@@ -148,6 +161,10 @@ class EntityNormalizer:
         text = text.strip()
         if not text:
             return Entity.make_id(entity_type, "unknown", user_id)
+
+        # 角色/亲属词不是实体同指：返回稳定、永不合并的伪实体（不并入任何既有实体）
+        if text.lower() in self.RELATION_WORDS:
+            return Entity.make_id("Other", f"role:{text}", user_id)
 
         # ── 1. 同 type 内精确匹配 aliases ──
         matches = self.store.find_entity_by_name(text, entity_type, user_id=user_id)
@@ -339,6 +356,8 @@ class EntityNormalizer:
         return None
 
     def _add_alias_if_new(self, entity_id: str, alias: str, user_id: str = "default"):
+        if str(alias or "").strip().lower() in self.RELATION_WORDS:
+            return  # 角色/亲属词不当别名
         entity = self.store.get_entity(entity_id, user_id=user_id)
         if entity and alias not in entity.aliases:
             entity.aliases.append(alias)

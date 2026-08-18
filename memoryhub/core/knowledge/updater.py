@@ -12,6 +12,7 @@ from memoryhub.adapter.schemas import (
     ConflictRecord,
     KnowledgeConflictResolution,
     KnowledgeMemory,
+    KnowledgeType,
     MemoryDecision,
     MemoryStatus,
 )
@@ -54,6 +55,13 @@ class KnowledgeUpdater:
         if self.know_repo is None:
             self.write_service.upsert_memory(memory, action=MemoryDecision.NEW)
             return memory.memory_id
+
+        if (
+            getattr(memory.knowledge_type, "value", str(memory.knowledge_type))
+            == KnowledgeType.FACT.value
+        ):
+            # 事实性知识走 S/P/O 精确匹配，不走文本相似度（REFACTOR_PLAN_V2 §4.8.5）
+            return self._add_fact(memory)
 
         exact = self.know_repo.get_by_id(memory.memory_id)
         if exact is not None and exact.user_id == memory.user_id:
@@ -157,6 +165,88 @@ class KnowledgeUpdater:
     def _find_equivalent(self, memory: KnowledgeMemory) -> KnowledgeMemory | None:
         candidate, score = self._find_best_candidate(memory)
         return candidate if score >= self.config.equivalent_threshold else None
+
+    # ─── FACT 冲突 matcher（S/P/O 精确匹配，REFACTOR_PLAN_V2 §4.8.5）──────────
+
+    _MAX_FACT_CONFLICT_VERSIONS = 3
+
+    def _add_fact(self, memory: KnowledgeMemory) -> str:
+        existing = self._find_best_fact_candidate(memory)
+        if existing is None:
+            self.write_service.upsert_memory(memory, action=MemoryDecision.NEW)
+            return memory.memory_id
+        if self._same_fact(existing, memory):
+            # 同 S/P/O → 只补证据，不覆盖（REINFORCE）
+            reinforced = self._reinforce(existing, memory, add_support=False)
+            self.write_service.upsert_memory(reinforced, action=MemoryDecision.REINFORCE)
+            return reinforced.memory_id
+        if existing.single_value:
+            if (existing.version or 1) >= self._MAX_FACT_CONFLICT_VERSIONS:
+                # 连续单值冲突过多 → REVIEW，不再自动覆盖（防止无限版本链）
+                memory.status = MemoryStatus.PENDING
+                self.write_service.upsert_memory(memory, action=MemoryDecision.REVIEW)
+                return memory.memory_id
+            merged = self._merge_fact(existing, memory)
+            self._archive_and_save_version(existing, merged)
+            return merged.memory_id
+        # 多值/未知 → 共存
+        self.write_service.upsert_memory(memory, action=MemoryDecision.COEXIST)
+        return memory.memory_id
+
+    def _find_best_fact_candidate(
+        self, memory: KnowledgeMemory
+    ) -> KnowledgeMemory | None:
+        """按 user + subject + predicate 精确匹配 active 事实性知识。"""
+        subj = self._normalize(memory.subject or "")
+        pred = self._normalize(memory.predicate or "")
+        if not subj or not pred:
+            return None
+        candidates = self.know_repo.list_all(status="active", user_id=memory.user_id)
+        for candidate in candidates:
+            if (
+                getattr(candidate.knowledge_type, "value", str(candidate.knowledge_type))
+                != KnowledgeType.FACT.value
+            ):
+                continue
+            if (
+                self._normalize(candidate.subject or "") == subj
+                and self._normalize(candidate.predicate or "") == pred
+            ):
+                return candidate
+        return None
+
+    @staticmethod
+    def _same_fact(left: KnowledgeMemory, right: KnowledgeMemory) -> bool:
+        return (
+            KnowledgeUpdater._normalize(left.subject or "")
+            == KnowledgeUpdater._normalize(right.subject or "")
+            and KnowledgeUpdater._normalize(left.predicate or "")
+            == KnowledgeUpdater._normalize(right.predicate or "")
+            and KnowledgeUpdater._normalize(left.object_value or "")
+            == KnowledgeUpdater._normalize(right.object_value or "")
+        )
+
+    def _merge_fact(
+        self, existing: KnowledgeMemory, incoming: KnowledgeMemory
+    ) -> KnowledgeMemory:
+        merged = incoming.model_copy(deep=True)
+        if not merged.memory_id or merged.memory_id == existing.memory_id:
+            merged.memory_id = f"{existing.memory_id}_v{existing.version + 1}"
+        merged.parent_id = existing.memory_id
+        merged.evidences = self._merge_evidences(
+            existing.evidences, incoming.evidences
+        )
+        merged.version = max(1, existing.version) + 1
+        merged.status = MemoryStatus.ACTIVE
+        merged.updated_at = datetime.now(timezone.utc)
+        merged.confidence = self.confidence_calculator.merge_score(
+            existing_confidence=existing.confidence,
+            incoming_confidence=incoming.confidence,
+            success_count=existing.success_count,
+            total_count=existing.total_count,
+            evidence_count=len(merged.evidences),
+        )
+        return merged
 
     def _find_best_candidate(
         self, memory: KnowledgeMemory

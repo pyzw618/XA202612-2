@@ -269,6 +269,40 @@ def test_api_08_forget_and_history(client: TestClient) -> None:
     assert any(r["record_id"] == resp.json()["record_id"] for r in history.json())
 
 
+def test_api_fact_knowledge_write_and_search(client: TestClient) -> None:
+    """FACT 并入知识：knowledge_type=fact 经 API 写入并可被混合检索命中。"""
+    resp = client.post(
+        "/api/memory/memories/knowledge",
+        json={
+            "user_id": "u-api",
+            "knowledge_type": "fact",
+            "subject": "项目A",
+            "predicate": "负责人",
+            "object_value": "张三",
+            "object_type": "Person",
+            "single_value": True,
+            "content": "项目A 负责人 张三",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    memory_id = resp.json()["memory_id"]
+
+    detail = client.get(
+        f"/api/memory/knowledge/{memory_id}", params={"user_id": "u-api"}
+    ).json()
+    assert detail["knowledge_type"] == "fact"
+    assert detail["subject"] == "项目A"
+    assert detail["predicate"] == "负责人"
+
+    search = client.post(
+        "/api/memory/search",
+        json={"user_id": "u-api", "query": "项目A负责人张三", "top_k": 5},
+    )
+    assert search.status_code == 200, search.text
+    hit_ids = [r["memory_id"] for r in search.json().get("results", [])]
+    assert memory_id in hit_ids or detail["content"] in str(search.json())
+
+
 def test_api_09_facts_crud(client: TestClient) -> None:
     """GET /facts、/facts/conflicts、/facts/{id}、/facts/{id}/evidence、DELETE /facts/{id}"""
     pipeline = client.app.state.fact_pipeline

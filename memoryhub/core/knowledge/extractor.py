@@ -31,6 +31,7 @@ from memoryhub.core.knowledge.confidence import (
     KnowledgeConfidenceFactors,
 )
 from memoryhub.core.knowledge.template_builder import TemplateBuilder
+from memoryhub.core.memory.llm import StructuredLLMAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,149 @@ class KnowledgeExtractor:
     def extract_workflow(self, events: list[MemoryEvent | dict]) -> KnowledgeMemory | None:
         trajectory = self._prepare_trajectory(events)
         return self._build_workflow(trajectory) if trajectory else None
+
+    # ─── FACT 关系抽取（REFACTOR_PLAN_V2 §4.8.3）───────────────────────────
+
+    _FACT_SINGLE_VALUE_PREDICATES = frozenset(
+        {"负责人", "ceo", "founder", "总部", "成立于", "位于", "owner", "headquarters"}
+    )
+
+    def extract_facts(self, events: list[MemoryEvent | dict]) -> list[KnowledgeMemory]:
+        """从工具调用结果确定性/LLM 提取客观关系事实（knowledge_type=FACT）。
+
+        结构化结果优先（不经 LLM）；否则 LLM 关系抽取；无 LLM 时返回空（不臆造）。
+        默认 single_value=None（冲突时共存），仅明确单值谓词标记为 True。
+        """
+        facts: list[KnowledgeMemory] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        adapter = (
+            StructuredLLMAdapter(self.llm_client)
+            if callable(getattr(self.llm_client, "generate", None))
+            else None
+        )
+        for event in events:
+            user_id = str(getattr(event, "user_id", "default") or "default")
+            event_id = str(getattr(event, "event_id", "") or "")
+            scene = getattr(event, "scene", "") or ""
+            task_type = getattr(event, "task_type", "") or ""
+            for call in list(getattr(event, "tool_calls", []) or []):
+                raw_status = getattr(call, "status", "")
+                if hasattr(raw_status, "value"):
+                    raw_status = raw_status.value
+                status = str(raw_status or "").lower()
+                if status not in self._USABLE_TOOL_STATUSES:
+                    continue
+                result = getattr(call, "result", None)
+                if result in (None, "", [], {}):
+                    continue
+                triples = self._facts_from_tool_result(call, result, adapter)
+                call_id = str(getattr(call, "call_id", "") or "")
+                for subj, pred, obj, otype, confidence, evidence in triples:
+                    key = (user_id, subj, pred, obj)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    facts.append(
+                        KnowledgeMemory(
+                            user_id=user_id,
+                            knowledge_type=KnowledgeType.FACT,
+                            name=f"{subj} {pred} {obj}",
+                            content=f"{subj} {pred} {obj}",
+                            subject=subj,
+                            predicate=pred,
+                            object_value=obj,
+                            object_type=otype,
+                            single_value=(
+                                True
+                                if pred in self._FACT_SINGLE_VALUE_PREDICATES
+                                else None
+                            ),
+                            confidence=float(confidence),
+                            scope=SceneScope(scene=scene, task_type=task_type),
+                            evidences=[
+                                Evidence(
+                                    event_id=event_id,
+                                    evidence_id=f"{event_id}:{call_id}",
+                                    content=evidence or json.dumps(
+                                        result, ensure_ascii=False
+                                    ),
+                                    source_id=call_id or event_id,
+                                    source_type="tool_result",
+                                )
+                            ],
+                        )
+                    )
+        return facts
+
+    def _facts_from_tool_result(self, call, result, adapter) -> list[tuple]:
+        """返回 [(subject, predicate, object, object_type, confidence, evidence)]。"""
+        if isinstance(result, dict):
+            subj = result.get("subject") or result.get("s") or result.get("entity")
+            pred = (
+                result.get("predicate")
+                or result.get("p")
+                or result.get("relation")
+            )
+            obj = (
+                result.get("object")
+                or result.get("o")
+                or result.get("value")
+                or result.get("object_value")
+            )
+            if subj and pred and obj is not None:
+                return [
+                    (
+                        str(subj),
+                        str(pred),
+                        str(obj),
+                        str(result.get("object_type") or "Other"),
+                        0.95,
+                        json.dumps(result, ensure_ascii=False),
+                    )
+                ]
+        if adapter is None:
+            return []
+        return self._llm_extract_relations(call, result, adapter)
+
+    def _llm_extract_relations(self, call, result, adapter) -> list[tuple]:
+        prompt_text = (
+            f"工具 {getattr(call, 'tool_name', '?')} 返回: "
+            f"{json.dumps(result, ensure_ascii=False)[:1000]}"
+        )
+        try:
+            data = adapter.generate_json(
+                task_name="fact_relation_extraction",
+                system_prompt=(
+                    "从工具返回结果中提取客观事实三元组。"
+                    "只输出 JSON: {\"triples\": [{\"subject\", \"predicate\", "
+                    "\"object\", \"object_type\", \"confidence\", \"evidence\"}]}。"
+                    "只依据结果数据，不要臆造。"
+                ),
+                prompt=prompt_text,
+                parser=lambda value: (
+                    value if isinstance(value, dict) else {"triples": []}
+                ),
+            )
+            out: list[tuple] = []
+            for t in (data.get("triples") or []):
+                if not isinstance(t, dict):
+                    continue
+                s, p, o = t.get("subject"), t.get("predicate"), t.get("object")
+                if not s or not p or o is None:
+                    continue
+                out.append(
+                    (
+                        str(s),
+                        str(p),
+                        str(o),
+                        str(t.get("object_type") or "Other"),
+                        float(t.get("confidence", 0.8) or 0.8),
+                        str(t.get("evidence", "") or ""),
+                    )
+                )
+            return out
+        except Exception:
+            return []
 
     def extract_case(self, events: list[MemoryEvent | dict]) -> KnowledgeMemory | None:
         trajectory = self._prepare_trajectory(events)
