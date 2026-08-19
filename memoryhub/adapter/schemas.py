@@ -175,6 +175,26 @@ class SceneScope(BaseModel):
     app: str = ""  # 来源应用，如 "os_agent"
 
 
+class ManualConfig(BaseModel):
+    """手动配置版本化对象（REFACTOR_PLAN_V2 §4.1.1 / I-7）。
+
+    每次修改生成新版本（复用 Preference 的版本语义），作为偏好的强来源
+    （source 因子 0.95，extract_source="manual_config"）。保留独立对象以便
+    "配置版本混乱"可回溯：config_id 不变，version/parent_id/root_id 构成版本链。
+    """
+
+    config_id: str = ""
+    user_id: str = "default"
+    config_type: str = ""  # 输出风格 / 安全策略 / 通用
+    payload: dict[str, Any] = Field(default_factory=dict)
+    version: int = 1
+    parent_id: str = ""
+    root_id: str = ""
+    scope: SceneScope = Field(default_factory=SceneScope)
+    source: str = "manual_config"
+    created_at: str = ""
+
+
 class Evidence(BaseModel):
     """证据链 — 记忆的来源依据"""
 
@@ -1584,6 +1604,7 @@ class SearchResult(BaseModel):
     score: float = 0.0  # 综合得分
     source: str = ""  # 来源标记："vector" | "keyword" | "metadata"
     metadata: dict[str, Any] = Field(default_factory=dict)
+    memory_level: str = ""  # short / mid / long（REFACTOR_PLAN_V2 §4.4.3 分层级联标注）
 
 
 class SearchResponse(BaseModel):
@@ -1696,6 +1717,8 @@ class ForgetRequest(BaseModel):
     target_scope: SceneScope | None = None
     target_project_id: str = ""
     cascade: bool = True  # 是否级联删除关联数据
+    level: str = ""  # 按记忆分层精准遗忘：short / mid / long（REFACTOR_PLAN_V2 I-13）
+    session_id: str = ""  # level=short 时限定某会话的工作记忆（I-13）
 
 
 class ForgetResponse(BaseModel):

@@ -16,7 +16,6 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
-from memoryhub.adapter import agent_api as _agent_api
 from memoryhub.adapter.schemas import (
     EvalReport,
     ExtractionTask,
@@ -28,11 +27,14 @@ from memoryhub.adapter.schemas import (
     ForgetRequest,
     ForgetResponse,
     KnowledgeMemory,
+    ManualConfig,
     MemoryStatus,
     PreferenceMemory,
     SafetyAction,
+    SceneScope,
     SearchRequest,
     SearchResponse,
+    SearchResult,
     WriteEventRequest,
     WriteEventResponse,
 )
@@ -42,7 +44,6 @@ from memoryhub.adapter.user_rule_schemas import (
     UserRuleErrorResponse,
     UserRuleResponse,
 )
-from memoryhub.core.fact.models import FactCandidate, RawTriple
 from memoryhub.core.forget import MemoryForgetter
 from memoryhub.core.forget.health import HealthCalculator
 from memoryhub.core.safety.gate import SafetyGateError
@@ -500,6 +501,130 @@ async def write_events(req: WriteEventRequest, request: Request):
 
 
 # ============================================================
+# 多源接入（REFACTOR_PLAN_V2 §4.1 赛题要求 1）
+# ============================================================
+
+
+class ToolResultSourceRequest(BaseModel):
+    """工具执行结果源接入请求（原始结果 → 结构化 MemoryEvent）。"""
+
+    tool_name: str
+    result: dict
+
+
+@router.post("/sources/tool_result", status_code=200)
+async def ingest_tool_result(req: ToolResultSourceRequest, request: Request):
+    """把一次工具执行结果经源适配层结构化为 MemoryEvent 并进入统一接收链。
+
+    Data flow: OS Agent 工具轨迹 → /sources/tool_result → ToolResultAdapter
+            → MemoryEvent(TOOL_RESULT) → event_ingestion_service.ingest
+            → Cleaner/Normalizer/QualityScorer/SafetyGate → 偏好/知识/FACT 抽取
+    """
+    from memoryhub.core.ingestion.adapters import ToolResultAdapter
+
+    try:
+        event = ToolResultAdapter().to_event(req.tool_name, req.result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid tool result: {exc}") from None
+
+    service = getattr(request.app.state, "event_ingestion_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="event ingestion not initialized")
+    result = service.ingest([event])
+    return {
+        "accepted": result.accepted,
+        "rejected": result.rejected,
+        "event_ids": result.event_ids,
+        "event_id": event.event_id,
+    }
+
+
+class BehaviorSourceRequest(BaseModel):
+    """用户行为源接入请求（行为记录 → USER_BEHAVIOR MemoryEvent）。"""
+
+    user_id: str = "default"
+    behavior_type: str = "message"  # selection / correction / confirm / message / cancel
+    behavior: dict
+
+
+class ConfigSourceRequest(BaseModel):
+    """手动配置源接入请求（配置修改 → 版本化 ManualConfig + MANUAL_CONFIG 事件）。"""
+
+    user_id: str = "default"
+    config_id: str = ""  # 缺省时首次生成；再次提交沿用同一 config_id 形成版本链
+    config_type: str = "general"  # output_style / safety_policy / general
+    payload: dict
+    scope: SceneScope = SceneScope()
+    previous: ManualConfig | None = None  # 同 config 上一版本，用于构建版本链
+
+
+@router.post("/sources/behavior", status_code=200)
+async def ingest_behavior(req: BehaviorSourceRequest, request: Request):
+    """把一次用户行为（选中项/纠错/确认/消息）经行为适配器进入统一接收链。
+
+    Data flow: 用户行为序列 → /sources/behavior → BehaviorAdapter
+            → MemoryEvent(USER_BEHAVIOR, behavior_type=...) → event_ingestion_service.ingest
+    """
+    from memoryhub.core.ingestion.adapters import BehaviorAdapter
+
+    try:
+        event = BehaviorAdapter().to_event(
+            req.behavior, behavior_type=req.behavior_type, user_id=req.user_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid behavior: {exc}") from None
+
+    service = getattr(request.app.state, "event_ingestion_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="event ingestion not initialized")
+    result = service.ingest([event])
+    return {
+        "accepted": result.accepted,
+        "rejected": result.rejected,
+        "event_ids": result.event_ids,
+        "event_id": event.event_id,
+    }
+
+
+@router.post("/sources/config", status_code=200)
+async def ingest_manual_config(req: ConfigSourceRequest, request: Request):
+    """把一次手动配置修改经配置适配器版本化后进入统一接收链。
+
+    Data flow: 手动配置 → /sources/config → ConfigAdapter
+            → ManualConfig（config_id 不变，version 递增）→ MANUAL_CONFIG 事件
+            → event_ingestion_service.ingest → 偏好抽取（source 强因子 0.95）
+    返回 ``manual_config``（含 config_id/version/版本链），供"配置版本混乱"回溯。
+    """
+    from memoryhub.core.ingestion.adapters import ConfigAdapter
+
+    try:
+        adapter = ConfigAdapter()
+        config = adapter.to_manual_config(
+            user_id=req.user_id,
+            config_type=req.config_type,
+            payload=req.payload,
+            previous=req.previous,
+            scope=req.scope,
+            config_id=req.config_id,
+        )
+        event = adapter.to_event(config, previous=req.previous)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid config: {exc}") from None
+
+    service = getattr(request.app.state, "event_ingestion_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="event ingestion not initialized")
+    result = service.ingest([event])
+    return {
+        "accepted": result.accepted,
+        "rejected": result.rejected,
+        "event_ids": result.event_ids,
+        "event_id": event.event_id,
+        "manual_config": config.model_dump(mode="json"),
+    }
+
+
+# ============================================================
 # 抽取任务与死信管理
 # ============================================================
 
@@ -530,60 +655,33 @@ def _fact_memory_to_dict(memory: KnowledgeMemory) -> dict:
     }
 
 
-def _legacy_fact_to_dict(fact) -> dict:
-    """legacy Fact dataclass → dict（迁移期 /facts 双读兼容）。"""
-    return {
-        "fact_id": fact.fact_id,
-        "memory_id": fact.fact_id,
-        "user_id": fact.user_id,
-        "subject": fact.subject_id,
-        "subject_id": fact.subject_id,
-        "predicate": fact.predicate_id,
-        "predicate_id": fact.predicate_id,
-        "object_value": fact.object_value,
-        "source_text": fact.source_text,
-        "source_id": fact.source_id,
-        "confidence": fact.confidence,
-        "status": fact.status,
-        "version": fact.version,
-        "memory_type": "fact",
-    }
-
-
 def _fact_knowledge_lookup(request: Request, fact_id: str, user_id: str):
-    """knowledge(FACT) 或 legacy fact 双读定位。"""
+    """knowledge(FACT) 单一来源定位（legacy Fact 体系已删除，REFACTOR_PLAN_V2 §4.8.8）。"""
     know_repo = getattr(request.app.state, "know_repo", None)
-    if know_repo is not None:
-        memory = know_repo.get_by_id(fact_id)
-        if memory is not None and memory.user_id == user_id and (
-            getattr(memory.knowledge_type, "value", str(memory.knowledge_type)) == "fact"
-        ):
-            return ("knowledge", memory)
-    store = getattr(request.app.state, "fact_store", None)
-    if store is not None:
-        fact = store.get_fact(fact_id, user_id=user_id)
-        if fact is not None:
-            return ("legacy", fact)
-    return (None, None)
+    if know_repo is None:
+        return None
+    memory = know_repo.get_by_id(fact_id)
+    if memory is not None and memory.user_id == user_id and (
+        getattr(memory.knowledge_type, "value", str(memory.knowledge_type)) == "fact"
+    ):
+        return memory
+    return None
 
 
 @router.get("/facts")
 async def list_facts(request: Request, user_id: str = "default", status: str | None = "active", limit: int = Query(default=100, ge=1, le=500)):
-    """FACT 双读：knowledge(FACT) + legacy facts（迁移期兼容，§4.8.8）。"""
-    out: dict[str, dict] = {}
+    """FACT 列表：纯 knowledge(FACT) 单一来源（legacy facts 已并入知识，§4.8.8）。"""
     know_repo = getattr(request.app.state, "know_repo", None)
-    if know_repo is not None:
-        for m in know_repo.get_by_type(user_id, knowledge_type="fact", status=status or "active"):
-            out[m.memory_id] = _fact_memory_to_dict(m)
-    store = getattr(request.app.state, "fact_store", None)
-    if store is not None:
-        for f in store.list_facts(status=status, user_id=user_id, limit=limit):
-            out[f.fact_id] = _legacy_fact_to_dict(f)
-    return list(out.values())[:limit]
+    if know_repo is None:
+        return []
+    return [
+        _fact_memory_to_dict(m)
+        for m in know_repo.get_by_type(user_id, knowledge_type="fact", status=status or "active")
+    ][:limit]
 
 @router.get("/facts/conflicts")
 async def list_fact_conflicts(request: Request, user_id: str = "default", limit: int = Query(default=100, ge=1, le=500)):
-    """FACT 冲突：knowledge 冲突 + legacy fact 冲突 并集。"""
+    """FACT 冲突：knowledge 冲突（legacy fact 冲突已并入知识冲突链，§4.8.5）。"""
     out: list[dict] = []
     conflict_repo = getattr(request.app.state, "conflict_repo", None)
     if conflict_repo is not None:
@@ -591,47 +689,32 @@ async def list_fact_conflicts(request: Request, user_id: str = "default", limit:
             r for r in conflict_repo.list_all(user_id=user_id)
             if getattr(r, "memory_type", "") == "knowledge"
         )
-    store = getattr(request.app.state, "fact_store", None)
-    if store is not None:
-        out.extend(store.list_fact_conflicts(user_id=user_id, limit=limit))
     return out[:limit]
 
 @router.get("/facts/{fact_id}")
 async def get_fact(fact_id: str, request: Request, user_id: str = "default"):
-    kind, obj = _fact_knowledge_lookup(request, fact_id, user_id)
-    if kind == "knowledge":
-        return _fact_memory_to_dict(obj)
-    if kind == "legacy":
-        return _legacy_fact_to_dict(obj)
-    raise HTTPException(status_code=404, detail="fact not found")
+    memory = _fact_knowledge_lookup(request, fact_id, user_id)
+    if memory is None:
+        raise HTTPException(status_code=404, detail="fact not found")
+    return _fact_memory_to_dict(memory)
 
 @router.get("/facts/{fact_id}/evidence")
 async def get_fact_evidence(fact_id: str, request: Request, user_id: str = "default"):
-    kind, obj = _fact_knowledge_lookup(request, fact_id, user_id)
-    if kind is None:
+    memory = _fact_knowledge_lookup(request, fact_id, user_id)
+    if memory is None:
         raise HTTPException(status_code=404, detail="fact not found")
-    if kind == "knowledge":
-        return [e.model_dump(mode="json") for e in obj.evidences]
-    store = getattr(request.app.state, "fact_store", None)
-    return store.list_fact_evidence(fact_id, user_id) if store is not None else []
+    return [e.model_dump(mode="json") for e in memory.evidences]
 
 @router.delete("/facts/{fact_id}")
 async def delete_fact(fact_id: str, request: Request, user_id: str = "default"):
-    kind, obj = _fact_knowledge_lookup(request, fact_id, user_id)
-    if kind is None:
+    memory = _fact_knowledge_lookup(request, fact_id, user_id)
+    if memory is None:
         raise HTTPException(status_code=404, detail="fact not found")
-    if kind == "knowledge":
-        write_service = getattr(request.app.state, "memory_write_service", None)
-        if write_service is None:
-            raise HTTPException(status_code=503, detail="memory write service not initialized")
-        obj.status = MemoryStatus.DELETED
-        write_service.sync_memory(obj, remove=True)
-    else:
-        store = getattr(request.app.state, "fact_store", None)
-        if store is None:
-            raise HTTPException(status_code=503, detail="fact store not initialized")
-        store.update_fact_status(fact_id, "deleted", user_id=user_id)
-        store.delete_fact_artifacts([fact_id], user_id)
+    write_service = getattr(request.app.state, "memory_write_service", None)
+    if write_service is None:
+        raise HTTPException(status_code=503, detail="memory write service not initialized")
+    memory.status = MemoryStatus.DELETED
+    write_service.sync_memory(memory, remove=True)
     return {"deleted": True, "fact_id": fact_id}
 @router.post("/admin/reconcile")
 async def reconcile_memory_indexes(request: Request):
@@ -728,13 +811,102 @@ def _record_search_access(request: Request, response: SearchResponse) -> None:
         repo = know_repo if memory.memory_type == "knowledge" else pref_repo
         if repo is not None:
             repo.record_access(memory.memory_id, user_id=memory.user_id)
-    fact_store = getattr(state, "fact_store", None)
-    if fact_store is not None:
-        for fact in response.facts:
-            if fact.fact_id in seen:
-                continue
-            seen.add(fact.fact_id)
-            fact_store.record_access(fact.fact_id, user_id=fact.user_id)
+
+
+def _apply_tiered_cascade(
+    request: Request, req: SearchRequest, response: SearchResponse
+) -> SearchResponse:
+    """记忆分层检索级联（REFACTOR_PLAN_V2 §4.4.3 / I-4）。
+
+    带 ``session_id`` 时，先在会话短期工作记忆（short_term_memory）注入当前会话
+    上下文，再取近期中期情景（mid_term_memory），最后与长期混合检索结果一起按
+    level 加权融合；每条结果标注 ``memory_level``，让 Agent 知道"这是本会话刚发生
+    的，还是历史沉淀的"。纯短期/中期结果不出现在全局长期检索中（level=long 过滤）。
+
+    ``req.level`` 显式指定时只返回该层记忆（short / mid / long）：long 为纯长期
+    混合检索结果；short 仅会话工作记忆；mid 仅中期情景。
+    """
+    level = (req.level or "").strip().lower()
+    state = request.app.state
+    st_repo = getattr(state, "short_term_repo", None)
+    mt_repo = getattr(state, "mid_term_repo", None)
+
+    # ① 会话短期工作记忆
+    short_results: list[SearchResult] = []
+    if level in ("", "short") and st_repo and req.session_id:
+        short_rows = st_repo.list_by_session(req.user_id, req.session_id)
+        short_results = [
+            SearchResult(
+                memory_id=row["id"],
+                memory_type=str(row.get("source_type", "")),
+                content=row.get("text") or "",
+                score=0.9,  # 工作记忆与当前会话直接相关，短档相对高权重
+                source="short-term",
+                metadata={
+                    "session_id": row.get("session_id", ""),
+                    "scene": row.get("scene", ""),
+                    "task_type": row.get("task_type", ""),
+                    "user_id": row.get("user_id", ""),
+                },
+                memory_level="short",
+            )
+            for row in short_rows
+            if row.get("text")
+        ]
+
+    # ② 近期中期情景
+    mid_results: list[SearchResult] = []
+    if level in ("", "mid") and mt_repo:
+        mid_rows = mt_repo.list_active(user_id=req.user_id)
+        mid_results = [
+            SearchResult(
+                memory_id=row["episode_id"],
+                memory_type="episode",
+                content=row.get("trajectory_summary") or row.get("summary") or "",
+                score=0.7,  # 中期情景为近期相关经验，中档权重
+                source="mid-term",
+                metadata={
+                    "scene": row.get("scene", ""),
+                    "task_type": row.get("task_type", ""),
+                    "user_id": row.get("user_id", ""),
+                    "outcome": row.get("outcome", ""),
+                },
+                memory_level="mid",
+            )
+            for row in mid_rows
+            if (row.get("trajectory_summary") or row.get("summary"))
+        ]
+
+    # ③ 长期记忆已由 retriever 标注 memory_level=long；按 level 过滤后合并。
+    #    level=short/mid 时只返回该层（不掺入长期）；level=long/空 时合并长期。
+    if level in ("short", "mid"):
+        long_results: list[SearchResult] = []
+    else:
+        long_results = [
+            r for r in response.results
+            if r.memory_id not in {
+                s.memory_id for s in [*short_results, *mid_results]
+            }
+        ]
+
+    merged = [*short_results, *mid_results, *long_results]
+    if merged:
+        merged.sort(key=lambda r: (r.score, -len(r.memory_id)), reverse=True)
+        merged = merged[: req.top_k]
+
+    response.results = merged
+    response.total_count = len(merged)
+    # 保持偏好/知识列表：仅当来自长期记忆时归入（短期/中期已作为纯内容注入）
+    if short_results or mid_results:
+        response.preferences = [
+            p for p in response.preferences
+            if p.memory_id not in {s.memory_id for s in [*short_results, *mid_results]}
+        ]
+        response.knowledge = [
+            k for k in response.knowledge
+            if k.memory_id not in {s.memory_id for s in [*short_results, *mid_results]}
+        ]
+    return response
 
 
 @router.post("/search", response_model=SearchResponse)
@@ -767,6 +939,7 @@ async def search_memory(req: SearchRequest, request: Request):
             )
         try:
             response = memory.search(req)
+            response = _apply_tiered_cascade(request, req, response)
             _record_search_access(request, response)
             return response
         except HTTPException:
@@ -783,6 +956,7 @@ async def search_memory(req: SearchRequest, request: Request):
                 fallback = memory.search(req)
                 if fallback.total_count:
                     response = fallback
+        response = _apply_tiered_cascade(request, req, response)
         _record_search_access(request, response)
         return response
     except (KylinEmbeddingError, MilvusEngineError) as exc:
@@ -1250,9 +1424,10 @@ def _get_forgetter(request: Request) -> MemoryForgetter:
         memory_lookup=getattr(state, "memory_lookup", None),
         evidence_store=getattr(state, "evidence_store", None),
         conflict_repo=getattr(state, "conflict_repo", None),
-        fact_store=getattr(state, "fact_store", None),
-        fact_index_service=getattr(state, "fact_index_service", None),
         embedding_client=getattr(state, "embedding_client", None),
+        short_term_repo=getattr(state, "short_term_repo", None),
+        mid_term_repo=getattr(state, "mid_term_repo", None),
+        forget_rule_service=getattr(state, "forget_rule_service", None),
     )
 
 
@@ -1270,6 +1445,7 @@ class ForgetPreviewResponse(BaseModel):
 class FactProposeRequest(BaseModel):
     """手工提交事实候选（前端 demo / 竞争测试使用）。"""
 
+    user_id: str = "default"
     source_id: str = ""
     scope_hint: str = "global"
     project_id: str | None = None
@@ -1307,38 +1483,53 @@ async def list_session_events(session_id: str, request: Request):
 
 @router.post("/facts/propose")
 async def propose_facts(req: FactProposeRequest, request: Request):
-    """提交手工三元组并生成事实候选，注册到 Agent 裁决暂存区。
+    """提交手工三元组，直接写入 knowledge(FACT)（legacy Fact 管线已删除，§4.8.8）。
 
-    返回候选列表，前端通过 `/api/agent/actions/{proposal_id}/decision`
-    进行 commit / reject 裁决。
+    结构化确定性映射（不经 LLM）：subject/predicate/object → KnowledgeMemory(FACT)。
+    返回已落库的事实列表（fact 风格响应，前端 FactPage 直接展示）。
     """
-    pipeline = getattr(request.app.state, "fact_pipeline", None)
-    if pipeline is None:
-        raise HTTPException(status_code=503, detail="fact pipeline not initialized")
-    proposals = []
+    write_service = getattr(request.app.state, "memory_write_service", None)
+    if write_service is None:
+        raise HTTPException(status_code=503, detail="memory write service not initialized")
+    from memoryhub.adapter.schemas import KnowledgeType, SceneScope
+
+    created = []
     for raw in req.triples:
         triple_data = dict(raw)
-        triple_data.setdefault("subject_type", "entity")
-        triple_data.setdefault("object_type", "entity")
-        triple = RawTriple(**triple_data)
-        admission = pipeline.admission.evaluate(
-            triple, project_id=req.project_id, scope_hint=req.scope_hint
+        subject = str(triple_data.get("subject_text") or triple_data.get("subject") or "").strip()
+        predicate = str(triple_data.get("predicate_text") or triple_data.get("predicate") or "").strip()
+        obj = str(triple_data.get("object_text") or triple_data.get("object") or "").strip()
+        if not subject or not predicate or not obj:
+            continue
+        scope = SceneScope(
+            scene="*" if req.scope_hint == "global" else "",
+            task_type="",
+            app="",
         )
-        proposal = FactCandidate(
-            candidate_id=FactCandidate.make_id(),
-            raw_triple=triple,
-            admission=admission,
-            source_id=req.source_id,
-            project_id_hint=req.project_id,
-            scope_hint=req.scope_hint,
-            metadata={},
+        memory = KnowledgeMemory(
+            memory_id=f"know_fact_{_fact_sha256(subject, predicate, obj)[:24]}",
+            user_id=req.user_id,
+            knowledge_type=KnowledgeType.FACT,
+            name=subject,
+            content=f"{subject} {predicate} {obj}",
+            subject=subject,
+            predicate=predicate,
+            object_value=obj,
+            object_type=str(triple_data.get("object_type") or "Other"),
+            scope=scope,
+            confidence=float(triple_data.get("confidence") or 0.9),
         )
-        _agent_api._FACT_PENDING[proposal.proposal_id] = {
-            "json": _agent_api._candidate_to_json(proposal),
-            "candidate": proposal,
-        }
-        proposals.append(_agent_api._FACT_PENDING[proposal.proposal_id]["json"])
-    return proposals
+        write_service.upsert_memory(memory, skip_write_gate=True)
+        created.append(_fact_memory_to_dict(memory))
+    return created
+
+
+def _fact_sha256(subject: str, predicate: str, obj: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(
+        f"{subject}|{predicate}|{obj}".encode("utf-8")
+    ).hexdigest()
 
 
 @router.post("/forget", response_model=ForgetResponse)
@@ -1385,9 +1576,55 @@ async def list_forget_history(
     return []
 
 
-# ============================================================
-# 评测
-# ============================================================
+class ForgetRuleRequest(BaseModel):
+    """用户遗忘规则创建请求（I-13）。"""
+
+    user_id: str = "default"
+    topic: str  # 规则主题，如 "周报"
+    keywords: list[str] = Field(default_factory=list)  # 命中主题后并入的关键词
+    enabled: bool = True
+
+
+@router.get("/forget/rules")
+async def list_forget_rules(
+    user_id: str = "default", request: Request = None
+) -> list[dict]:
+    """列出指定用户的遗忘规则。"""
+    service = getattr(request.app.state, "forget_rule_service", None) if request else None
+    if service is None:
+        raise HTTPException(status_code=503, detail="forget rule service not initialized")
+    return service.list(user_id)
+
+
+@router.post("/forget/rules", status_code=201)
+async def create_forget_rule(req: ForgetRuleRequest, request: Request):
+    """创建一条用户遗忘规则（如"删除所有涉及 X 的记忆"）。
+
+    之后遗忘指令若命中该规则 topic，其 keywords 会被并入意图关键词，实现
+    用户自定义的语义规则遗忘（REFACTOR_PLAN_V2 §4.5.2 / I-13）。
+    """
+    service = getattr(request.app.state, "forget_rule_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="forget rule service not initialized")
+    try:
+        rule = service.create(
+            user_id=req.user_id, topic=req.topic, keywords=req.keywords,
+            enabled=req.enabled,
+        )
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid forget rule") from None
+    return rule
+
+
+@router.delete("/forget/rules/{rule_id}", status_code=200)
+async def delete_forget_rule(rule_id: str, request: Request, user_id: str = "default"):
+    """删除一条用户遗忘规则。"""
+    service = getattr(request.app.state, "forget_rule_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="forget rule service not initialized")
+    if not service.delete(user_id, rule_id):
+        raise HTTPException(status_code=404, detail="forget rule not found")
+    return {"deleted": True, "rule_id": rule_id}
 
 
 @router.post("/evaluate/{task_name}")
@@ -1395,7 +1632,7 @@ async def run_evaluation(task_name: str, dataset_path: str = "", request: Reques
     """
     运行指定任务的评测
 
-    task_name: "retrieval" | "latency"（preference / conflict 后端尚未实现）
+    task_name: "retrieval" | "latency" | "preference" | "conflict"
 
     数据流: 触发评测 → 加载数据集 → 批量执行 → 计算指标 → 生成报告
 
@@ -1452,7 +1689,32 @@ async def run_evaluation(task_name: str, dataset_path: str = "", request: Reques
             raise HTTPException(status_code=503, detail="latency benchmark failed") from None
         return result.to_dict()
 
-    # preference / conflict 评测框架已定义、实现未落地
+    if task in ("preference", "conflict"):
+        if not dataset_path:
+            raise HTTPException(
+                status_code=400,
+                detail=f"dataset_path is required for {task} evaluation",
+            )
+        try:
+            if task == "preference":
+                from evaluation.metrics.preference_eval import PreferenceEvaluator
+
+                evaluator = PreferenceEvaluator()
+            else:
+                from evaluation.metrics.conflict_eval import ConflictEvaluator
+
+                evaluator = ConflictEvaluator()
+        except ImportError:
+            raise HTTPException(status_code=503, detail="evaluation module unavailable")
+        try:
+            report = evaluator.run(dataset_path)
+        except FileNotFoundError:
+            raise HTTPException(status_code=400, detail="dataset file not found")
+        except (ValueError, KeyError, TypeError):
+            raise HTTPException(status_code=400, detail="invalid dataset file")
+        return report
+
+    # preference / conflict 评测框架已定义、实现已落地（Phase F / I-10）；仅未知任务返回 501
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail={"code": "evaluation.not_implemented", "task_name": task_name},

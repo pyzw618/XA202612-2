@@ -30,12 +30,10 @@ def test_adapter_layer_has_no_direct_memory_repository_save():
     assert violations == []
 
 
-def test_fact_public_insert_sink_is_not_called_outside_fact_store():
-    """Fact pipeline must use the private transactional persistence sink."""
+def test_fact_legacy_insert_sink_removed_with_fact_module():
+    """legacy FactStore.insert_fact 已随 core/fact 删除，全库零残留。"""
     violations = []
     for path in (ROOT / "memoryhub").rglob("*.py"):
-        if path.as_posix().endswith("core/fact/store.py"):
-            continue
         if ".insert_fact(" in path.read_text(encoding="utf-8"):
             violations.append(path.relative_to(ROOT).as_posix())
     assert violations == []

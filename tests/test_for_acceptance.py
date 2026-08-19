@@ -13,6 +13,7 @@ from pathlib import Path
 from memoryhub.adapter.schemas import (
     ForgetRequest,
     KnowledgeMemory,
+    KnowledgeType,
     MemoryLevel,
     MemoryStatus,
     PreferenceMemory,
@@ -20,7 +21,6 @@ from memoryhub.adapter.schemas import (
     SearchRequest,
     SearchResult,
 )
-from memoryhub.core.fact.pipeline import FactMemoryPipeline
 from memoryhub.core.forget.auto_forget import AutoForgetEngine
 from memoryhub.core.forget.forgetter import MemoryForgetter
 from memoryhub.retrieval.cache import SearchCache
@@ -277,20 +277,27 @@ def test_for_03_natural_language_keyword_locate_and_cascade(tmp_path: Path) -> N
 # ---------------------------------------------------------------------------
 
 
-def _make_fact(store: FactMemoryPipeline, user_id: str = "u1") -> "object":
-    """通过真实 pipeline 写入一条全局事实。"""
-    proposal = store.propose(
-        "项目周报的负责人是张三", metadata={"user_id": user_id}
-    )[0]
-    store.commit(proposal, scope="global", user_id=user_id)
-    return store.get_facts(user_id=user_id)[0]
+def _make_fact(know_repo, user_id: str = "u1") -> KnowledgeMemory:
+    """通过知识仓储写入一条全局事实性知识（knowledge_type=FACT）。"""
+    fact = KnowledgeMemory(
+        memory_id=f"fact_for_{user_id}",
+        user_id=user_id,
+        knowledge_type=KnowledgeType.FACT,
+        subject="项目周报",
+        predicate="负责人",
+        object_value="张三",
+        object_type="Person",
+        single_value=True,
+        content="项目周报的负责人是张三",
+        confidence=0.9,
+    )
+    know_repo.save(fact)
+    return fact
 
 
 def test_for_04_cascade_cleans_evidence_conflicts_and_indexes(tmp_path: Path) -> None:
     db, pref_repo, know_repo = _make_repos(tmp_path)
-    fact_pipeline = FactMemoryPipeline(db_path=":memory:")
-    fact_store = fact_pipeline.store
-    fact = _make_fact(fact_pipeline)
+    fact = _make_fact(know_repo)
     engine = FakeVectorEngine()
     store = FakeVectorStore()
     kws = FakeKeywordSearch()
@@ -302,14 +309,15 @@ def test_for_04_cascade_cleans_evidence_conflicts_and_indexes(tmp_path: Path) ->
     pref_repo.save(_pref("pref_c", "周报使用 Markdown"))
     know_repo.save(_know("know_c", "周报流程", "收集数据"))
     for mid, mem in [("pref_c", pref_repo.get_by_id("pref_c")),
-                     ("know_c", know_repo.get_by_id("know_c"))]:
+                     ("know_c", know_repo.get_by_id("know_c")),
+                     (fact.memory_id, fact)]:
         lookup[mid] = mem
 
     # 缓存中预置一条包含 pref_c 的响应，验证 invalidate
     cache.set(SearchRequest(user_id="u1", query="周报"), _fake_response("pref_c"))
 
     forgetter = MemoryForgetter(
-        pref_repo=pref_repo, know_repo=know_repo, fact_store=fact_store,
+        pref_repo=pref_repo, know_repo=know_repo,
         vector_engine=engine, vector_store=store, keyword_search=kws,
         memory_lookup=lookup, evidence_store=evidence, conflict_repo=conflicts,
         cache=cache, storage=db,
@@ -320,11 +328,11 @@ def test_for_04_cascade_cleans_evidence_conflicts_and_indexes(tmp_path: Path) ->
 
     assert response.deleted_count == 3
     ids = set(response.deleted_ids)
-    assert {"pref_c", "know_c", fact.fact_id} <= ids
+    assert {"pref_c", "know_c", fact.memory_id} <= ids
     # SQLite 软删除
     assert pref_repo.get_by_id("pref_c").status.value == "deleted"
     assert know_repo.get_by_id("know_c").status.value == "deleted"
-    assert fact_store.get_fact(fact.fact_id).status == "deleted"
+    assert know_repo.get_by_id(fact.memory_id).status.value == "deleted"
     # 向量 / BM25 / lookup / 证据 / conflicts / 缓存全部清理
     assert set(engine.deleted) == ids
     assert set(store.deleted) == ids
@@ -332,7 +340,7 @@ def test_for_04_cascade_cleans_evidence_conflicts_and_indexes(tmp_path: Path) ->
     assert set(evidence.deleted) == ids
     assert "pref_c" not in lookup
     assert cache.size() == 0
-    assert fact_store.list_facts(status="active", user_id="u1") == []
+    assert know_repo.get_by_type("u1", knowledge_type="fact", status="active") == []
     db.close()
 
 
@@ -374,18 +382,16 @@ def test_for_05_auto_forget_archive_demote_review(tmp_path: Path) -> None:
 
 def test_for_05_fact_low_health_archived(tmp_path: Path) -> None:
     db, pref_repo, know_repo = _make_repos(tmp_path)
-    fact_pipeline = FactMemoryPipeline(db_path=":memory:")
-    fact_store = fact_pipeline.store
-    fact = _make_fact(fact_pipeline)
+    fact = _make_fact(know_repo)
 
     engine = AutoForgetEngine(
         pref_repo=pref_repo, know_repo=know_repo, db=db,
-        fact_store=fact_store, calculator=FixedCalculator(0.1),
+        calculator=FixedCalculator(0.1),
     )
     stats = engine.run()
 
     assert stats["archived"] >= 1
-    assert fact_store.get_fact(fact.fact_id).status == "archived"
+    assert know_repo.get_by_id(fact.memory_id).status.value == "archived"
     db.close()
 
 

@@ -55,11 +55,12 @@ class MemoryForgetter:
         memory_lookup=None,
         evidence_store=None,
         conflict_repo=None,
-        fact_store=None,
-        fact_index_service=None,
         memory_write_service=None,
         db=None,
         embedding_client=None,
+        short_term_repo=None,
+        mid_term_repo=None,
+        forget_rule_service=None,
     ):
         """
         参数:
@@ -83,10 +84,11 @@ class MemoryForgetter:
         self.memory_lookup = memory_lookup if memory_lookup is not None else {}
         self.evidence_store = evidence_store
         self.conflict_repo = conflict_repo
-        self.fact_store = fact_store
-        self.fact_index_service = fact_index_service
         self.memory_write_service = memory_write_service
         self.embedding_client = embedding_client
+        self.short_term_repo = short_term_repo
+        self.mid_term_repo = mid_term_repo
+        self.forget_rule_service = forget_rule_service
         self._last_deleted_ids: list[str] = []
 
     def execute(self, request: ForgetRequest) -> ForgetResponse:
@@ -100,6 +102,18 @@ class MemoryForgetter:
               → 生成审计日志
               → 返回结果
         """
+        level = (request.level or "").strip().lower()
+        # 短期/中期记忆由各自仓储承载，按 level 直接执行（I-13）
+        if level in ("short", "mid"):
+            deleted_count = self._delete_short_mid(level, request)
+            record = self.create_audit_log(request, self._last_deleted_ids)
+            return ForgetResponse(
+                record_id=record.record_id,
+                deleted_count=deleted_count,
+                deleted_ids=self._last_deleted_ids,
+                audit_log="forgotten",
+            )
+
         intent = self.parse_intent(request)
         target_ids = self.locate_memories(intent, request)
 
@@ -118,6 +132,41 @@ class MemoryForgetter:
             deleted_ids=deleted_ids,
             audit_log="forgotten",
         )
+
+    def _delete_short_mid(self, level: str, request: ForgetRequest) -> int:
+        """按分层删除短期/中期记忆；仅统计并返回删除数（I-13）。"""
+        deleted = 0
+        self._last_deleted_ids = []
+        if level == "short":
+            if self.short_term_repo is None:
+                return 0
+            if request.session_id:
+                rows = self.short_term_repo.list_by_session(
+                    request.user_id, request.session_id
+                )
+                for row in rows:
+                    self.short_term_repo.delete_for_session(
+                        request.user_id, row.get("session_id", ""), row.get("task_type", "")
+                    )
+                    self._last_deleted_ids.append(row.get("id"))
+                return len(self._last_deleted_ids)
+            rows = self.short_term_repo.list_all(user_id=request.user_id)
+            for row in rows:
+                self.short_term_repo.delete_for_session(
+                    request.user_id, row.get("session_id", ""), row.get("task_type", "")
+                )
+                self._last_deleted_ids.append(row.get("id"))
+            return len(self._last_deleted_ids)
+
+        # mid
+        if self.mid_term_repo is None:
+            return 0
+        rows = self.mid_term_repo.list_active(user_id=request.user_id)
+        for row in rows:
+            if self.mid_term_repo.delete(row.get("episode_id")):
+                self._last_deleted_ids.append(row.get("episode_id"))
+                deleted += 1
+        return deleted
 
     def parse_intent(self, request: ForgetRequest) -> dict:
         """
@@ -154,6 +203,10 @@ class MemoryForgetter:
         memory_type = self._infer_memory_type(instruction)
         keywords = self._extract_keywords(instruction)
 
+        # 用户遗忘规则展开（I-13）：若指令命中某条规则主题，并入其关键词，
+        # 使"删除所有涉及 X 的记忆"这类规则在遗忘定位时真正生效。
+        keywords = self._apply_forget_rules(request.user_id, instruction, keywords)
+
         base = {
             "memory_type": memory_type,
             "target_topic": instruction,
@@ -186,6 +239,29 @@ class MemoryForgetter:
                     base["target_topic"] = llm_result["target_topic"]
 
         return base
+
+    def _apply_forget_rules(
+        self, user_id: str, instruction: str, keywords: list[str]
+    ) -> list[str]:
+        """若遗忘指令命中用户遗忘规则的主题，则并入该规则的关键词。"""
+        if self.forget_rule_service is None:
+            return keywords
+        try:
+            rules = self.forget_rule_service.active_keywords(user_id or "default")
+        except Exception:
+            return keywords
+        instruction_lower = instruction.lower()
+        extra: list[str] = []
+        for topic, rule_keywords in rules.items():
+            if topic and topic.lower() in instruction_lower:
+                extra.extend(rule_keywords)
+        if not extra:
+            return keywords
+        merged = list(keywords)
+        for word in extra:
+            if word and word not in merged:
+                merged.append(word)
+        return merged
 
     def _llm_parse_intent(self, instruction: str) -> dict | None:
         """经 StructuredLLMAdapter 把遗忘指令解析为结构化意图；失败返回 None。"""
@@ -273,18 +349,46 @@ class MemoryForgetter:
         strategy = intent.get("match_strategy", "semantic")
 
         if strategy == "exact" and request.target_memory_ids:
-            return request.target_memory_ids
+            return self._filter_by_level(request.target_memory_ids, request)
 
         if strategy == "scope":
-            return self._locate_by_scope(
-                request.target_scope or SceneScope(),
-                intent.get("memory_type", "all"),
-                request.user_id,
-                request.target_project_id,
+            return self._filter_by_level(
+                self._locate_by_scope(
+                    request.target_scope or SceneScope(),
+                    intent.get("memory_type", "all"),
+                    request.user_id,
+                    request.target_project_id,
+                ),
+                request,
             )
 
         # 自然语言/关键词模式
-        return self._locate_by_keywords(intent, request.user_id)
+        located = self._locate_by_keywords(intent, request.user_id)
+        return self._filter_by_level(located, request)
+
+    def _filter_by_level(self, ids: list[str], request: ForgetRequest) -> list[str]:
+        """按记忆分层（short/mid/long）精准筛选目标（REFACTOR_PLAN_V2 I-13）。
+
+        ``request.level`` 为空时不加过滤（保持既有行为）；非空时仅保留
+        level 与该值一致的长期记忆（言语层：长期记忆的 level 字段）。短期/中期
+        由各自 repo 承载，此处对长期偏好/知识按其 level 元数据过滤。
+        """
+        level = (request.level or "").strip().lower()
+        if not level or not ids:
+            return ids
+        out: list[str] = []
+        for mid in ids:
+            mem = None
+            if self.pref_repo is not None:
+                mem = self.pref_repo.get_by_id(mid)
+            if mem is None and self.know_repo is not None:
+                mem = self.know_repo.get_by_id(mid)
+            if mem is None:
+                continue
+            lvl = getattr(mem.level, "value", None) or getattr(mem, "level", "")
+            if str(lvl).lower() == level:
+                out.append(mid)
+        return out
 
     def _locate_by_scope(
         self, scope, memory_type: str, user_id: str, project_id: str = ""
@@ -314,13 +418,6 @@ class MemoryForgetter:
             for k in self.know_repo.list_all(status="active", user_id=user_id):
                 if _matches(k.scope):
                     ids.append(k.memory_id)
-
-        if memory_type in ("fact", "all") and self.fact_store is not None and project_id:
-            facts = self.fact_store.list_facts(
-                status="active", limit=100000, scope="project",
-                project_id=project_id, user_id=user_id,
-            )
-            ids.extend(f.fact_id for f in facts)
 
         return ids
 
@@ -385,14 +482,6 @@ class MemoryForgetter:
                 if keyword_hit or k.memory_id in semantic_hits:
                     matched.append(k.memory_id)
 
-        if memory_type in ("fact", "all") and self.fact_store is not None:
-            for fact in self.fact_store.list_facts(
-                status="active", limit=100000, user_id=user_id
-            ):
-                text = self.fact_store.render_fact(fact).lower()
-                if any(kw.lower() in text for kw in keywords):
-                    matched.append(fact.fact_id)
-
         return list(dict.fromkeys(matched))  # 去重
 
     @staticmethod
@@ -416,7 +505,6 @@ class MemoryForgetter:
         for memory_id in memory_ids:
             pref_deleted = False
             know_deleted = False
-            fact_deleted = False
             if self.pref_repo is not None:
                 memory = self.pref_repo.get_by_id(memory_id)
                 if memory is not None and (not user_id or memory.user_id == user_id):
@@ -443,14 +531,7 @@ class MemoryForgetter:
                         know_deleted = self.know_repo.update_status(
                             memory_id, "deleted", user_id=user_id
                         )
-            if self.fact_store is not None:
-                fact_deleted = self.fact_store.transition_fact_status(
-                    memory_id,
-                    "deleted",
-                    user_id=user_id or None,
-                    transition_action=MemoryDecision.SUPERSEDE.value,
-                )
-            if not (pref_deleted or know_deleted or fact_deleted):
+            if not (pref_deleted or know_deleted):
                 continue
             deleted += 1
             self._last_deleted_ids.append(memory_id)
@@ -466,19 +547,13 @@ class MemoryForgetter:
                     self.evidence_store.delete(memory_id)
                 if self.conflict_repo is not None:
                     self.conflict_repo.delete_for_memories([memory_id])
-                if fact_deleted and hasattr(self.fact_store, "delete_fact_artifacts"):
-                    self.fact_store.delete_fact_artifacts([memory_id], user_id)
                 projection_version = time.time_ns()
                 if pref_deleted and hasattr(self.pref_repo, "mark_indexed"):
                     self.pref_repo.mark_indexed([memory_id], projection_version)
                 if know_deleted and hasattr(self.know_repo, "mark_indexed"):
                     self.know_repo.mark_indexed([memory_id], projection_version)
-                if fact_deleted and hasattr(self.fact_store, "mark_indexed"):
-                    self.fact_store.mark_indexed(memory_id, projection_version, user_id)
                 if self.cache is not None:
                     self.cache.invalidate(memory_id)
-        if deleted and self.fact_store is not None:
-            self.fact_store.prune_orphan_entities(user_id)
         if deleted and cascade and self.memory_write_service is None:
             if self.vector_store is not None and hasattr(self.vector_store, "save"):
                 self.vector_store.save()

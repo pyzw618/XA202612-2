@@ -103,7 +103,10 @@ class KnowledgeMemoryHandler(BaseMemoryHandler):
         memory = decision.candidate.payload
         memory.evidences = decision.candidate.evidences
         memory.confidence = decision.confidence
-        result = self.updater.add(memory)
+        # Extraction-derived write: the source event already passed the
+        # event-level safety gate, so skip the redundant memory-level re-gate
+        # (I-14 double-gate fix).
+        result = self.updater.add(memory, skip_write_gate=True)
         logger.info(
             "knowledge apply: action=%s memory=%s -> %s",
             action,

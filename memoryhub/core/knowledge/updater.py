@@ -51,9 +51,15 @@ class KnowledgeUpdater:
             else None
         )
 
-    def add(self, memory: KnowledgeMemory) -> str:
+    def add(
+        self, memory: KnowledgeMemory, *, skip_write_gate: bool = False
+    ) -> str:
         if self.know_repo is None:
-            self.write_service.upsert_memory(memory, action=MemoryDecision.NEW)
+            self.write_service.upsert_memory(
+                memory,
+                action=MemoryDecision.NEW,
+                skip_write_gate=skip_write_gate,
+            )
             return memory.memory_id
 
         if (
@@ -61,7 +67,7 @@ class KnowledgeUpdater:
             == KnowledgeType.FACT.value
         ):
             # 事实性知识走 S/P/O 精确匹配，不走文本相似度（REFACTOR_PLAN_V2 §4.8.5）
-            return self._add_fact(memory)
+            return self._add_fact(memory, skip_write_gate=skip_write_gate)
 
         exact = self.know_repo.get_by_id(memory.memory_id)
         if exact is not None and exact.user_id == memory.user_id:
@@ -81,7 +87,9 @@ class KnowledgeUpdater:
                 if has_new_evidence:
                     reinforced.version = max(1, exact.version) + 1
                 self.write_service.upsert_memory(
-                    reinforced, action=MemoryDecision.REINFORCE
+                    reinforced,
+                    action=MemoryDecision.REINFORCE,
+                    skip_write_gate=skip_write_gate,
                 )
                 logger.info("knowledge add: reinforce %s -> v%s", exact.memory_id, reinforced.version)
                 return reinforced.memory_id
@@ -91,7 +99,9 @@ class KnowledgeUpdater:
                 add_support=has_new_evidence
                 and not bool(incoming_events & existing_events),
             )
-            self._archive_and_save_version(exact, merged)
+            self._archive_and_save_version(
+                exact, merged, skip_write_gate=skip_write_gate
+            )
             logger.info("knowledge add: merge %s -> %s", exact.memory_id, merged.memory_id)
             return merged.memory_id
 
@@ -108,7 +118,9 @@ class KnowledgeUpdater:
                             - {e.event_id for e in existing.evidences if e.event_id}
                         ),
                     )
-                    self._archive_and_save_version(existing, merged)
+                    self._archive_and_save_version(
+                        existing, merged, skip_write_gate=skip_write_gate
+                    )
                     logger.info(
                         "knowledge add: llm-equivalent merge %s -> %s",
                         existing.memory_id,
@@ -117,7 +129,9 @@ class KnowledgeUpdater:
                     return merged.memory_id
                 if resolution == KnowledgeConflictResolution.CONCRETE_CONFLICT:
                     merged = self._llm_merge_conflict(existing, memory)
-                    self._archive_and_save_version(existing, merged)
+                    self._archive_and_save_version(
+                        existing, merged, skip_write_gate=skip_write_gate
+                    )
                     logger.info(
                         "knowledge add: llm-concrete-conflict merge %s -> %s",
                         existing.memory_id,
@@ -132,13 +146,21 @@ class KnowledgeUpdater:
                     existing.memory_id,
                     memory.memory_id,
                 )
-            self.write_service.upsert_memory(memory, action=MemoryDecision.NEW)
+            self.write_service.upsert_memory(
+                memory,
+                action=MemoryDecision.NEW,
+                skip_write_gate=skip_write_gate,
+            )
             return memory.memory_id
 
         incoming_events = {e.event_id for e in memory.evidences if e.event_id}
         existing_events = {e.event_id for e in existing.evidences if e.event_id}
         if incoming_events and incoming_events.issubset(existing_events):
-            self.write_service.upsert_memory(existing, action=MemoryDecision.DUPLICATE)
+            self.write_service.upsert_memory(
+                existing,
+                action=MemoryDecision.DUPLICATE,
+                skip_write_gate=skip_write_gate,
+            )
             logger.debug("knowledge add: duplicate %s", existing.memory_id)
             return existing.memory_id
 
@@ -149,7 +171,9 @@ class KnowledgeUpdater:
                 add_support=not bool(incoming_events & existing_events),
             )
             self.write_service.upsert_memory(
-                reinforced, action=MemoryDecision.REINFORCE
+                reinforced,
+                action=MemoryDecision.REINFORCE,
+                skip_write_gate=skip_write_gate,
             )
             logger.info("knowledge add: reinforce %s -> v%s", existing.memory_id, reinforced.version)
             return reinforced.memory_id
@@ -158,7 +182,9 @@ class KnowledgeUpdater:
             memory,
             add_support=not bool(incoming_events & existing_events),
         )
-        self._archive_and_save_version(existing, merged)
+        self._archive_and_save_version(
+            existing, merged, skip_write_gate=skip_write_gate
+        )
         logger.info("knowledge add: merge %s -> %s", existing.memory_id, merged.memory_id)
         return merged.memory_id
 
@@ -170,27 +196,47 @@ class KnowledgeUpdater:
 
     _MAX_FACT_CONFLICT_VERSIONS = 3
 
-    def _add_fact(self, memory: KnowledgeMemory) -> str:
+    def _add_fact(
+        self, memory: KnowledgeMemory, *, skip_write_gate: bool = False
+    ) -> str:
         existing = self._find_best_fact_candidate(memory)
         if existing is None:
-            self.write_service.upsert_memory(memory, action=MemoryDecision.NEW)
+            self.write_service.upsert_memory(
+                memory,
+                action=MemoryDecision.NEW,
+                skip_write_gate=skip_write_gate,
+            )
             return memory.memory_id
         if self._same_fact(existing, memory):
             # 同 S/P/O → 只补证据，不覆盖（REINFORCE）
             reinforced = self._reinforce(existing, memory, add_support=False)
-            self.write_service.upsert_memory(reinforced, action=MemoryDecision.REINFORCE)
+            self.write_service.upsert_memory(
+                reinforced,
+                action=MemoryDecision.REINFORCE,
+                skip_write_gate=skip_write_gate,
+            )
             return reinforced.memory_id
         if existing.single_value:
             if (existing.version or 1) >= self._MAX_FACT_CONFLICT_VERSIONS:
                 # 连续单值冲突过多 → REVIEW，不再自动覆盖（防止无限版本链）
                 memory.status = MemoryStatus.PENDING
-                self.write_service.upsert_memory(memory, action=MemoryDecision.REVIEW)
+                self.write_service.upsert_memory(
+                    memory,
+                    action=MemoryDecision.REVIEW,
+                    skip_write_gate=skip_write_gate,
+                )
                 return memory.memory_id
             merged = self._merge_fact(existing, memory)
-            self._archive_and_save_version(existing, merged)
+            self._archive_and_save_version(
+                existing, merged, skip_write_gate=skip_write_gate
+            )
             return merged.memory_id
         # 多值/未知 → 共存
-        self.write_service.upsert_memory(memory, action=MemoryDecision.COEXIST)
+        self.write_service.upsert_memory(
+            memory,
+            action=MemoryDecision.COEXIST,
+            skip_write_gate=skip_write_gate,
+        )
         return memory.memory_id
 
     def _find_best_fact_candidate(
@@ -544,13 +590,25 @@ class KnowledgeUpdater:
         return reinforced
 
     def _archive_and_save_version(
-        self, existing: KnowledgeMemory, successor: KnowledgeMemory
+        self,
+        existing: KnowledgeMemory,
+        successor: KnowledgeMemory,
+        *,
+        skip_write_gate: bool = False,
     ) -> None:
         archived = existing.model_copy(deep=True)
         archived.status = MemoryStatus.ARCHIVED
         archived.updated_at = datetime.now(timezone.utc)
-        self.write_service.upsert_memory(archived, action=MemoryDecision.REVISE)
-        self.write_service.upsert_memory(successor, action=MemoryDecision.REVISE)
+        self.write_service.upsert_memory(
+            archived,
+            action=MemoryDecision.REVISE,
+            skip_write_gate=skip_write_gate,
+        )
+        self.write_service.upsert_memory(
+            successor,
+            action=MemoryDecision.REVISE,
+            skip_write_gate=skip_write_gate,
+        )
 
     def _merge(
         self,

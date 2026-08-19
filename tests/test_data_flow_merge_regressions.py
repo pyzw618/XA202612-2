@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -74,7 +74,6 @@ def make_repositories(tmp_path: Path):
 def test_milvus_retriever_fails_closed_for_foreign_or_ownerless_results() -> None:
     retriever = MilvusHybridRetriever.__new__(MilvusHybridRetriever)
     retriever.memory_lookup = {}
-    retriever.fact_store = None
     request = SearchRequest(user_id="u1", query="secret")
     results = [
         SearchResult(
@@ -301,7 +300,6 @@ def test_failed_inactive_delete_keeps_pending_tombstone_in_lookup(tmp_path: Path
         assert row.pending_index is True
     retriever = MilvusHybridRetriever.__new__(MilvusHybridRetriever)
     retriever.memory_lookup = lookup
-    retriever.fact_store = None
     stale = SearchResult(
         memory_id=active.memory_id,
         memory_type="knowledge",

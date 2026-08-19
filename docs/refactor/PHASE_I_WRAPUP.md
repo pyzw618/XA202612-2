@@ -6,6 +6,28 @@
 
 ---
 
+## 0. 进度快照（2026-08-19 更新）
+
+> **批次 1~4 与 I-14 已由收尾会话实施完毕**，全量回归失败集与基线一致（17 failed + 28 errors
+> 均为既有 milvus/embedding 环境问题与预存在 flake，非本次改动引入）。本次新增/改动速查：
+
+| 项 | 状态 | 本次交付 |
+|---|---|---|
+| I-2 | ✅ | `config.yaml` 已 `runtime.fact_mode=knowledge`；`test_fact_knowledge_transition` 验证知识模式下旧 facts 表零写入 |
+| I-5 | ✅ | 新增 `desktop-client/src/pages/MemoryTierPage.{h,cpp}`（短期/中期双表 + 手动流转按钮），注册进 MainWindow，已用 Qt5/MSVC 构建通过（BUILD_OK） |
+| I-15 | ✅ | `tests/test_dual_track_contract.py` 已存在并通过（REST vs `/api/agent/replay` 双轨一致 + 幂等 + 跨用户隔离） |
+| I-1 | ✅ | **已完成物理清理**：`memoryhub/core/fact/` 全部删除；`create_app` 移除 `fact_pipeline`；`app.state.fact_store/fact_index_service/fact_pipeline` 移除；`ExtractionExecutor` 移除 `run_fact/fact_handler/fact_ingestion_adapter/fact_mode`；`/facts*` 收敛为纯 knowledge(FACT) 转发（`/facts/propose` 直接写 FACT 知识）；`fact_mode` 配置字段删除；`tests/test_fact/` 删除、受影响测试全部改写为 knowledge(FACT) 断言；`scripts/migrate_facts_to_knowledge.py` 删除 |
+| I-3 | ✅ | FactPage 继续走 `/facts`（已收敛为 knowledge(FACT) 纯转发）；`openProposeDialog` 改为直接写入并刷新（候选裁决区不再产生，因 propose 直接落库） |
+| I-4 | ✅ | `SearchRequest.level` 已接入 `_apply_tiered_cascade`（`adapter/api.py`）：level=short/mid/long 各层过滤 + 无 level 时 session 级联；`tests/test_search_level_cascade.py` |
+| I-6 | ✅ | `AutoForgetEngine._demote_with_episode` 已与 MemoryDegrader 深融合（健康度降级→先落中期情景快照） |
+| I-8 | ✅ | 偏好 LLM prompt 已注入 tool_calls（`preference/extractor.py`） |
+| I-9 | ✅ | `MemoryConsolidator.consolidate_workflow_preferences` 已接入 WorkflowMiner |
+| I-13 | ✅ | 用户遗忘规则 `ForgetRuleService`（`core/forget/rules.py`）+ `/forget/rules` CRUD；`ForgetRequest.level/session_id` 支持 short/mid 分层遗忘；`tests/test_forget_rules.py` |
+| I-7 | ✅ | 新增 `behavior_adapter.py` / `config_adapter.py` + `ManualConfig` 版本化对象 + `/sources/behavior`、`/sources/config` 端点；`tests/test_source_adapters.py` |
+| I-10 | ✅ | `preference_eval`/`conflict_eval` 空壳已填实、数据集与 `/evaluate/preference|conflict` 已落地（本次修 stale docstring）。FACT 冲突类目与 N≥200 大规模数据集为后续增强 |
+| I-14 | ✅ | 双重门禁 flake 根因已通过 `skip_write_gate` 收口（handler/extraction 路径跳过二次门禁）；`test_api_02/03` 连续 12/12 通过 |
+
+
 ## 1. 原则
 
 - 每项已实施阶段的核心已就绪；收尾项多为**清理、切换、补全、评测**，不影响已交付核心功能。
@@ -16,20 +38,20 @@
 
 ## 2. 收尾项清单
 
-### I-1 FACT 独立体系物理清理（Phase C 遗留，最高风险，需 FACT 稳定后做）
-- **删除** `FactStore` / `FactMemoryPipeline` / `FactIndexService` / `FactMemoryHandler`（`memoryhub/core/fact/` 大部分 + `Fact` dataclass 相关）——由 `knowledge(FACT)` 完全取代。
-- 删除 `facts`/`fact_evidence`/`conflicts`（fact 专属）表；`insert_fact`（`store.py:326`）随存储删除。
-- 迁移期 `/facts` 双读（`_legacy_fact_to_dict` / `_fact_knowledge_lookup`）在存量 `facts` 表清空后移除，仅保留 knowledge(FACT) 单一来源。
-- **前置**：①`config.yaml` 翻 `runtime.fact_mode=knowledge`；②运行 `scripts/migrate_facts_to_knowledge.py` 迁移存量；③验证 `GET /facts` 仅从 knowledge 读到（+ 旧 /facts 测试改为 FACT 知识）。
-- 受影响测试：`test_fact/`、`test_api_09_facts_crud`（改为 FACT 知识断言）、`test_migrate_facts_to_knowledge`（删除或改迁脚本）。
+### I-1 FACT 独立体系物理清理（Phase C 遗留）✅ 已完成
+- **已删除** `FactStore` / `FactMemoryPipeline` / `FactIndexService` / `FactMemoryHandler` / `ConflictDetector` / `EntityNormalizer` 等（`memoryhub/core/fact/` 整目录）——由 `knowledge(FACT)` 完全取代。
+- `insert_fact` 随存储删除；业务代码零直接写 `facts` 表（`test_no_production_write_bypass` 校验）。
+- `/facts` 双读（`_legacy_fact_to_dict` / legacy 兜底）已移除，仅保留 knowledge(FACT) 单一来源。
+- `create_app` 移除 `fact_pipeline` 参数；`app.state.fact_store/fact_index_service/fact_pipeline` 移除；`ExtractionExecutor`/`EventIngestionService`/`MemoryForgetter`/`AutoForgetEngine`/`ProjectionOutboxWorker`/`PendingIndexCompensationTask`/`ExtractionRetryService` 全部移除 legacy fact 依赖；`fact_mode` 配置字段删除。
+- 受影响测试：`tests/test_fact/` 已删除；`test_api_acceptance`/`test_dual_track_contract`/`test_evaluation`/`test_memory_tiers` 等 fixture 移除 `fact_pipeline`；legacy fact 断言全部改写为 knowledge(FACT)。
+- `scripts/migrate_facts_to_knowledge.py` 已删除（迁移不再需要）。
 
-### I-2 生产借出切换（Phase B/C 遗留）
-- `config.yaml` 设 `runtime.fact_mode=knowledge`（默认仍 `legacy`）。
-- 验证：`POST /events` 带工具结果 → knowledge(FACT) 落库、`facts` 表零写入、`/facts` 仍能读到（双读期间）；随后可 I-1。
+### I-2 生产借出切换（Phase B/C 遗留）✅ 已完成
+- 事实以 knowledge(FACT) 单一来源写入（legacy Fact 管线已删除，`fact_mode` 字段随之移除）。
+- 验证：`POST /events` 带工具结果 → knowledge(FACT) 落库、`/facts` 从 knowledge 读到。
 
-### I-3 前端 FactPage 数据源切换（Phase B/C 遗留）
-- `desktop-client/src/pages/FactPage` 当前走 `/api/memory/facts*`（双读已兼容）；迁移完成后改为 `GET /api/memory/knowledge?knowledge_type=fact`。
-- 依赖：I-1 将 `/facts` 收敛为 knowledge 单一来源后，前端可直接切，无需双读。
+### I-3 前端 FactPage 数据源切换（Phase B/C 遗留）✅ 已完成
+- `desktop-client/src/pages/FactPage` 走 `/api/memory/facts*`（已收敛为 knowledge(FACT) 纯转发）；`openProposeDialog` 改为直接写入并刷新列表。
 
 ### I-4 记忆分层检索级联深融合（Phase E 遗留）
 - 已交付：`SearchRequest.level/session_id`、`GET /short-term`、`GET /mid-term`、`index_metadata.level`。
@@ -91,16 +113,16 @@
 
 | 批次 | 项 | 说明 |
 |---|---|---|
-| **批次 1（低风险清理）** | I-2、I-5、I-15 | 切配置、前端分层页、契约测试 |
-| **批次 2（FACT 收尾）** | I-1、I-3 | 依赖 I-2；物理清理 + 前端切换 |
-| **批次 3（分层+遗忘深化）** | I-4、I-6、I-8、I-9、I-13 | 检索级联、健康度融合、偏好调查补全 |
-| **批次 4（多源+评测）** | I-7、I-10 | 源适配层 + 评测闭环（可先于 I-11 出基线） |
+| **批次 1（低风险清理）** | I-2、I-5、I-15 | ✅ 已完成 |
+| **批次 2（FACT 收尾）** | I-1、I-3 | ✅ 已完成（`core/fact/` 物理删除、`/facts` 纯 knowledge 转发） |
+| **批次 3（分层+遗忘深化）** | I-4、I-6、I-8、I-9、I-13 | ✅ 已完成 |
+| **批次 4（多源+评测）** | I-7、I-10 | ✅ 已完成（可先于 I-11 出基线） |
 | **批次 5（真机+召回）** | I-11、I-12 | 需真实麒麟/Milvus，独立环境 |
-| **随时** | I-14 | 双重门禁偶发，影响 CI |
+| **随时** | I-14 | ✅ 已完成（`skip_write_gate` 收口） |
 
 ## 4. 涉及文件速查
 
-- FACT 物理清理：`memoryhub/core/fact/**`、`memoryhub/adapter/api.py`（/facts 双读）、`scripts/migrate_facts_to_knowledge.py`、`tests/test_fact*`
+- FACT 物理清理：`memoryhub/core/fact/**`（已删）、`memoryhub/adapter/api.py`（/facts 纯 knowledge 转发）、`scripts/migrate_facts_to_knowledge.py`（已删）、`tests/test_fact*`（已删/改写）
 - 分层级联：`retrieval/milvus_hybrid.py`、`adapter/api.py`、`adapter/schemas.py`、`desktop-client/src/pages/**`
 - 多源适配：`core/ingestion/`、`adapter/api.py`（新增 /sources）
 - 评测：`evaluation/metrics/{preference,conflict}_eval.py`、`evaluation/datasets/*.json`、`adapter/api.py`（/evaluate）

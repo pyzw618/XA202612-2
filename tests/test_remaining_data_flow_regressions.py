@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from memoryhub.adapter.schemas import KnowledgeMemory, SceneScope
+from memoryhub.adapter.schemas import KnowledgeMemory, KnowledgeType, SceneScope
 from memoryhub.adapter.simulator import OSAgentSimulator
 from memoryhub.config import AppConfig, ExtractionRetryConfig, KnowledgeMergeConfig, RuntimeConfig
 from memoryhub.core.conflict.detector import ConflictDetector
-from memoryhub.core.fact.index_service import FactIndexService
-from memoryhub.core.fact.models import Fact
-from memoryhub.core.fact.store import FactStore
 from memoryhub.core.ingestion.retry import ExtractionRetryRunResult
 from memoryhub.core.ingestion.retry_task import ExtractionRetryTask
 from memoryhub.core.knowledge.updater import KnowledgeUpdater
 from memoryhub.storage.compensation_task import PendingIndexCompensationTask
+from memoryhub.storage.database import Database, KnowledgeRepository, PreferenceRepository
 from memoryhub.app import create_app
 
 
@@ -56,60 +53,49 @@ class _Embedding:
         return [0.1, 0.2]
 
 
-def _fact() -> Fact:
-    return Fact(
-        fact_id="fact_pending",
-        subject_id="subject",
-        predicate_id="predicate",
-        object_id="object",
-        object_value="value",
-        source_text="subject predicate value",
-        source_id="event_1",
-        observed_at=datetime.now(timezone.utc).isoformat(),
-        confidence=0.9,
+def test_fact_projection_failure_remains_pending_and_is_compensated(tmp_path) -> None:
+    from memoryhub.storage.sync_service import MemorySyncService
+
+    db = Database(str(tmp_path / "facts-pending.db"))
+    db.init_schema()
+    know_repo = KnowledgeRepository(db)
+    fact = KnowledgeMemory(
+        memory_id="fact_pending",
         user_id="u1",
+        knowledge_type=KnowledgeType.FACT,
+        subject="subject",
+        predicate="predicate",
+        object_value="value",
+        content="subject predicate value",
+        confidence=0.9,
     )
-
-
-def test_fact_projection_failure_remains_pending_and_is_compensated() -> None:
-    store = FactStore(":memory:")
-    fact = _fact()
-    store.insert_fact(fact)
+    know_repo.save(fact)
     engine = _Engine(fail=True)
-    service = FactIndexService(
-        fact_store=store,
-        vector_engine=engine,
+    service = MemorySyncService(
+        pref_repo=PreferenceRepository(db),
+        know_repo=know_repo,
         embedding_client=_Embedding(),
-        memory_lookup={},
+        vector_engine=engine,
     )
     failed = service.sync_pending()
-    assert failed.failed == [fact.fact_id]
-    assert store.get_fact(fact.fact_id, user_id="u1").pending_index is True
+    assert failed.failed == [fact.memory_id]
+    assert [m.memory_id for m in know_repo.list_pending()] == [fact.memory_id]
 
     engine.fail = False
     repaired = service.sync_pending()
-    current = store.get_fact(fact.fact_id, user_id="u1")
-    assert repaired.succeeded == [fact.fact_id]
-    assert current.pending_index is False
-    assert fact.fact_id in engine.ids
+    assert repaired.succeeded == [fact.memory_id]
+    assert know_repo.list_pending() == []
+    assert fact.memory_id in engine.ids
+    db.close()
 
 
-class _MemoryProjectionSync:
+class _ProjectionSync:
     def sync_pending(self):
-        return SimpleNamespace(succeeded=["memory_ok"], failed=[], duration_ms=1.0)
+        return SimpleNamespace(succeeded=["memory_ok"], failed=["fact_failed"])
 
 
-class _FactProjectionSync:
-    def sync_pending(self):
-        return SimpleNamespace(succeeded=[], failed=["fact_failed"])
-
-
-def test_compensation_metrics_include_fact_projection_failures() -> None:
-    task = PendingIndexCompensationTask(
-        _MemoryProjectionSync(),
-        enabled=False,
-        fact_index_service=_FactProjectionSync(),
-    )
+def test_compensation_metrics_include_failed_projection_syncs() -> None:
+    task = PendingIndexCompensationTask(_ProjectionSync(), enabled=False)
     task.run_once()
     metrics = task.metrics
     assert metrics.total_runs == 1

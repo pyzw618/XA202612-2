@@ -3,7 +3,6 @@
 import pytest
 
 from memoryhub.adapter.schemas import SearchRequest, SearchResult
-from memoryhub.core.fact.extractor import TripleExtractor
 from memoryhub.core.memory.base import BaseMemoryHandler, MemoryCandidate
 from memoryhub.core.memory.confidence import (
     ConfidenceFactors,
@@ -117,25 +116,45 @@ def test_structured_llm_adapter_uses_application_generate_contract():
     assert result == 3
 
 
-class _TripleResponse:
-    content = (
-        '{"triples":[{"subject":"??A","subject_type":"Other",'
-        '"predicate":"???","object":"??","object_type":"Person",'
-        '"evidence":"??A???????","confidence":0.9}]}'
+def test_fact_extraction_via_unified_knowledge_chain():
+    """FACT 事实经统一知识链 extract_facts 产出 KnowledgeMemory(FACT)（§4.8.3）。"""
+    from memoryhub.adapter.schemas import (
+        EventQuality,
+        KnowledgeType,
+        MemoryEvent,
+        QualityStatus,
+        ToolCallResult,
     )
+    from memoryhub.core.knowledge.extractor import KnowledgeExtractor
 
-
-class _TripleLLM:
-    def generate(self, prompt, system_prompt="", **kwargs):
-        assert "?????" in prompt
-        assert system_prompt
-        return _TripleResponse()
-
-
-def test_fact_extractor_uses_application_level_generate_client():
-    triples = TripleExtractor(llm_client=_TripleLLM()).extract("??A???????")
-    assert len(triples) == 1
-    assert triples[0].object_text == "??"
+    event = MemoryEvent(
+        event_id="evt-fact-unify",
+        user_id="u1",
+        source_type="tool_result",
+        event_type="project_query",
+        text="查询项目负责人",
+        occurred_at="2026-08-18T00:00:00Z",
+        source_hash="a" * 64,
+        quality=EventQuality(
+            score=1.0, status=QualityStatus.ACCEPTED, completeness=1.0,
+            validity=1.0, consistency=1.0, freshness=1.0,
+        ),
+        tool_calls=[
+            ToolCallResult(
+                call_id="c1", sequence=1, tool_name="project_query", status="success",
+                result={
+                    "subject": "项目A", "predicate": "负责人", "object": "张三",
+                    "object_type": "Person",
+                },
+            )
+        ],
+    )
+    facts = KnowledgeExtractor(llm_client=None).extract_facts([event])
+    assert len(facts) == 1
+    fact = facts[0]
+    assert fact.knowledge_type == KnowledgeType.FACT
+    assert fact.subject == "项目A"
+    assert fact.object_value == "张三"
 
 
 def test_shared_freshness_is_bounded_and_uses_type_half_lives():

@@ -145,7 +145,6 @@ def test_memory_consolidator_writes_long_term_and_marks(tmp_path):
     executor = ExtractionExecutor(
         memory_write_service=repos["writer"],
         knowledge_extractor=extractor,
-        fact_mode="knowledge",
     )
     consolidator = MemoryConsolidator(
         mid_term_repo=repos["mt"], event_repo=repos["events"], extraction_executor=executor
@@ -194,3 +193,178 @@ def test_memory_degrader_archives_low_health(tmp_path):
     stored = repos["pref"].get_by_id(pref.memory_id)
     assert stored.status == MemoryStatus.ARCHIVED
     assert len(repos["mt"].list_all(user_id="u1")) >= 1
+
+
+def test_tiered_cascade_search_annotates_levels(tmp_path):
+    """I-4：带 session_id 的 /search 注入短期/中期结果并按 level 标注。"""
+    import hashlib as _hashlib
+
+    from fastapi.testclient import TestClient
+
+    from memoryhub.app import create_app
+    from memoryhub.config import AppConfig, SafetyConfig, StorageConfig, UserRuleConfig
+
+    config = AppConfig(
+        storage=StorageConfig(
+            db_path=str(tmp_path / "cascade.db"),
+            vector_index_path=str(tmp_path / "v"),
+            evidence_path=str(tmp_path / "e"),
+        ),
+        safety=SafetyConfig(user_rules=UserRuleConfig(enabled=False)),
+    )
+    payload = {
+        "event_id": "evt-cascade",
+        "source_type": "user_behavior",
+        "event_type": "user_message",
+        "user_id": "u-cascade",
+        "session_id": "sess-cascade",
+        "scene": "office",
+        "task_type": "office.weekly_report",
+        "occurred_at": "2026-08-08T08:00:00Z",
+        "text": "请用 Markdown 格式写周报",
+        "payload": {"action": "message"},
+        "tool_calls": [],
+        "schema_version": "1.1",
+        "source_hash": _hashlib.sha256(b"cascade").hexdigest(),
+        "redactions": [],
+        "quality": {
+            "score": 1.0, "status": "accepted", "completeness": 1.0,
+            "validity": 1.0, "consistency": 1.0, "freshness": 1.0, "issues": [],
+        },
+    }
+    with TestClient(
+        create_app(config)
+    ) as c:
+        r = c.post("/api/memory/events", json={"events": [payload]})
+        assert r.status_code == 200, r.text
+        assert c.get("/api/memory/short-term", params={"user_id": "u-cascade", "session_id": "sess-cascade"}).status_code == 200
+
+        # 带 session_id 检索：短期内容注入结果，且标注 memory_level
+        sr = c.post("/api/memory/search", json={
+            "user_id": "u-cascade", "session_id": "sess-cascade",
+            "query": "Markdown 周报", "top_k": 5,
+        })
+        assert sr.status_code == 200, sr.text
+        levels = {res["memory_level"] for res in sr.json()["results"]}
+        assert "short" in levels, sr.json()
+
+
+
+def test_workflow_preference_mining_from_episodes(tmp_path):
+    """I-9：跨≥3 条同类轨迹挖掘稳定工作流 → WORKFLOW_PREF 写入长期偏好。"""
+    db, repos = _setup(tmp_path)
+    from memoryhub.core.knowledge.workflow_miner import WorkflowMiner
+    from memoryhub.core.preference.updater import PreferenceUpdater
+
+    events = []
+    for i in range(3):  # 3 条同类任务轨迹（同一 scene/task_type）
+        calls = [
+            ToolCallResult(
+                call_id=f"c{i}-1", sequence=1, tool_name="file_read", status="success",
+                arguments={"path": f"/docs/{i}.md"}, result={"ok": True},
+            ),
+            ToolCallResult(
+                call_id=f"c{i}-2", sequence=2, tool_name="template_apply", status="success",
+                arguments={"name": "report"}, result={"ok": True},
+            ),
+        ]
+        ev = _event(
+            f"wf-e{i}", session=f"s{i}", task="weekly_report", source_type="tool_result",
+            event_type="task_run", tool_calls=calls,
+        )
+        ev.payload = {"steps": ["读取项目文档", "应用周报模板"], "task_id": "report_gen"}
+        repos["events"].save(ev)
+        events.append(ev)
+        repos["mt"].add(
+            episode_id=f"epi-wf-{i}", user_id="u1", session_ids=[f"s{i}"],
+            task_type="weekly_report", scene="office",
+            event_ids=[f"wf-e{i}"], trajectory_summary="report generation",
+            tools=["file_read", "template_apply"],
+        )
+
+    updater = PreferenceUpdater(
+        pref_repo=repos["pref"], write_service=repos["writer"]
+    )
+    consolidator = MemoryConsolidator(
+        mid_term_repo=repos["mt"], event_repo=repos["events"],
+        extraction_executor=None, preference_updater=updater,
+        workflow_miner=WorkflowMiner(),
+    )
+    written = consolidator.consolidate_workflow_preferences(user_id="u1")
+    prefs = repos["pref"].list_all(status="active", user_id="u1")
+    workflow_prefs = [
+        p for p in prefs
+        if str(getattr(p.preference_type, "value", "") or "") == "workflow_preference"
+    ]
+    assert workflow_prefs, "未挖掘出 WORKFLOW_PREF"
+    assert any("读取项目文档" in (p.text or "") for p in workflow_prefs)
+    assert written
+
+
+def test_auto_forget_demote_writes_mid_episode(tmp_path):
+    """I-6：AutoForgetEngine 降级与 MemoryDegrader 深融合——低健康度长期记忆
+    先落中期情景快照再降级，而非仅改 level 字段。"""
+    from datetime import datetime, timedelta, timezone
+
+    from memoryhub.core.forget.auto_forget import AutoForgetEngine
+
+    db, repos = _setup(tmp_path)
+    pref = PreferenceMemory(
+        user_id="u1", preference_type="output_style", text="低频旧偏好",
+        status="active", level="long", access_count_30d=0,
+    )
+    # 拉低健康度到"降级带"（Preference 半衰期 180 天 → ~180 天未用≈健康0.3，
+    # 落入 [ARCHIVE=0.2, DEMOTE=0.4) 的降级带，而非直接归档）
+    pref.updated_at = datetime.now(timezone.utc) - timedelta(days=180)
+    repos["pref"].save(pref)
+
+    engine = AutoForgetEngine(
+        pref_repo=repos["pref"], know_repo=repos["know"],
+        memory_write_service=repos["writer"],
+        mid_term_repo=repos["mt"],
+    )
+    stats = engine.run()
+    # 低健康度落入降级带（而非直接归档） → 落中期情景快照
+    episodes = repos["mt"].list_all(user_id="u1")
+    assert episodes, "降级未落中期情景快照"
+    assert episodes[0]["trajectory_summary"] == "低频旧偏好"
+    stored = repos["pref"].get_by_id(pref.memory_id)
+    assert str(stored.level.value if hasattr(stored.level, "value") else stored.level) in (
+        "mid", "short",
+    )
+
+
+def test_level_precise_forget(tmp_path):
+    """I-13：按记忆分层精准遗忘——level=long 只删长期、保留短期同主题记忆。"""
+    from memoryhub.adapter.schemas import ForgetRequest
+    from memoryhub.core.forget.forgetter import MemoryForgetter
+
+    db, repos = _setup(tmp_path)
+    long_pref = PreferenceMemory(
+        user_id="u1", preference_type="format_preference", text="项目周报使用 Markdown",
+        status="active", level="long",
+    )
+    short_pref = PreferenceMemory(
+        user_id="u1", preference_type="format_preference", text="临时记住用 markdown",
+        status="active", level="short",
+    )
+    repos["pref"].save(long_pref)
+    repos["pref"].save(short_pref)
+
+    forgetter = MemoryForgetter(
+        pref_repo=repos["pref"],
+        know_repo=repos["know"],
+        memory_write_service=repos["writer"],
+    )
+    resp = forgetter.execute(
+        ForgetRequest(
+            user_id="u1",
+            instruction="忘记 markdown 相关偏好",
+            level="long",  # 只忘长期
+        )
+    )
+    assert resp.deleted_count >= 1
+    assert long_pref.memory_id in resp.deleted_ids
+    # 短期记忆保留
+    assert short_pref.memory_id not in resp.deleted_ids
+    assert repos["pref"].get_by_id(short_pref.memory_id).status == "active"

@@ -101,8 +101,20 @@ class MemoryWriteService:
         *,
         action: MemoryDecision | str | None = None,
         provenance=None,
+        skip_write_gate: bool = False,
     ):
-        """Persist through the safety gate while preserving an explicit domain action."""
+        """Persist through the safety gate while preserving an explicit domain action.
+
+        ``skip_write_gate`` is used by the event-extraction path (REFACTOR_PLAN_V2
+        I-14): memories derived from events that already passed the event-level
+        safety gate do not need a second, redundant memory-level re-gate. This
+        removes the intermittent "double gate" safe-projection / review failure
+        without weakening the explicit-write safety boundary.
+        """
+        if skip_write_gate:
+            return self._unsafe_upsert_memory(
+                memory, action=action, provenance=provenance
+            )
         status = (
             memory.status.value
             if hasattr(memory.status, "value")

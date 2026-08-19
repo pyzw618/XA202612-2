@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,17 +21,16 @@ from memoryhub.adapter.schemas import (
     FeedbackRequest,
     ForgetRequest,
     KnowledgeMemory,
+    KnowledgeType,
     MemoryEvent,
     MemoryLevel,
+    MemoryStatus,
     PreferenceMemory,
     QualityStatus,
     SearchRequest,
     ToolCallResult,
     ToolCallStatus,
 )
-from memoryhub.core.fact.index_service import FactIndexService
-from memoryhub.core.fact.models import Fact, PredicateDef
-from memoryhub.core.fact.store import FactStore
 from memoryhub.core.forget.auto_forget import AutoForgetEngine
 from memoryhub.core.forget.forgetter import MemoryForgetter
 from memoryhub.core.ingestion.normalizer import EventNormalizer
@@ -713,175 +713,121 @@ def test_conflict_repository_enforces_user_dimension(tmp_path: Path) -> None:
     assert repo.resolve("conf_u2", "override", "yes", user_id="u2") is True
 
 
-class _RecordingFactAdapter:
+class _RecordingFactExtractor:
     def __init__(self):
         self.events = []
 
-    def ingest_event(self, event):
-        self.events.append(event)
+    def extract_from_trajectory(self, events):
+        return []
+
+    def extract_facts(self, events):
+        self.events.extend(events)
         return []
 
 
-def _fact(
+def _fact_knowledge(
     fact_id: str,
     *,
     user_id: str = "u1",
     value: str = "Alice",
-    scope: str = "global",
-    project_id: str | None = None,
-    observed_at: str = "2026-08-03T12:00:00+00:00",
+    subject: str = "Project A",
     confidence: float = 0.9,
-) -> Fact:
-    return Fact(
-        fact_id=fact_id,
+) -> KnowledgeMemory:
+    return KnowledgeMemory(
+        memory_id=fact_id,
         user_id=user_id,
-        subject_id=f"entity:other:project:{user_id}",
-        predicate_id="owner",
-        object_id=f"entity:person:{value}:{user_id}",
+        knowledge_type=KnowledgeType.FACT,
+        subject=subject,
+        predicate="owner",
         object_value=value,
-        source_text=f"Project owner is {value}",
-        source_id="evt_fact:text",
-        observed_at=observed_at,
+        object_type="Person",
+        single_value=True,
+        content=f"Project owner is {value}",
         confidence=confidence,
-        scope=scope,
-        project_id=project_id,
     )
 
 
-def _fact_store(tmp_path: Path) -> FactStore:
-    store = FactStore(str(tmp_path / "facts-flow.db"))
-    store.upsert_predicate(
-        PredicateDef(
-            predicate_id="owner",
-            canonical_name="owner",
-            aliases=["owner"],
-            single_value=True,
-        )
-    )
-    return store
-
-
-def test_event_ingestion_runs_fact_adapter_once_for_first_safe_event(
+def test_event_ingestion_runs_fact_extractor_once_for_first_safe_event(
     tmp_path: Path,
 ) -> None:
     event_repo = EventRepository(_db(tmp_path))
-    adapter = _RecordingFactAdapter()
+    extractor = _RecordingFactExtractor()
     service = EventIngestionService(
         event_repo=event_repo,
         safety_gate=_FakeGate(masked_text="safe fact text"),
         quality_scorer=_FixedQualityScorer(QualityStatus.ACCEPTED),
         memory_write_service=SimpleNamespace(upsert_memory=lambda _memory: None),
-        fact_ingestion_adapter=adapter,
+        knowledge_extractor=extractor,
     )
 
     first = service.ingest([_ingestion_event("evt_fact")])
     duplicate = service.ingest([_ingestion_event("evt_fact")])
 
     assert first.accepted == 1 and duplicate.accepted == 1
-    assert len(adapter.events) == 1
-    assert adapter.events[0].text == "safe fact text"
+    assert len(extractor.events) == 1
+    assert extractor.events[0].text == "safe fact text"
 
 
 def test_fact_retrieval_is_owner_scoped_and_records_access(tmp_path: Path) -> None:
-    store = _fact_store(tmp_path)
-    lookup = {}
+    db = _db(tmp_path)
+    know_repo = KnowledgeRepository(db)
+    fact = _fact_knowledge("fact_owner_u1")
+    know_repo.save(fact)
+    lookup = {fact.memory_id: fact}
     keyword = KeywordSearcher()
-    index = FactIndexService(
-        fact_store=store,
-        keyword_search=keyword,
-        memory_lookup=lookup,
-    )
-    fact = _fact("fact_owner_u1")
-    store.insert_fact(fact)
-    index.sync_fact(fact)
+    keyword.build_index([(fact.memory_id, fact.content, "{}")])
     retriever = HybridRetriever(
         keyword_search=keyword,
         memory_lookup=lookup,
-        fact_store=store,
     )
 
     response = retriever.search(SearchRequest(user_id="u1", query="Alice owner"))
-    assert [item.fact_id for item in response.facts] == [fact.fact_id]
+    assert [item.memory_id for item in response.knowledge] == [fact.memory_id]
     assert (
-        retriever.search(SearchRequest(user_id="u2", query="Alice owner")).facts == []
+        retriever.search(SearchRequest(user_id="u2", query="Alice owner")).knowledge
+        == []
     )
 
-    _record_search_access(_request_with_state(fact_store=store), response)
-    loaded = store.get_fact(fact.fact_id, user_id="u1")
+    _record_search_access(_request_with_state(know_repo=know_repo), response)
+    loaded = know_repo.get_by_id(fact.memory_id)
     assert loaded.access_count_30d == 1
     assert loaded.last_accessed_at is not None
-
-
-def test_project_fact_shadows_global_fact_in_main_retrieval(tmp_path: Path) -> None:
-    store = _fact_store(tmp_path)
-    lookup = {}
-    keyword = KeywordSearcher()
-    index = FactIndexService(
-        fact_store=store,
-        keyword_search=keyword,
-        memory_lookup=lookup,
-    )
-    global_fact = _fact("fact_global", value="Alice")
-    project_fact = _fact(
-        "fact_project",
-        value="Bob",
-        scope="project",
-        project_id="project-a",
-    )
-    store.insert_fact(global_fact)
-    store.insert_fact(project_fact)
-    index.sync_fact(global_fact)
-    index.sync_fact(project_fact)
-    retriever = HybridRetriever(
-        keyword_search=keyword,
-        memory_lookup=lookup,
-        fact_store=store,
-    )
-
-    response = retriever.search(
-        SearchRequest(
-            user_id="u1",
-            query="Project owner",
-            project_id="project-a",
-            top_k=10,
-        )
-    )
-    assert [fact.fact_id for fact in response.facts] == ["fact_project"]
 
 
 def test_fact_forget_enforces_owner_and_cascades_runtime_indexes(
     tmp_path: Path,
 ) -> None:
-    store = _fact_store(tmp_path)
-    fact = _fact("fact_forget")
-    store.insert_fact(fact)
-    lookup = {fact.fact_id: fact}
+    db = _db(tmp_path)
+    know_repo = KnowledgeRepository(db)
+    fact = _fact_knowledge("fact_forget")
+    know_repo.save(fact)
+    lookup = {fact.memory_id: fact}
     vector = _FakeVectorStore()
     forgetter = MemoryForgetter(
-        fact_store=store,
+        pref_repo=PreferenceRepository(db),
+        know_repo=know_repo,
         memory_lookup=lookup,
         vector_store=vector,
     )
 
-    assert forgetter.delete_memories([fact.fact_id], user_id="u2") == 0
-    assert forgetter.delete_memories([fact.fact_id], user_id="u1") == 1
-    assert store.get_fact(fact.fact_id, user_id="u1").status == "deleted"
-    assert fact.fact_id not in lookup
-    assert vector.deleted == [fact.fact_id]
+    assert forgetter.delete_memories([fact.memory_id], user_id="u2") == 0
+    assert forgetter.delete_memories([fact.memory_id], user_id="u1") == 1
+    assert know_repo.get_by_id(fact.memory_id).status == MemoryStatus.DELETED
+    assert fact.memory_id not in lookup
+    assert vector.deleted == [fact.memory_id]
 
 
-def test_auto_forget_archives_fact_and_removes_it_from_lookup(tmp_path: Path) -> None:
-    store = _fact_store(tmp_path)
-    fact = _fact("fact_stale", observed_at="2020-01-01T00:00:00+00:00")
-    store.insert_fact(fact)
-    lookup = {fact.fact_id: fact}
-    index = FactIndexService(fact_store=store, memory_lookup=lookup)
+def test_auto_forget_archives_fact(tmp_path: Path) -> None:
+    db = _db(tmp_path)
+    know_repo = KnowledgeRepository(db)
+    fact = _fact_knowledge("fact_stale")
+    fact.updated_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    know_repo.save(fact)
     engine = AutoForgetEngine(
-        fact_store=store,
-        fact_index_service=index,
+        pref_repo=PreferenceRepository(db),
+        know_repo=know_repo,
     )
 
     stats = engine.run()
     assert stats["archived"] == 1
-    assert store.get_fact(fact.fact_id, user_id="u1").status == "archived"
-    assert fact.fact_id not in lookup
+    assert know_repo.get_by_id(fact.memory_id).status == MemoryStatus.ARCHIVED

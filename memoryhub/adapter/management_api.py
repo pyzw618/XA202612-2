@@ -145,10 +145,12 @@ def _iso(value) -> str | None:
 
 
 def _resolve_memory(state, memory_id: str, user_id: str):
-    """跨偏好/知识/事实三类存储解析一条记忆，返回 (memory_type, memory) 或 (None, None)。"""
+    """跨偏好/知识两类存储解析一条记忆，返回 (memory_type, memory) 或 (None, None)。
+
+    事实已并入知识存储（knowledge_type=fact），统一按 knowledge 解析。
+    """
     pref_repo = getattr(state, "pref_repo", None)
     know_repo = getattr(state, "know_repo", None)
-    fact_store = getattr(state, "fact_store", None)
     if pref_repo is not None:
         mem = pref_repo.get_by_id(memory_id)
         if mem is not None and mem.user_id == user_id:
@@ -157,10 +159,6 @@ def _resolve_memory(state, memory_id: str, user_id: str):
         mem = know_repo.get_by_id(memory_id)
         if mem is not None and mem.user_id == user_id:
             return "knowledge", mem
-    if fact_store is not None:
-        fact = fact_store.get_fact(memory_id, user_id=user_id)
-        if fact is not None:
-            return "fact", fact
     return None, None
 
 
@@ -178,9 +176,10 @@ def _build_forgetter(state) -> MemoryForgetter:
         memory_lookup=getattr(state, "memory_lookup", None),
         evidence_store=getattr(state, "evidence_store", None),
         conflict_repo=getattr(state, "conflict_repo", None),
-        fact_store=getattr(state, "fact_store", None),
-        fact_index_service=getattr(state, "fact_index_service", None),
         memory_write_service=getattr(state, "memory_write_service", None),
+        short_term_repo=getattr(state, "short_term_repo", None),
+        mid_term_repo=getattr(state, "mid_term_repo", None),
+        forget_rule_service=getattr(state, "forget_rule_service", None),
     )
 
 
@@ -200,18 +199,6 @@ def _set_memory_status(state, memory_id: str, user_id: str, status: str) -> dict
     action = MemoryDecision.REVIEW if status == "pending" else MemoryDecision.REVISE
     if status == "archived":
         action = MemoryDecision.SUPERSEDE
-    if mtype == "fact":
-        fact_store = getattr(state, "fact_store", None)
-        if fact_store is None:
-            raise HTTPException(status_code=503, detail="fact store not initialized")
-        if not fact_store.transition_fact_status(
-            memory_id,
-            status,
-            user_id=user_id,
-            transition_action=action.value,
-        ):
-            raise HTTPException(status_code=409, detail="fact status update failed")
-        return {"memory_id": memory_id, "status": status}
     write_service = getattr(state, "memory_write_service", None)
     if write_service is None:
         raise HTTPException(status_code=503, detail="memory writer not initialized")
@@ -261,7 +248,7 @@ def _unified_memory_update(
 ) -> dict:
     """Route every manual memory mutation through one type-aware write boundary."""
     memory_type = str(memory_type or "").strip().lower()
-    if memory_type not in {"preference", "knowledge", "fact"}:
+    if memory_type not in {"preference", "knowledge"}:
         raise HTTPException(status_code=422, detail={"code": "memory.invalid_type"})
     if body.status is not None and body.status not in _MEMORY_STATUSES:
         raise HTTPException(status_code=422, detail={"code": "memory.invalid_status"})
@@ -275,74 +262,6 @@ def _unified_memory_update(
     requested = body.model_fields_set - {"user_id", "transition_action", "replace_evidences"}
     if not requested:
         raise HTTPException(status_code=422, detail={"code": "memory.empty_update"})
-
-    if memory_type == "fact":
-        disallowed = requested - {
-            "status", "confidence", "version", "object_value", "object_type", "evidence_text",
-            "evidences"
-        }
-        if disallowed:
-            raise HTTPException(
-                status_code=422,
-                detail={"code": "memory.unsupported_fact_fields", "fields": sorted(disallowed)},
-            )
-        action = body.transition_action or _default_transition_action(body, requested)
-        fact_store = getattr(state, "fact_store", None)
-        if fact_store is None:
-            raise HTTPException(status_code=503, detail={"code": "fact.store_unavailable"})
-        try:
-            updated = fact_store.update_fact(
-                memory_id,
-                user_id=body.user_id,
-                object_value=(
-                    body.object_value
-                    if _update_field_is_set(body, "object_value")
-                    else None
-                ),
-                object_type=(
-                    body.object_type
-                    if _update_field_is_set(body, "object_type")
-                    else None
-                ),
-                confidence=(
-                    body.confidence
-                    if _update_field_is_set(body, "confidence")
-                    else None
-                ),
-                status=body.status if _update_field_is_set(body, "status") else None,
-                version=body.version if _update_field_is_set(body, "version") else None,
-                evidence_text=(
-                    body.evidence_text
-                    if _update_field_is_set(body, "evidence_text")
-                    else None
-                ),
-                evidences=(
-                    body.evidences
-                    if _update_field_is_set(body, "evidences")
-                    else None
-                ),
-                transition_action=action.value,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail={"code": "memory.invalid_update"}) from exc
-        if updated is None:
-            raise HTTPException(status_code=404, detail={"code": "memory.not_found"})
-        index_service = getattr(state, "fact_index_service", None)
-        pipeline = getattr(state, "fact_pipeline", None)
-        if index_service is not None and bool(getattr(pipeline, "project_immediately", True)):
-            try:
-                index_service.sync_fact(updated)
-            except Exception:
-                # The authoritative outbox remains pending for the worker to replay.
-                pass
-        from dataclasses import asdict
-
-        return {
-            "memory": asdict(updated),
-            "memory_id": memory_id,
-            "memory_type": "fact",
-            "action": action.value,
-        }
 
     fields_by_type = {
         "preference": {
@@ -411,38 +330,16 @@ def _hard_delete_memory(state, memory_id: str, user_id: str) -> dict:
         raise HTTPException(status_code=404, detail="memory not found")
 
     write_service = getattr(state, "memory_write_service", None)
-    fact_index_service = getattr(state, "fact_index_service", None)
     forget_repo = getattr(state, "forget_repo", None)
 
-    if mtype == "fact":
-        fact_store = getattr(state, "fact_store", None)
-        if fact_index_service is not None:
-            try:
-                fact_index_service.sync_fact(memory, remove=True)
-            except Exception:
-                pass
-        if fact_store is not None:
-            fact_store.delete_fact_artifacts([memory_id], user_id)
-            conn = getattr(fact_store, "_conn", None)
-            if conn is not None:
-                conn.execute(
-                    "DELETE FROM facts WHERE fact_id = ? AND user_id = ?",
-                    (memory_id, user_id),
-                )
-                conn.commit()
-            try:
-                fact_store.prune_orphan_entities(user_id)
-            except Exception:
-                pass
-    else:
-        if write_service is not None:
-            try:
-                write_service.sync_memory(memory, remove=True)
-            except Exception:
-                pass
-        if forget_repo is not None:
-            table = "preferences" if mtype == "preference" else "knowledge"
-            forget_repo.delete_memories([memory_id], table)
+    if write_service is not None:
+        try:
+            write_service.sync_memory(memory, remove=True)
+        except Exception:
+            pass
+    if forget_repo is not None:
+        table = "preferences" if mtype == "preference" else "knowledge"
+        forget_repo.delete_memories([memory_id], table)
 
     cache = getattr(state, "search_cache", None)
     if cache is not None:
@@ -732,27 +629,32 @@ async def list_memories_health(
                 }
             )
 
-    fact_store = getattr(state, "fact_store", None)
-    if fact_store is not None:
+    if know_repo is not None:
         try:
-            facts = fact_store.list_facts(status=status, limit=100000, user_id=user_id)
+            facts = know_repo.get_by_type(
+                user_id=user_id, knowledge_type="fact", status=status
+            )
         except (ValueError, TypeError):
             facts = []
         for f in facts:
             factors = calc.factors_for(f)
             items.append(
                 {
-                    "memory_id": f.fact_id,
+                    "memory_id": f.memory_id,
                     "memory_type": "fact",
-                    "health_score": round(calc.calculate_from_row(f), 4),
+                    "health_score": round(calc.calculate(f), 4),
                     "time_decay": round(factors.time_decay, 4),
                     "usage_frequency": round(factors.usage_frequency, 4),
-                    "stability": 1.0,
+                    "stability": f.stability,
                     "access_count_30d": f.access_count_30d,
                     "last_accessed_at": _iso(f.last_accessed_at),
                     "confidence": f.confidence,
-                    "status": f.status,
-                    "level": None,
+                    "status": (
+                        f.status.value if hasattr(f.status, "value") else str(f.status)
+                    ),
+                    "level": (
+                        f.level.value if hasattr(f.level, "value") else str(f.level)
+                    ),
                 }
             )
 
@@ -773,9 +675,8 @@ async def run_auto_forget(request: Request):
         know_repo=getattr(state, "know_repo", None),
         db=getattr(state, "db", None),
         calculator=HealthCalculator(),
-        fact_store=getattr(state, "fact_store", None),
-        fact_index_service=getattr(state, "fact_index_service", None),
         memory_write_service=getattr(state, "memory_write_service", None),
+        mid_term_repo=getattr(state, "mid_term_repo", None),
     )
     try:
         return engine.run()
@@ -845,6 +746,7 @@ async def run_memory_consolidation(request: Request, user_id: str = ""):
         )
         result["sessions_consolidated"] = session_cons.consolidate_sessions(user_id=user_id)
     if event_repo is not None and executor is not None:
+        from memoryhub.core.knowledge.workflow_miner import WorkflowMiner
         from memoryhub.core.preference.tool_miner import ToolPreferenceMiner
         from memoryhub.core.preference.updater import PreferenceUpdater
 
@@ -856,9 +758,11 @@ async def run_memory_consolidation(request: Request, user_id: str = ""):
                 write_service=write_service,
             ),
             tool_miner=ToolPreferenceMiner(),
+            workflow_miner=WorkflowMiner(),
         )
         result["episodes_consolidated"] = memory_cons.consolidate_episodes(user_id=user_id)
         result["tool_preferences"] = memory_cons.consolidate_tool_preferences(user_id=user_id)
+        result["workflow_preferences"] = memory_cons.consolidate_workflow_preferences(user_id=user_id)
     if write_service is not None and pref_repo is not None and know_repo is not None:
         degrader = MemoryDegrader(
             pref_repo=pref_repo, know_repo=know_repo,
@@ -1080,7 +984,6 @@ async def get_forget_history_detail(
         raise HTTPException(status_code=404, detail="forget record not found")
 
     state = request.app.state
-    fact_store = getattr(state, "fact_store", None)
     resolved: list[dict[str, Any]] = []
     for mid in record.target_memory_ids:
         mtype, mem = _resolve_memory(state, mid, user_id)
@@ -1094,10 +997,7 @@ async def get_forget_history_detail(
                 }
             )
             continue
-        if mtype == "fact":
-            content = fact_store.render_fact(mem) if fact_store is not None else ""
-            status_value = mem.status
-        elif mtype == "preference":
+        if mtype == "preference":
             content = mem.text
             status_value = (
                 mem.status.value if hasattr(mem.status, "value") else str(mem.status)
@@ -1140,7 +1040,7 @@ def _count(db, model, column: str) -> int:
 
 
 @router.get("/system/status")
-async def system_status(request: Request):
+async def system_status(request: Request, user_id: str = "default"):
     """运行态子系统状态总览（后端状态页）。"""
     state = request.app.state
     config = getattr(state, "config", None)
@@ -1156,10 +1056,15 @@ async def system_status(request: Request):
     )
 
     fact_count = 0
-    fact_store = getattr(state, "fact_store", None)
-    if fact_store is not None:
+    know_repo = getattr(state, "know_repo", None)
+    if know_repo is not None:
         try:
-            fact_count = len(fact_store.list_facts(status=None, limit=100000))
+            for fact_status in _MEMORY_STATUSES:
+                fact_count += len(
+                    know_repo.get_by_type(
+                        user_id=user_id, knowledge_type="fact", status=fact_status
+                    )
+                )
         except Exception:
             fact_count = 0
 

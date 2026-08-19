@@ -31,8 +31,6 @@ class ProjectionOutboxWorker:
         pref_repo,
         know_repo,
         memory_write_service,
-        fact_store=None,
-        fact_index_service=None,
         outbox_repo: MemoryProjectionOutboxRepository | None = None,
         base_retry_seconds: int = 5,
         max_retry_seconds: int = 3600,
@@ -40,8 +38,6 @@ class ProjectionOutboxWorker:
         self.pref_repo = pref_repo
         self.know_repo = know_repo
         self.memory_write_service = memory_write_service
-        self.fact_store = fact_store
-        self.fact_index_service = fact_index_service
         db = getattr(pref_repo, "db", None)
         self.outbox_repo = outbox_repo or MemoryProjectionOutboxRepository(db)
         self.base_retry_seconds = base_retry_seconds
@@ -78,19 +74,6 @@ class ProjectionOutboxWorker:
             memory = self.pref_repo.get_by_id(item.memory_id)
         elif item.memory_type == "knowledge":
             memory = self.know_repo.get_by_id(item.memory_id)
-        elif item.memory_type == "fact":
-            if self.fact_store is None or self.fact_index_service is None:
-                raise ValueError("projection.fact_service_unavailable")
-            memory = self.fact_store.get_fact(item.memory_id)
-            if memory is None:
-                raise LookupError("projection.memory_not_found")
-            if item.operation not in {"upsert", "delete"}:
-                raise ValueError("projection.unsupported_operation")
-            self.fact_index_service.sync_fact(
-                memory,
-                remove=item.operation == "delete",
-            )
-            return
         else:
             raise ValueError("projection.unsupported_memory_type")
         if memory is None:

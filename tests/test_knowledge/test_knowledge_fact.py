@@ -25,8 +25,6 @@ _QUALITY = EventQuality(
     consistency=1.0,
     freshness=1.0,
 )
-from memoryhub.core.fact.normalizer import EntityNormalizer
-from memoryhub.core.fact.store import FactStore
 from memoryhub.core.knowledge.extractor import KnowledgeExtractor
 from memoryhub.core.knowledge.updater import KnowledgeUpdater
 from memoryhub.core.memory_write import MemoryWriteService
@@ -116,21 +114,6 @@ def test_fact_conflict_caps_versions(tmp_path):
     review = updater.add(_fact(object_value="钱七"))
     stored = know_repo.get_by_id(review)
     assert stored.status == MemoryStatus.PENDING
-
-
-def test_entity_normalizer_does_not_merge_relation_words(tmp_path):
-    """共指修复：哥哥/妹妹 不并入老王、不互为别名。"""
-    store = FactStore(str(tmp_path / "facts.db"))
-    norm = EntityNormalizer(store)
-    e_gege = norm.normalize("哥哥", "Person", "u1")
-    e_meimei = norm.normalize("妹妹", "Person", "u1")
-    e_laowang = norm.normalize("老王", "Person", "u1")
-    assert len({e_gege, e_meimei, e_laowang}) == 3
-    # 同一角色词归一化稳定（不每次新建）
-    assert norm.normalize("哥哥", "Person", "u1") == e_gege
-    # 角色词不成为老王实体的别名
-    assert "哥哥" not in (store.get_entity(e_laowang).aliases or [])
-    assert "妹妹" not in (store.get_entity(e_laowang).aliases or [])
 
 
 def test_extract_facts_deterministic_mapping():

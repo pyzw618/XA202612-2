@@ -139,7 +139,6 @@ def _service(db: Database, *, gate=None, quality_scorer=None, preference_updater
         preference_extractor=extractor,
         preference_updater=preference_updater,
         knowledge_extractor=extractor,
-        fact_ingestion_adapter=extractor,
         extraction_task_repo=None,
     )
     return service, event_repo, writer
@@ -277,7 +276,7 @@ class TestEvt05SafetyGate:
 class TestEvt06ExtractionOnce:
     def test_extraction_runs_only_once_for_same_event(self, tmp_path: Path) -> None:
         db = _db(tmp_path)
-        calls = {"pref": 0, "know": 0, "fact": 0}
+        calls = {"pref": 0, "know": 0}
 
         class CountingExtractor:
             def extract(self, event):
@@ -289,7 +288,6 @@ class TestEvt06ExtractionOnce:
                 return []
 
             def ingest_event(self, event):
-                calls["fact"] += 1
                 return []
 
         writer = MemoryWriteService(
@@ -305,14 +303,12 @@ class TestEvt06ExtractionOnce:
             preference_extractor=extractor,
             preference_updater=PreferenceUpdater(),
             knowledge_extractor=extractor,
-            fact_ingestion_adapter=extractor,
             extraction_task_repo=None,
         )
         service.ingest([_event("evt_once")])
         service.ingest([_event("evt_once")])
         assert calls["pref"] == 1
         assert calls["know"] == 1
-        assert calls["fact"] == 1
 
 
 class TestEvt07RetryDurable:
@@ -350,7 +346,6 @@ class TestEvt07RetryDurable:
             memory_write_service=writer,
             preference_extractor=extractor,
             knowledge_extractor=extractor,
-            fact_ingestion_adapter=extractor,
             extraction_task_repo=task_repo,
             extraction_max_attempts=3,
         )
@@ -387,7 +382,6 @@ class TestEvt07RetryDurable:
             memory_write_service=writer,
             preference_extractor=extractor,
             knowledge_extractor=extractor,
-            fact_ingestion_adapter=extractor,
             extraction_task_repo=task_repo,
         )
         retry = ExtractionRetryService(task_repo=task_repo, event_repo=event_repo, executor=service.extraction_executor)

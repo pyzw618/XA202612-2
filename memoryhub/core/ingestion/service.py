@@ -36,7 +36,6 @@ class EventIngestionService:
         preference_extractor=None,
         preference_updater=None,
         knowledge_extractor=None,
-        fact_ingestion_adapter=None,
         extraction_task_repo=None,
         extraction_executor=None,
         extraction_max_attempts: int = 3,
@@ -50,7 +49,6 @@ class EventIngestionService:
         self.preference_extractor = preference_extractor
         self.preference_updater = preference_updater
         self.knowledge_extractor = knowledge_extractor
-        self.fact_ingestion_adapter = fact_ingestion_adapter
         self.extraction_task_repo = extraction_task_repo
         self.extraction_max_attempts = max(1, int(extraction_max_attempts))
         self.short_term_repo = short_term_repo
@@ -60,7 +58,6 @@ class EventIngestionService:
             preference_extractor=preference_extractor,
             preference_updater=preference_updater,
             knowledge_extractor=knowledge_extractor,
-            fact_ingestion_adapter=fact_ingestion_adapter,
         )
 
     def ingest(self, events: list[MemoryEvent]) -> EventIngestionResult:
@@ -132,7 +129,6 @@ class EventIngestionService:
 
         self._extract_preferences(newly_saved, result)
         self._extract_knowledge(newly_saved, result)
-        self._extract_facts(newly_saved, result)
         return result
 
     def _buffer_short_term(self, events: list[MemoryEvent]) -> None:
@@ -211,17 +207,6 @@ class EventIngestionService:
                 self._record_extraction_failure(
                     ExtractionType.KNOWLEDGE, trajectory, result
                 )
-
-    def _extract_facts(
-        self, events: list[MemoryEvent], result: EventIngestionResult
-    ) -> None:
-        if not self.extraction_executor.supports(ExtractionType.FACT):
-            return
-        for event in events:
-            try:
-                self.extraction_executor.run_fact(event)
-            except Exception:
-                self._record_extraction_failure(ExtractionType.FACT, [event], result)
 
     def _record_extraction_failure(
         self,

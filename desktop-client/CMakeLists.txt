@@ -48,6 +48,7 @@ set(CLIENT_SOURCES
     src/pages/TerminalPage.cpp
     src/pages/PreferencePage.cpp
     src/pages/KnowledgePage.cpp
+    src/pages/MemoryTierPage.cpp
     src/pages/FactPage.cpp
     src/pages/SearchPage.cpp
     src/pages/ProjectionPage.cpp
@@ -79,6 +80,7 @@ set(CLIENT_HEADERS
     src/pages/TerminalPage.h
     src/pages/PreferencePage.h
     src/pages/KnowledgePage.h
+    src/pages/MemoryTierPage.h
     src/pages/FactPage.h
     src/pages/SearchPage.h
     src/pages/ProjectionPage.h

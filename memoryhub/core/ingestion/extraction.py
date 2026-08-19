@@ -29,13 +29,10 @@ class ExtractionExecutor:
         preference_extractor=None,
         preference_updater=None,
         knowledge_extractor=None,
-        fact_ingestion_adapter=None,
         knowledge_merge_config=None,
         conflict_repo=None,
         preference_handler=None,
         knowledge_handler=None,
-        fact_handler=None,
-        fact_mode: str = "legacy",
     ) -> None:
         self.memory_write_service = memory_write_service
         self.preference_extractor = preference_extractor
@@ -46,12 +43,8 @@ class ExtractionExecutor:
             merge_config=knowledge_merge_config,
             conflict_repo=conflict_repo,
         )
-        self.fact_ingestion_adapter = fact_ingestion_adapter
         self.preference_handler = preference_handler
         self.knowledge_handler = knowledge_handler
-        self.fact_handler = fact_handler
-        # "knowledge" 模式：事实以 knowledge(FACT) 产出（run_knowledge 内），run_fact 停用
-        self.fact_mode = fact_mode
 
     @staticmethod
     def execution_key(extractor_type: str, event_ids: list[str]) -> str:
@@ -129,10 +122,15 @@ class ExtractionExecutor:
             existing = self._get_existing(memory)
             if existing is not None:
                 # Repair an index/evidence failure that occurred after SQLite save.
-                self.memory_write_service.upsert_memory(existing)
+                # The source event already passed the event-level safety gate, so
+                # the repair re-syncs without a redundant memory-level re-gate
+                # (I-14 double-gate fix).
+                self.memory_write_service.upsert_memory(
+                    existing, skip_write_gate=True
+                )
                 continue
             if self.preference_updater is not None:
-                self.preference_updater.add(memory)
+                self.preference_updater.add(memory, skip_write_gate=True)
             else:
                 self.memory_write_service.upsert_memory(memory)
         return len(memories)
@@ -205,27 +203,14 @@ class ExtractionExecutor:
                     ],
                 )
                 memory.memory_id = self._memory_id("know", semantic_key, index, memory)
-            self.knowledge_updater.add(memory)
+            self.knowledge_updater.add(memory, skip_write_gate=True)
 
-        # fact_mode="knowledge"：事实以 knowledge(FACT) 产出（复用 §4.8.3 extract_facts +
-        # §4.8.5 冲突 matcher），与旧 Fact 管线彻底隔离，避免双写。
-        if self.fact_mode == "knowledge" and self.knowledge_extractor is not None:
+        # 事实以 knowledge(FACT) 产出（复用 §4.8.3 extract_facts + §4.8.5 冲突 matcher），
+        # 与旧 Fact 管线彻底隔离（REFACTOR_PLAN_V2 §4.8；legacy Fact 体系已删除）。
+        if hasattr(self.knowledge_extractor, "extract_facts"):
             for fact in self.knowledge_extractor.extract_facts(events):
-                self.knowledge_updater.add(fact)
+                self.knowledge_updater.add(fact, skip_write_gate=True)
         return len(memories)
-
-    def run_fact(self, event: MemoryEvent) -> int:
-        if self.fact_mode == "knowledge":
-            return 0  # FACT 已由 run_knowledge 产出，跳过旧 Fact 管线
-        if self.fact_handler is not None:
-            return sum(
-                1
-                for decision in self.fact_handler.process_and_apply(event)
-                if decision.action not in {"reject", "review"}
-            )
-        if self.fact_ingestion_adapter is None:
-            return 0
-        return len(self.fact_ingestion_adapter.ingest_event(event) or [])
 
     def supports(self, extractor_type: str) -> bool:
         kind = (
@@ -238,8 +223,7 @@ class ExtractionExecutor:
             or self.preference_extractor is not None,
             ExtractionType.KNOWLEDGE.value: self.knowledge_handler is not None
             or self.knowledge_extractor is not None,
-            ExtractionType.FACT.value: self.fact_handler is not None
-            or self.fact_ingestion_adapter is not None,
+            ExtractionType.FACT.value: self.knowledge_extractor is not None,
         }.get(kind, False)
 
     def _get_existing(self, memory: PreferenceMemory | KnowledgeMemory):

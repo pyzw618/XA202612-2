@@ -28,6 +28,7 @@
 #include "pages/FactPage.h"
 #include "pages/ForgetPages.h"
 #include "pages/KnowledgePage.h"
+#include "pages/MemoryTierPage.h"
 #include "pages/PreferencePage.h"
 #include "pages/SafetyPages.h"
 #include "pages/SearchPage.h"
@@ -328,6 +329,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
     registerPage("mem/preference", "记忆管理", "偏好记忆", new PreferencePage(m_stack));
     registerPage("mem/knowledge", "记忆管理", "知识记忆", new KnowledgePage(m_stack));
+    registerPage("mem/tiers", "记忆管理", "记忆分层", new MemoryTierPage(m_stack));
     registerPage("mem/fact", "记忆管理", "事实记忆", new FactPage(m_stack));
 
     registerPage("search", "检索与冲突", "检索测试", new SearchPage(m_stack));
@@ -421,6 +423,7 @@ void MainWindow::buildSidebar() {
     QTreeWidgetItem *g2 = addGroup("记忆");
     addLeaf(g2, "偏好记忆", "mem/preference", ":/icons/preference.svg");
     addLeaf(g2, "知识记忆", "mem/knowledge", ":/icons/knowledge.svg");
+    addLeaf(g2, "记忆分层", "mem/tiers", ":/icons/activity.svg");
     addLeaf(g2, "事实记忆", "mem/fact", ":/icons/fact.svg");
 
     QTreeWidgetItem *g3 = addGroup("处理中心");

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -14,6 +13,8 @@ from pydantic import BaseModel, Field, ValidationError
 
 from memoryhub.adapter.schemas import (
     ForgetRequest,
+    KnowledgeMemory,
+    KnowledgeType,
     MemoryEvent,
     SceneScope,
     SearchRequest,
@@ -113,30 +114,6 @@ async def clear_demo_data(request: Request, user_id: str = "default"):
                 synchronize_session=False
             )
 
-    # 事实（含事实冲突/证据），演示用户的相关记录一并清掉
-    fact_store = getattr(request.app.state, "fact_store", None)
-    if fact_store is not None:
-        try:
-            facts = fact_store.list_facts(status=None, limit=100000, user_id=user_id)
-            fact_ids = [fact.fact_id for fact in facts]
-            counts["facts"] = len(fact_ids)
-            fact_store.delete_fact_artifacts(fact_ids, user_id)
-            conn = getattr(fact_store, "_conn", None)
-            if conn is not None:
-                if fact_ids:
-                    placeholders = ",".join("?" for _ in fact_ids)
-                    conn.execute(
-                        f"DELETE FROM facts WHERE user_id = ? AND fact_id IN ({placeholders})",
-                        [user_id, *fact_ids],
-                    )
-                    conn.commit()
-                conn.execute(
-                    "DELETE FROM fact_conflicts WHERE user_id = ?", (user_id,)
-                )
-                conn.commit()
-        except Exception:
-            counts["facts"] = 0
-
     # 清空向量索引与进程内检索投影，避免检索返回已删除的“幽灵”记忆
     vector_store = getattr(request.app.state, "vector_store", None)
     if vector_store is not None:
@@ -166,13 +143,7 @@ async def clear_demo_data(request: Request, user_id: str = "default"):
         except Exception:
             pass
 
-    # 清理进程内的事实候选裁决暂存区
-    _FACT_PENDING.clear()
     return {"deleted": counts, "user_id": user_id}
-
-# 进程内 fact 候选暂存区：proposal_id -> {"json": <dict>, "candidate": <FactCandidate>}
-# 便于前端 FactDialog 裁决（main 后端本身是自动 commit，无候选存储）
-_FACT_PENDING: dict[str, dict[str, Any]] = {}
 
 
 class ReplayRequest(BaseModel):
@@ -239,25 +210,6 @@ def _events_from_replay(body: ReplayRequest) -> list[MemoryEvent]:
         for raw_event in turn.get("events", []):
             events.append(_normalize_event(raw_event))
     return events
-
-
-def _candidate_to_json(proposal: Any) -> dict[str, Any]:
-    """把 FactCandidate 序列化为前端 FactCard 需要的结构。"""
-    raw = proposal.raw_triple
-    admission = proposal.admission
-    return {
-        "proposal_id": proposal.proposal_id,
-        "subject": getattr(raw, "subject_text", ""),
-        "predicate": getattr(raw, "predicate_text", ""),
-        "object": getattr(raw, "object_text", ""),
-        "evidence": getattr(raw, "evidence", ""),
-        "confidence": float(getattr(raw, "confidence", 0) or 0),
-        "admission_reason": admission.reason if hasattr(admission, "reason") else "",
-        "suggested_scope": proposal.scope_hint or "project",
-        "status": "proposed",
-        "source_id": proposal.source_id,
-        "metadata": dict(proposal.metadata or {}),
-    }
 
 
 @router.post("/replay")
@@ -356,18 +308,9 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
         summary_lines.append(f"写入 {len(processing.preferences_written)} 条偏好记忆")
     if processing.knowledge_written:
         summary_lines.append(f"写入 {len(processing.knowledge_written)} 条知识记忆")
-    if processing.fact_proposal_ids:
-        summary_lines.append(f"生成 {len(processing.fact_proposal_ids)} 条事实候选")
     summary_lines.append(f"实际检索到 {len(cards)} 条记忆，使用 {len(used_ids)} 条")
 
-    # fact 候选：把 processing 暂存的候选注册到进程内裁决暂存区
     fact_proposals = []
-    cached_candidates = getattr(processor, "_fact_candidates", None) or []
-    for proposal in cached_candidates:
-        if proposal.proposal_id in processing.fact_proposal_ids:
-            json_repr = _candidate_to_json(proposal)
-            _FACT_PENDING[proposal.proposal_id] = {"json": json_repr, "candidate": proposal}
-            fact_proposals.append(json_repr)
 
     generated_tool_calls = [
         {
@@ -391,16 +334,6 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
             },
             "status": "success",
             "sequence": 899,
-            "latency_ms": 0,
-        })
-    if fact_proposals:
-        generated_tool_calls.append({
-            "call_id": f"{body.turn_id}_fact_propose",
-            "tool_name": "fact_propose",
-            "arguments": {"source_event_ids": [event.event_id for event in new_events]},
-            "result": {"proposal_ids": processing.fact_proposal_ids},
-            "status": "success",
-            "sequence": 901,
             "latency_ms": 0,
         })
 
@@ -427,51 +360,29 @@ async def decide_agent_action(
     request: Request,
 ):
     """接收用户裁决，由 Agent 适配层执行相应 MemoryHub 操作。"""
-    if body.action_type in {"fact_commit", "fact_reject"}:
-        staged = _FACT_PENDING.get(action_id)
-        pipeline = getattr(request.app.state, "fact_pipeline", None)
-        if pipeline is None:
-            raise HTTPException(status_code=503, detail="fact pipeline not initialized")
+    if body.action_type == "fact_reject":
+        return {"action_id": action_id, "status": "rejected"}
 
-        # 从暂存区取回候选（含 FactCandidate 对象）
-        if staged is None:
-            raise HTTPException(status_code=404, detail="fact proposal not found")
-        proposal = staged["candidate"]
-
-        if body.action_type == "fact_reject":
-            staged["json"]["status"] = "rejected"
-            return {"action_id": action_id, "status": "rejected"}
-
-        try:
-            result = pipeline.commit(
-                proposal,
-                scope=body.payload.get("scope") or proposal.scope_hint or "global",
-                project_id=body.payload.get("project_id") or proposal.project_id_hint,
-                resolution=body.payload.get("resolution") or None,
-                force=bool(body.payload.get("force", False)),
-                auto_resolve=False,
-                user_id=body.payload.get("user_id", "default"),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        requires_decision = result.relation == "CONFLICT" and result.resolution == "escalate"
-        # 幂等：重复提交同一候选时（DUPLICATE）返回已存储的事实，而不是新构建的临时 fact
-        duplicate = result.relation == "DUPLICATE"
-        stored_fact = (
-            result.existing_fact if duplicate and result.existing_fact else result.new_fact
+    if body.action_type == "fact_commit":
+        write_service = getattr(request.app.state, "memory_write_service", None)
+        if write_service is None:
+            raise HTTPException(status_code=503, detail="memory write service not initialized")
+        payload = body.payload or {}
+        user_id = str(payload.get("user_id", "default"))
+        memory = KnowledgeMemory(
+            user_id=user_id,
+            knowledge_type=KnowledgeType.FACT,
+            subject=str(payload.get("subject") or payload.get("subject_text") or ""),
+            predicate=str(payload.get("predicate") or payload.get("predicate_text") or ""),
+            object_value=str(payload.get("object") or payload.get("object_text") or ""),
+            object_type=str(payload.get("object_type") or ""),
         )
-        response = {
-            "proposal_id": action_id,
-            "status": "awaiting_decision" if requires_decision else "committed",
-            "requires_decision": requires_decision,
-            "relation": result.relation,
-            "resolution": result.resolution,
-            "reason": result.reason,
-            "fact": asdict(stored_fact) if stored_fact is not None else None,
-            "existing_fact": asdict(result.existing_fact) if getattr(result, "existing_fact", None) else None,
+        write_service.upsert_memory(memory, skip_write_gate=True)
+        return {
+            "action_id": action_id,
+            "status": "committed",
+            "fact": memory.model_dump(mode="json"),
         }
-        _FACT_PENDING[action_id]["json"]["status"] = response["status"]
-        return response
 
     if body.action_type == "conflict_resolve":
         repo = getattr(request.app.state, "conflict_repo", None)

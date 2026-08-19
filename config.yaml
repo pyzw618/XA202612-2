@@ -1,3 +1,8 @@
+# 运行时模式（FACT 已并入 knowledge 单一来源，legacy Fact 管线已删除，REFACTOR_PLAN_V2 §4.8）
+runtime:
+  mode: development
+  allow_fallback: true
+
 storage:
   db_path: data/memoryhub.db
   vector_index_path: data/vector_index

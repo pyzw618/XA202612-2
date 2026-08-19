@@ -47,7 +47,6 @@ class PendingIndexCompensationTask:
         sync_service: MemorySyncService,
         interval_seconds: float = 30.0,
         enabled: bool = True,
-        fact_index_service=None,
         projection_outbox_worker=None,
     ):
         """
@@ -59,7 +58,6 @@ class PendingIndexCompensationTask:
         self.sync_service = sync_service
         self.interval_seconds = max(1.0, float(interval_seconds))
         self.enabled = enabled
-        self.fact_index_service = fact_index_service
         self.projection_outbox_worker = projection_outbox_worker
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -128,7 +126,6 @@ class PendingIndexCompensationTask:
             self._metrics.total_runs += 1
             self._metrics.last_error = ""
         result = None
-        fact_result = None
         outbox_result = None
         if self.projection_outbox_worker is not None:
             try:
@@ -143,22 +140,13 @@ class PendingIndexCompensationTask:
             with self._metrics_lock:
                 self._metrics.last_error = "memory_projection.failed"
             logger.exception("memory projection compensation failed")
-        if self.fact_index_service is not None:
-            try:
-                fact_result = self.fact_index_service.sync_pending()
-            except Exception:
-                with self._metrics_lock:
-                    self._metrics.last_error = "fact_projection.failed"
-                logger.exception("fact projection compensation failed")
         succeeded = (
             (len(outbox_result.succeeded) if outbox_result is not None else 0)
             + (len(result.succeeded) if result is not None else 0)
-            + (len(fact_result.succeeded) if fact_result is not None else 0)
         )
         failed_ids = (
             (list(outbox_result.failed) if outbox_result is not None else [])
             + (list(result.failed) if result is not None else [])
-            + (list(fact_result.failed) if fact_result is not None else [])
         )
         with self._metrics_lock:
             self._metrics.total_succeeded += succeeded

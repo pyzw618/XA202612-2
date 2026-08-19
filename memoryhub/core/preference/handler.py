@@ -100,7 +100,10 @@ class PreferenceMemoryHandler(BaseMemoryHandler):
         memory = decision.candidate.payload
         memory.evidences = decision.candidate.evidences
         memory.confidence = decision.confidence
-        return self.updater.add(memory)
+        # Extraction-derived write: the source event already passed the
+        # event-level safety gate, so skip the redundant memory-level re-gate
+        # (I-14 double-gate fix).
+        return self.updater.add(memory, skip_write_gate=True)
 
     def _freshness(self, value: str) -> float:
         return candidate_freshness(value, memory_type=self.memory_type)

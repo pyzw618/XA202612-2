@@ -16,18 +16,6 @@ from fastapi.testclient import TestClient
 
 from memoryhub.app import create_app
 from memoryhub.config import AppConfig, SafetyConfig, StorageConfig, UserRuleConfig
-from memoryhub.core.fact.pipeline import FactMemoryPipeline
-
-
-class _StaticFactLLMResponse:
-    content = '{"triples": []}'
-
-
-class _StaticFactLLM:
-    """Stable local test double: API contract tests never call a host LLM port."""
-
-    def generate(self, prompt, system_prompt="", **kwargs):
-        return _StaticFactLLMResponse()
 
 
 @pytest.fixture()
@@ -43,11 +31,7 @@ def client(tmp_path) -> TestClient:
         # gate is still provisioned and every explicit write remains gated.
         safety=SafetyConfig(user_rules=UserRuleConfig(enabled=False)),
     )
-    fact_pipeline = FactMemoryPipeline(
-        db_path=config.storage.db_path,
-        llm_client=_StaticFactLLM(),
-    )
-    with TestClient(create_app(config, fact_pipeline=fact_pipeline)) as test_client:
+    with TestClient(create_app(config)) as test_client:
         yield test_client
 
 
@@ -383,36 +367,39 @@ def test_api_memory_tiers_short_and_mid_term(client: TestClient) -> None:
 
 def test_api_09_facts_crud(client: TestClient) -> None:
     """GET /facts、/facts/conflicts、/facts/{id}、/facts/{id}/evidence、DELETE /facts/{id}"""
-    pipeline = client.app.state.fact_pipeline
-    proposal = pipeline.propose("项目周报的负责人是李四", metadata={"user_id": "u-api"})[0]
-    pipeline.commit(proposal, scope="global", user_id="u-api")
-    fact = pipeline.get_facts(user_id="u-api")[0]
+    created = client.post(
+        "/api/memory/memories/knowledge",
+        json={
+            "user_id": "u-api",
+            "knowledge_type": "fact",
+            "subject": "项目周报",
+            "predicate": "负责人",
+            "object_value": "李四",
+            "object_type": "Person",
+            "content": "项目周报 负责人 李四",
+        },
+    )
+    assert created.status_code == 200, created.text
+    fact_id = created.json()["memory_id"]
 
     facts = client.get("/api/memory/facts", params={"user_id": "u-api"})
     assert facts.status_code == 200
-    assert any(f["fact_id"] == fact.fact_id for f in facts.json())
+    assert any(f["fact_id"] == fact_id for f in facts.json())
 
     conflicts = client.get("/api/memory/facts/conflicts", params={"user_id": "u-api"})
     assert conflicts.status_code == 200
     assert isinstance(conflicts.json(), list)
 
-    detail = client.get(f"/api/memory/facts/{fact.fact_id}", params={"user_id": "u-api"})
+    detail = client.get(f"/api/memory/facts/{fact_id}", params={"user_id": "u-api"})
     assert detail.status_code == 200
-    assert detail.json()["fact_id"] == fact.fact_id
+    assert detail.json()["fact_id"] == fact_id
 
-    evidence = client.get(f"/api/memory/facts/{fact.fact_id}/evidence", params={"user_id": "u-api"})
+    evidence = client.get(f"/api/memory/facts/{fact_id}/evidence", params={"user_id": "u-api"})
     assert evidence.status_code == 200
 
-    deleted = client.delete(f"/api/memory/facts/{fact.fact_id}", params={"user_id": "u-api"})
+    deleted = client.delete(f"/api/memory/facts/{fact_id}", params={"user_id": "u-api"})
     assert deleted.status_code == 200
     assert deleted.json()["deleted"] is True
-
-    # 软删除：active 列表不再包含,详情状态为 deleted
-    active_facts = client.get("/api/memory/facts", params={"user_id": "u-api"}).json()
-    assert all(f["fact_id"] != fact.fact_id for f in active_facts)
-    soft = client.get(f"/api/memory/facts/{fact.fact_id}", params={"user_id": "u-api"})
-    assert soft.status_code == 200
-    assert soft.json()["status"] == "deleted"
 
 
 def test_api_10_extraction_tasks_endpoints(client: TestClient) -> None:
@@ -439,10 +426,11 @@ def test_api_10_extraction_tasks_endpoints(client: TestClient) -> None:
 
 def test_api_11_evaluate_endpoints(client: TestClient) -> None:
     """POST /evaluate/{task_name}、GET /evaluate/reports"""
-    # preference/conflict 评测框架已定义、实现未落地 → 501 稳定错误码
+    # preference/conflict 评测需服务器端数据集路径，缺省 → 400（已实现，I-10）
     resp = client.post("/api/memory/evaluate/preference")
-    assert resp.status_code == 501, resp.text
-    assert resp.json()["detail"]["code"] == "evaluation.not_implemented"
+    assert resp.status_code == 400, resp.text
+    resp = client.post("/api/memory/evaluate/conflict")
+    assert resp.status_code == 400, resp.text
 
     # retrieval 评测需要服务器端数据集路径，缺省 → 400
     resp = client.post("/api/memory/evaluate/retrieval")

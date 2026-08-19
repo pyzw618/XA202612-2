@@ -58,14 +58,11 @@ def exists(conn: sqlite3.Connection, table: str) -> bool:
 
 
 def bootstrap(db_path: str) -> None:
-    from memoryhub.core.fact.store import FactStore
     from memoryhub.storage.database import Database
 
     db = Database(db_path)
     db.init_schema()
     db.close()
-    store = FactStore(db_path)
-    store.close()
 
 
 def checkpoint_schema(conn: sqlite3.Connection) -> None:
@@ -254,97 +251,11 @@ def migrate_domain(
                 counts[f"{memory_type}.evidence.existing"] += 1
 
 
-def migrate_facts(
-    conn: sqlite3.Connection,
-    dry_run: bool,
-    counts: Counter,
-    undo: dict[str, list[str]],
-    owners: dict[str, Counter],
-) -> None:
-    if not exists(conn, "facts"):
-        return
-    for fact in conn.execute("SELECT fact_id,user_id,version,status,observed_at FROM facts"):
-        fact_id, user_id = str(fact["fact_id"]), str(fact["user_id"] or "default")
-        version = max(1, int(fact["version"] or 1))
-        item = {
-            "lineage_id": lineage_id(fact_id, "fact", version, fact_id),
-            "memory_id": fact_id,
-            "memory_type": "fact",
-            "parent_memory_id": None,
-            "root_memory_id": fact_id,
-            "semantic_version": version,
-            "transition_action": "new" if fact["status"] == "active" else "supersede",
-            "created_at": str(fact["observed_at"] or now()),
-        }
-        counts["fact.lineage.source"] += 1
-        owners["fact"][user_id] += 1
-        if dry_run:
-            counts["fact.lineage.planned"] += 1
-        elif put_lineage(conn, item):
-            counts["fact.lineage.inserted"] += 1
-            undo["lineage"].append(item["lineage_id"])
-        else:
-            counts["fact.lineage.existing"] += 1
-    if not exists(conn, "fact_evidence"):
-        return
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(fact_evidence)")}
-    event, source_hash, audit = (
-        ("event_id" if "event_id" in columns else "''"),
-        ("source_hash" if "source_hash" in columns else "''"),
-        ("safety_audit_id" if "safety_audit_id" in columns else "''"),
-    )
-    sql = (
-        "SELECT fact_id,source_id,source_text,observed_at,"
-        + event
-        + " AS event_id,"
-        + source_hash
-        + " AS source_hash,"
-        + audit
-        + " AS safety_audit_id FROM fact_evidence"
-    )
-    for index, row in enumerate(conn.execute(sql), 1):
-        memory_id = str(row["fact_id"])
-        event_id = str(row["event_id"] or row["source_id"] or f"legacy:{memory_id}:{index}")
-        text = str(row["source_text"] or "")
-        hashed = str(
-            row["source_hash"]
-            or digest(
-                {
-                    "fact_id": memory_id,
-                    "event_id": event_id,
-                    "source_id": row["source_id"],
-                    "source_text": text,
-                }
-            )
-        )
-        item = {
-            "evidence_id": evidence_id(memory_id, event_id, hashed),
-            "memory_id": memory_id,
-            "memory_type": "fact",
-            "event_id": event_id,
-            "source_hash": hashed,
-            "source_type": "tool_result",
-            "excerpt": text[:1000],
-            "occurred_at": str(row["observed_at"] or now()),
-            "quality_score": 1.0,
-            "safety_audit_id": str(row["safety_audit_id"] or "") or None,
-        }
-        counts["fact.evidence.source"] += 1
-        if dry_run:
-            counts["fact.evidence.planned"] += 1
-        elif put_evidence(conn, item):
-            counts["fact.evidence.inserted"] += 1
-            undo["evidence"].append(item["evidence_id"])
-        else:
-            counts["fact.evidence.existing"] += 1
-
-
 def target_owner_counts(conn: sqlite3.Connection) -> dict[str, Counter]:
     result: dict[str, Counter] = defaultdict(Counter)
     for memory_type, table, id_column in (
         ("preference", "preferences", "memory_id"),
         ("knowledge", "knowledge", "memory_id"),
-        ("fact", "facts", "fact_id"),
     ):
         if not exists(conn, table):
             continue
@@ -399,7 +310,6 @@ def main() -> int:
         checkpoint_schema(conn)
         migrate_domain(conn, "preferences", "preference", True, args.dry_run, counts, undo, owners)
         migrate_domain(conn, "knowledge", "knowledge", False, args.dry_run, counts, undo, owners)
-        migrate_facts(conn, args.dry_run, counts, undo, owners)
         if args.dry_run:
             conn.rollback()
         else:
@@ -415,7 +325,7 @@ def main() -> int:
             target = owners
         owner_match = {
             kind: dict(owners[kind]) == dict(target[kind])
-            for kind in ("preference", "knowledge", "fact")
+            for kind in ("preference", "knowledge")
         }
         report = {
             "migration": MIGRATION_NAME,

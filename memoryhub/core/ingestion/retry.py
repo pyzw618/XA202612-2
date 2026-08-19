@@ -93,9 +93,7 @@ class ExtractionRetryService:
                 if not events:
                     raise ExtractionPermanentError("extraction.event_missing")
             self.executor.run_knowledge(events)
-        elif task.extractor_type == ExtractionType.FACT:
-            if len(events) != 1:
-                raise ExtractionPermanentError("extraction.invalid_event_set")
-            self.executor.run_fact(events[0])
         else:
+            # FACT 已并入知识链（run_knowledge 内以 KnowledgeType.FACT 产出），
+            # 不再存在独立的 FACT 抽取任务（REFACTOR_PLAN_V2 §4.8）。
             raise ExtractionPermanentError("extraction.unsupported_type")

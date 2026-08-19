@@ -6,8 +6,6 @@ import sys
 from pathlib import Path
 
 from memoryhub.adapter.schemas import Evidence, KnowledgeMemory, PreferenceMemory, SourceType
-from memoryhub.core.fact.models import Fact
-from memoryhub.core.fact.store import FactStore
 from memoryhub.storage.database import Database, KnowledgeRepository, PreferenceRepository
 from memoryhub.storage.models import MemoryEvidenceRow, MemoryLineageRow
 
@@ -47,23 +45,6 @@ def _legacy_database(tmp_path) -> str:
         )
     )
     db.close()
-
-    fact_store = FactStore(db_path)
-    fact = Fact(
-        fact_id="fact_legacy",
-        subject_id="entity:project:a",
-        predicate_id="owner",
-        object_id="entity:person:alice",
-        object_value="Alice",
-        source_text="legacy fact evidence",
-        source_id="evt_fact",
-        observed_at="2026-08-15T00:00:00Z",
-        confidence=0.9,
-        user_id="u-fact",
-    )
-    fact_store.insert_fact(fact)
-    fact_store.save_fact_evidence(fact)
-    fact_store.close()
     return db_path
 
 
@@ -87,7 +68,7 @@ def test_migration_dry_run_is_write_free_and_reports_planned_counts(tmp_path):
     payload = json.loads(report.read_text(encoding="utf-8"))
     assert payload["dry_run"] is True
     assert payload["counters"]["preference.lineage.planned"] == 1
-    assert payload["counters"]["fact.evidence.planned"] == 1
+    assert payload["counters"]["knowledge.evidence.planned"] == 1
 
     db = Database(db_path)
     db.init_schema()
@@ -108,14 +89,13 @@ def test_migration_is_idempotent_and_emits_checkpoint_validation_and_rollback(tm
     assert payload["validation"]["owner_scope_valid"] is True
     assert payload["counters"]["preference.lineage.inserted"] == 1
     assert payload["counters"]["knowledge.evidence.inserted"] == 1
-    assert payload["counters"]["fact.evidence.inserted"] == 1
     assert "DELETE FROM memory_evidence" in rollback.read_text(encoding="utf-8")
 
     db = Database(db_path)
     db.init_schema()
     with db.session() as session:
-        assert session.query(MemoryLineageRow).count() == 3
-        assert session.query(MemoryEvidenceRow).count() == 3
+        assert session.query(MemoryLineageRow).count() == 2
+        assert session.query(MemoryEvidenceRow).count() == 2
         checkpoint = (
             session.connection()
             .exec_driver_sql(
@@ -131,4 +111,4 @@ def test_migration_is_idempotent_and_emits_checkpoint_validation_and_rollback(tm
     assert second.returncode == 0, second.stderr
     repeated = json.loads(report.read_text(encoding="utf-8"))
     assert repeated["counters"]["preference.lineage.existing"] == 1
-    assert repeated["counters"]["fact.evidence.existing"] == 1
+    assert repeated["counters"]["knowledge.evidence.existing"] == 1

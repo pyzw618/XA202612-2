@@ -58,6 +58,7 @@ class LifecycleScheduler:
             result["sessions_consolidated"] = self.session_consolidator.consolidate_sessions()
             result["episodes_consolidated"] = self.memory_consolidator.consolidate_episodes()
             result["tool_preferences"] = self.memory_consolidator.consolidate_tool_preferences()
+            result["workflow_preferences"] = self.memory_consolidator.consolidate_workflow_preferences()
             if self.memory_degrader is not None:
                 result["degraded"] = self.memory_degrader.degrade_low_health()
             if self.lifecycle_manager is not None:

@@ -423,11 +423,9 @@ void FactPage::openProposeDialog() {
     AppContext::instance()->api()->postAsync("/api/memory/facts/propose", body,
         [this](const api::Result &r) {
             m_proposeBtn->setEnabled(true);
-            if (r.hasJsonArray()) {
-                const QJsonArray proposals = r.jsonArray();
-                for (const QJsonValue &p : proposals) m_candidates.append(p.toObject());
-                QMessageBox::information(this, "完成", QString("已生成 %1 条事实候选，请到上方裁决区处理").arg(proposals.size()));
-                renderCandidates();
+            if (r.ok && r.hasJsonArray()) {
+                QMessageBox::information(this, "完成", "事实已写入（knowledge(FACT)）。");
+                onRefresh();
             } else if (r.errorCode == "memory.safety.review_required") {
                 QMessageBox::warning(this, "需人工复核", "提案需人工复核。");
             } else if (r.errorCode == "memory.safety.rejected") {

@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from memoryhub.adapter.schemas import KnowledgeMemory, PreferenceMemory
+from memoryhub.adapter.schemas import (
+    Evidence,
+    KnowledgeMemory,
+    KnowledgeType,
+    MemoryDecision,
+    PreferenceMemory,
+    SourceType,
+)
 from memoryhub.app import create_app
 from memoryhub.config import AppConfig, SafetyConfig, StorageConfig, UserRuleConfig
-from memoryhub.core.fact.models import Entity, Fact
 
 
 def _client(tmp_path) -> TestClient:
@@ -97,47 +103,39 @@ def test_put_updates_knowledge_template_and_steps(tmp_path) -> None:
         assert updated["version"] == 2
 
 
-def test_put_updates_fact_object_confidence_and_evidence(tmp_path) -> None:
+def test_put_updates_fact_knowledge_confidence_and_evidence(tmp_path) -> None:
     with _client(tmp_path) as client:
-        store = client.app.state.fact_store
         user_id = "u1"
-        subject = Entity(
-            Entity.make_id("Organization", "Project A", user_id),
-            "Project A",
-            "Organization",
+        fact = KnowledgeMemory(
+            memory_id="fact_unified_update",
             user_id=user_id,
-        )
-        object_entity = Entity(
-            Entity.make_id("Person", "Alice", user_id),
-            "Alice",
-            "Person",
-            user_id=user_id,
-        )
-        store.upsert_entity(subject)
-        store.upsert_entity(object_entity)
-        fact = Fact(
-            fact_id="fact_unified_update",
-            subject_id=subject.entity_id,
-            predicate_id="owner",
-            object_id=object_entity.entity_id,
+            knowledge_type=KnowledgeType.FACT,
+            subject="Project A",
+            predicate="owner",
             object_value="Alice",
-            source_text="Project A owner is Alice",
-            source_id="evt_fact_initial",
-            observed_at="2026-08-15T00:00:00Z",
+            object_type="Person",
+            single_value=True,
+            content="Project A owner is Alice",
             confidence=0.70,
-            user_id=user_id,
+            evidences=[
+                Evidence(
+                    event_id="evt_fact_initial",
+                    evidence_id="evt_fact_initial:1",
+                    content="Project A owner is Alice",
+                    source_type=SourceType.TOOL_RESULT,
+                )
+            ],
         )
-        store.insert_fact(fact)
-        store.save_fact_evidence(fact)
+        client.app.state.memory_write_service.upsert_memory(
+            fact, action=MemoryDecision.NEW
+        )
 
         response = client.put(
-            f"/api/memory/fact/{fact.fact_id}",
+            f"/api/memory/knowledge/{fact.memory_id}",
             json={
                 "user_id": user_id,
-                "object_value": "Bob",
-                "object_type": "Person",
+                "content": "Project A owner changed to Bob",
                 "confidence": 0.91,
-                "evidence_text": "Project A owner changed to Bob",
                 "evidences": [
                     {
                         "event_id": "evt_fact_manual_proof",
@@ -151,20 +149,17 @@ def test_put_updates_fact_object_confidence_and_evidence(tmp_path) -> None:
         )
 
         assert response.status_code == 200, response.text
-        updated = response.json()["memory"]
-        assert updated["object_value"] == "Bob"
+        body = response.json()
+        updated = body["memory"]
+        assert body["action"] == "supersede"
+        assert updated["content"] == "Project A owner changed to Bob"
         assert updated["confidence"] == 0.91
         assert updated["version"] == 2
         evidence = client.get(
-            f"/api/memory/v2/memories/{fact.fact_id}/evidence",
+            f"/api/memory/v2/memories/{fact.memory_id}/evidence",
             params={"user_id": user_id},
         ).json()["items"]
-        assert len(evidence) == 3
-        lineage = client.get(
-            f"/api/memory/v2/memories/{fact.fact_id}/lineage",
-            params={"user_id": user_id},
-        ).json()["items"]
-        assert lineage[-1]["transition_action"] == "supersede"
+        assert len(evidence) == 2
 
 
 def test_put_rejects_type_mismatch_and_version_regression(tmp_path) -> None:

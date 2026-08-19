@@ -1,0 +1,26 @@
+{
+  "metadata": {
+    "dataset_id": "preference_golden_v1",
+    "version": "1.0",
+    "created_at": "2026-08-19",
+    "split": "golden",
+    "description": "偏好提取评测黄金集：均为规则引擎可确定性提取的偏好文本（无需 LLM），用于偏好准确率≥85% 基线评测（REFACTOR_PLAN_V2 §4.7.2）。expected_output 为规则产出文本（子串/归一化匹配）。"
+  },
+  "samples": [
+    {"sample_id": "pref_001", "input_text": "以后都用 Markdown 写周报", "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。", "expected_type": "format_preference", "scene": "office"},
+    {"sample_id": "pref_002", "input_text": "以后默认用 HTML 输出项目文档", "expected_output": "偏好使用 HTML 格式进行数据输出。", "expected_type": "format_preference", "scene": "office"},
+    {"sample_id": "pref_003", "input_text": "以后始终用 JSON 格式返回接口数据", "expected_output": "偏好使用 JSON 格式进行数据输出。", "expected_type": "format_preference", "scene": "dev"},
+    {"sample_id": "pref_004", "input_text": "以后都用 CSV 格式导出数据表", "expected_output": "偏好使用 CSV 格式进行数据输出。", "expected_type": "format_preference", "scene": "office"},
+    {"sample_id": "pref_005", "input_text": "每次输出都用 XML 格式", "expected_output": "偏好使用 XML 格式进行数据输出。", "expected_type": "format_preference", "scene": "office"},
+    {"sample_id": "pref_006", "input_text": "以后都用 markdown 格式", "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。", "expected_type": "format_preference", "scene": "office"},
+    {"sample_id": "pref_007", "input_text": "from now on always use JSON format", "expected_output": "偏好使用 JSON 格式进行数据输出。", "expected_type": "format_preference", "scene": "dev"},
+    {"sample_id": "pref_008", "input_text": "以后默认用 markdown 写会议纪要", "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。", "expected_type": "format_preference", "scene": "office"},
+    {"sample_id": "pref_009", "input_text": "以后默认用 JSON 格式", "expected_output": "偏好使用 JSON 格式进行数据输出。", "expected_type": "format_preference", "scene": "dev"},
+    {"sample_id": "pref_010", "input_text": "以后都用 html 格式", "expected_output": "偏好使用 HTML 格式进行数据输出。", "expected_type": "format_preference", "scene": "office"},
+    {"sample_id": "pref_011", "input_text": "不要保存我的密码", "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。", "expected_type": "safety_preference", "scene": "security"},
+    {"sample_id": "pref_012", "input_text": "禁止记录用户的隐私信息", "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。", "expected_type": "safety_preference", "scene": "security"},
+    {"sample_id": "pref_013", "input_text": "don't remember my password", "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。", "expected_type": "safety_preference", "scene": "security"},
+    {"sample_id": "pref_014", "input_text": "不要记住我的银行卡号", "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。", "expected_type": "safety_preference", "scene": "security"},
+    {"sample_id": "pref_015", "input_text": "以后默认用 json，内容尽量简洁", "expected_output": "偏好使用 JSON 格式进行数据输出。", "expected_type": "format_preference", "scene": "office"}
+  ]
+}

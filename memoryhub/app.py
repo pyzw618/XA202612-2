@@ -174,7 +174,6 @@ def create_app(
     user_rule_identity_resolver: Callable[[Request], str] | None = None,
     safety_gate: object | None = None,
     event_ingestion_service: object | None = None,
-    fact_pipeline: object | None = None,
     memory_service: object | None = None,
 ) -> FastAPI:
     """
@@ -235,10 +234,6 @@ def create_app(
     app.state.extraction_retry_service = None
     app.state.extraction_retry_task = None
     app.state.memory_write_service = None
-    app.state.fact_pipeline = fact_pipeline
-    app.state.fact_store = getattr(fact_pipeline, "store", None)
-    app.state.fact_index_service = None
-    app.state.owns_fact_pipeline = False
     app.state.memory_service = memory_service
     app.state.owns_memory_service = False
 
@@ -355,12 +350,6 @@ def create_app(
 
         import json
 
-        from memoryhub.core.fact import (
-            FactIndexService,
-            FactIngestionAdapter,
-            FactMemoryPipeline,
-        )
-        from memoryhub.core.fact.handler import FactMemoryHandler
         from memoryhub.core.ingestion.extraction import ExtractionExecutor
         from memoryhub.core.ingestion.quality import QualityScorer
         from memoryhub.core.ingestion.retry import ExtractionRetryService
@@ -460,19 +449,7 @@ def create_app(
         conflict_repo = ConflictRepository(db)
         forget_repo = ForgetRepository(db)
 
-        if app.state.fact_pipeline is None:
-            app.state.fact_pipeline = FactMemoryPipeline(
-                db_path=config.storage.db_path,
-                llm_client=llm_client,
-                llm_timeout_seconds=config.llm.fact_extraction_timeout_seconds,
-                safety_gate=app.state.safety_gate,
-                project_immediately=not config.runtime.is_production,
-            )
-            app.state.owns_fact_pipeline = True
-        fact_store = app.state.fact_pipeline.store
-        facts = fact_store.list_facts(status="active", limit=100000)
-
-        memories = [*pref_repo.list_all(), *know_repo.list_all(), *facts]
+        memories = [*pref_repo.list_all(), *know_repo.list_all()]
         memory_lookup = {m.memory_id: m for m in memories}
 
         embedding_kwargs = {"dim": config.embedding.dimension}
@@ -578,20 +555,6 @@ def create_app(
         app.state.vector_store = vector_store
         app.state.vector_engine = vector_engine
         app.state.evidence_store = EvidenceStore(config.storage.evidence_path)
-        app.state.fact_store = fact_store
-        app.state.fact_index_service = FactIndexService(
-            fact_store=fact_store,
-            vector_store=vector_store,
-            vector_engine=vector_engine,
-            keyword_search=keyword_search,
-            memory_lookup=memory_lookup,
-            search_cache=cache,
-            embedding_client=embedding_client,
-        )
-        app.state.fact_pipeline.index_service = app.state.fact_index_service
-        for fact in facts:
-            app.state.fact_index_service.sync_fact(fact)
-        app.state.fact_index_service.sync_pending()
 
         app.state.memory_write_service = MemoryWriteService(
             pref_repo=pref_repo,
@@ -619,7 +582,6 @@ def create_app(
         app.state.event_processor = EventProcessingCoordinator(
             pref_repo=pref_repo,
             know_repo=know_repo,
-            fact_pipeline=app.state.fact_pipeline,
             # Use the configured cloud LLM for assisted preference/knowledge extraction.
             llm_client=llm_client,
             safety_config=config.safety,
@@ -634,7 +596,6 @@ def create_app(
             write_service=app.state.memory_write_service,
         )
         knowledge_extractor = KnowledgeExtractor(llm_client=llm_client)
-        fact_ingestion_adapter = FactIngestionAdapter(app.state.fact_pipeline)
         preference_handler = PreferenceMemoryHandler(
             preference_extractor, preference_updater
         )
@@ -646,21 +607,15 @@ def create_app(
                 conflict_repo=conflict_repo,
             ),
         )
-        fact_handler = FactMemoryHandler(
-            app.state.fact_pipeline, adapter=fact_ingestion_adapter
-        )
         extraction_executor = ExtractionExecutor(
             memory_write_service=app.state.memory_write_service,
             preference_extractor=preference_extractor,
             preference_updater=preference_updater,
             knowledge_extractor=knowledge_extractor,
-            fact_ingestion_adapter=fact_ingestion_adapter,
             knowledge_merge_config=config.knowledge_merge,
             conflict_repo=conflict_repo,
             preference_handler=preference_handler,
             knowledge_handler=knowledge_handler,
-            fact_handler=fact_handler,
-            fact_mode=config.runtime.fact_mode,
         )
         if (
             app.state.event_ingestion_service is None
@@ -674,7 +629,6 @@ def create_app(
                 preference_extractor=preference_extractor,
                 preference_updater=preference_updater,
                 knowledge_extractor=knowledge_extractor,
-                fact_ingestion_adapter=fact_ingestion_adapter,
                 extraction_task_repo=extraction_task_repo,
                 extraction_executor=extraction_executor,
                 short_term_repo=(
@@ -711,10 +665,15 @@ def create_app(
             from memoryhub.core.lifecycle.memory_consolidator import MemoryConsolidator
             from memoryhub.core.lifecycle.scheduler import LifecycleScheduler
             from memoryhub.core.lifecycle.session_consolidator import SessionConsolidator
+            from memoryhub.core.knowledge.workflow_miner import WorkflowMiner
             from memoryhub.core.preference.tool_miner import ToolPreferenceMiner
 
             st_repo = ShortTermMemoryRepository(db)
             mt_repo = MidTermMemoryRepository(db)
+            # 暴露给检索级联（REFACTOR_PLAN_V2 §4.4.3 / I-4）：带 session_id 的
+            # /search 需注入会话短期工作记忆与中期情景，再做长期混合。
+            app.state.short_term_repo = st_repo
+            app.state.mid_term_repo = mt_repo
             session_consolidator = SessionConsolidator(
                 short_term_repo=st_repo, mid_term_repo=mt_repo, event_repo=event_repo
             )
@@ -722,6 +681,7 @@ def create_app(
                 mid_term_repo=mt_repo, event_repo=event_repo, extraction_executor=extraction_executor,
                 preference_updater=preference_updater,
                 tool_miner=ToolPreferenceMiner(),
+                workflow_miner=WorkflowMiner(),
             )
             memory_degrader = MemoryDegrader(
                 pref_repo=pref_repo, know_repo=know_repo,
@@ -740,6 +700,14 @@ def create_app(
             )
             app.state.lifecycle_scheduler.start()
 
+        # 用户遗忘规则（REFACTOR_PLAN_V2 §4.5.2 / I-13）：存用户自定义的
+        # "删除所有涉及 X 的记忆"类主题规则，遗忘执行前并入意图关键词。
+        from memoryhub.core.forget.rules import ForgetRuleService
+
+        app.state.forget_rule_service = ForgetRuleService(
+            database_path=config.storage.db_path
+        )
+
         if config.runtime.is_production or vector_engine is not None:
             # 生产路径：仅装配 MilvusHybridRetriever，不构建 KeywordSearcher / HybridRetriever
             retriever = MilvusHybridRetriever(
@@ -750,7 +718,6 @@ def create_app(
                 memory_lookup=memory_lookup,
                 cache=cache,
                 index_version=str(index_version),
-                fact_store=fact_store,
             )
         else:
             # development/test 降级路径：构建 KeywordSearcher / HybridRetriever（FAISS + BM25）
@@ -768,7 +735,6 @@ def create_app(
                 config=config.retrieval,
                 embedding_fn=embedding_client.embed,
                 memory_lookup=memory_lookup,
-                fact_store=fact_store,
             )
 
         # 写入同步服务：SQLite 事实源 ↔ 当前运行时检索投影
@@ -793,8 +759,6 @@ def create_app(
             pref_repo=pref_repo,
             know_repo=know_repo,
             memory_write_service=app.state.memory_write_service,
-            fact_store=fact_store,
-            fact_index_service=app.state.fact_index_service,
         )
         projection_outbox_worker.run_once()
 
@@ -806,7 +770,6 @@ def create_app(
             sync_service=sync_service,
             interval_seconds=30.0,
             enabled=vector_engine is not None or keyword_search is not None,
-            fact_index_service=app.state.fact_index_service,
             projection_outbox_worker=projection_outbox_worker,
         )
         compensation_task.start()
@@ -876,15 +839,6 @@ def create_app(
                     app.state.owns_memory_service = False
 
         # 保存向量索引并关闭数据库
-        if app.state.owns_fact_pipeline:
-            owned_fact_pipeline = getattr(app.state, "fact_pipeline", None)
-            if owned_fact_pipeline is not None:
-                try:
-                    owned_fact_pipeline.close()
-                finally:
-                    app.state.fact_pipeline = None
-                    app.state.fact_store = None
-                    app.state.owns_fact_pipeline = False
         vector_store = getattr(app.state, "vector_store", None)
         if vector_store is not None:
             vector_store.save()

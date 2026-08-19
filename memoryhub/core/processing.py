@@ -33,7 +33,6 @@ class EventProcessingCoordinator:
         *,
         pref_repo,
         know_repo,
-        fact_pipeline=None,
         llm_client=None,
         on_memory_written: Callable[[object], None] | None = None,
         safety_config=None,
@@ -42,7 +41,6 @@ class EventProcessingCoordinator:
     ):
         self.pref_repo = pref_repo
         self.know_repo = know_repo
-        self.fact_pipeline = fact_pipeline
         self.preference_extractor = PreferenceExtractor(llm_client=llm_client)
         self.knowledge_extractor = KnowledgeExtractor(llm_client=llm_client)
         self.preference_updater = PreferenceUpdater(
@@ -146,7 +144,9 @@ class EventProcessingCoordinator:
                 written: list[str] = []
                 if preference_items:
                     for memory in preference_items:
-                        result_id = self.preference_updater.add(memory)
+                        result_id = self.preference_updater.add(
+                            memory, skip_write_gate=True
+                        )
                         if result_id:
                             written.append(result_id)
                 else:
@@ -159,7 +159,9 @@ class EventProcessingCoordinator:
                     # 兜底：Handler 链无产出时，从中文对话确定性抽取显式偏好（无 LLM 也可用）
                     if not written:
                         for memory in self._extract_dialogue_preferences(event):
-                            result_id = self.preference_updater.add(memory)
+                            result_id = self.preference_updater.add(
+                                memory, skip_write_gate=True
+                            )
                             if result_id:
                                 written.append(result_id)
                 summary.preferences_written.extend(written)
@@ -210,7 +212,9 @@ class EventProcessingCoordinator:
             written: list[str] = []
             if knowledge_items:
                 for memory in knowledge_items:
-                    result_id = self.knowledge_updater.add(memory)
+                    result_id = self.knowledge_updater.add(
+                        memory, skip_write_gate=True
+                    )
                     if result_id:
                         written.append(result_id)
             elif external_calls:
@@ -229,58 +233,8 @@ class EventProcessingCoordinator:
         except Exception as exc:
             summary.warnings.append(f"knowledge extraction failed: {exc}")
 
-        if self.fact_pipeline is not None:
-            for event in events:
-                text_parts = [event.text]
-                for call in event.tool_calls:
-                    try:
-                        text_parts.append(json.dumps(call.result, ensure_ascii=False))
-                    except Exception:
-                        pass
-                fact_text = "\n".join(part for part in text_parts if part)
-                if not fact_text:
-                    continue
-                try:
-                    structured_triples = event.payload.get("fact_triples", [])
-                    proposals = []
-                    if isinstance(structured_triples, Sequence) and not isinstance(
-                        structured_triples, (str, bytes)
-                    ):
-                        from memoryhub.core.fact.models import FactCandidate, RawTriple
-
-                        for raw in structured_triples:
-                            if not isinstance(raw, Mapping):
-                                continue
-                            triple = RawTriple(**dict(raw))
-                            admission = self.fact_pipeline.admission.evaluate(
-                                triple,
-                                project_id=event.payload.get("project_id"),
-                                scope_hint=event.payload.get("fact_scope"),
-                            )
-                            proposals.append(
-                                FactCandidate(
-                                    candidate_id=FactCandidate.make_id(),
-                                    raw_triple=triple,
-                                    admission=admission,
-                                    source_id=event.event_id,
-                                    project_id_hint=event.payload.get("project_id"),
-                                    scope_hint=event.payload.get("fact_scope"),
-                                    metadata={
-                                        "session_id": event.session_id,
-                                        "turn_id": event.turn_id,
-                                    },
-                                )
-                            )
-                    # 演示适配层：无显式 fact_triples 时不调用 LLM 提取，
-                    # 避免云端 LLM 暂时不可用时阻塞 step 响应（fact 提取走确定性数据）
-                    for proposal in proposals:
-                        summary.fact_proposal_ids.append(proposal.proposal_id)
-                    # 候选由 agent_api 暂存，供前端 FactDialog 裁决
-                    self._fact_candidates = list(proposals)
-                except Exception:
-                    summary.warnings.append(
-                        f"fact proposal failed for {event.event_id}"
-                    )
+        # 事实（Fact）已并入知识链以 KnowledgeType.FACT 产出（REFACTOR_PLAN_V2 §4.8），
+        # 不再经独立 Fact 管线生成 legacy 候选；演示适配层不再产生 fact_proposals。
 
         return summary
 

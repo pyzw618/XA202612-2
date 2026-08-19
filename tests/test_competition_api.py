@@ -78,6 +78,7 @@ def _propose(client: TestClient, object_text: str) -> str:
         json={
             "source_id": "demo",
             "scope_hint": "global",
+            "user_id": "default",
             "triples": [
                 {
                     "subject_text": "project-a",
@@ -90,7 +91,7 @@ def _propose(client: TestClient, object_text: str) -> str:
         },
     )
     assert response.status_code == 200
-    return response.json()[0]["proposal_id"]
+    return response.json()[0]["fact_id"]
 
 
 def test_replay_is_read_only_until_execute_and_masks_tool_results(client):
@@ -113,39 +114,25 @@ def test_replay_is_read_only_until_execute_and_masks_tool_results(client):
     assert len(test_client.get("/api/memory/events/session/sess_demo").json()) == 1
 
 
-def test_fact_propose_commit_is_idempotent_and_conflict_waits_for_decision(client):
+def test_fact_propose_is_idempotent_via_knowledge_fact(client):
+    """/facts/propose 直接写入 knowledge(FACT)；同一三元组幂等，不同客体共存。"""
     test_client, _ = client
     first_id = _propose(test_client, "alice")
-    first = test_client.post(
-        f"/api/agent/actions/{first_id}/decision",
-        json={"action_type": "fact_commit", "payload": {"scope": "global"}},
-    )
-    assert first.json()["status"] == "committed"
-    again = test_client.post(
-        f"/api/agent/actions/{first_id}/decision",
-        json={"action_type": "fact_commit", "payload": {"scope": "global"}},
-    )
-    assert again.json()["fact"]["fact_id"] == first.json()["fact"]["fact_id"]
+    assert first_id
 
-    second_id = _propose(test_client, "bob")
-    pending = test_client.post(
-        f"/api/agent/actions/{second_id}/decision",
-        json={"action_type": "fact_commit", "payload": {"scope": "global"}},
-    )
-    assert pending.json()["requires_decision"] is True
-    assert len(test_client.get("/api/memory/facts").json()) == 1
-
-    resolved = test_client.post(
-        f"/api/agent/actions/{second_id}/decision",
-        json={
-            "action_type": "fact_commit",
-            "payload": {"scope": "global", "resolution": "replace"},
-        },
-    )
-    assert resolved.json()["status"] == "committed"
+    # 幂等：重复提交同一三元组，仍只有 1 条事实（knowledge 冲突 matcher 去重）
+    again_id = _propose(test_client, "alice")
+    assert again_id == first_id
     facts = test_client.get("/api/memory/facts").json()
     assert len(facts) == 1
-    assert facts[0]["object_value"] == "bob"
+    assert facts[0]["fact_id"] == first_id
+    assert facts[0]["object_value"] == "alice"
+
+    # 不同客体：single_value 未标记 → 共存，新增一条事实
+    second_id = _propose(test_client, "bob")
+    assert second_id != first_id
+    facts = test_client.get("/api/memory/facts").json()
+    assert {f["object_value"] for f in facts} == {"alice", "bob"}
 
 
 def test_knowledge_filter_and_forget_preview_do_not_mutate(client):

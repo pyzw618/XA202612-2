@@ -135,8 +135,6 @@ class MilvusHybridRetriever:
         query_vector_cache_size: int = 1000,
         fallback_retriever: Callable[[SearchRequest], SearchResponse] | None = None,
         metrics_collector: Callable[[dict[str, float]], None] | None = None,
-        fact_store=None,
-
     ):
         """
         参数:
@@ -168,8 +166,6 @@ class MilvusHybridRetriever:
         self._query_vector_cache_size = query_vector_cache_size
         self.fallback_retriever = fallback_retriever
         self.metrics_collector = metrics_collector
-        self.fact_store = fact_store
-
 
     def search(self, request: SearchRequest) -> SearchResponse:
         """
@@ -268,7 +264,6 @@ class MilvusHybridRetriever:
         t0 = time.perf_counter()
         results = [self._to_search_result(hit, timings) for hit in hits]
         filtered = self._filter_by_context(results, search_request)
-        filtered = self._suppress_shadowed_global_facts(filtered, search_request)
 
         # 7. 普通重排默认关闭；开启时仅对前 20 个候选执行无模型规则重排
         if self.reranker is not None and self.config.rerank_enabled:
@@ -476,30 +471,6 @@ class MilvusHybridRetriever:
             filtered.append(result)
         return filtered
 
-
-    def _suppress_shadowed_global_facts(
-        self, results: list[SearchResult], request: SearchRequest
-    ) -> list[SearchResult]:
-        if self.fact_store is None or not request.project_id:
-            return results
-        project_facts = self.fact_store.list_facts(
-            status="active", limit=100000, scope="project",
-            project_id=request.project_id, user_id=request.user_id,
-        )
-        shadowed = set()
-        for fact in project_facts:
-            predicate = self.fact_store.get_predicate(fact.predicate_id)
-            if predicate is None or predicate.single_value:
-                shadowed.add((fact.subject_id, fact.predicate_id))
-        kept = []
-        for result in results:
-            scope = result.metadata.get("scope") or {}
-            key = (result.metadata.get("subject_id"), result.metadata.get("predicate_id"))
-            if result.memory_type == "fact" and scope.get("scope") == "global" and key in shadowed:
-                continue
-            kept.append(result)
-        return kept
-
     @staticmethod
     def _scope_conflict(result: SearchResult, request: SearchRequest) -> bool:
         """scope 与请求 context 存在明确冲突时返回 True（无信息不算冲突）"""
@@ -525,6 +496,8 @@ class MilvusHybridRetriever:
         facts: list[FactMemory] = []
         for result in results:
             t0 = time.perf_counter()
+            # 分层级联标注（REFACTOR_PLAN_V2 §4.4.3 / I-4）：长期记忆默认 memory_level=long
+            result.memory_level = result.memory_level or "long"
             memory = self.memory_lookup.get(result.memory_id)
             if timings is not None:
                 timings["sqlite_lookup_ms"] = timings.get("sqlite_lookup_ms", 0.0) + (

@@ -32,19 +32,17 @@ def _iso(value: datetime | None) -> str | None:
 def _resolve_memory(state, memory_id: str, user_id: str):
     pref_repo = getattr(state, "pref_repo", None)
     know_repo = getattr(state, "know_repo", None)
-    fact_store = getattr(state, "fact_store", None)
     if pref_repo is not None:
         memory = pref_repo.get_by_id(memory_id)
         if memory is not None and memory.user_id == user_id:
             return "preference", memory
-    if know_repo is not None:
-        memory = know_repo.get_by_id(memory_id)
-        if memory is not None and memory.user_id == user_id:
-            return "knowledge", memory
-    if fact_store is not None:
-        fact = fact_store.get_fact(memory_id, user_id=user_id)
-        if fact is not None:
-            return "fact", fact
+    if know_repo is None:
+        return None, None
+    memory = know_repo.get_by_id(memory_id)
+    if memory is not None and memory.user_id == user_id:
+        if getattr(memory, "knowledge_type", "") == "fact":
+            return "fact", memory
+        return "knowledge", memory
     return None, None
 
 
@@ -95,23 +93,27 @@ async def get_lineage(memory_id: str, request: Request, user_id: str = Query(...
 @router.get("/memories/{memory_id}/evidence")
 async def get_evidence(memory_id: str, request: Request, user_id: str = Query(..., min_length=1)):
     state = request.app.state
-    memory_type, _ = _owned_or_404(state, memory_id, user_id)
+    memory_type, memory = _owned_or_404(state, memory_id, user_id)
     if memory_type == "fact":
-        rows = state.fact_store.list_fact_evidence(memory_id, user_id)
+        evidences = getattr(memory, "evidences", []) or []
         return {
             "memory_id": memory_id,
             "memory_type": "fact",
             "items": [
                 {
-                    "evidence_id": row["evidence_id"],
-                    "event_id": row.get("event_id", ""),
-                    "source_hash": row.get("source_hash", ""),
-                    "source_type": "fact_source",
-                    "excerpt": _safe_evidence_excerpt("fact_source"),
-                    "occurred_at": row.get("observed_at"),
-                    "safety_audit_id": row.get("safety_audit_id") or None,
+                    "evidence_id": ev.evidence_id,
+                    "event_id": ev.event_id,
+                    "source_hash": "",
+                    "source_type": (
+                        ev.source_type.value
+                        if hasattr(ev.source_type, "value")
+                        else str(ev.source_type)
+                    ),
+                    "excerpt": _safe_evidence_excerpt(str(ev.source_type)),
+                    "occurred_at": _iso(ev.timestamp),
+                    "safety_audit_id": None,
                 }
-                for row in rows
+                for ev in evidences
             ],
         }
     repo = MemoryEvidenceRepository(state.db)
@@ -138,11 +140,11 @@ async def get_evidence(memory_id: str, request: Request, user_id: str = Query(..
 @router.get("/memories/{memory_id}/audit")
 async def get_audit(memory_id: str, request: Request, user_id: str = Query(..., min_length=1)):
     state = request.app.state
-    memory_type, _ = _owned_or_404(state, memory_id, user_id)
+    memory_type, memory = _owned_or_404(state, memory_id, user_id)
     if memory_type == "fact":
         audit_ids = {
-            str(row.get("safety_audit_id", "") or "")
-            for row in state.fact_store.list_fact_evidence(memory_id, user_id)
+            str(getattr(ev, "safety_audit_id", "") or "")
+            for ev in getattr(memory, "evidences", []) or []
         }
     else:
         evidence_repo = MemoryEvidenceRepository(state.db)
@@ -247,18 +249,12 @@ async def search_with_provenance(
         if memory is None:
             continue
         if memory_type == "fact":
-            evidence = state.fact_store.list_fact_evidence(result.memory_id, user_id)
+            evidence = getattr(memory, "evidences", []) or []
             provenance[result.memory_id] = {
                 "memory_type": "fact",
                 "lineage_count": 0,
                 "evidence_count": len(evidence),
-                "audit_ids": sorted(
-                    {
-                        str(item.get("safety_audit_id", "") or "")
-                        for item in evidence
-                    }
-                    - {""}
-                ),
+                "audit_ids": [],
             }
             continue
         lineage = lineage_repo.list_for_memory(result.memory_id, memory_type)

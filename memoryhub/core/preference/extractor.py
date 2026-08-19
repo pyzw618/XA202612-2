@@ -136,15 +136,37 @@ class PreferenceExtractor:
             "Rules:\n"
             "1. Do NOT repeat raw parameters or mention temporary details.\n"
             "2. Output strictly JSON with keys: 'implicit_pref', 'preference_type', 'action_payload', 'tags', and optional 'is_global' (boolean, true if user explicitly asks for global/all-scenario applicability).\n"
+            "3. When the same tool is repeatedly chosen across calls and never corrected, "
+            "it may signal a TOOL_PREFERENCE; emit preference_type 'tool_preference' "
+            "with action_payload like "
+            "{\"action\": \"use_tool\", \"target\": \"<tool_name>\", \"value\": \"<task_type>\"}.\n"
         )
 
         allowed_types = "|".join([e.value for e in PreferenceType])
+        # 注入工具调用轨迹（REFACTOR_PLAN_V2 §4.2.1 / I-8）：让 LLM 路径也能直接
+        # 产出 TOOL_PREFERENCE / WORKFLOW_PREF，与确定性 ToolPreferenceMiner 互补。
+        tool_calls_json = json.dumps(
+            [
+                {
+                    "tool_name": call.tool_name,
+                    "sequence": call.sequence,
+                    "status": (
+                        call.status.value if hasattr(call.status, "value") else str(call.status)
+                    ),
+                    "arguments": call.arguments,
+                    "result": call.result,
+                }
+                for call in (event.tool_calls or [])
+            ],
+            ensure_ascii=False,
+        )
         user_prompt = f"""
 Execution Context:
 Event Source Type: {event.source_type}
 Event Type: {event.event_type}
 Event Text Summary: {event.text}
 Cleaned content payload: {json.dumps(clean_payload)}
+Tool calls: {tool_calls_json}
 Outcome status: {event.payload.get("status", "SUCCESS")}
 
 Output JSON format:

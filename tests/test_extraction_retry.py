@@ -95,24 +95,11 @@ class _FlakyKnowledgeExtractor:
         )]
 
 
-class _FlakyFactAdapter:
-    def __init__(self) -> None:
-        self.fail = True
-        self.seen_texts: list[str] = []
-
-    def ingest_event(self, event):
-        self.seen_texts.append(event.text)
-        if self.fail:
-            raise RuntimeError("fact provider leaked raw response")
-        return []
-
-
 def _service(
     *,
     db: Database,
     preference_extractor=None,
     knowledge_extractor=None,
-    fact_adapter=None,
 ):
     event_repo = EventRepository(db)
     task_repo = ExtractionTaskRepository(db)
@@ -127,7 +114,6 @@ def _service(
         memory_write_service=writer,
         preference_extractor=preference_extractor,
         knowledge_extractor=knowledge_extractor,
-        fact_ingestion_adapter=fact_adapter,
         extraction_task_repo=task_repo,
     )
     retry = ExtractionRetryService(
@@ -189,20 +175,6 @@ def test_knowledge_retry_reloads_only_safe_persisted_trajectory(tmp_path: Path) 
     assert len(writer.know_repo.list_all(user_id="u1")) == 1
 
 
-def test_fact_failure_enqueues_and_retries_the_safe_event(tmp_path: Path) -> None:
-    adapter = _FlakyFactAdapter()
-    service, retry, task_repo, _, _ = _service(db=_db(tmp_path), fact_adapter=adapter)
-
-    result = service.ingest([_event("evt-fact")])
-    task = task_repo.list(user_id="u1")[0]
-    assert result.extraction_failures == 1
-    assert task.extractor_type == ExtractionType.FACT
-
-    adapter.fail = False
-    assert retry.run_due(user_id="u1").succeeded == 1
-    assert adapter.seen_texts == ["safe:evt-fact", "safe:evt-fact"]
-
-
 def test_exponential_backoff_dead_letter_and_owner_isolation(tmp_path: Path) -> None:
     repo = ExtractionTaskRepository(_db(tmp_path))
     start = datetime(2026, 8, 3, 12, 0, 0)
@@ -254,15 +226,20 @@ def test_retry_dead_letters_missing_or_cross_owner_events_without_exposing_text(
     writer = MemoryWriteService(
         pref_repo=PreferenceRepository(db), know_repo=KnowledgeRepository(db)
     )
+
+    class _NoOpPref:
+        def extract(self, event):
+            return []
+
     executor = ExtractionExecutor(
         memory_write_service=writer,
-        fact_ingestion_adapter=_FlakyFactAdapter(),
+        preference_extractor=_NoOpPref(),
     )
     retry = ExtractionRetryService(
         task_repo=task_repo, event_repo=event_repo, executor=executor
     )
     missing, _ = task_repo.enqueue(
-        event_ids=["evt-missing"], user_id="u1", extractor_type=ExtractionType.FACT
+        event_ids=["evt-missing"], user_id="u1", extractor_type=ExtractionType.PREFERENCE
     )
 
     outcome = retry.run_due(user_id="u1")
@@ -278,8 +255,8 @@ class _FailAfterFirstPersistWriter(MemoryWriteService):
         super().__init__(**kwargs)
         self.fail_once = True
 
-    def upsert_memory(self, memory) -> None:
-        super().upsert_memory(memory)
+    def upsert_memory(self, memory, *args, **kwargs) -> None:
+        super().upsert_memory(memory, *args, **kwargs)
         if self.fail_once:
             self.fail_once = False
             raise RuntimeError("index synchronization failed with sensitive detail")

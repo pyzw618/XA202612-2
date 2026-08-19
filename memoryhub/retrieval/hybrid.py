@@ -42,7 +42,6 @@ class HybridRetriever:
         config: RetrievalConfig | None = None,
         embedding_fn: Callable[[str], list[float]] | None = None,
         memory_lookup: dict | None = None,
-        fact_store=None,
     ):
         """
         参数:
@@ -62,7 +61,6 @@ class HybridRetriever:
         self.config = config or RetrievalConfig()
         self.embedding_fn = embedding_fn
         self.memory_lookup = memory_lookup if memory_lookup is not None else {}
-        self.fact_store = fact_store
 
     def search(self, request: SearchRequest) -> SearchResponse:
         """
@@ -113,7 +111,6 @@ class HybridRetriever:
 
         merged = self._merge_results(vector_results, keyword_results, metadata_results)
         filtered = self._filter_by_context(merged, request)
-        filtered = self._suppress_shadowed_global_facts(filtered, request)
 
         if self.reranker is not None and self.config.rerank_enabled:
             filtered = self.reranker.rerank(filtered, request)
@@ -226,13 +223,13 @@ class HybridRetriever:
         knowledge: list[KnowledgeMemory] = []
         facts: list[FactMemory] = []
         for result in results:
+            # 分层级联标注（REFACTOR_PLAN_V2 §4.4.3 / I-4）：长期记忆默认标注 memory_level=long
+            result.memory_level = result.memory_level or "long"
             memory = self.memory_lookup.get(result.memory_id)
             if isinstance(memory, PreferenceMemory):
                 preferences.append(memory)
             elif isinstance(memory, KnowledgeMemory):
                 knowledge.append(memory)
-            elif getattr(memory, "memory_type", "") == "fact":
-                facts.append(FactMemory.model_validate(memory))
         return SearchResponse(
             results=results,
             preferences=preferences,
@@ -279,32 +276,6 @@ class HybridRetriever:
                 SearchResult(memory_id=result.memory_id, score=score, source="metadata")
             )
         return scored
-
-
-    def _suppress_shadowed_global_facts(
-        self, results: list[SearchResult], request: SearchRequest
-    ) -> list[SearchResult]:
-        if self.fact_store is None or not request.project_id:
-            return results
-        project_facts = self.fact_store.list_facts(
-            status="active", limit=100000, scope="project",
-            project_id=request.project_id, user_id=request.user_id,
-        )
-        shadowed = set()
-        for fact in project_facts:
-            predicate = self.fact_store.get_predicate(fact.predicate_id)
-            if predicate is None or predicate.single_value:
-                shadowed.add((fact.subject_id, fact.predicate_id))
-        if not shadowed:
-            return results
-        kept = []
-        for result in results:
-            scope = result.metadata.get("scope") or {}
-            key = (result.metadata.get("subject_id"), result.metadata.get("predicate_id"))
-            if result.memory_type == "fact" and scope.get("scope") == "global" and key in shadowed:
-                continue
-            kept.append(result)
-        return kept
 
     @staticmethod
     def _scope_conflict(result: SearchResult, request: SearchRequest) -> bool:

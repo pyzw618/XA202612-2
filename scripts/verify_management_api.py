@@ -63,7 +63,6 @@ from memoryhub.adapter.schemas import (  # noqa: E402
     SceneScope,
     SourceType,
 )
-from memoryhub.core.fact.models import Fact, MemoryScope  # noqa: E402
 
 
 def _mk_event(state, event_id):
@@ -124,12 +123,6 @@ with TestClient(app) as client:
         tools=["file_search", "report_writer"], knowledge_type="workflow",
     )
     st.know_repo.save(know)
-    st.fact_store.insert_fact(Fact(
-        fact_id="fact_test1", subject_id="entity:person:a_1", predicate_id="pred:works_at_x",
-        object_id="entity:org:b_1", object_value="银河麒麟", source_text="小明在银河麒麟工作",
-        source_id="evt_1", observed_at="2026-08-01T00:00:00+00:00", confidence=0.9,
-        user_id="default", scope=MemoryScope.GLOBAL.value,
-    ))
 
     # 1. PATCH 单条状态流转（归档）
     r = client.patch("/api/memory/memories/pref_test1/status",

@@ -1,8 +1,14 @@
 from __future__ import annotations
 
-from memoryhub.adapter.schemas import MemoryDecision, PreferenceMemory
-from memoryhub.core.fact.models import Fact
-from memoryhub.core.fact.store import FactStore
+from memoryhub.adapter.schemas import (
+    Evidence,
+    KnowledgeMemory,
+    KnowledgeType,
+    MemoryDecision,
+    MemoryStatus,
+    PreferenceMemory,
+    SourceType,
+)
 from memoryhub.core.forget.forgetter import MemoryForgetter
 from memoryhub.core.lifecycle.manager import LifecycleManager
 from memoryhub.core.memory_write import MemoryWriteService
@@ -114,41 +120,45 @@ def test_forgetter_deletes_through_writer_and_retains_authoritative_evidence(tmp
 
 
 def test_fact_lifecycle_transition_appends_lineage_and_delete_outbox(tmp_path):
-    db, _, _, _ = _setup(tmp_path)
-    fact_store = FactStore(db.db_path)
-    fact = Fact(
-        fact_id="fact_lifecycle",
-        subject_id="entity:project:a",
-        predicate_id="owner",
-        object_id="entity:person:alice",
+    db, _, _, writer = _setup(tmp_path)
+    fact = KnowledgeMemory(
+        memory_id="fact_lifecycle",
+        user_id="u1",
+        knowledge_type=KnowledgeType.FACT,
+        subject="Project A",
+        predicate="owner",
         object_value="Alice",
-        source_text="fact source",
-        source_id="evt_fact",
-        observed_at="2026-08-15T00:00:00Z",
+        object_type="Person",
+        content="Project A owner is Alice",
         confidence=0.9,
-        user_id="u1",
+        evidences=[
+            Evidence(
+                event_id="evt_fact",
+                content="fact source",
+                source_type=SourceType.TOOL_RESULT,
+            )
+        ],
     )
-    fact_store.insert_fact(fact)
+    writer.upsert_memory(fact, action=MemoryDecision.NEW)
 
-    assert fact_store.transition_fact_status(
-        fact.fact_id,
-        "deleted",
-        user_id="u1",
-        transition_action="supersede",
-    )
+    fact.status = MemoryStatus.DELETED
+    writer.upsert_memory(fact, action=MemoryDecision.SUPERSEDE)
 
     with db.session() as session:
         lineage = (
             session.query(MemoryLineageRow)
-            .filter(MemoryLineageRow.memory_id == fact.fact_id)
-            .one()
+            .filter(MemoryLineageRow.memory_id == fact.memory_id)
+            .order_by(MemoryLineageRow.evidence_revision)
+            .all()
         )
         outbox = (
             session.query(MemoryProjectionOutboxRow)
-            .filter(MemoryProjectionOutboxRow.memory_id == fact.fact_id)
+            .filter(
+                MemoryProjectionOutboxRow.memory_id == fact.memory_id,
+                MemoryProjectionOutboxRow.operation == "delete",
+            )
             .one()
         )
-        assert lineage.transition_action == "supersede"
+        assert [row.transition_action for row in lineage] == ["new", "supersede"]
         assert outbox.operation == "delete"
-    fact_store.close()
     db.close()
