@@ -13,6 +13,8 @@ class QLineEdit;
 class QComboBox;
 class QTimer;
 class QPushButton;
+class QWidget;
+class QResizeEvent;
 class BasePage;
 
 class MainWindow : public QMainWindow {
@@ -25,8 +27,11 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *e) override;
+    void resizeEvent(QResizeEvent *e) override;
 
 private:
+    // 侧边栏磨砂玻璃：窗口启用透明背景，由 ukui 样式读取 blurRegion 属性做区域模糊
+    void updateBlurRegion();
     void buildSidebar();
     void buildTopBar();
     void registerPage(const QString &key, const QString &group, const QString &title,
@@ -38,6 +43,7 @@ private:
     void polishPopupControls(QWidget *root);
 
     QTreeWidget *m_nav = nullptr;
+    QWidget *m_sidebar = nullptr;
     QStackedWidget *m_stack = nullptr;
     QLabel *m_breadcrumb = nullptr;
     QLabel *m_statusDot = nullptr;

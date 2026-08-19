@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["./agent-integration/plugin/opencode/memoryhub.plugin.mjs"],
+  "tools": { "memoryhub_*": true },
+  "permission": {
+    "bash": { "memoryhub *": "allow", "*": "ask" },
+    "skill": { "memory-awareness": "allow" }
+  },
+  "mcp": {
+    "memoryhub": {
+      "type": "local",
+      "command": ["/home/lcz/XA202612-2/.venv/bin/python", "-m", "memoryhub_mcp"],
+      "cwd": "agent-integration",
+      "environment": {
+        "MEMORYHUB_API_URL": "{env:MEMORYHUB_API_URL}",
+        "MEMORYHUB_USER_ID": "{env:MEMORYHUB_USER_ID}"
+      },
+      "enabled": true
+    }
+  }
+}

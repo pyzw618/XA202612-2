@@ -16,6 +16,7 @@ public:
     void setNumber(const QString &num);
     void setCaption(const QString &caption);
     void setTrend(const QString &trend, bool good = true); // 空则隐藏
+    void setHint(const QString &hint); // 中性色细信息，空则隐藏
     void setClickable(bool on);
     void setLoading(bool on);
     void setError(const QString &message);

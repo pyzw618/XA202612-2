@@ -63,9 +63,12 @@ private:
     int m_generation = 0;
     int m_pendingRequests = 0;
     int m_successfulRequests = 0;
-    int m_pref = -1;
-    int m_know = -1;
-    int m_fact = -1;
+    int m_pref = -1;            // 偏好记忆总数
+    int m_know = -1;            // 知识记忆总数
+    int m_knowWorkflow = -1;    // 知识·工作流
+    int m_knowCase = -1;        // 知识·案例
+    int m_knowTemplate = -1;    // 知识·模板
+    int m_knowFact = -1;        // 知识·事实（原独立事实记忆并入知识）
     int m_conflicts = -1;
     int m_deadLetters = -1;
 };

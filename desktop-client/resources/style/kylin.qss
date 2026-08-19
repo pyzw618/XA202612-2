@@ -1,9 +1,10 @@
 /* MemoryHub modern workstation · Qt 5 / UKUI compatible */
 * { font-family: "Noto Sans CJK SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif; font-size: 13px; font-weight: 400; color: #29313D; }
-QMainWindow, QWidget#centralRoot, QWidget#dashboardBody, QScrollArea#dashboardScroll { background: #F3F6FA; }
+QMainWindow, QWidget#centralRoot { background: transparent; }
+QWidget#rightPane, QWidget#dashboardBody, QScrollArea#dashboardScroll { background: #F3F6FA; }
 
 /* Application shell */
-QWidget#sidebar { background: #F7F9FC; border-right: 1px solid #E8EBF0; }
+QWidget#sidebar { background: rgba(246, 248, 252, 0.52); border-right: 1px solid rgba(180, 192, 208, 0.35); }
 QWidget#brandBlock { background: transparent; }
 QLabel#brandIcon { background: #E8F0FF; border-radius: 10px; padding: 5px; }
 QLabel#brandTitle { color: #252C36; font-size: 16px; font-weight: 600; }
@@ -13,7 +14,7 @@ QTreeWidget#navTree::item { height: 34px; border-radius: 7px; margin: 1px 0; pad
 QTreeWidget#navTree::item:hover { background: #EEF3FA; color: #35435A; }
 QTreeWidget#navTree::item:selected, QTreeWidget#navTree::item:selected:!active { background: #E8F0FF; color: #356FCE; font-weight: 400; }
 QTreeWidget#navTree::branch { background: transparent; width: 0; }
-QFrame#accountPanel { background: #FFFFFF; border: 1px solid #E8EBF0; border-radius: 10px; }
+QFrame#accountPanel { background: rgba(255, 255, 255, 0.38); border: 1px solid rgba(228, 233, 240, 0.9); border-radius: 10px; }
 QLabel#avatar { background: #EEF3FA; border-radius: 8px; }
 QLabel#accountCaption { color: #8B93A2; font-size: 10px; }
 QWidget#userSwitcherFrame { background: #F7F9FC; border: 1px solid #D5DEEA; border-radius: 8px; }
@@ -127,6 +128,12 @@ QFrame#activityItem { background: transparent; border-bottom: 1px solid #F0F2F5;
 QLabel#activityTitle { color: #374252; font-size: 12px; }
 QLabel#activityDetail, QLabel#activityTime { color: #697180; font-size: 11px; }
 QLabel#pieCenter { color: #374252; font-size: 16px; font-weight: 500; }
+QLabel#activityTag { font-size: 11px; border-radius: 6px; padding: 2px 7px; }
+QLabel#activityTag[tone="blue"] { color: #3D78DF; background: #EAF1FC; }
+QLabel#activityTag[tone="violet"] { color: #6A56C9; background: #EFEBFA; }
+QLabel#activityTag[tone="teal"] { color: #2E8F8B; background: #E4F5F4; }
+QLabel#activityTag[tone="rose"] { color: #B9466C; background: #FBEAF0; }
+QLabel#activityTag[tone="gray"] { color: #697180; background: #F0F2F5; }
 
 /* Popup menus and selection controls */
 QMenu { background: #FFFFFF; border: 1px solid #DCE2EA; border-radius: 9px; padding: 6px; }

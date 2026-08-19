@@ -53,6 +53,12 @@ void StatCard::setTrend(const QString &trend, bool good) {
     m_trend->setVisible(!trend.isEmpty());
 }
 
+void StatCard::setHint(const QString &hint) {
+    m_trend->setText(hint);
+    m_trend->setStyleSheet("font-size: 11px; color: #697180;");
+    m_trend->setVisible(!hint.isEmpty());
+}
+
 void StatCard::setClickable(bool on) {
     m_clickable = on;
     setFocusPolicy(on ? Qt::StrongFocus : Qt::NoFocus);

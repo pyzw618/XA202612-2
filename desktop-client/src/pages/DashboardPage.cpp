@@ -33,6 +33,38 @@
 #include "../widgets/StatCard.h"
 
 namespace {
+
+struct KnowledgeSlice {
+    const char *name;     // 图表分类名
+    const QString keyword; // 用于知识卡片细信息的标记名
+    int *counter;         // 指向成员计数
+    const char *color;     // 十六进制颜色
+};
+
+const QColor kPrefColor("#4B7FE0");
+const QColor kWorkflowColor("#7F6BDC");
+const QColor kCaseColor("#3FB6B2");
+const QColor kTemplateColor("#E8A23C");
+const QColor kFactColor("#D15B7E");
+
+QString eventTypeLabel(const QString &raw) {
+    if (raw == "agent_response") return "工具轨迹";
+    if (raw == "agent_summary") return "会话总结";
+    if (raw == "memory_write") return "记忆写入";
+    if (raw == "user_behavior") return "用户行为";
+    if (raw.startsWith("knowledge")) return "知识";
+    if (raw.startsWith("preference")) return "偏好";
+    return raw.isEmpty() ? "记忆事件" : raw;
+}
+
+QString eventTypeTone(const QString &raw) {
+    if (raw == "agent_response" || raw.startsWith("knowledge")) return "violet";
+    if (raw == "agent_summary") return "teal";
+    if (raw == "memory_write" || raw.startsWith("preference")) return "blue";
+    if (raw == "user_behavior") return "gray";
+    return "rose";
+}
+
 QFrame *makeCard(QWidget *parent, const QString &title, const QString &subtitle,
                  QVBoxLayout **content) {
     auto *card = new QFrame(parent);
@@ -100,7 +132,7 @@ DashboardPage::DashboardPage(QWidget *parent) : BasePage(parent) {
 
     auto *header = new PageHeader(body);
     header->setTitle("记忆系统状态");
-    header->setSubtitle("查看当前用户的真实记忆概况与待处理事项");
+    header->setSubtitle("偏好记忆与知识记忆（工作流 · 案例 · 模板 · 事实）的实时概况");
     m_updateTime = new QLabel("尚未更新", header);
     m_updateTime->setObjectName("updateTime");
     auto *search = new QPushButton(QIcon(":/icons/search.svg"), "检索测试", header);
@@ -129,7 +161,7 @@ DashboardPage::DashboardPage(QWidget *parent) : BasePage(parent) {
         {"记忆总数", ":/icons/database.svg", ""},
         {"偏好记忆", ":/icons/preference.svg", "mem/preference"},
         {"知识记忆", ":/icons/knowledge.svg", "mem/knowledge"},
-        {"事实记忆", ":/icons/fact.svg", "mem/fact"}
+        {"事实知识", ":/icons/fact.svg", "mem/knowledge"}
     };
     for (int i = 0; i < 4; ++i) {
         auto *card = new StatCard(body);
@@ -144,13 +176,15 @@ DashboardPage::DashboardPage(QWidget *parent) : BasePage(parent) {
         stats->setColumnStretch(i, 1);
         m_statCards.append(card);
     }
+    m_statCards[2]->setHint("等待知识数据…");
+    m_statCards[3]->setHint("等待知识数据…");
     layout->addLayout(stats);
 
     auto *chartRow = new QHBoxLayout();
     m_chartLayout = chartRow;
     chartRow->setSpacing(16);
     QVBoxLayout *barLayout = nullptr;
-    auto *barCard = makeCard(body, "各类记忆数量", "当前有效记忆的绝对数量", &barLayout);
+    auto *barCard = makeCard(body, "记忆构成对比", "偏好记忆与知识记忆各子类型的绝对数量", &barLayout);
     m_barCard = barCard;
     m_barSeries = new QtCharts::QBarSeries();
     auto *barChart = new QtCharts::QChart();
@@ -159,7 +193,7 @@ DashboardPage::DashboardPage(QWidget *parent) : BasePage(parent) {
     barChart->setBackgroundVisible(false);
     barChart->setMargins(QMargins(4, 4, 4, 4));
     auto *axisX = new QtCharts::QBarCategoryAxis();
-    axisX->append({"偏好", "知识", "事实"});
+    axisX->append({"偏好", "工作流", "案例", "模板", "事实"});
     barChart->addAxis(axisX, Qt::AlignBottom);
     m_barSeries->attachAxis(axisX);
     auto *axisY = new QtCharts::QValueAxis();
@@ -175,7 +209,7 @@ DashboardPage::DashboardPage(QWidget *parent) : BasePage(parent) {
     chartRow->addWidget(barCard, 3);
 
     QVBoxLayout *pieLayout = nullptr;
-    auto *pieCard = makeCard(body, "记忆类型分布", "当前有效记忆", &pieLayout);
+    auto *pieCard = makeCard(body, "记忆类型分布", "当前有效记忆构成（事实已并入知识）", &pieLayout);
     m_pieCard = pieCard;
     m_pieSeries = new QtCharts::QPieSeries();
     m_pieSeries->setHoleSize(0.58);
@@ -235,16 +269,19 @@ DashboardPage::DashboardPage(QWidget *parent) : BasePage(parent) {
     taskLayout->addStretch();
     conflict->installEventFilter(this);
     conflict->setProperty("navKey", "conflicts");
-    // 抽取任务页本轮不新增；死信只展示真实数量和接口状态，不跳转到无关的遗忘队列。
     bottom->addWidget(taskCard, 2);
     layout->addLayout(bottom);
 }
 
 void DashboardPage::beginLoading() {
-    m_pendingRequests = 7;
+    m_pendingRequests = 10;
     m_successfulRequests = 0;
-    m_pref = m_know = m_fact = m_conflicts = m_deadLetters = -1;
+    m_pref = m_know = -1;
+    m_knowWorkflow = m_knowCase = m_knowTemplate = m_knowFact = -1;
+    m_conflicts = m_deadLetters = -1;
     for (auto *card : m_statCards) card->setLoading(true);
+    m_statCards[2]->setHint("等待知识数据…");
+    m_statCards[3]->setHint("等待知识数据…");
     m_activityState->setState(PageState::Loading, "正在加载活动", "正在读取最近变化…");
     m_activityState->clearAction();
     m_conflictCount->setText("—");
@@ -275,18 +312,26 @@ void DashboardPage::refresh() {
             if (r.ok && r.hasJsonArray()) { m_know = r.jsonArray().size(); m_statCards[2]->setLoading(false); m_statCards[2]->setNumber(QString::number(m_know)); }
             else m_statCards[2]->setError(r.errorMessage.isEmpty() ? "知识记忆加载失败" : r.errorMessage);
             updateMemoryVisuals(); finishRequest(r.ok); });
-    api->getAsync(query("/api/memory/facts", {{"status", "active"}}),
-        [this, generation](const api::Result &r) { if (generation != m_generation) return;
-            if (r.ok && r.hasJsonArray()) { m_fact = r.jsonArray().size(); m_statCards[3]->setLoading(false); m_statCards[3]->setNumber(QString::number(m_fact)); }
-            else m_statCards[3]->setError(r.errorMessage.isEmpty() ? "事实记忆加载失败" : r.errorMessage);
-            updateMemoryVisuals(); finishRequest(r.ok); });
+    const struct { const char *arg; int *target; } subtypes[] = {
+        {"workflow", &m_knowWorkflow},
+        {"case", &m_knowCase},
+        {"template", &m_knowTemplate},
+        {"fact", &m_knowFact},
+    };
+    for (const auto &sub : subtypes) {
+        api->getAsync(query("/api/memory/knowledge", {{"status", "active"}, {"knowledge_type", QString::fromUtf8(sub.arg)}}),
+            [this, generation, sub](const api::Result &r) { if (generation != m_generation) return;
+                if (r.ok && r.hasJsonArray()) *sub.target = r.jsonArray().size();
+                else *sub.target = -2;
+                updateMemoryVisuals(); finishRequest(r.ok); });
+    }
     api->getAsync(query("/api/memory/conflicts", {{"status", "pending"}}),
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
             if (r.ok && r.hasJsonArray()) m_conflicts = r.jsonArray().size(); else m_conflicts = -2; updateTasks(); finishRequest(r.ok); });
     api->getAsync(query("/api/memory/extraction/tasks", {{"status", "dead_letter"}}),
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
             if (r.ok && r.hasJsonArray()) m_deadLetters = r.jsonArray().size(); else m_deadLetters = -2; updateTasks(); finishRequest(r.ok); });
-    api->getAsync(query("/api/memory/events", {{"limit", "6"}, {"offset", "0"}}),
+    api->getAsync(query("/api/memory/events", {{"limit", "8"}, {"offset", "0"}}),
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
             updateActivity(r.jsonObject().value("items").toArray(), r.ok && r.hasJsonObject()); finishRequest(r.ok); });
     api->getAsync("/api/health", [this, generation](const api::Result &r) {
@@ -322,7 +367,7 @@ void DashboardPage::finishRequest(bool ok) {
     m_updateTime->setText("更新于 " + QDateTime::currentDateTime().toString("HH:mm"));
     if (m_successfulRequests == 0) {
         setBanner("后端当前不可用。界面仍可正常浏览，你可以启动服务后点击“刷新数据”重试。", "offline");
-    } else if (m_successfulRequests < 7) {
+    } else if (m_successfulRequests < 10) {
         setBanner("部分数据暂时无法获取，已保留成功加载的内容。", "warning");
     } else {
         setBanner(QString(), "info");
@@ -330,21 +375,47 @@ void DashboardPage::finishRequest(bool ok) {
 }
 
 void DashboardPage::updateMemoryVisuals() {
-    const int values[] = {m_pref, m_know, m_fact};
-    for (int i = 0; i < 3; ++i) if (values[i] >= 0) {
-        m_statCards[i + 1]->setNumber(QString::number(values[i]));
-        m_statCards[i + 1]->setLoading(false);
+    QStringList parts;
+    const struct { int value; const char *name; } knownParts[] = {
+        {m_knowWorkflow, "工作流"},
+        {m_knowCase, "案例"},
+        {m_knowTemplate, "模板"},
+        {m_knowFact, "事实"},
+    };
+    bool allKnown = true;
+    for (const auto &p : knownParts) {
+        if (p.value < 0) { allKnown = false; continue; }
+        parts << QString("%1 %2").arg(QString::fromUtf8(p.name)).arg(p.value);
     }
-    if (m_pref >= 0 && m_know >= 0 && m_fact >= 0) {
-        const int total = m_pref + m_know + m_fact;
+    if (!parts.isEmpty()) m_statCards[2]->setHint(parts.join(" · "));
+    if (m_knowFact >= 0) {
+        m_statCards[3]->setLoading(false);
+        m_statCards[3]->setNumber(QString::number(m_knowFact));
+    }
+    if (m_knowFact < 0) m_statCards[3]->setHint(allKnown ? "事实数据不可用" : "等待知识数据…");
+    else if (m_know > 0) m_statCards[3]->setHint(QString("占知识记忆 %1%").arg(qRound(m_knowFact * 100.0 / m_know)));
+    else if (m_know == 0) m_statCards[3]->setHint("暂无知识记忆");
+
+    if (m_pref >= 0 && m_know >= 0 && m_knowWorkflow >= 0 && m_knowCase >= 0 &&
+        m_knowTemplate >= 0 && m_knowFact >= 0) {
+        const int total = m_pref + m_know;
         m_statCards[0]->setNumber(QString::number(total));
         m_statCards[0]->setLoading(false);
         m_pieCenter->setText(QString("%1\n总记忆").arg(total));
         m_barSeries->clear();
-        auto *set = new QtCharts::QBarSet("记忆");
-        set->setColor(QColor("#4B7FE0"));
-        *set << m_pref << m_know << m_fact;
-        m_barSeries->append(set);
+        const struct { int value; const QColor &color; } barValues[] = {
+            {m_pref, kPrefColor},
+            {m_knowWorkflow, kWorkflowColor},
+            {m_knowCase, kCaseColor},
+            {m_knowTemplate, kTemplateColor},
+            {m_knowFact, kFactColor},
+        };
+        for (int i = 0; i < 5; ++i) {
+            auto *set = new QtCharts::QBarSet(QString::number(i));
+            set->setColor(barValues[i].color);
+            set->append(barValues[i].value);
+            m_barSeries->append(set);
+        }
         m_pieSeries->clear();
         if (total == 0) {
             auto *empty = m_pieSeries->append("暂无数据", 1);
@@ -353,14 +424,20 @@ void DashboardPage::updateMemoryVisuals() {
             m_chartEmpty->show();
             m_pieCenter->hide();
         } else {
-            auto add = [this](const QString &name, int value, const QColor &color) {
-                if (value <= 0) return;
-                auto *slice = m_pieSeries->append(QString("%1 %2").arg(name).arg(value), value);
-                slice->setColor(color);
+            const struct { int value; const QColor &color; const char *name; } slices[] = {
+                {m_pref, kPrefColor, "偏好"},
+                {m_knowWorkflow, kWorkflowColor, "知识·工作流"},
+                {m_knowCase, kCaseColor, "知识·案例"},
+                {m_knowTemplate, kTemplateColor, "知识·模板"},
+                {m_knowFact, kFactColor, "知识·事实"},
             };
-            add("偏好", m_pref, QColor("#4B7FE0"));
-            add("知识", m_know, QColor("#7F6BDC"));
-            add("事实", m_fact, QColor("#39A6AF"));
+            for (const auto &s : slices) {
+                if (s.value <= 0) continue;
+                auto *slice = m_pieSeries->append(
+                    QString("%1 %2 (%3%)").arg(QString::fromUtf8(s.name)).arg(s.value)
+                        .arg(qRound(s.value * 100.0 / total)), s.value);
+                slice->setColor(s.color);
+            }
             m_chartEmpty->hide();
             m_pieCenter->show();
         }
@@ -393,12 +470,16 @@ void DashboardPage::updateActivity(const QJsonArray &items, bool ok) {
         icon->setPixmap(QIcon(":/icons/activity.svg").pixmap(16, 16));
         icon->setFixedSize(22, 22);
         icon->setAlignment(Qt::AlignCenter);
+        const QString rawType = j::str(event, "event_type", "记忆事件");
+        auto *tag = new QLabel(eventTypeLabel(rawType), row);
+        tag->setObjectName("activityTag");
+        tag->setProperty("tone", eventTypeTone(rawType));
         auto *texts = new QVBoxLayout();
         texts->setSpacing(1);
         const QString full = j::str(event, "content", j::str(event, "summary"));
-        auto *title = new QLabel(j::str(event, "event_type", "记忆事件"), row);
+        auto *title = new QLabel(j::str(event, "scene", "未分类"), row);
         title->setObjectName("activityTitle");
-        auto *detail = new QLabel(QString("%1 · %2").arg(j::str(event, "scene", "未分类"), full), row);
+        auto *detail = new QLabel(full, row);
         detail->setObjectName("activityDetail");
         detail->setToolTip(full);
         detail->setWordWrap(false);
@@ -408,6 +489,7 @@ void DashboardPage::updateActivity(const QJsonArray &items, bool ok) {
         time->setObjectName("activityTime");
         time->setToolTip(j::fmtTime(j::str(event, "occurred_at")));
         rowLayout->addWidget(icon);
+        rowLayout->addWidget(tag);
         rowLayout->addLayout(texts, 1);
         rowLayout->addWidget(time);
         m_activityLayout->addWidget(row);

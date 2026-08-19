@@ -10,6 +10,8 @@
 #include <QPainter>
 #include <QPalette>
 #include <QPushButton>
+#include <QRegion>
+#include <QResizeEvent>
 #include <QScreen>
 #include <QStackedWidget>
 #include <QStyle>
@@ -17,6 +19,7 @@
 #include <QShortcut>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <QVariant>
 
 #include <functional>
 
@@ -145,6 +148,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     setWindowTitle("MemoryHub 控制台 · Kylin-MemoryHub");
     resize(1440, 900);
     setMinimumSize(1180, 720);
+    // UKUI 原生毛玻璃：开启窗口透明，由 ukui 样式 + 合成器对侧边栏区域做背景模糊。
+    // 通过 blurRegion 属性限定模糊范围（见 updateBlurRegion()）。
+    setAttribute(Qt::WA_TranslucentBackground, true);
+    setProperty("useSystemStyleBlur", true);
+    setProperty("doNotBlur", false);
     AppContext::instance()->setNavigateCallback([this](const QString &key) { navigateTo(key); });
 
     auto *central = new QWidget(this);
@@ -158,6 +166,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     auto *sidebar = new QWidget(central);
     sidebar->setObjectName("sidebar");
     sidebar->setFixedWidth(224);
+    m_sidebar = sidebar;
     auto *sidebarLay = new QVBoxLayout(sidebar);
     sidebarLay->setContentsMargins(14, 18, 14, 14);
     sidebarLay->setSpacing(12);
@@ -270,6 +279,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
     // ---------------- 右列：顶栏 + 内容栈 ----------------
     auto *right = new QWidget(central);
+    right->setObjectName("rightPane");
     auto *rightLay = new QVBoxLayout(right);
     rightLay->setContentsMargins(0, 0, 0, 0);
     rightLay->setSpacing(0);
@@ -393,6 +403,23 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         pollHealth();
         refreshCurrentPage();
     });
+
+    updateBlurRegion();
+}
+
+void MainWindow::updateBlurRegion() {
+    if (!m_sidebar)
+        return;
+    const QPoint topLeft = m_sidebar->mapTo(this, QPoint(0, 0));
+    const QRegion region(QRect(topLeft, m_sidebar->size()));
+    setProperty("blurRegion", QVariant::fromValue(region));
+    if (isVisible())
+        update();
+}
+
+void MainWindow::resizeEvent(QResizeEvent *e) {
+    QMainWindow::resizeEvent(e);
+    updateBlurRegion();
 }
 
 void MainWindow::buildSidebar() {
