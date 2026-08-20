@@ -26,7 +26,7 @@ case "$BUILD_ROOT" in
     *) echo "Refusing unsafe build directory: $BUILD_ROOT" >&2; exit 2 ;;
 esac
 
-for command in python3 cmake dpkg dpkg-deb sed find install; do
+for command in python3 cmake dpkg dpkg-deb ar sed find install; do
     command -v "$command" >/dev/null 2>&1 || {
         echo "Missing build command: $command" >&2
         exit 2
@@ -74,7 +74,6 @@ install -d "$STAGE/opt/memoryhub" \
     "$STAGE/etc/memoryhub" \
     "$STAGE/usr/bin" \
     "$STAGE/usr/lib/memoryhub" \
-    "$STAGE/usr/lib/systemd/user" \
     "$STAGE/usr/share/applications" \
     "$STAGE/usr/share/icons/hicolor/scalable/apps" \
     "$STAGE/usr/share/memoryhub/opencode" \
@@ -83,9 +82,11 @@ install -d "$STAGE/opt/memoryhub" \
 
 install -m 0755 "$CLIENT_BUILD/memoryhub-client" "$STAGE/usr/bin/memoryhub-client"
 install -m 0755 "$SCRIPT_DIR/assets/prepare-user" "$STAGE/usr/lib/memoryhub/prepare-user"
+install -m 0755 "$SCRIPT_DIR/assets/memoryhub_service_launcher" "$STAGE/usr/bin/memoryhub_service_launcher"
+install -m 0755 "$SCRIPT_DIR/assets/memoryhub_session_launcher" "$STAGE/usr/bin/memoryhub_session_launcher"
+install -m 0755 "$SCRIPT_DIR/assets/memoryhub_app_launcher" "$STAGE/usr/bin/memoryhub_app_launcher"
 install -m 0755 "$SCRIPT_DIR/assets/memoryhub-mcp" "$STAGE/usr/bin/memoryhub-mcp"
 install -m 0755 "$SCRIPT_DIR/assets/memoryhub-configure-opencode" "$STAGE/usr/bin/memoryhub-configure-opencode"
-install -m 0644 "$SCRIPT_DIR/assets/memoryhub.service" "$STAGE/usr/lib/systemd/user/memoryhub.service"
 install -m 0644 "$SCRIPT_DIR/assets/config.yaml" "$STAGE/etc/memoryhub/config.yaml"
 install -m 0644 "$SCRIPT_DIR/assets/memoryhub.desktop" "$STAGE/usr/share/applications/memoryhub.desktop"
 install -m 0644 "$SCRIPT_DIR/assets/memoryhub-first-login.desktop" "$STAGE/etc/xdg/autostart/memoryhub-first-login.desktop"
@@ -108,9 +109,9 @@ cat > "$STAGE/usr/share/doc/$PACKAGE_NAME/README.Debian" <<EOF
 Kylin MemoryHub for Debian/Kylin
 ================================
 
-The package installs a per-user systemd service and an OpenCode integration.
-At first desktop login, the integration is copied to ~/.config/opencode and
-the service is enabled for that user. Existing user memory under
+The package installs a desktop-session service and an OpenCode integration.
+At desktop login, the integration is copied to ~/.config/opencode and the
+local service is started for that user. Existing user memory under
 ~/.local/share/MemoryHub is preserved across upgrades and removals.
 
 Package version: $VERSION-$REVISION
@@ -141,12 +142,64 @@ EOF
 
 echo "[4/5] Validating staged package"
 test -x "$STAGE/usr/bin/memoryhub-client"
+test -x "$STAGE/usr/bin/memoryhub_service_launcher"
+test -x "$STAGE/usr/bin/memoryhub_session_launcher"
+test -x "$STAGE/usr/bin/memoryhub_app_launcher"
+test ! -e "$STAGE/usr/lib/systemd/user/memoryhub.service"
 test -f "$STAGE/usr/share/memoryhub/opencode/memoryhub.plugin.mjs"
 test -f "$STAGE/usr/share/memoryhub/opencode/skills/memory-awareness/SKILL.md"
 test -n "$(find "$WHEELHOUSE" -maxdepth 1 -name 'kylin_memoryhub-*.whl' -print -quit)"
 
 echo "[5/5] Creating DEB"
 dpkg-deb --root-owner-group --build "$STAGE" "$OUTPUT"
+
+# Kylin's patched dpkg-deb may append an internal `_compat` archive member
+# when a package is built on Kylin itself.  That marker is intended for
+# distribution-managed compatibility packages and must not leak into an
+# ordinary third-party DEB.  Kylin V11 may still install native third-party
+# applications through its KARE shadow environment; the package service is
+# deliberately compatible with both native and KARE installation paths.
+# Official Kylin signing, when configured below, is applied after this
+# normalization so its signature covers the final archive.
+if ar t "$OUTPUT" | grep -qx '_compat'; then
+    echo "Removing Kylin-internal _compat marker from third-party DEB"
+    ar d "$OUTPUT" _compat
+fi
+
+if ar t "$OUTPUT" | grep -qx '_compat'; then
+    echo "Failed to remove Kylin-internal _compat marker" >&2
+    exit 2
+fi
+
+if [[ -n "${KYLIN_SIGN_PRIVATE_KEY:-}" || -n "${KYLIN_SIGN_CERTIFICATE:-}" ]]; then
+    if [[ -z "${KYLIN_SIGN_PRIVATE_KEY:-}" || -z "${KYLIN_SIGN_CERTIFICATE:-}" ]]; then
+        echo "KYLIN_SIGN_PRIVATE_KEY and KYLIN_SIGN_CERTIFICATE must be set together" >&2
+        exit 2
+    fi
+    command -v kylinsigntool >/dev/null 2>&1 || {
+        echo "kylinsigntool is required for Kylin package signing" >&2
+        exit 2
+    }
+    test -f "$KYLIN_SIGN_PRIVATE_KEY" || {
+        echo "Kylin signing private key not found: $KYLIN_SIGN_PRIVATE_KEY" >&2
+        exit 2
+    }
+    test -f "$KYLIN_SIGN_CERTIFICATE" || {
+        echo "Kylin signing certificate not found: $KYLIN_SIGN_CERTIFICATE" >&2
+        exit 2
+    }
+    echo "Signing DEB with the supplied Kylin developer certificate"
+    kylinsigntool -a "$OUTPUT" \
+        -p "$KYLIN_SIGN_PRIVATE_KEY" \
+        -c "$KYLIN_SIGN_CERTIFICATE"
+    kylinsigntool -v "$OUTPUT"
+elif [[ "${KYLIN_REQUIRE_SIGNATURE:-false}" == "true" ]]; then
+    echo "KYLIN_REQUIRE_SIGNATURE=true but no Kylin signing credentials were supplied" >&2
+    exit 2
+else
+    echo "[WARN] DEB is unsigned; Kylin source policy must be Warning/Off for local installation"
+fi
+
 dpkg-deb --info "$OUTPUT"
 dpkg-deb --contents "$OUTPUT" >/dev/null
 (cd "$DIST_DIR" && sha256sum "$(basename "$OUTPUT")" > "$(basename "$OUTPUT").sha256")

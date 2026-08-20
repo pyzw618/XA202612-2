@@ -84,7 +84,9 @@ safety:
     fsync: true
     fail_closed: true
   user_rules:
-    enabled: true
+    # The standalone desktop service has no external request identity resolver.
+    # Keep the built-in safety gate enabled while disabling only per-user rules.
+    enabled: false
     encryption_key_env: MEMORYHUB_USER_RULE_KEY
     key_id: device-local-v1
     max_rules_per_user: 100

@@ -2,6 +2,10 @@
 set -eu
 
 if [ "${1:-configure}" = "configure" ]; then
+    # Migration from revisions 1-5: remove their global enable link. KARE may
+    # retain its generated wrapper file, but without this link it is dormant.
+    systemctl --global disable memoryhub.service >/dev/null 2>&1 || true
+
     venv="/opt/memoryhub/venv"
     rm -rf /opt/memoryhub/venv.new "$venv"
     python3 -m venv "$venv"
@@ -15,6 +19,9 @@ if [ "${1:-configure}" = "configure" ]; then
         /usr/sbin/kyexectl -s /usr/bin/memoryhub-client >/dev/null 2>&1 || true
         /usr/sbin/kyexectl -s /usr/bin/memoryhub-mcp >/dev/null 2>&1 || true
         /usr/sbin/kyexectl -s /usr/bin/memoryhub-configure-opencode >/dev/null 2>&1 || true
+        /usr/sbin/kyexectl -s /usr/bin/memoryhub_service_launcher >/dev/null 2>&1 || true
+        /usr/sbin/kyexectl -s /usr/bin/memoryhub_session_launcher >/dev/null 2>&1 || true
+        /usr/sbin/kyexectl -s /usr/bin/memoryhub_app_launcher >/dev/null 2>&1 || true
         /usr/sbin/kyexectl -s /usr/lib/memoryhub/prepare-user >/dev/null 2>&1 || true
     fi
     if command -v /usr/sbin/kysec_netctl >/dev/null 2>&1; then
@@ -23,9 +30,6 @@ if [ "${1:-configure}" = "configure" ]; then
         /usr/sbin/kysec_netctl --set -a /usr/bin/memoryhub-client -s allow >/dev/null 2>&1 || true
         /usr/sbin/kysec_netctl --set -a /opt/memoryhub/venv/bin/python -s allow >/dev/null 2>&1 || true
     fi
-
-    systemctl --global enable memoryhub.service >/dev/null 2>&1 || true
-    systemctl daemon-reload >/dev/null 2>&1 || true
 
     if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
         /usr/bin/memoryhub-configure-opencode --user "$SUDO_USER" || true
