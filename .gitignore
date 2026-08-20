@@ -271,7 +271,10 @@ step_response*.json
 .idea/
 .vscode/
 *.code-workspace
+
+# ---- 构建产物 ----
 milvus-v2.4.23-amd64.tar
+desktop-client/build-release/
 
 
 # ---- Vibecoding ----
