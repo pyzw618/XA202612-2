@@ -1,0 +1,72 @@
+#!/bin/sh
+set -eu
+
+target_user=""
+if [ "${1:-}" = "--user" ]; then
+    target_user="${2:-}"
+elif [ "${1:-}" = "--current-user" ]; then
+    target_user="$(id -un)"
+elif [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    target_user="$SUDO_USER"
+else
+    target_user="$(id -un)"
+fi
+
+account="$(getent passwd "$target_user" || true)"
+if [ -z "$account" ]; then
+    echo "memoryhub: user '$target_user' does not exist" >&2
+    exit 2
+fi
+
+target_uid="$(printf '%s' "$account" | cut -d: -f3)"
+target_gid="$(printf '%s' "$account" | cut -d: -f4)"
+target_home="$(printf '%s' "$account" | cut -d: -f6)"
+if [ -z "$target_home" ] || [ ! -d "$target_home" ]; then
+    echo "memoryhub: home directory for '$target_user' is unavailable" >&2
+    exit 2
+fi
+
+if [ "$(id -u)" -eq 0 ]; then
+    config_home="$target_home/.config"
+else
+    config_home="${XDG_CONFIG_HOME:-$target_home/.config}"
+fi
+opencode_root="$config_home/opencode"
+source_root="/usr/share/memoryhub/opencode"
+
+install -d -m 0755 "$opencode_root/plugins" "$opencode_root/commands" \
+    "$opencode_root/skills" "$opencode_root/tools" "$config_home/memoryhub"
+install -m 0644 "$source_root/memoryhub.plugin.mjs" "$opencode_root/plugins/memoryhub.plugin.mjs"
+install -m 0644 "$source_root/memoryhub_events.mjs" "$opencode_root/plugins/memoryhub_events.mjs"
+cp -R "$source_root/commands/." "$opencode_root/commands/"
+cp -R "$source_root/skills/." "$opencode_root/skills/"
+cp -R "$source_root/tools/." "$opencode_root/tools/"
+
+cat > "$config_home/memoryhub/config.json" <<EOF
+{
+  "api_url": "http://127.0.0.1:8099",
+  "user_id": "$target_user",
+  "scene": "code",
+  "task_type": "coding_task",
+  "auto_record": true,
+  "mode": "plugin"
+}
+EOF
+
+if [ "$(id -u)" -eq 0 ]; then
+    chown -R "$target_uid:$target_gid" "$opencode_root" "$config_home/memoryhub"
+fi
+
+if command -v systemctl >/dev/null 2>&1; then
+    if [ "$(id -u)" -eq 0 ]; then
+        runuser -u "$target_user" -- env HOME="$target_home" XDG_RUNTIME_DIR="/run/user/$target_uid" \
+            systemctl --user daemon-reload >/dev/null 2>&1 || true
+        runuser -u "$target_user" -- env HOME="$target_home" XDG_RUNTIME_DIR="/run/user/$target_uid" \
+            systemctl --user enable --now memoryhub.service >/dev/null 2>&1 || true
+    else
+        systemctl --user daemon-reload >/dev/null 2>&1 || true
+        systemctl --user enable --now memoryhub.service >/dev/null 2>&1 || true
+    fi
+fi
+
+echo "MemoryHub OpenCode integration configured for $target_user in $opencode_root"

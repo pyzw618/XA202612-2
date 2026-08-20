@@ -1,0 +1,98 @@
+runtime:
+  mode: development
+  allow_fallback: true
+
+storage:
+  db_path: data/memoryhub.db
+  vector_index_path: data/vector_index
+  evidence_path: data/evidence
+  cache_max_size: 1000
+
+retrieval:
+  default_top_k: 5
+  candidate_multiplier: 4
+  max_query_chars: 512
+  target_p95_ms: 350
+  target_p99_ms: 500
+  vector_weight: 0.6
+  keyword_weight: 0.3
+  metadata_weight: 0.1
+  rerank_enabled: true
+  cache_ttl_seconds: 300
+
+llm:
+  api_base: https://api.openai.com/v1
+  api_key: ""
+  model: gpt-4o-mini
+  temperature: 0.1
+  max_tokens: 2048
+  fact_extraction_timeout_seconds: 1.0
+
+embedding:
+  provider: mock
+  dimension: 1024
+  model_name: mock-embedding
+  so_path: ""
+  query_timeout_ms: 250
+
+vector_engine:
+  provider: faiss
+  app_id: ""
+  so_path: ""
+  host: 127.0.0.1
+  port: 19530
+  collection: memoryhub
+  dimension: 1024
+  search_timeout_ms: 120
+
+safety:
+  rule_set_id: kylin-memoryhub.safety
+  rule_set_version: "1.0"
+  policy:
+    policy_id: default
+    version: "1.0"
+    rule_overrides: []
+    level_overrides: []
+    exceptions: []
+    fallback_action: review
+    on_scan_error: review
+    on_unmaskable: review
+    auto_sanitize: true
+    fail_closed: true
+  auto_mask: true
+  reject_on_detect: false
+  audit:
+    enabled: true
+    directory: data/safety-audit
+    hmac_key_env: MEMORYHUB_AUDIT_HMAC_KEY
+    key_id: device-local-v1
+    rotate_max_bytes: 16777216
+    retention_days: 180
+    max_record_bytes: 65536
+    lock_timeout_seconds: 5.0
+    strict_permissions: true
+    fsync: true
+    fail_closed: true
+  quarantine:
+    enabled: true
+    directory: data/review-quarantine
+    encryption_key_env: MEMORYHUB_QUARANTINE_KEY
+    key_id: device-local-v1
+    retention_days: 30
+    max_record_bytes: 4194304
+    strict_permissions: true
+    fsync: true
+    fail_closed: true
+  user_rules:
+    enabled: true
+    encryption_key_env: MEMORYHUB_USER_RULE_KEY
+    key_id: device-local-v1
+    max_rules_per_user: 100
+    max_matcher_chars: 2048
+    allow_advanced_regex: false
+    detector_cache_size: 256
+
+debug: false
+log_level: INFO
+host: 127.0.0.1
+port: 8099

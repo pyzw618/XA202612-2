@@ -4,6 +4,8 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QtTest>
+#include <future>
+#include <thread>
 
 class ApiClientTest : public QObject {
     Q_OBJECT
@@ -20,28 +22,37 @@ private:
     }
 
     api::Result getResponse(int status, const QByteArray &body) {
-        QTcpServer server;
-        if (!server.listen(QHostAddress::LocalHost, 0))
-            return api::Result();
         const QByteArray response = httpResponse(status, body);
-        QObject::connect(&server, &QTcpServer::newConnection, &server, [&server, response]() {
+        std::promise<quint16> portPromise;
+        std::future<quint16> portFuture = portPromise.get_future();
+        std::thread serverThread([response, promise = std::move(portPromise)]() mutable {
+            QTcpServer server;
+            if (!server.listen(QHostAddress::LocalHost, 0)) {
+                promise.set_value(0);
+                return;
+            }
+            promise.set_value(server.serverPort());
+            if (!server.waitForNewConnection(5000)) return;
             QTcpSocket *socket = server.nextPendingConnection();
-            QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket, response]() {
-                if (socket->property("responded").toBool()) return;
-                socket->setProperty("responded", true);
+            if (socket && (socket->bytesAvailable() > 0 || socket->waitForReadyRead(5000))) {
                 socket->write(response);
-                socket->flush();
-                QObject::connect(socket, &QTcpSocket::bytesWritten, socket, [socket](qint64) {
-                    if (socket->bytesToWrite() == 0)
-                        socket->disconnectFromHost();
-                });
-                QObject::connect(socket, &QTcpSocket::disconnected, socket, &QTcpSocket::deleteLater);
-            });
+                socket->waitForBytesWritten(5000);
+                socket->disconnectFromHost();
+            }
+            delete socket;
         });
 
+        const quint16 port = portFuture.get();
+        if (port == 0) {
+            serverThread.join();
+            return api::Result();
+        }
+
         api::ApiClient client;
-        client.setBaseUrl(QString("http://127.0.0.1:%1").arg(server.serverPort()));
-        return client.get("/");
+        client.setBaseUrl(QString("http://127.0.0.1:%1").arg(port));
+        const api::Result result = client.get("/");
+        serverThread.join();
+        return result;
     }
 
 private slots:

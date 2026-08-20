@@ -1,0 +1,35 @@
+#!/bin/sh
+set -eu
+
+if [ "${1:-configure}" = "configure" ]; then
+    venv="/opt/memoryhub/venv"
+    rm -rf /opt/memoryhub/venv.new "$venv"
+    python3 -m venv "$venv"
+    "$venv/bin/python" -m pip install --no-index --no-cache-dir \
+        --find-links /usr/share/memoryhub/wheelhouse "kylin-memoryhub==@VERSION@"
+
+    # Kylin's application-execution control blocks newly installed binaries
+    # until they are registered. This is a no-op on Debian/Ubuntu systems.
+    if command -v /usr/sbin/kyexectl >/dev/null 2>&1; then
+        /usr/sbin/kyexectl -s -r /opt/memoryhub/venv >/dev/null 2>&1 || true
+        /usr/sbin/kyexectl -s /usr/bin/memoryhub-client >/dev/null 2>&1 || true
+        /usr/sbin/kyexectl -s /usr/bin/memoryhub-mcp >/dev/null 2>&1 || true
+        /usr/sbin/kyexectl -s /usr/bin/memoryhub-configure-opencode >/dev/null 2>&1 || true
+        /usr/sbin/kyexectl -s /usr/lib/memoryhub/prepare-user >/dev/null 2>&1 || true
+    fi
+    if command -v /usr/sbin/kysec_netctl >/dev/null 2>&1; then
+        /usr/sbin/kysec_netctl --remove -a /usr/bin/memoryhub-client >/dev/null 2>&1 || true
+        /usr/sbin/kysec_netctl --remove -a /opt/memoryhub/venv/bin/python >/dev/null 2>&1 || true
+        /usr/sbin/kysec_netctl --set -a /usr/bin/memoryhub-client -s allow >/dev/null 2>&1 || true
+        /usr/sbin/kysec_netctl --set -a /opt/memoryhub/venv/bin/python -s allow >/dev/null 2>&1 || true
+    fi
+
+    systemctl --global enable memoryhub.service >/dev/null 2>&1 || true
+    systemctl daemon-reload >/dev/null 2>&1 || true
+
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+        /usr/bin/memoryhub-configure-opencode --user "$SUDO_USER" || true
+    fi
+fi
+
+exit 0

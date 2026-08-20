@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MemoryHub
+Name[zh_CN]=MemoryHub 记忆中枢
+Comment=Local memory console for OS Agents
+Comment[zh_CN]=OS Agent 本地记忆管理控制台
+Exec=/usr/bin/memoryhub-client
+Icon=memoryhub
+Terminal=false
+Categories=Utility;System;
+StartupNotify=true

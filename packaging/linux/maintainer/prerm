@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+if [ "${1:-remove}" = "remove" ]; then
+    systemctl --global disable memoryhub.service >/dev/null 2>&1 || true
+fi
+
+exit 0

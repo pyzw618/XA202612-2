@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import httpx
@@ -10,6 +11,20 @@ def test_project_defaults_to_git_root(tmp_path: Path):
     (tmp_path / ".git").mkdir()
     config = ClientConfig.load(cwd=tmp_path)
     assert config.project == str(tmp_path)
+
+
+def test_linux_global_config_uses_xdg_config_home(tmp_path: Path, monkeypatch):
+    config_home = tmp_path / "xdg"
+    config_file = config_home / "memoryhub" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text(json.dumps({"user_id": "ethan", "api_url": "http://127.0.0.1:9000"}))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    monkeypatch.delenv("APPDATA", raising=False)
+
+    config = ClientConfig.load(cwd=tmp_path)
+
+    assert config.user_id == "ethan"
+    assert config.api_url == "http://127.0.0.1:9000"
 
 
 def test_client_maps_memory_and_agent_routes():

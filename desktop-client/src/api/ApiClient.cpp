@@ -4,6 +4,7 @@
 #include <QEventLoop>
 #include <QJsonParseError>
 #include <QNetworkReply>
+#include <QNetworkProxy>
 #include <QNetworkRequest>
 #include <QTimer>
 #include <QUrl>
@@ -14,7 +15,11 @@ namespace api {
 
 ApiClient::ApiClient(QObject *parent)
     : QObject(parent), m_baseUrl(QStringLiteral("http://127.0.0.1:8099")),
-      m_userId(QStringLiteral("default")) {}
+      m_userId(QStringLiteral("default")) {
+    // The desktop client talks to a local MemoryHub service. System/VPN proxy
+    // settings must never intercept loopback traffic.
+    m_nam.setProxy(QNetworkProxy::NoProxy);
+}
 
 void ApiClient::setBaseUrl(const QString &url) {
     QString u = url.trimmed();

@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+case "${1:-}" in
+    remove|purge)
+        rm -rf /opt/memoryhub/venv /opt/memoryhub/venv.new
+        ;;
+esac
+
+systemctl daemon-reload >/dev/null 2>&1 || true
+exit 0

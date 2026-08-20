@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /opt/memoryhub/venv/bin/python -m memoryhub_mcp "$@"

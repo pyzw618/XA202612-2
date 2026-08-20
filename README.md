@@ -6,7 +6,7 @@
 
 - `memoryhub`：Python/FastAPI 本地记忆服务，负责事件处理、偏好、知识、事实、检索、冲突和遗忘。
 - `desktop-client`：Qt 5 原生桌面控制台（银河麒麟/Windows），21 个页面，可视化审计、演示与调参（详见 `desktop-client/README.md`）。
-- `integrations/`、`claudecode-integration/`、`opencode-integration/`：Qwen（LangGraph）、Claude Code、opencode 三种 Agent 接入（REST + MCP，各 12 个工具）。
+- `agent-integration`：统一 CLI、MCP 与 OpenCode Plugin 接入层；旧的重复集成目录已收敛。
 
 ## 项目定位
 
@@ -49,6 +49,15 @@ MemoryHub 负责真正的记忆读写、冲突处理和遗忘；客户端通过 
 - Python 3.11+
 
 ## 安装
+
+### 银河麒麟 DEB（x86_64）
+
+```bash
+sudo apt install ./kylin-memoryhub_0.1.0-1_amd64.deb
+memoryhub-configure-opencode --current-user
+```
+
+安装包同时提供后端、Qt 桌面控制台、CLI/MCP 和 OpenCode 全局插件。OpenCode 配置会根据当前用户主目录自动写入 `~/.config/opencode/`，详见 [`packaging/linux/README.md`](packaging/linux/README.md)。
 
 ### 安装后端环境
 
@@ -150,10 +159,8 @@ evaluation/                 # 评测模块
 
 docs/                       # 设计/验收/技术文档
 scripts/                    # 服务启停脚本 + 环境自检（start/stop/verify）
-integrations/               # Qwen（LangGraph）Agent 集成
-claudecode-integration/     # Claude Code MCP + Hooks 接入
-opencode-integration/       # opencode MCP + Plugin 接入
-packaging/                  # systemd 服务打包
+agent-integration/          # 统一 CLI / MCP / OpenCode Plugin 接入
+packaging/                  # systemd 用户服务与 DEB 独立安装包
 third_party/                # 麒麟 SDK mock 动态库
 tests/                      # 后端测试（约 700 用例）
 ```
