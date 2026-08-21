@@ -1,6 +1,6 @@
 # KNO 专项验收测试结果记录
 
-对应 `docs/TEST_PLAN.md` 6.5 知识记忆(KNO-01~04)。knowledge 板块实现与算法重构已完成并提交(`de38770` / `56a6e7c` / `19b4a74`,详见 `docs/DATA_FLOW_UPDATE.md`),测试位于 `tests/test_knowledge/`。本记录汇总该板块的修改内容与测试结果。
+对应 `docs/tests/0811功能性测试/TEST_PLAN.md` 6.5 知识记忆(KNO-01~04)。knowledge 板块实现与算法重构已完成并提交(`de38770` / `56a6e7c` / `19b4a74`,详见 `docs/tests/0805数据流测试/DATA_FLOW_UPDATE.md`),测试位于 `tests/test_knowledge/`。本记录汇总该板块的修改内容与测试结果。
 
 ## 执行结果
 

@@ -194,7 +194,7 @@ vecs = client.embed_batch(["文本1", "文本2"])
 
 ### 3. 安全模块
 
-规则加载/校验、递归扫描、策略决策、全值脱敏、同快照复检、用户自定义规则 Overlay、实例内结果认证、最小化 JSONL 审计链、REVIEW 加密隔离和强制写入 Gate 均已实现。安全配置与密钥要求见 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)，数据契约见 [`docs/INTERFACE.md`](docs/INTERFACE.md)。
+规则加载/校验、递归扫描、策略决策、全值脱敏、同快照复检、用户自定义规则 Overlay、实例内结果认证、最小化 JSONL 审计链、REVIEW 加密隔离和强制写入 Gate 均已实现。安全配置与密钥要求见 [`docs/spec/CONFIGURATION.md`](docs/spec/CONFIGURATION.md)，数据契约见 [`docs/spec/INTERFACE.md`](docs/spec/INTERFACE.md)。
 
 ## 常用接口
 

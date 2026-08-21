@@ -1,6 +1,6 @@
 # EVT / PRE 专项验收测试结果记录
 
-对应 `docs/TEST_PLAN.md` 6.2 事件写入链路(EVT-01~08)与 6.3 偏好记忆(PRE-01~07),实现为 `tests/test_evt_acceptance.py` 与 `tests/test_pre_acceptance.py`。
+对应 `docs/tests/0811功能性测试/TEST_PLAN.md` 6.2 事件写入链路(EVT-01~08)与 6.3 偏好记忆(PRE-01~07),实现为 `tests/test_evt_acceptance.py` 与 `tests/test_pre_acceptance.py`。
 
 ## 执行结果
 

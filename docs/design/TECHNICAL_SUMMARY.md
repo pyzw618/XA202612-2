@@ -292,14 +292,27 @@ XA202612-2/
 │   └── test_search_integration.py      #   检索集成测试
 │
 ├── docs/                               # 📖 文档
-│   ├── TECHNICAL_SUMMARY.md            #   ⬅ 本文档
-│   ├── ARCHITECTURE.md                 #   架构可视化
-│   ├── INTERFACE.md                    #   数据契约与接口规范
-│   ├── CONFIGURATION.md                #   配置指南
-│   ├── PROJECT_ANALYSIS.md             #   深入浅出讲解
-│   ├── 前端页面规划.md                  #   前端设计规格（desktop-client 依据）
-│   ├── 麒麟数据库原生化过程.md          #   数据库原生化过程记录
-│   ├── 0805数据流测试/ 0811功能性测试/   #   测试计划与验收结果
+│   ├── README.md                       #   导航索引
+│   ├── 赛题要求.md                      #   赛题原始要求（XA-202612）
+│   ├── spec/                           #   核心规范与契约
+│   │   ├── INTERFACE.md                #     数据契约与接口规范
+│   │   ├── ARCHITECTURE.md             #     架构可视化
+│   │   └── CONFIGURATION.md            #     配置指南
+│   ├── design/                         #   总体设计与总结
+│   │   ├── TECHNICAL_SUMMARY.md        #     ⬅ 本文档
+│   │   ├── PROJECT_ANALYSIS.md         #     深入浅出讲解
+│   │   ├── 产品形态与使用方案.md         #     产品形态
+│   │   └── Agent接入设计.md             #     Agent 接入方案
+│   ├── frontend/                       #   前端
+│   │   ├── 前端页面规划.md              #     前端设计规格（desktop-client 依据）
+│   │   └── 毛玻璃侧边栏实现技术报告.md   #     毛玻璃实现报告
+│   ├── kylin/                          #   麒麟原生化专项
+│   │   ├── 麒麟数据库原生化过程.md       #     数据库原生化过程记录
+│   │   └── KYLIN_EMBEDDING_RUNTIME_CONTRACT.md
+│   ├── tests/                          #   测试与验收
+│   │   ├── 0805数据流测试/              #     数据流测试
+│   │   └── 0811功能性测试/              #     功能验收与 TEST_PLAN
+│   ├── refactor/                       #   核心记忆模块重构
 │   └── retrieval/                      #   检索/向量引擎/Kylin 技术方案
 │
 ├── config.example.yaml                 # 配置文件模板

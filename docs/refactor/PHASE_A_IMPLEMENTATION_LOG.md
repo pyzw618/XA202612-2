@@ -16,7 +16,7 @@
 | **§4.9.2 反馈闭环** | `feedback confirm` → `access_count_30d+1` + `last_accessed_at` 刷新 + 健康度重算（艾宾浩斯复习反弹）；`reject` → 归档 + 健康度归零 | `adapter/api.py` |
 | **R3 决策集合补全** | `MemoryAction` 扩为 8 动作（对齐 `schemas.MemoryDecision`）；`BaseMemoryHandler` 新增 `classify_relation` 钩子；偏好产 `duplicate/supersede/update`，知识产 `duplicate/update` | `core/memory/base.py`、`core/preference/handler.py`、`core/knowledge/handler.py` |
 | **R1 双轨合一** | `EventProcessingCoordinator` 内部构建 Handler 链，偏好/知识抽取走统一 `process → apply`；**删除 CASE 知识丢弃过滤**；保留结构化直写、中文对话兜底、Fact 候选暂存 | `core/processing.py` |
-| **KYLIN 契约** | 新增 `docs/KYLIN_EMBEDDING_RUNTIME_CONTRACT.md`（版本/架构/.so/DBus/模型/768 维/profile）与 `scripts/check_kylin_embedding_runtime.py`（8 项部署前检查） | `docs/`、`scripts/` |
+| **KYLIN 契约** | 新增 `docs/kylin/KYLIN_EMBEDDING_RUNTIME_CONTRACT.md`（版本/架构/.so/DBus/模型/768 维/profile）与 `scripts/check_kylin_embedding_runtime.py`（8 项部署前检查） | `docs/`、`scripts/` |
 
 ## 2. 验证结果
 

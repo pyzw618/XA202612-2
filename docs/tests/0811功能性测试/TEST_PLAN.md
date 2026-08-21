@@ -3,8 +3,8 @@
 > 版本: v1.0
 > 日期: 2026-08-11
 > 适用对象: 测试人员
-> 依据文档: `docs/INTERFACE.md`、`docs/ARCHITECTURE.md`、`docs/CONFIGURATION.md`、
-> `docs/DATA_FLOW_UPDATE.md`、`docs/前端页面规划.md`、`docs/麒麟数据库原生化过程.md`
+> 依据文档: `docs/spec/INTERFACE.md`、`docs/spec/ARCHITECTURE.md`、`docs/spec/CONFIGURATION.md`、
+> `docs/tests/0805数据流测试/DATA_FLOW_UPDATE.md`、`docs/frontend/前端页面规划.md`、`docs/kylin/麒麟数据库原生化过程.md`
 
 ---
 
@@ -80,7 +80,7 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 
 ### 6.1 安全模块专项(SEC,最高优先级)
 
-依据:`docs/ARCHITECTURE.md` 2、`docs/CONFIGURATION.md` 安全配置、`docs/INTERFACE.md` 3.5
+依据:`docs/spec/ARCHITECTURE.md` 2、`docs/spec/CONFIGURATION.md` 安全配置、`docs/spec/INTERFACE.md` 3.5
 
 | 编号 | 测试项 | 关键步骤/输入 | 期望结果 |
 |------|--------|---------------|----------|
@@ -106,7 +106,7 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 
 ### 6.2 事件写入链路(EVT)
 
-依据:`INTERFACE.md` 5.1、`DATA_FLOW_UPDATE.md`
+依据:`docs/spec/INTERFACE.md` 5.1、`docs/tests/0805数据流测试/DATA_FLOW_UPDATE.md`
 
 | 编号 | 测试项 | 关键步骤 | 期望结果 |
 |------|--------|----------|----------|
@@ -121,7 +121,7 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 
 ### 6.3 偏好记忆(PRE)
 
-依据:`INTERFACE.md` 1.4、3.2、`DATA_FLOW_UPDATE.md`
+依据:`docs/spec/INTERFACE.md` 1.4、3.2、`docs/tests/0805数据流测试/DATA_FLOW_UPDATE.md`
 
 | 编号 | 测试项 | 关键步骤 | 期望结果 |
 |------|--------|----------|----------|
@@ -164,7 +164,7 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 
 ### 6.7 遗忘模块(FOR)
 
-依据:`docs/INTERFACE.md` 1.7、3.6/3.7、`docs/ARCHITECTURE.md` 4
+依据:`docs/spec/INTERFACE.md` 1.7、3.6/3.7、`docs/spec/ARCHITECTURE.md` 4
 
 | 编号 | 测试项 | 关键步骤 | 期望结果 |
 |------|--------|----------|----------|
@@ -178,7 +178,7 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 
 ### 6.8 检索链路(RET)
 
-依据:`INTERFACE.md` 5.2、`ARCHITECTURE.md` 3/8、`DATA_FLOW_UPDATE.md`
+依据:`docs/spec/INTERFACE.md` 5.2、`docs/spec/ARCHITECTURE.md` 3/8、`docs/tests/0805数据流测试/DATA_FLOW_UPDATE.md`
 
 | 编号 | 测试项 | 关键步骤 | 期望结果 |
 |------|--------|----------|----------|
@@ -204,7 +204,7 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 
 | 编号 | 测试项 | 关键步骤 | 期望结果 |
 |------|--------|----------|----------|
-| PER-01 | SQLite 表结构 | 建库后检查 8 张业务表+新扩展列 | 与 INTERFACE.md 6.1 一致 |
+| PER-01 | SQLite 表结构 | 建库后检查 8 张业务表+新扩展列 | 与 docs/spec/INTERFACE.md 6.1 一致 |
 | PER-02 | 重启恢复 | 写入→重建进程→查询 | 数据不丢;FAISS/证据链可加载 |
 | PER-03 | 证据链 JSONL | 写入/追加/删除 | 每 memory_id 一个文件,行格式正确 |
 | PER-04 | 向量落盘 | 保存/加载 FAISS 索引 | id_map/reverse_map 一致 |
@@ -234,7 +234,7 @@ MemoryHub 是银河麒麟 OS 上 AI Agent 的端侧记忆系统,包含:**事件�
 
 ## 8. 前端控制台测试(CONSOLE)
 
-依据:`docs/前端页面规划.md`。Qt 5 原生桌面客户端(`desktop-client/`),按
+依据:`docs/frontend/前端页面规划.md`。Qt 5 原生桌面客户端(`desktop-client/`),按
 `desktop-client/README.md` 构建并启动客户端,手工验证:
 
 | 编号 | 页面 | 测试要点 |

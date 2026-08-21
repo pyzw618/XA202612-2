@@ -179,7 +179,7 @@ GET  /api/memory/v2/search?include_provenance=true
 
 | 时间 | 专项内容 | 交付物 |
 |---|---|---|
-| 08-17 | 明确目标银河麒麟版本、CPU 架构、SDK `.so` 路径、DBus 服务名、模型名和 768 维契约 | `docs/KYLIN_EMBEDDING_RUNTIME_CONTRACT.md` |
+| 08-17 | 明确目标银河麒麟版本、CPU 架构、SDK `.so` 路径、DBus 服务名、模型名和 768 维契约 | `docs/kylin/KYLIN_EMBEDDING_RUNTIME_CONTRACT.md` |
 | 08-17 | 增加部署前检查：动态库、依赖、DBus、模型、维度、Milvus app_id | `scripts/check_kylin_embedding_runtime.py` |
 | 08-18 | 增加 SDK load、session init、model init、timeout、dimension mismatch 指标 | 健康检查与稳定错误码 |
 | 08-21 | Outbox worker 强制使用同一 `BaseEmbeddingClient` 和 embedding profile | projection contract test |

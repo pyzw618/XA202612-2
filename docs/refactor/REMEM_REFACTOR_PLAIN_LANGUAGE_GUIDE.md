@@ -2,7 +2,7 @@
 
 > 面向对象：产品、测试、运营、项目管理、前端、刚加入项目的开发同学，以及不需要深入阅读全部后端代码的协作者。
 >
-> 配套技术路线图：`docs/MAIN_TO_REMEM_REFACTOR_ROADMAP.md`
+> 配套技术路线图：`docs/refactor/MAIN_TO_REMEM_REFACTOR_ROADMAP.md`
 
 ## 1. 这次重构在做什么？
 

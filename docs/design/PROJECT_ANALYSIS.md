@@ -1,6 +1,6 @@
 # Kylin-MemoryHub 深入浅出讲解
 
-> **当前数据契约说明（2026-07-22）**：本文包含项目早期分析和示例。实际开发请以 [`memoryhub/adapter/schemas.py`](../memoryhub/adapter/schemas.py) 与 [`INTERFACE.md`](INTERFACE.md) 定义的 canonical `MemoryEvent` 为准；早期示例中的 `task_id`、`content`、`timestamp`、`quality_score` 不再是模块间输入输出字段。
+> **当前数据契约说明（2026-07-22）**：本文包含项目早期分析和示例。实际开发请以 [`memoryhub/adapter/schemas.py`](../memoryhub/adapter/schemas.py) 与 [`docs/spec/INTERFACE.md`](docs/spec/INTERFACE.md) 定义的 canonical `MemoryEvent` 为准；早期示例中的 `task_id`、`content`、`timestamp`、`quality_score` 不再是模块间输入输出字段。
 
 ## 一、项目是什么？一句话概括
 

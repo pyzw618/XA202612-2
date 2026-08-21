@@ -1,7 +1,7 @@
 ﻿# Core 记忆模块统一化改造记录
 
 > 修改日期：2026-08-14
-> 对应方案：`docs/CORE_MEMORY_REFACTOR_PLAN.md`
+> 对应方案：`docs/refactor/CORE_MEMORY_REFACTOR_PLAN.md`
 > 改造原则：保持现有 API、Schema、仓储和 Fact 管线公开方法不变，仅增加内部统一编排能力。
 
 ## 本次完成内容

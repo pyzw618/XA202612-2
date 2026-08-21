@@ -1,6 +1,6 @@
 # LIF / PER / API 专项验收测试结果记录
 
-对应 `docs/TEST_PLAN.md` 6.9 生命周期(LIF-01~03)、6.10 持久化与恢复(PER-01~04)与第 7 章 REST API 契约(API),实现为 `tests/test_lif_acceptance.py`、`tests/test_per_acceptance.py` 与 `tests/test_api_acceptance.py`。
+对应 `docs/tests/0811功能性测试/TEST_PLAN.md` 6.9 生命周期(LIF-01~03)、6.10 持久化与恢复(PER-01~04)与第 7 章 REST API 契约(API),实现为 `tests/test_lif_acceptance.py`、`tests/test_per_acceptance.py` 与 `tests/test_api_acceptance.py`。
 
 ## 执行结果
 
@@ -21,7 +21,7 @@
 
 | 编号 | 用例数 | 结果 | 关键断言 |
 |------|-------|------|----------|
-| PER-01 | 4 | 通过 | 建库后 events/preferences/knowledge/knowledge_versions/conflicts/forget_history/extraction_tasks 共 7 张业务表齐备;preferences 扩展列(health_score/stability/last_accessed_at/access_count_30d 等)、knowledge 扩展列(index/pending_index)、events 契约列均与 INTERFACE.md 6.1 对齐 |
+| PER-01 | 4 | 通过 | 建库后 events/preferences/knowledge/knowledge_versions/conflicts/forget_history/extraction_tasks 共 7 张业务表齐备;preferences 扩展列(health_score/stability/last_accessed_at/access_count_30d 等)、knowledge 扩展列(index/pending_index)、events 契约列均与 docs/spec/INTERFACE.md 6.1 对齐 |
 | PER-02 | 3 | 通过 | 写入→关闭→重建 Database→查询,偏好/知识/冲突解决记录均不丢;证据链在新 EvidenceStore 实例可加载(模拟进程重启) |
 | PER-03 | 2 | 通过 | 证据链 JSONL 每 memory_id 一个文件,追加/批量写入行数正确、每行可独立 parse 为 Evidence;delete 物理删除文件,二次删除返回 False,list_all 返回全部记忆 ID |
 | PER-04 | 2 | 通过 | VectorStore save 后 init_index 从磁盘加载,id_map/reverse_map 与落盘一致、可检索;删除后落盘 reload 不再返回已删向量(size 正确) |
@@ -42,7 +42,7 @@
 
 ### 修复:生命周期升级阈值与文档不一致(真实 Bug,LIF-02)
 
-`LifecycleManager.PROMOTE_THRESHOLDS` 原实现为单一阈值(`access_count≥5 且 confidence≥0.5 且 stability≥0.6`),与 TEST_PLAN 6.9 LIF-02 及 PROJECT_ANALYSIS.md 生命周期设计(`short_to_mid`/`mid_to_long` 两档)不符。修改 `memoryhub/core/lifecycle/manager.py`:
+`LifecycleManager.PROMOTE_THRESHOLDS` 原实现为单一阈值(`access_count≥5 且 confidence≥0.5 且 stability≥0.6`),与 docs/tests/0811功能性测试/TEST_PLAN 6.9 LIF-02 及 docs/design/PROJECT_ANALYSIS.md 生命周期设计(`short_to_mid`/`mid_to_long` 两档)不符。修改 `memoryhub/core/lifecycle/manager.py`:
 
 1. 阈值改为两档:`{"short_to_mid": {min_occurrences:2, min_quality_score:0.4}, "mid_to_long": {min_occurrences:5, min_confidence:0.7, min_days:3}}`;`should_promote` 按记忆当前层级选择对应档位,LONG 不再提升;存在时长由 `created_at` 计算。
 2. `promote` 重构为按 `_level(memory)` 单级提升映射。

@@ -93,7 +93,7 @@
 - **依赖**：真实银河麒麟 + Milvus 环境（`check_kylin_embedding_runtime.py` 通过）才能复验；本机 mock 环境不可作验收。
 
 ### I-12 KYLIN 真机验收（赛题要求 4）
-- `docs/KYLIN_EMBEDDING_RUNTIME_CONTRACT.md` + `scripts/check_kylin_embedding_runtime.py` 已交付；需在真实麒麟设备执行 8 项检查 + `run_kylin_http_retrieval_evaluation.py` 端到端延迟（P99≤500ms）。
+- `docs/kylin/KYLIN_EMBEDDING_RUNTIME_CONTRACT.md` + `scripts/check_kylin_embedding_runtime.py` 已交付；需在真实麒麟设备执行 8 项检查 + `run_kylin_http_retrieval_evaluation.py` 端到端延迟（P99≤500ms）。
 - `/health` 暴露 SDK load/session/model/timeout/dimension 指标（`kylin_client.py` 已有稳定错误码，接线到 health 端点）。
 
 ### I-13 语义遗忘收尾（Phase G 遗留 + Phase F 衔接）

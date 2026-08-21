@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """银河麒麟 Embedding 生产运行时部署前检查。
 
-对照 docs/KYLIN_EMBEDDING_RUNTIME_CONTRACT.md §6，逐项检查：
+对照 docs/kylin/KYLIN_EMBEDDING_RUNTIME_CONTRACT.md §6，逐项检查：
   1. 操作系统是否为麒麟桌面、CPU 架构
   2. libkylin-coreai-embedding.so 是否存在于预期路径并可加载
   3. 依赖动态库（libstdc++/libgcc）是否可解析

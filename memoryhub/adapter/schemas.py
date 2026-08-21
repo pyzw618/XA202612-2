@@ -2,7 +2,7 @@
 核心数据结构定义 — 全系统共享的 Pydantic 模型
 
 所有模块间传递的数据都基于这里定义的模型，
-修改任何字段必须同步更新 docs/INTERFACE.md。
+修改任何字段必须同步更新 docs/spec/INTERFACE.md。
 """
 
 from __future__ import annotations

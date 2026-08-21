@@ -138,7 +138,7 @@ MemoryHub SearchResponse
 由于当前没有麒麟 OS 环境，本次工作必须采用 **"接口先行、Mock 兜底、文档完整"** 的策略：
 
 1. **SDK 接口签名先行**  
-   从 Gitee 源码和本地 `libkysdk-vector-engine-client` 仓库中提取所有 C/C++ 接口签名，整理为 `docs/2026-08-02_kylin_sdk_api_signatures.md`，作为后续 ctypes 封装和真实环境验证的依据。
+   从 Gitee 源码和本地 `libkysdk-vector-engine-client` 仓库中提取所有 C/C++ 接口签名，整理为 `docs/retrieval/2026-08-02_kylin_embedding_sdk_api_signatures.md`，作为后续 ctypes 封装和真实环境验证的依据。
 
 2. **最小 C API 桥接层**  
    在 `libkysdk-vector-engine-client` 仓库中新增 `c_api_bridge.cpp`，只导出 MemoryHub 需要的最少函数（create/connect/create_collection/insert/hybrid_search/destroy）。  
