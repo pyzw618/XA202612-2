@@ -53,11 +53,13 @@ MemoryHub 负责真正的记忆读写、冲突处理和遗忘；客户端通过 
 ### 银河麒麟 DEB（x86_64）
 
 ```bash
-sudo apt install ./kylin-memoryhub_0.1.0-1_amd64.deb
+sudo apt install ./kylin-memoryhub_0.1.0-8_amd64.deb
 memoryhub-configure-opencode --current-user
 ```
 
 安装包同时提供后端、Qt 桌面控制台、CLI/MCP 和 OpenCode 全局插件。OpenCode 配置会根据当前用户主目录自动写入 `~/.config/opencode/`，详见 [`packaging/linux/README.md`](packaging/linux/README.md)。
+
+面向普通用户的下载、图形化安装和首次使用步骤见 [`docs/银河麒麟安装与使用手册.md`](docs/银河麒麟安装与使用手册.md)。
 
 ### 安装后端环境
 
