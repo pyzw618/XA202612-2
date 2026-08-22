@@ -1,10 +1,16 @@
 # Kylin-MemoryHub 架构可视化
 
-> **当前数据契约说明（2026-07-22）**：模块间统一事件以 [`memoryhub/adapter/schemas.py`](../memoryhub/adapter/schemas.py) 的 `MemoryEvent` 和 [`INTERFACE.md`](INTERFACE.md) 为准。本文中早期架构图里的 `task_id`、`content`、`timestamp`、`quality_score` 等字段仅代表历史设计，新增代码不得继续使用；旧数据必须先按迁移表转换为 `payload`、`occurred_at`、`quality` 等 canonical 字段。
+> **数据契约说明（v0.1.0）**：模块间统一事件以 [`memoryhub/adapter/schemas.py`](../memoryhub/adapter/schemas.py) 的 `MemoryEvent`（Schema 1.1）和 [`INTERFACE.md`](INTERFACE.md) 为准；本文中所有「代码事实」均以当前 `main` 分支源码为准（`memoryhub/app.py`、`memoryhub/core/*`、`memoryhub/retrieval/*`、`desktop-client/`、`agent-integration/`）。
+>
+> **生产栈 vs 开发栈**：默认架构图描绘「端侧生产栈」（麒麟 Embedding SDK + Milvus）；开发/测试栈使用 `MockEmbeddingClient` + `MilvusHybridRetriever(mock=True)` 或 `FAISSVectorEngine`（详见 `memoryhub/storage/vector_engine/__init__.py` 工厂）。`runtime.mode=production` 下强制生产栈，由 `memoryhub/config.py:validate_production_gate()` 与 `validate_production_runtime()` 双层门禁校验。
+>
+> **统一写入契约**：所有内容写入最终都收敛到 `MemoryWriteService.upsert_memory()`（`memoryhub/core/memory_write.py:98-158`）→ `DomainMemoryWriter` 单事务（`memoryhub/core/domain_writer.py`），下游 SQLite 是事实源，向量/关键词/缓存通过 `ProjectionOutboxWorker`（`memoryhub/storage/projection_outbox.py`）异步投影。`SafetyWriteGate.route()`（`memoryhub/core/safety/gate.py:181-`）是 `ApprovedWrite` 能力的唯一发放点。
 
 ---
 
 ## 1. 系统整体架构（分层视图）
+
+> **代码事实**（v0.1.0）：应用入口 `memoryhub/app.py:171-866` 的 `create_app()` 注册 **5 个 Router**（`api.py:58` `/api/memory`、`agent_api.py:24` `/api/agent` + `:27` `/api`、`management_api.py:44` `/api/memory` 管理类、`memory_v2_api.py:18` `/api/memory/v2`）。8 个核心子模块：`ingestion / preference / knowledge / conflict / forget / safety / lifecycle / memory`；新增 `fact` 已并入 `knowledge/extract_facts`。检索器**生产唯一装配 `MilvusHybridRetriever`**（`retrieval/milvus_hybrid.py:106-520`），开发/测试模式才用 `HybridRetriever`（`retrieval/hybrid.py:23-308`）。
 
 ```mermaid
 graph TB
@@ -40,18 +46,21 @@ graph TB
     end
 
     subgraph L5["第 5 层 · Retrieval Engine 混合检索"]
-        Hybrid["HybridRetriever<br/>混合检索入口"]
-        Vector["VectorSearcher<br/>FAISS 向量检索"]
-        Keyword["KeywordSearcher<br/>BM25 关键词检索"]
-        Rerank["Reranker<br/>重排序"]
-        Cache["SearchCache<br/>LRU 缓存"]
+        MilvusHybrid["MilvusHybridRetriever<br/>生产唯一 · RRF 融合"]
+        Hybrid["HybridRetriever<br/>dev/test 降级 · FAISS+BM25"]
+        Vector["VectorSearcher<br/>FAISS IndexFlatIP"]
+        Keyword["KeywordSearcher<br/>rank-bm25 + jieba"]
+        Rerank["Reranker<br/>6 因子加权"]
+        Cache["SearchCache<br/>LRU+TTL · 索引版本隔离"]
+        QueryCache["query_vector_cache<br/>1000 条查询向量 LRU"]
     end
 
-    subgraph L6["第 6 层 · Local Runtime 本地存储"]
-        SQLite["SQLite + SQLAlchemy<br/>events · preferences<br/>knowledge · conflicts"]
-        FAISS["FAISS Index<br/>向量索引"]
-        Evidence["EvidenceStore<br/>证据链 JSONL"]
-        KylinSDK["麒麟 Embedding SDK<br/>D-Bus → 本地向量化"]
+    subgraph L6["第 6 层 · Local Runtime 本地存储 + 麒麟原生"]
+        SQLite["SQLite + SQLAlchemy<br/>events · preferences · knowledge<br/>memory_lineage/evidence/outbox<br/>extraction_tasks · short/mid_term"]
+        Outbox["ProjectionOutbox<br/>durable · 后台 worker 投影"]
+        MilvusSDK["libkysdk-vector-engine-client<br/>C++ → C API 桥接 → Milvus gRPC"]
+        KylinSDK["libkylin-coreai-embedding.so<br/>ctypes → DBus → 768 维"]
+        Evidence["EvidenceStore<br/>JSONL 证据链"]
     end
 
     subgraph L7["第 7 层 · Evaluation & Console"]
@@ -80,21 +89,27 @@ graph TB
     ConflictDet --> ConflictRes
     ConflictRes --> SQLite
 
-    API --> Hybrid
+    API --> MilvusHybrid
+    MilvusHybrid --> Hybrid
+    MilvusHybrid --> Cache
+    MilvusHybrid --> QueryCache
+    MilvusHybrid --> MilvusSDK
+    MilvusHybrid --> KylinSDK
     Hybrid --> Vector
     Hybrid --> Keyword
     Hybrid --> Rerank
     Hybrid --> Cache
 
     PrefUpdate --> SQLite
-    PrefUpdate --> FAISS
+    PrefUpdate --> Outbox
     KnowExtract --> SQLite
-    KnowExtract --> FAISS
+    KnowExtract --> Outbox
+    SQLite --> Outbox
+    Outbox --> MilvusSDK
+    Outbox --> Vector
+    Outbox --> Keyword
+    Outbox --> Cache
     SQLite --> Evidence
-
-    Vector --> FAISS
-    Keyword --> SQLite
-    KylinSDK --> FAISS
 
     API --> Forget
     Forget --> SQLite
@@ -203,39 +218,32 @@ flowchart TD
 
 ---
 
-## 3. 检索数据流
+## 3. 检索数据流（生产栈 MilvusHybridRetriever）
+
+> **代码事实**：生产环境仅装配 `MilvusHybridRetriever`（`memoryhub/retrieval/milvus_hybrid.py:106-520`），由 `memoryhub/app.py:711-738` 在 `runtime.mode=production` 下强制装配；开发/测试模式才使用 `HybridRetriever`（`retrieval/hybrid.py:23-308`，FAISS + BM25 手动加权）。生产检索器在 Milvus 引擎内部完成稠密 + 稀疏的 RRF（Reciprocal Rank Fusion）融合，Python 侧只取 Top-K。
 
 ```mermaid
 flowchart TD
-    A["OS Agent 发起检索<br/>POST /api/memory/search"] --> B["SearchRequest<br/>{query, context, top_k}"]
+    A["OS Agent 发起检索<br/>POST /api/memory/search"] --> B["SearchRequest<br/>{query, context, top_k, level}"]
 
-    B --> C["SearchCache.get()<br/>查询缓存"]
-    C -->|命中| D["✅ 直接返回缓存结果"]
-    C -->|未命中| E["并行启动三路检索"]
+    B --> C["MilvusHybridRetriever.search()<br/>缓存键 = version + canonical_json"]
+    C -->|SearchCache 命中| D["✅ 直接返回缓存结果<br/>（结果缓存 LRU+TTL）"]
+    C -->|未命中| E["query_vector_cache 检查<br/>1000 条 LRU"]
 
-    E --> F["VectorSearcher.search()<br/>query → embed → FAISS 近邻搜索"]
-    E --> G["KeywordSearcher.search()<br/>query → 分词 → BM25 打分"]
-    E --> H["MetadataFilter<br/>scope + status + confidence 过滤"]
+    E -->|向量命中| F2["直接复用 768 维向量"]
+    E -->|未命中| F["KylinEmbeddingClient.embed()<br/>ctypes → DBus → 768 维向量"]
 
-    F --> I["vector_results<br/>[{memory_id, vector_score}]"]
-    G --> J["keyword_results<br/>[{memory_id, bm25_score}]"]
-    H --> K["metadata_results<br/>[{memory_id, match_score}]"]
-
-    I --> L["HybridRetriever._merge_results()<br/>score = 0.6×vector + 0.3×keyword + 0.1×metadata"]
-    J --> L
-    K --> L
-
-    L --> M["HybridRetriever._filter_by_context()<br/>scope 匹配 · 置信度过滤"]
-    M --> N["Reranker.rerank()<br/>相关性 + scope匹配度 + 时间新鲜度"]
-
-    N --> O["取 Top-K 结果"]
-    O --> P["SearchCache.set()<br/>写入缓存"]
-    O --> Q["格式化为 SearchResponse<br/>分离 preferences 和 knowledge"]
-
-    Q --> R["返回<br/>{preferences, knowledge, latency_ms}"]
+    F --> G["build_sparse_vector(query)<br/>FNV-1a 与 C 侧逐位一致"]
+    G --> H["Milvus engine.hybrid_search<br/>(dense, sparse) → RRF 融合"]
+    H --> I["metadata 后过滤<br/>user_id / status / memory_type"]
+    I --> J["SQLite 回表补齐 + 限 20 候选"]
+    J --> K["Reranker 6 因子加权<br/>原始/相关/scope/置信/新鲜/健康"]
+    K --> L["format_response → SearchResponse<br/>preferences / knowledge / facts"]
+    L --> M["SearchCache.set() 按 index_version 失效"]
 
     style D fill:#c8e6c9,stroke:#2e7d32
-    style R fill:#e3f2fd,stroke:#1565c0
+    style M fill:#c8e6c9,stroke:#2e7d32
+    style L fill:#e3f2fd,stroke:#1565c0
 ```
 
 ---
@@ -253,12 +261,12 @@ flowchart TD
     D --> E["MemoryForgetter.locate_memories()<br/>查询 SQLite 定位目标记忆"]
     E --> F["目标: pref_001, pref_003"]
 
-    F --> G["并行删除"]
+    F --> G["并行清理"]
 
-    G --> H["EventRepository.delete_memories()<br/>删除 preferences 表记录"]
-    G --> I["VectorStore.batch_delete()<br/>删除 FAISS 向量"]
-    G --> J["SearchCache.invalidate()<br/>清除相关缓存"]
-    G --> K["EvidenceStore.delete()<br/>删除证据链文件"]
+    G --> H["MemoryWriteService.upsert_memory<br/>SUPERSEDE 软删 + 谱系"]
+    G --> I["MilvusHybridRetriever.index_version++<br/>向量投影自动失效"]
+    G --> J["SearchCache.clear()"]
+    G --> K["MemoryEvidenceRepository 删证据链"]
 
     H --> L["统计删除数量"]
     I --> L
@@ -266,7 +274,7 @@ flowchart TD
     K --> L
 
     L --> M["MemoryForgetter.create_audit_log()<br/>生成 ForgetRecord"]
-    M --> N["存入 forget_history 表"]
+    M --> N["存入 forget_history 表<br/>（含被删记忆快照）"]
 
     N --> O["返回 ForgetResponse<br/>{record_id, deleted_count, deleted_ids}"]
 
@@ -276,123 +284,126 @@ flowchart TD
 
 ---
 
-## 5. 记忆生命周期流转
+## 5. 记忆生命周期流转（三引擎 + Scheduler）
+
+> **代码事实**：v0.1.0 已实现**三引擎 + 后台调度器**架构（`memoryhub/core/lifecycle/`）：`SessionConsolidator`（短期 → 中期）、`MemoryConsolidator`（中期 → 长期，含 `consolidate_tool_preferences()` 触发 `ToolPreferenceMiner`）、`MemoryDegrader`（长期低健康度 → 中期情景 `epi_dg_*`）。`LifecycleScheduler`（`scheduler.py:25-104`）后台线程每 300s 跑 `run_consolidation_cycle()`。手动触发入口 `POST /api/memory/lifecycle/{auto-forget,check,consolidate}`（`memoryhub/adapter/management_api.py:669-772`）。
+>
+> 健康度公式（`core/forget/health.py:54-75`）：`health = 0.6·time_decay + 0.4·usage_frequency`，上限 = confidence；艾宾浩斯 `R = e^(-t/S)`，其中 `S = half_life/ln2 · (1 + hits/10)`（复习强化）。`AutoForgetEngine` 阈值常量（`core/forget/auto_forget.py:20-22`）：`ARCHIVE_THRESHOLD=0.2` / `DEMOTE_THRESHOLD=0.4` / `REVIEW_THRESHOLD=0.6`。
 
 ```mermaid
 stateDiagram-v2
-    [*] --> SHORT: 新事件写入<br/>quality_score < 0.6
+    [*] --> SHORT: 新事件写入<br/>EventIngestionService._buffer_short_term<br/>TTL 24h
 
-    SHORT --> MID: 条件满足<br/>出现次数 ≥ 2<br/>quality_score ≥ 0.4
-    SHORT --> [*]: 任务结束<br/>未被引用
+    SHORT --> MID: SessionConsolidator<br/>会话结束聚合
+    SHORT --> [*]: 任务结束未被引用
 
-    MID --> LONG: 条件满足<br/>出现次数 ≥ 5<br/>confidence ≥ 0.7<br/>存在天数 ≥ 3
-    MID --> EXPIRED: 30 天无更新
+    MID --> LONG: MemoryConsolidator<br/>consolidate_episodes<br/>consolidate_tool_preferences<br/>consolidate_workflow_preferences
 
-    LONG --> EXPIRED: 365 天无更新<br/>触发审查
+    MID --> MID: 长期低健康度 →<br/>MemoryDegrader 写 epi_dg_* 情景<br/>+ 长期 ARCHIVED
 
-    EXPIRED --> [*]: 归档 archived
+    LONG --> EXPIRED: AutoForgetEngine<br/>health < 0.2 归档
+    LONG --> LONG: feedback confirm →<br/>hits +1 → S 复习强化
+
+    EXPIRED --> [*]: archived · 不参与检索<br/>保留审计和回溯
 
     note right of SHORT
-        短期记忆
-        - 当前任务内的临时数据
+        短期工作记忆
+        - 当前会话/任务内
         - 不参与跨任务检索
     end note
 
     note right of MID
-        中期记忆
+        中期情景
         - 候选偏好 / 近期案例
-        - 可被检索，但置信度较低
+        - 可被检索，置信度较低
     end note
 
     note right of LONG
         长期记忆
-        - 稳定偏好 / 工作流知识 / 模板
+        - 稳定偏好 / 工作流 / 模板 / 事实
         - 主要检索来源
     end note
 
     note right of EXPIRED
-        过期记忆
-        - 不参与检索
-        - 保留用于审计和回溯
+        自动遗忘
+        - 健康度 < 0.2 自动归档
+        - 0.2 ≤ h < 0.4 降级为中期
+        - 0.4 ≤ h < 0.6 待审查
     end note
 ```
 
 ---
 
-## 6. 模块依赖关系
+## 6. 模块依赖关系（v0.1.0 真实拓扑）
+
+> **代码事实**：v0.1.0 在 `memoryhub/core/` 下有 **8 个核心子模块**：`ingestion / preference / knowledge / conflict / forget / safety / lifecycle / memory`（`memory` 是共享基元：BaseMemoryHandler / UnifiedConfidenceCalculator / EvidenceMerger / StructuredLLMAdapter / freshness_score）。`memoryhub/retrieval/` 拆分为生产检索器 `milvus_hybrid.py` + 降级 `hybrid.py`。`storage/vector_engine/` 拆分为 `faiss_engine / milvus_engine / _milvus_ctypes / sparse`（FNV-1a 稀疏向量）。
 
 ```mermaid
 graph LR
     subgraph 入口层
-        APP["app.py"]
-        API["adapter/api.py"]
+        APP["app.py:171-866<br/>create_app() + lifespan"]
+        API["adapter/api.py<br/>/api/memory"]
+        Agent["adapter/agent_api.py<br/>/api/agent + /api"]
+        Mgmt["adapter/management_api.py<br/>/api/memory 管理类"]
+        V2["adapter/memory_v2_api.py<br/>/api/memory/v2"]
     end
 
     subgraph 数据结构层
-        Schemas["adapter/schemas.py<br/>⭐ 所有模块共享"]
+        Schemas["adapter/schemas.py 1781 行<br/>⭐ 所有模块共享"]
+        USchemas["adapter/user_rule_schemas.py"]
     end
 
-    subgraph 核心逻辑层
-        Ingestion["core/ingestion/"]
+    subgraph 核心逻辑层（8 模块）
+        Ingestion["core/ingestion/<br/>+ adapters/"]
         Preference["core/preference/"]
-        Knowledge["core/knowledge/"]
+        Knowledge["core/knowledge/<br/>（含 fact）"]
         Conflict["core/conflict/"]
-        Safety["core/safety/"]
+        Forget["core/forget/<br/>（含 health）"]
+        Safety["core/safety/<br/>（含 gate）"]
         Lifecycle["core/lifecycle/"]
+        Memory["core/memory/<br/>（基元）"]
     end
 
     subgraph 检索层
-        Retrieval["retrieval/"]
+        MilvusHybrid["retrieval/milvus_hybrid.py<br/>生产唯一"]
+        Hybrid["retrieval/hybrid.py<br/>dev/test 降级"]
+        VS["vector_search.py / keyword_search.py<br/>reranker.py / cache.py"]
     end
 
     subgraph 存储层
-        Storage["storage/"]
-        Vector["storage/vector_store"]
+        DB["storage/database.py + models.py<br/>12 张表 + 8 个 Repository"]
+        VEng["storage/vector_engine/<br/>milvus_engine / faiss_engine"]
+        Sync["sync_service + projection_outbox +<br/>compensation_task"]
+        Meta["memory_metadata.py<br/>lineage/evidence/outbox"]
     end
 
     subgraph 抽象层
-        LLM["llm/"]
-        Embedding["embedding/"]
+        LLM["llm/openai_client.py"]
+        Embed["embedding/kylin_client.py<br/>+ mock_client.py"]
+        Rules["safety_rules/<br/>声明式规则库"]
     end
 
-    APP --> API
-    APP --> Storage
-    APP --> LLM
-    APP --> Embedding
+    APP --> API & Agent & Mgmt & V2
+    APP --> DB & VEng & Embed & LLM & Rules
 
-    API --> Schemas
-    API --> Ingestion
-    API --> Preference
-    API --> Knowledge
-    API --> Conflict
-    API --> Safety
-    API --> Retrieval
+    API & Agent & Mgmt & V2 --> Schemas
+    API --> Ingestion & Preference & Knowledge & Conflict & Forget & Safety & Lifecycle
+    Mgmt --> DB & Forget & Lifecycle & Safety & Sync
+    V2 --> Meta
 
-    Ingestion --> Schemas
-    Ingestion --> Safety
-    Preference --> Schemas
-    Preference --> LLM
-    Preference --> Conflict
-    Preference --> Storage
-    Preference --> Vector
-    Preference --> Embedding
-    Knowledge --> Schemas
-    Knowledge --> LLM
-    Knowledge --> Conflict
-    Knowledge --> Storage
-    Knowledge --> Vector
-    Knowledge --> Embedding
-    Conflict --> Schemas
-    Conflict --> LLM
-    Safety --> Schemas
-    Safety --> LLM
-    Lifecycle --> Storage
-    Retrieval --> Schemas
-    Retrieval --> Vector
-    Retrieval --> Storage
-    Retrieval --> Embedding
+    Ingestion --> Schemas & Safety & Rules
+    Preference --> Schemas & Memory & Conflict & DB & Embed & LLM
+    Knowledge --> Schemas & Memory & Conflict & DB & Embed & LLM
+    Conflict --> Schemas & Memory & LLM
+    Forget --> Schemas & Memory & DB
+    Safety --> Schemas & Memory & LLM & Rules & DB
+    Lifecycle --> DB & Memory & Sync
+
+    MilvusHybrid --> Hybrid & VS & DB & Embed & VEng & Meta
+    Hybrid --> VS & DB & Embed
 
     style Schemas fill:#ffcdd2,stroke:#c62828,stroke-width:3px
+    style MilvusHybrid fill:#a29bfe,color:#fff
 ```
 
 ---
@@ -545,46 +556,202 @@ sequenceDiagram
 
 ## 11. 前端页面与 API 对应关系
 
-前端实现为 **Qt 5 原生桌面客户端**（`desktop-client/`，21 个页面，按《前端页面规划.md》落地），
-与后端通过 REST 对接：
+前端实现为 **Qt 5 原生桌面客户端**（`desktop-client/`），按当前 `main` 分支真实代码（`MainWindow.cpp:337-365` 注册 `registerPage(key, group, title, page)`）落地，共 **26 个 pageKey，6 大组**：
+
+- **总览 / 内置终端**：`dashboard` / `terminal`（共 2）
+- **记忆管理**：`mem/preference` / `mem/knowledge` / `mem/fact` / `mem/tiers`（共 4）
+- **检索与冲突**：`search` / `conflicts` / `projections`（共 3）
+- **遗忘与生命周期**：`forget/precise|pending|archived|recycle|health|history|settings`（共 7，全部在 `pages/ForgetPages.cpp`）
+- **安全中心**：`safety/overview|user-rules|audit|quarantine`（共 4，全部在 `pages/SafetyPages.cpp`）
+- **系统设置**：`settings/status|llm|config|demo`（共 4，全部在 `pages/SettingsPages.cpp`）
+
+复用组件 12 个（`widgets/`）：`PageHeader / StatCard / ScoreRing / StatusTag / JsonViewer / EmptyState / DetailDrawer / MemoryFilterBar / ConfirmDialog / RoundedContainer / PageStateView / ProvenancePanel`。API 客户端 1 个（`api/ApiClient.cpp`，同步 + 异步 + Result 错误码）+ `j::` JSON 工具命名空间。
 
 ```mermaid
 graph LR
-    subgraph Qt5桌面客户端
+    subgraph Qt5 桌面客户端（26 pageKey）
         P1["📊 总览 Dashboard"]
-        P2["🧠 偏好 / 知识 / 事实"]
-        P3["🔍 检索测试 / 冲突中心"]
-        P4["🗑 遗忘与生命周期"]
-        P5["🛡 安全中心 / 系统设置"]
+        P2["🧠 偏好 / 知识 / 事实 / 分层"]
+        P3["🔍 检索测试 / 冲突中心 / 投影恢复"]
+        P4["🗑 遗忘与生命周期（7 页）"]
+        P5["🛡 安全中心（4 页）"]
+        P6["⚙ 系统设置（4 页）"]
+        P0["💻 内置 opencode 终端"]
     end
 
-    subgraph REST API
+    subgraph REST API（5 Router）
         A1["GET /api/memory/preferences|knowledge|facts"]
         A2["POST /api/memory/search | /context"]
         A3["GET /api/memory/conflicts; POST .../resolve"]
-        A4["POST /api/memory/forget; GET /forget/history"]
-        A5["PATCH /api/memory/memories/{id}/status"]
+        A4["POST /api/memory/forget[/preview]; GET .../history"]
+        A5["PATCH /api/memory/memories/{id}/status; POST .../delete"]
         A6["GET /api/memory/memories/health"]
         A7["CRUD /api/memory/safety/user-rules"]
-        A8["GET /api/memory/safety/audit-logs"]
+        A8["GET /api/memory/safety/audit-logs[/verify]"]
         A9["GET /api/memory/system/status | /config"]
+        A10["GET /api/memory/safety/quarantine[/...]"]
+        A11["POST /api/memory/lifecycle/{auto-forget,check,consolidate}"]
+        A12["GET /api/memory/v2/memories/{id}/{lineage,evidence,audit}"]
+        A13["GET /api/memory/short-term | /mid-term"]
+        A14["GET /api/memory/extraction/tasks[/metrics]"]
     end
 
-    P1 --> A1
-    P1 --> A6
-    P2 --> A1
-    P2 --> A5
-    P3 --> A2
-    P3 --> A3
-    P4 --> A4
-    P4 --> A5
-    P4 --> A6
-    P5 --> A7
-    P5 --> A8
-    P5 --> A9
+    P1 --> A1 & A6
+    P2 --> A1 & A5 & A14
+    P3 --> A2 & A3 & A12
+    P4 --> A4 & A5 & A6 & A11 & A13
+    P5 --> A7 & A8 & A10
+    P6 --> A9
+    P0 --> AgentSide["OS Agent / opencode 进程"]
+    AgentSide --> A1 & A2
 ```
 
 用户规则接口（`A7`）必须携带 `X-MemoryHub-User` 请求头；matcher 仅在创建或替换时
 发送，读取响应不包含 matcher，数据库只存 AES-256-GCM 密文。其余管理类接口（审计
 验链、隔离区放行、批量状态流转、健康度、生命周期触发）由 `management_api.py`
 提供，详见 `desktop-client/README.md` 与接口文档。
+
+---
+
+## 12. 麒麟系统原生化（生产栈全景）
+
+> **本章与《技术报告》第 9 章配套**；这里是图层面，最详细的代码事实见 `docs/MemoryHub_技术报告.md` §5 与 `docs/技术报告_框架_v1.docx` 第 9 章。
+
+```mermaid
+graph TB
+    subgraph App["MemoryHub Python 进程（memoryhub/app.py）"]
+        PY["FastAPI / 业务代码"]
+        ECLI["KylinEmbeddingClient<br/>(ctypes)"]
+        VENG["MilvusVectorEngine<br/>+ _MilvusCAPI"]
+    end
+
+    subgraph SDK["麒麟系统预装 .so"]
+        EMB["libkylin-coreai-embedding.so<br/>C API"]
+        VEC["libkysdk-vector-engine-client.so<br/>C++ SDK"]
+    end
+
+    subgraph Bridge["自编译 C API 桥接层"]
+        CAPI["libkysdk-vector-engine-client-capi.so<br/>third_party/libkysdk-vector-engine-client-nile-sp2/<br/>capi/c_api_bridge.cpp"]
+    end
+
+    subgraph Daemon["麒麟系统服务"]
+        DBus["D-Bus System Bus<br/>text_embedding 服务"]
+        Milvus["Milvus gRPC Server<br/>:19530"]
+    end
+
+    PY --> ECLI
+    PY --> VENG
+    ECLI -->|ctypes.CDLL| EMB
+    EMB -->|create/init/init_model/embed| DBus
+    VENG -->|ctypes.CDLL| CAPI
+    CAPI -->|包装 C++| VEC
+    VEC -->|gRPC :19530| Milvus
+
+    style EMB fill:#ffeaa7,stroke:#d35400
+    style VEC fill:#ffeaa7,stroke:#d35400
+    style CAPI fill:#fab1a0,stroke:#e17055
+    style DBus fill:#74b9ff,color:#fff
+    style Milvus fill:#74b9ff,color:#fff
+```
+
+**生产栈硬约束**（`memoryhub/config.py:494-584` 双层校验）：
+
+| # | 约束 | 违规行为 |
+|---|---|---|
+| 1 | `runtime.allow_fallback = false` | ProductionGateError |
+| 2 | `embedding.provider = "kylin"`（禁止 mock / kylin_mock / auto） | 同上 |
+| 3 | `embedding.dimension = 768` | 同上 |
+| 4 | `vector_engine.provider = "milvus"`，`app_id` 非空 | 同上 |
+| 5 | 运行时 `KylinEmbeddingClient.is_available()=true` 且 `get_dimension()=768`；`MilvusVectorEngine` 已连接且未关闭 | 同上 |
+
+**端到端延迟预算**（`config.yaml retrieval.target_p95_ms / target_p99_ms`）：350ms / 500ms。`KylinEmbeddingClient` 单次超时 250ms；`MilvusVectorEngine` 单次超时 120ms。
+
+**运行时契约部署前自检**：`scripts/check_kylin_embedding_runtime.py`（输出 `kylin_runtime_check.json`）逐项确认 8 条契约；`scripts/verify_kylin_environment.py` 验证开发栈 mock SDK。
+
+---
+
+## 13. Agent 接入三件套（CLI / MCP / OpenCode Plugin）
+
+> **代码事实**：所有接入统一走同一份 REST 契约（`memoryhub/app.py` 5 Router）；CLI 是「记忆能力母语」，MCP / Plugin / 桌面控制台都是 CLI 薄壳或 REST 适配，逻辑零分叉。
+
+```mermaid
+graph LR
+    subgraph Side["Agent 侧"]
+        Agent["OS Agent"]
+        OC["opencode"]
+        CC["Claude Code"]
+        Self["自研 Agent"]
+    end
+
+    subgraph Access["agent-integration/ 接入层"]
+        CLI["memoryhub CLI<br/>argparse 17+ 子命令<br/>pyproject:memoryhub = memoryhub_cli.cli:main"]
+        MCP["memoryhub_mcp<br/>MCP server stdio JSON-RPC<br/>8 工具"]
+        Plugin["plugin/opencode/<br/>3 custom tools<br/>5 slash commands<br/>1 skill + 3 hooks"]
+    end
+
+    subgraph Backend["MemoryHub 后端"]
+        REST["5 Router :8099"]
+    end
+
+    Agent --> CLI
+    Agent --> MCP
+    OC --> Plugin --> CLI
+    OC -.可选.-> MCP
+    CC --> MCP
+    Self --> CLI
+    Self --> MCP
+
+    CLI --> REST
+    MCP --> REST
+    Plugin -.通过 CLI.-> REST
+```
+
+**CLI 17+ 子命令**（`agent-integration/memoryhub_cli/cli.py`）：`search / context / event / remember / update / forget [--preview] / list / get / provenance / projection list|replay / feedback / review / resolve / decide / knowledge fact propose / export / import / status / service / completion`。
+
+**MCP 8 工具**（`memoryhub_mcp/tools.py:ToolRegistry._register()`）：
+`memoryhub_health / search / get_context / write_event / remember / forget / feedback / knowledge_fact_propose`。
+
+**OpenCode Plugin**（`agent-integration/plugin/opencode/`）：
+- 3 custom tools：`memoryhub_search / memoryhub_get_context / memoryhub_remember`（薄壳调 CLI）
+- 5 slash commands：`/memoryhub-context / -forget / -remember / -review / -status`
+- 1 skill：`memory-awareness/SKILL.md`（agent 按 description 自动发现，判断何时调用记忆）
+- 3 hooks：`tool.execute.after`（累积工具轨迹）+ `session.status(idle)` 冲刷 + `session.deleted` 兜底 + `experimental.session.compacting`（注入记忆到压缩期 prompt）
+
+---
+
+## 14. 统一写入契约（最关键工程纪律）
+
+> **代码事实**：`MemoryWriteService.upsert_memory()`（`memoryhub/core/memory_write.py:98-158`）是所有写入来源的唯一收口；`DomainMemoryWriter`（`memoryhub/core/domain_writer.py`）把 `memory + lineage + evidence + outbox` 写在同一 SQL 事务里，要么全成要么全败。`SafetyWriteGate.route()`（`memoryhub/core/safety/gate.py:181-`）是 `ApprovedWrite` 能力的唯一发放点，**fail_closed 兜底**。
+
+```mermaid
+flowchart LR
+    subgraph Sources["任何写入来源"]
+        S1["事件摄取<br/>POST /api/memory/events"]
+        S2["显式写 API<br/>POST /api/memory/memories/*"]
+        S3["多源适配器<br/>POST /api/memory/sources/{tool_result,behavior,config}"]
+        S4["分层流转 / 评测 / 反馈 / 遗忘"]
+    end
+
+    Sources --> Gate["SafetyWriteGate.route()<br/>ALLOW/MASK/REVIEW/REJECT<br/>+ HMAC 审计链<br/>fail_closed"]
+    Gate --> Writer["DomainMemoryWriter<br/>单事务<br/>memory + lineage + evidence + outbox"]
+    Writer --> RC["MemoryWriteReceipt 回执"]
+    Writer --> Outbox["ProjectionOutbox<br/>status=pending"]
+    Outbox --> Worker["ProjectionOutboxWorker<br/>run_once / replay"]
+    Worker --> Proj["向量 / 关键词 / Lookup / 缓存"]
+    Worker --> Sync["MemorySyncService.reconcile()<br/>SQLite ↔ Milvus 漂移对账"]
+
+    style Gate fill:#ff7675,color:#fff
+    style Writer fill:#fab1a0
+    style Proj fill:#74b9ff,color:#fff
+```
+
+**4 处置 → sink 路由**（`SafetyWriteGate`）：
+
+| 动作 | SQLite / Embedding / 向量 / 证据 | REVIEW 隔离区 | 持久审计 |
+|---|---|---|---|
+| `ALLOW` | ✓ ApprovedWrite | ✗ | ✓ |
+| `MASK` | ✓ 脱敏后 ApprovedWrite（复检通过） | ✗ | ✓ |
+| `REVIEW` | ✗ | ✓ AES-256-GCM 密文 | ✓ |
+| `REJECT` | ✗ | ✗ | ✓ |
+
+**Outbox 模式**：写入只到 durable outbox，由后台 `ProjectionOutboxWorker`（`memoryhub/storage/projection_outbox.py:25-99`）异步投影到 Milvus / 关键词 / 缓存；崩溃后由 `MemorySyncService.reconcile()` + `PendingIndexCompensationTask`（`storage/compensation_task.py:34-164`）补偿。`repair_at_startup()` 仅同步历史 `pending_index`，禁止全量重建。

@@ -1,8 +1,10 @@
 # Kylin-MemoryHub 配置说明
 
-> `load_config()` 支持本文列出的主要 YAML 配置及运行时环境变量覆盖。安全密钥值
-> 不写入 YAML：单机部署默认由 MemoryHub 首次启动自动生成并持久化，外部环境变量
-> 仍具有最高优先级。
+> **`load_config()` 优先级**：环境变量（最高）> `config.yaml` > 代码内 dataclass 默认值。
+> 首次启动时若未提供三把安全密钥，`SafetyKeyStore.provision_safety_keys()` 会自动生成 3 把
+> 独立的 32 字节随机密钥并保存到 `<storage.db_path 父目录>/security/safety-keys.json`（POSIX 0700/0600）。
+> 外部环境变量始终具有最高优先级。生产门禁由 `memoryhub/config.py:validate_production_gate()` 与
+> `validate_production_runtime()` 双层校验，违规直接 `ProductionGateError` 启动失败。
 
 ## 快速开始
 
@@ -36,6 +38,8 @@ cp config.example.yaml config.yaml
 |---------|----------|-------|------|
 | — | `host` | `0.0.0.0` | 服务监听地址（`127.0.0.1` 仅本机） |
 | — | `port` | `8099` | 服务监听端口（当前仓库所有集成/客户端默认端口） |
+| `DEBUG` | `debug` | `false` | 调试模式开关 |
+| — | `log_level` | `INFO` | 日志级别 |
 
 ```yaml
 host: "0.0.0.0"
@@ -50,21 +54,31 @@ FastAPI 接口文档：`http://<host>:8099/docs`。启动方式：
 
 | 环境变量 | YAML 路径 | 默认值 | 说明 |
 |---------|----------|-------|------|
-| `MEMORYHUB_RUNTIME_MODE` | `runtime.mode` | `development` | 运行模式：`production` / `development` / `test` |
+| `MEMORYHUB_RUNTIME_MODE` | `runtime.mode` | `development` | 运行模式：`production` / `development` / `test`（校验：`memoryhub/config.py:38-41`） |
 | `MEMORYHUB_RUNTIME_ALLOW_FALLBACK` | `runtime.allow_fallback` | `true`（dev/test）/ `false`（production） | 是否允许 FAISS 等降级后端 |
 
 `production` 模式下禁止 `mock`、`kylin_mock`、`faiss`、`milvus_mock` 和静默降级；
 `development` / `test` 模式可在明确记录告警后启用 `allow_fallback`。
+**生产模式硬约束**（任意一条不满足即 `ProductionGateError`）：
+
+1. `runtime.allow_fallback = false`（`config.py:506-507`）
+2. `embedding.provider = "kylin"`（`config.py:510-514`，禁止 `{mock, kylin_mock}`）
+3. `embedding.dimension = 768`（`config.py:524-527`）
+4. `vector_engine.provider = "milvus"`，且 `app_id` 非空（`config.py:517-521`）
+5. 运行时 `KylinEmbeddingClient.is_available()=true` 且 `get_dimension()=768`；`MilvusVectorEngine` 已连接且未关闭（`config.py:550-584`）
 
 ### LLM 配置
 
 | 环境变量 | YAML 路径 | 默认值 | 说明 |
 |---------|----------|-------|------|
-| `LLM_API_BASE` | `llm.api_base` | `https://api.openai.com/v1` | 云端 OpenAI 兼容 API 地址 |
-| `LLM_API_KEY` | `llm.api_key` | - | API 密钥（可在桌面端 LLM 服务页面配置） |
-| `LLM_MODEL` | `llm.model` | `gpt-4o-mini` | 模型名称 |
+| `LLM_API_BASE` / `MEMORYHUB_LLM_API_BASE` | `llm.api_base` | `https://api.openai.com/v1` | 云端 OpenAI 兼容 API 地址 |
+| `LLM_API_KEY` / `MEMORYHUB_LLM_API_KEY` | `llm.api_key` | - | API 密钥（可在桌面端 LLM 服务页面配置） |
+| `LLM_MODEL` / `MEMORYHUB_LLM_MODEL` | `llm.model` | `gpt-4o-mini` | 模型名称 |
+| — | `llm.temperature` | `0.2` | 采样温度 |
+| — | `llm.max_tokens` | `2048` | 最大输出 token |
+| — | `llm.fact_extraction_timeout_seconds` | `8` | 事实抽取超时（秒） |
 
-**LLM 后端：** 仅支持云端 OpenAI 兼容 API。
+**LLM 后端：** 仅支持云端 OpenAI 兼容 API（`memoryhub/llm/openai_client.py:OpenAIClient`，通过 `urllib.request` 直连 Chat Completions 协议）。`is_available()` 判定：`api_base` 非空 +（`api_key` 有值 或 host 为 `localhost` / `127.0.0.1`）。
 
 ```yaml
 llm:
@@ -73,31 +87,34 @@ llm:
   model: "gpt-4o-mini"
 ```
 
-桌面端可在 **系统 → LLM 服务** 页面保存 `LLM_API_BASE`、`LLM_API_KEY` 和 `LLM_MODEL`。API Key 为只写字段，不会通过配置查询接口返回；保存后需重启服务生效。
+桌面端可在 **系统 → LLM 服务** 页面保存 `LLM_API_BASE`、`LLM_API_KEY` 和 `LLM_MODEL`（`PUT /api/memory/system/llm`，`management_api.py:434-454`）。API Key 为只写字段，不会通过 `GET /api/memory/system/config` 返回；保存后需重启服务生效。
 
 ### Embedding 配置
 
 | 环境变量 | YAML 路径 | 默认值 | 说明 |
 |---------|----------|-------|------|
-| `EMBEDDING_PROVIDER` | `embedding.provider` | `mock` | Embedding 提供商 |
-| `EMBEDDING_DIMENSION` | `embedding.dimension` | `1024` | 向量维度 |
+| `EMBEDDING_PROVIDER` / `MEMORYHUB_EMBEDDING_PROVIDER` | `embedding.provider` | `mock` | `kylin` / `mock` / `kylin_mock` / `auto`（`embedding/__init__.py:30-76` 工厂） |
+| `EMBEDDING_DIMENSION` | `embedding.dimension` | `768` | 向量维度 |
+| — | `embedding.model_name` | `ensemble-embd_gte-base_uint8-text` | 麒麟 SDK 模型名（`kylin_client.py:38-45`） |
+| — | `embedding.so_path` | 自动搜索 | 麒麟 SDK `.so` 显式路径 |
+| — | `embedding.query_timeout_ms` | `250` | 单次 Embedding 调用超时（毫秒） |
 
 **支持的 Embedding 后端：**
 
-- **麒麟 SDK**（生产唯一允许）
+- **麒麟 SDK**（生产唯一允许，`memoryhub/embedding/kylin_client.py:KylinEmbeddingClient`）
   ```yaml
   embedding:
     provider: "kylin"
     dimension: 768
     model_name: "ensemble-embd_gte-base_uint8-text"
   ```
-
-- **Mock / kylin_mock**（开发测试或诊断场景）
+- **Mock**（开发测试或诊断场景，`embedding/mock_client.py:MockEmbeddingClient`，SHA256 + 种子确定性 768 维随机向量）
   ```yaml
   embedding:
     provider: "mock"
     dimension: 768
   ```
+- **kylin_mock**（使用项目内 `third_party/kylin-mock/build/libkylin-coreai-embedding-mock.{so,dll,dylib}`，跨平台 dev 用）
 
 生产模式（`runtime.mode=production`）下禁止 `mock`、`kylin_mock` 和 `auto`。
 
@@ -109,29 +126,44 @@ llm:
 | `VECTOR_WEIGHT` | `retrieval.vector_weight` | `0.6` | 向量检索权重（仅 HybridRetriever fallback 使用） |
 | `KEYWORD_WEIGHT` | `retrieval.keyword_weight` | `0.3` | BM25 权重（仅 HybridRetriever fallback 使用） |
 | `METADATA_WEIGHT` | `retrieval.metadata_weight` | `0.1` | 元数据权重（仅 HybridRetriever fallback 使用） |
+| — | `retrieval.candidate_multiplier` | `3` | 候选乘数（生产检索器预取 top_k × N） |
+| — | `retrieval.max_query_chars` | `512` | 单查询最大字符数（与 `kylin_client.MAX_QUERY_CHARS` 一致） |
+| — | `retrieval.target_p95_ms` | `350` | P95 延迟预算（ms），超预算触发告警 |
+| — | `retrieval.target_p99_ms` | `500` | P99 延迟预算（ms）—— 赛题硬约束 |
+| — | `retrieval.rerank_enabled` | `false` | 是否启用重排序（启用时仅对前 20 候选做无模型规则重排） |
+| — | `retrieval.cache_ttl_seconds` | `300` | 结果缓存 TTL（秒） |
 
-**权重调整建议：**
+**权重调整建议（仅 dev/test 模式）：**
 
 - 语义搜索为主：`vector_weight: 0.8`
 - 精确匹配为主：`keyword_weight: 0.6`
 - 均衡模式：默认值
 
+生产模式下仅装配 `MilvusHybridRetriever`（`retrieval/milvus_hybrid.py:106-520`），稠密/稀疏 RRF 融合在 Milvus 引擎内部完成；Python 侧不再使用 `vector_weight` / `keyword_weight`，但仍保留字段以便 fallback 降级。
+
 ### 存储配置
 
 | 环境变量 | YAML 路径 | 默认值 | 说明 |
 |---------|----------|-------|------|
-| `DB_PATH` | `storage.db_path` | `data/memoryhub.db` | SQLite 路径（端侧唯一事实源） |
+| `DB_PATH` / `MEMORYHUB_DB_PATH` | `storage.db_path` | `data/memoryhub.db` | SQLite 路径（端侧唯一事实源） |
 | `VECTOR_INDEX_PATH` | `storage.vector_index_path` | `data/vector_index` | FAISS 索引路径（仅 development/test 使用） |
 | `EVIDENCE_PATH` | `storage.evidence_path` | `data/evidence` | 证据链路径 |
+
+数据库通过 `Database.init_schema()` 创建 12 张表：`events / preferences / knowledge / knowledge_versions / conflicts / forget_history / memory_lineage / memory_evidence / memory_projection_outbox / extraction_tasks / short_term_memory / mid_term_memory`（详见 `memoryhub/storage/models.py:24-308`）。
 
 ### 向量引擎配置
 
 | 环境变量 | YAML 路径 | 默认值 | 说明 |
 |---------|----------|-------|------|
-| `MEMORYHUB_VECTOR_ENGINE_APP_ID` | `vector_engine.app_id` | - | Milvus/Milvus mock 必填的非空 SDK 应用标识 |
+| `MEMORYHUB_VECTOR_ENGINE_APP_ID` / `MEMORYHUB_VECTOR_ENGINE_PROVIDER` | `vector_engine.provider` / `app_id` | — / — | `milvus` / `faiss` / `milvus_mock`（`vector_engine/__init__.py:29-62` 工厂） |
+| — | `vector_engine.host` | `127.0.0.1` | Milvus gRPC 地址 |
+| — | `vector_engine.port` | `19530` | Milvus gRPC 端口 |
+| — | `vector_engine.collection` | `memoryhub` | collection 名 |
+| — | `vector_engine.dimension` | `768` | 向量维度（生产硬约束） |
+| — | `vector_engine.search_timeout_ms` | `120` | Milvus 检索超时（毫秒） |
+| — | `vector_engine.so_path` | 自动搜索 | `libkysdk-vector-engine-client-capi.so` 显式路径 |
 
-`vector_engine.provider=milvus` 或 `milvus_mock` 时必须提供 `app_id`；该值由测试/部署平台提供，
-不是 collection 名或 user ID，也不应写入日志。`faiss` 不消费此字段。
+`vector_engine.provider=milvus` 或 `milvus_mock` 时必须提供 `app_id`（`memoryhub/storage/vector_engine/milvus_engine.py` 的 `_validate_app_id` 拒绝空值，部署平台下发）；该值由测试/部署平台提供，不是 collection 名或 user ID，也不应写入日志。`faiss` 不消费此字段。生产模式下 `dimension` 强制 768，不匹配直接 `milvus.schema_dimension_mismatch` 错误码。
 
 ### 安全配置
 
@@ -356,6 +388,10 @@ startup 时才初始化，不会在模块 import 阶段创建数据库。resolve
 ### 场景 1：开发环境（云端 OpenAI 兼容 API + Mock Embedding）
 
 ```yaml
+runtime:
+  mode: development
+  allow_fallback: true
+
 llm:
   api_base: "https://api.openai.com/v1"
   api_key: "${LLM_API_KEY}"
@@ -363,6 +399,12 @@ llm:
 
 embedding:
   provider: "mock"
+  dimension: 768
+
+vector_engine:
+  provider: "milvus_mock"          # 使用 third_party/kylin-mock C API mock
+  app_id: "dev-app"
+  dimension: 768
 
 debug: true
 ```
@@ -387,7 +429,15 @@ embedding:
 vector_engine:
   provider: "milvus"
   app_id: "<provided-by-deployment-platform>"
+  host: "127.0.0.1"
+  port: 19530
+  collection: "memoryhub"
   dimension: 768
+  search_timeout_ms: 120
+
+retrieval:
+  target_p95_ms: 350
+  target_p99_ms: 500
 
 debug: false
 ```
@@ -397,8 +447,84 @@ debug: false
 ```yaml
 retrieval:
   default_top_k: 10
-  vector_weight: 0.7
-  keyword_weight: 0.2
-  metadata_weight: 0.1
+  candidate_multiplier: 3
   rerank_enabled: true
   cache_ttl_seconds: 600
+  target_p95_ms: 300
+  target_p99_ms: 450
+```
+
+### 场景 4：用户规则管理（启用 / 禁用）
+
+```yaml
+safety:
+  user_rules:
+    enabled: true
+    encryption_key_env: "MEMORYHUB_USER_RULE_KEY"
+    key_id: "device-local-v1"
+    max_rules_per_user: 100
+    max_matcher_chars: 2048
+    allow_advanced_regex: false       # 默认关闭；启用需先经 `regex_safety.py` 探针
+    detector_cache_size: 256
+```
+
+### 场景 5：审计链与隔离区（合规审计）
+
+```yaml
+safety:
+  audit:
+    enabled: true
+    directory: "data/safety-audit"
+    hmac_key_env: "MEMORYHUB_AUDIT_HMAC_KEY"
+    rotate_max_bytes: 16777216
+    retention_days: 180
+    fsync: true
+    fail_closed: true
+  quarantine:
+    enabled: true
+    directory: "data/review-quarantine"
+    encryption_key_env: "MEMORYHUB_QUARANTINE_KEY"
+    retention_days: 30
+    fsync: true
+    fail_closed: true
+```
+
+---
+
+## 完整环境变量清单（v0.1.0）
+
+`load_config()` 与 `memoryhub/config.py` 实际消费的 `MEMORYHUB_*` 环境变量（覆盖 `.env.example`）：
+
+| 变量 | 用途 |
+|---|---|
+| `MEMORYHUB_RUNTIME_MODE` | 覆盖 `runtime.mode` |
+| `MEMORYHUB_RUNTIME_ALLOW_FALLBACK` | 覆盖 `runtime.allow_fallback` |
+| `MEMORYHUB_DB_PATH` | 覆盖 `storage.db_path` |
+| `MEMORYHUB_DEBUG` | 覆盖 `debug` |
+| `MEMORYHUB_EMBEDDING_PROVIDER` | 覆盖 `embedding.provider` |
+| `MEMORYHUB_VECTOR_ENGINE_PROVIDER` | 覆盖 `vector_engine.provider` |
+| `MEMORYHUB_VECTOR_ENGINE_APP_ID` | 覆盖 `vector_engine.app_id`（Milvus 必填） |
+| `MEMORYHUB_LLM_API_BASE` / `MEMORYHUB_LLM_API_KEY` / `MEMORYHUB_LLM_MODEL` | 覆盖 LLM 三项 |
+| `MEMORYHUB_AUDIT_HMAC_KEY` | 审计哈希链密钥（Base64 32 字节） |
+| `MEMORYHUB_QUARANTINE_KEY` | 隔离区 AES-256-GCM 密钥 |
+| `MEMORYHUB_USER_RULE_KEY` | 用户规则 AES-256-GCM 主密钥（HKDF 派生加密/指纹子密钥） |
+| `MEMORYHUB_SAFETY_KEY_FILE` | 覆盖 `<db_dir>/security/safety-keys.json` 位置（绝对路径） |
+| `LLM_API_BASE` / `LLM_API_KEY` / `LLM_MODEL` | LLM 三项（裸名，与 `MEMORYHUB_*` 等价） |
+| `EMBEDDING_PROVIDER` / `EMBEDDING_DIMENSION` | Embedding 两项（裸名） |
+| `RETRIEVAL_TOP_K` / `VECTOR_WEIGHT` / `KEYWORD_WEIGHT` / `METADATA_WEIGHT` | 检索权重（裸名） |
+| `DB_PATH` / `VECTOR_INDEX_PATH` / `EVIDENCE_PATH` | 存储路径（裸名） |
+| `MEMORYHUB_URL` | 服务地址 |
+| `DASHSCOPE_API_KEY` / `QWEN_API_BASE` / `QWEN_MODEL` / `QWEN_TEMPERATURE` | 千问 LLM 兼容（仅辅助） |
+
+**三把安全密钥必须独立、不可复用**：审计 HMAC、隔离 AES-256-GCM、用户规则主密钥三者由 HKDF 派生独立的加密与指纹子密钥；`SafetyWriteGate.from_config()` 与 `from_user_rule_config()` 会在创建任何目录前**拒绝两两复用**。
+
+---
+
+## 部署前自检脚本
+
+| 脚本 | 用途 | 输出 |
+|---|---|---|
+| `scripts/verify_kylin_environment.py` | 麒麟 / Mock SDK 环境自检（平台 / Python / mock .so / 依赖） | `retrieval_environment_manifest.json` |
+| `scripts/check_kylin_embedding_runtime.py` | 部署前 Embedding 运行时门禁（OS / CPU / .so / deps / DBus / 模型 / 维度 / Milvus） | `kylin_runtime_check.json`（--json） |
+| `scripts/run_milvus_real_smoke_test.py` | Milvus 端到端冒烟测试（建 collection → 插 10 条 → 原文自召回 → drop） | 退出码 0/非 0 |
+| `scripts/verify_management_api.py` | 管理后台接口端到端验证（状态流转 / 批量 / 硬删 / 版本 / 健康 / 生命周期 / 审计 / 隔离 / 评测 / 系统状态） | passed/failed 统计 |
