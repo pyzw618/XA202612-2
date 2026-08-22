@@ -15,6 +15,20 @@ runtime:
   # production 模式下必须为 false
   allow_fallback: false
 
+# ==================== vNext 链路切流 ====================
+vnext:
+  # legacy | shadow | dual-read | canary | vnext
+  # 默认 legacy；切换必须经过对应 Gate 和回滚演练。
+  mode: legacy
+  # 仅 canary 模式允许 5/25/50/100；其他模式必须为 0。
+  canary_percent: 0
+  # 生产环境必须保持 Policy 前置和 Authority 单写。
+  policy_required: true
+  authority_single_writer: true
+  allow_policy_bypass: false
+  # 保留兼容读回滚窗口，不代表允许第二个 Authority writer。
+  allow_legacy_read_fallback: true
+
 # ==================== 存储配置 ====================
 storage:
   # SQLite 数据库路径（端侧唯一事实源）

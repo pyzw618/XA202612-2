@@ -1,0 +1,39 @@
+{
+  "passed": true,
+  "errors": [],
+  "warnings": [
+    {
+      "section": "queries",
+      "id": "q_dev_018",
+      "message": "有答案查询无任何 relevance≥2 的记忆"
+    }
+  ],
+  "stats": {
+    "memory_count": 108,
+    "query_count": 30,
+    "knowledge_type_distribution": {
+      "workflow": 45,
+      "case": 31,
+      "template": 32
+    },
+    "status_distribution": {
+      "active": 104,
+      "archived": 1,
+      "deleted": 1,
+      "replaced": 2
+    },
+    "difficulty_distribution": {
+      "exact": 5,
+      "semantic": 10,
+      "hard-negative": 7,
+      "cross-domain": 5,
+      "no-answer": 3
+    },
+    "unique_users": 2,
+    "unique_projects": 2,
+    "no_answer_queries": 3,
+    "total_errors": 0,
+    "total_warnings": 1,
+    "passed": true
+  }
+}

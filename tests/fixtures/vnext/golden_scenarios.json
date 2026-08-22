@@ -1,0 +1,111 @@
+{
+  "fixture_version": "vnext/golden/v1",
+  "normal": {
+    "request": {
+      "api_version": "vnext/v1",
+      "request_id": "req-golden-normal",
+      "tenant_id": "tenant-a",
+      "user_id": "user-a",
+      "query": "what format should the report use",
+      "intent_hint": "PREFERENCE",
+      "consistency": "AUTHORITY_CHECKED"
+    },
+    "expected": {"api_version": "vnext/v1", "completeness": "FULL"}
+  },
+  "conflict": {
+    "left": {
+      "tenant_id": "tenant-a",
+      "user_id": "user-a",
+      "candidate_id": "candidate-docx",
+      "memory_type": "PREFERENCE",
+      "normalized_key": "output.format.report",
+      "claim": {"value": "DOCX"},
+      "scope_level": "PROJECT",
+      "scope": "PROJECT:reporting",
+      "status": "REVIEW",
+      "confidence": 0.7,
+      "utility": 0.7,
+      "stability": 0.4,
+      "conflicting_memory_ids": ["memory-pdf"]
+    },
+    "right": {
+      "tenant_id": "tenant-a",
+      "user_id": "user-a",
+      "candidate_id": "candidate-pdf",
+      "memory_type": "PREFERENCE",
+      "normalized_key": "output.format.report",
+      "claim": {"value": "PDF"},
+      "scope_level": "PROJECT",
+      "scope": "PROJECT:reporting",
+      "status": "REVIEW",
+      "confidence": 0.7,
+      "utility": 0.7,
+      "stability": 0.4,
+      "conflicting_memory_ids": ["memory-docx"]
+    },
+    "expected_action": "REVIEW"
+  },
+  "sensitive": {
+    "event": {
+      "tenant_id": "tenant-a",
+      "user_id": "user-a",
+      "event_id": "evt-sensitive",
+      "event_type": "user_instruction",
+      "source_type": "user",
+      "task_id": "task-sensitive",
+      "session_id": "session-sensitive",
+      "occurred_at": "2026-08-22T05:00:00Z",
+      "payload": {"content_ref": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},
+      "policy_action": "REVIEW",
+      "sensitivity_level": "HIGH",
+      "source_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "idempotency_key": "idem-sensitive",
+      "trace_id": "trace-sensitive"
+    },
+    "expected": {"policy_action": "REVIEW", "ordinary_context_allowed": false}
+  },
+  "duplicate": {
+    "first": {"event_id": "evt-duplicate", "idempotency_key": "idem-duplicate"},
+    "retry": {"event_id": "evt-duplicate", "idempotency_key": "idem-duplicate"},
+    "expected": {"new_evidence_count": 0, "code": "IDEMPOTENCY_CONFLICT"}
+  },
+  "expired_version": {
+    "request": {
+      "api_version": "vnext/v0",
+      "request_id": "req-expired",
+      "tenant_id": "tenant-a",
+      "user_id": "user-a"
+    },
+    "expected_code": "VERSION_CONFLICT"
+  },
+  "deleted": {
+    "memory": {
+      "tenant_id": "tenant-a",
+      "user_id": "user-a",
+      "memory_id": "memory-deleted",
+      "memory_type": "PREFERENCE",
+      "normalized_key": "output.format.report",
+      "content": {"value": "DOCX"},
+      "scope_level": "PROJECT",
+      "scope": "PROJECT:reporting",
+      "evolution_status": "DELETED",
+      "confidence": 0.9,
+      "utility": 0.8,
+      "evidence_refs": ["evidence-deleted"]
+    },
+    "expected": {"ordinary_retrieval_allowed": false, "residual_retrieval_count": 0}
+  },
+  "degraded_response": {
+    "response": {
+      "request_id": "req-degraded",
+      "trace_id": "trace-degraded",
+      "intent": "MIXED",
+      "selected_memories": [],
+      "degraded_channels": ["semantic_vector"],
+      "completeness": "PARTIAL",
+      "warnings": ["semantic channel unavailable"],
+      "total_count": 0
+    },
+    "expected": {"completeness": "PARTIAL", "degraded": true}
+  }
+}

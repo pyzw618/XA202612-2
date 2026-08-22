@@ -39,6 +39,8 @@ _RUNTIME_MODES = frozenset({"production", "development", "test"})
 _PRODUCTION_EMBEDDING_PROVIDER = "kylin"
 _PRODUCTION_VECTOR_ENGINE_PROVIDER = "milvus"
 _PRODUCTION_DIMENSION = 768
+_VNEXT_MODES = frozenset({"legacy", "shadow", "dual-read", "canary", "vnext"})
+_CANARY_PERCENTAGES = frozenset({5, 25, 50, 100})
 
 
 def is_production_mode() -> bool:
@@ -71,6 +73,40 @@ class RuntimeConfig:
     @property
     def is_production(self) -> bool:
         return self.mode == "production"
+
+
+@dataclass
+class VNextConfig:
+    """Explicit vNext rollout mode and safety invariants."""
+
+    mode: str = "legacy"
+    canary_percent: int = 0
+    policy_required: bool = True
+    authority_single_writer: bool = True
+    allow_policy_bypass: bool = False
+    allow_legacy_read_fallback: bool = True
+
+    def __post_init__(self) -> None:
+        if self.mode not in _VNEXT_MODES:
+            raise ValueError(
+                f"vnext.mode must be one of {_VNEXT_MODES}, got {self.mode!r}"
+            )
+        if type(self.canary_percent) is not int or not 0 <= self.canary_percent <= 100:
+            raise ValueError("vnext.canary_percent must be an integer between 0 and 100")
+        if self.mode == "canary" and self.canary_percent not in _CANARY_PERCENTAGES:
+            raise ValueError(
+                "vnext.canary_percent must be one of 5, 25, 50, 100 in canary mode"
+            )
+        if self.mode != "canary" and self.canary_percent != 0:
+            raise ValueError("vnext.canary_percent is only valid in canary mode")
+        for field_name in (
+            "policy_required",
+            "authority_single_writer",
+            "allow_policy_bypass",
+            "allow_legacy_read_fallback",
+        ):
+            if type(getattr(self, field_name)) is not bool:
+                raise ValueError(f"vnext.{field_name} must be a boolean")
 
 
 @dataclass
@@ -543,6 +579,13 @@ def validate_production_gate(config: AppConfig) -> None:
             f"vector_engine provider {config.vector_engine.provider!r} is not allowed in production"
         )
 
+    if not config.vnext.policy_required:
+        errors.append("vnext.policy_required must be true in production mode")
+    if not config.vnext.authority_single_writer:
+        errors.append("vnext.authority_single_writer must be true in production mode")
+    if config.vnext.allow_policy_bypass:
+        errors.append("vnext.allow_policy_bypass must be false in production mode")
+
     if errors:
         raise ProductionGateError("; ".join(errors))
 
@@ -589,6 +632,7 @@ class AppConfig:
     """应用总配置"""
 
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    vnext: VNextConfig = field(default_factory=VNextConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
@@ -647,6 +691,9 @@ def load_config(config_path: str | None = None) -> AppConfig:
             config.runtime = RuntimeConfig(
                 **{**config.runtime.__dict__, **section("runtime")}
             )
+            config.vnext = VNextConfig(
+                **{**config.vnext.__dict__, **section("vnext")}
+            )
             config.storage = StorageConfig(
                 **{**config.storage.__dict__, **section("storage")}
             )
@@ -688,6 +735,24 @@ def load_config(config_path: str | None = None) -> AppConfig:
         config.runtime.allow_fallback = os.environ[
             "MEMORYHUB_RUNTIME_ALLOW_FALLBACK"
         ].lower() in ("1", "true", "yes")
+
+    vnext_data = dict(config.vnext.__dict__)
+    if os.environ.get("MEMORYHUB_VNEXT_MODE"):
+        vnext_data["mode"] = os.environ["MEMORYHUB_VNEXT_MODE"]
+    if os.environ.get("MEMORYHUB_VNEXT_CANARY_PERCENT"):
+        vnext_data["canary_percent"] = int(os.environ["MEMORYHUB_VNEXT_CANARY_PERCENT"])
+    for env_name, field_name in (
+        ("MEMORYHUB_VNEXT_POLICY_REQUIRED", "policy_required"),
+        ("MEMORYHUB_VNEXT_AUTHORITY_SINGLE_WRITER", "authority_single_writer"),
+        ("MEMORYHUB_VNEXT_ALLOW_POLICY_BYPASS", "allow_policy_bypass"),
+        ("MEMORYHUB_VNEXT_LEGACY_READ_FALLBACK", "allow_legacy_read_fallback"),
+    ):
+        if env_name in os.environ:
+            raw_value = os.environ[env_name].lower()
+            if raw_value not in ("0", "1", "false", "true", "no", "yes"):
+                raise ValueError(f"{env_name} must be a boolean")
+            vnext_data[field_name] = raw_value in ("1", "true", "yes")
+    config.vnext = VNextConfig(**vnext_data)
     # 环境变量可能绕过 dataclass __post_init__，重新构造以校验 runtime.mode
     config.runtime = RuntimeConfig(
         mode=config.runtime.mode, allow_fallback=config.runtime.allow_fallback

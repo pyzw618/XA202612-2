@@ -1,0 +1,44 @@
+{
+  "migration": "memoryhub_vnext_authority_v1",
+  "plan_version": "vnext/v1",
+  "database": "data\\memoryhub.db",
+  "dry_run": true,
+  "generated_at": "2026-08-22T05:35:52.880522+00:00",
+  "source_tables": [],
+  "count": {
+    "source_records": 0,
+    "planned_long_term_active": 0,
+    "planned_deleted_tombstone": 0,
+    "planned_review": 0,
+    "invalid": 0,
+    "by_source": {}
+  },
+  "hash": {
+    "input_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "record_hashes": []
+  },
+  "tenant": {},
+  "scope": {},
+  "invalid": {
+    "count": 0,
+    "reasons": {}
+  },
+  "review": {
+    "count": 0,
+    "reasons": {},
+    "records": []
+  },
+  "records": [],
+  "validation": {
+    "read_only_scan": true,
+    "no_irreversible_delete": true,
+    "uncertain_data_never_promoted_to_active_global": true,
+    "database_exists": false,
+    "missing_database": true
+  },
+  "compatibility": {
+    "apply_status": "DEFERRED_TO_S5-06",
+    "rollback": "Authority tombstone/compatibility read; no DELETE in S0-05",
+    "projection_strategy": "rebuild after Authority validation"
+  }
+}

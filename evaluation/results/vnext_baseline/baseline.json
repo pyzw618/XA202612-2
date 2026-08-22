@@ -1,0 +1,848 @@
+{
+  "schema": "memoryhub/vnext-baseline/v1",
+  "generated_at": "2026-08-22T06:02:36.697805+00:00",
+  "repository": {
+    "root": "D:\\project\\XA202612-2",
+    "branch": "dev-remem",
+    "commit": "aa24ed029f9adc33f92311e2b106a39ee218a496",
+    "short_commit": "aa24ed0"
+  },
+  "configuration": {
+    "path": "config.yaml",
+    "sha256": "06fc939a9942d56e41ec354fcbcde26b33ee46e4c3344aafce6365d92f804e91",
+    "runtime_mode": "development",
+    "embedding_provider": "mock",
+    "embedding_model": "mock-embedding",
+    "vector_engine": "faiss",
+    "vector_index_version": "runtime-configured",
+    "vnext": {
+      "mode": "legacy",
+      "canary_percent": 0,
+      "policy_required": true,
+      "authority_single_writer": true
+    }
+  },
+  "dataset": {
+    "path": "evaluation\\datasets\\memoryhub_knowledge_retrieval_v1_dev.json",
+    "sha256": "68539bfe4480757486c79cb75e52a75ef62f377dc316598c309406a4de089924",
+    "metadata": {
+      "dataset_id": "memoryhub-knowledge-retrieval-v1",
+      "version": "1.0.0",
+      "created_at": "2026-08-11T00:00:00Z",
+      "annotation_guideline_version": "1.0",
+      "split": "dev",
+      "description": "小规模开发集，用于检索权重、阈值和索引参数调优",
+      "generator_git_commit": "HEAD",
+      "generator_random_seed": 20260811
+    },
+    "memory_count": 108,
+    "query_count": 30
+  },
+  "model_and_index": {
+    "embedding_provider": "mock",
+    "embedding_model": "memoryhub-mock-deterministic-v1",
+    "index_engine": "faiss",
+    "index_version": "runtime-built-from-dataset-v1"
+  },
+  "tests": {
+    "status": "PASS",
+    "exit_code": 0,
+    "command": [
+      "D:\\conda\\python.exe",
+      "-m",
+      "pytest",
+      "tests/test_no_production_write_bypass.py",
+      "tests/test_vnext_contracts.py",
+      "tests/test_vnext_interface.py",
+      "-q"
+    ],
+    "stdout_tail": "....................                                                     [100%]\n============================== warnings summary ===============================\n..\\..\\conda\\Lib\\site-packages\\_pytest\\config\\__init__.py:1474\n  D:\\conda\\Lib\\site-packages\\_pytest\\config\\__init__.py:1474: PytestConfigWarning: Unknown config option: asyncio_mode\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n20 passed, 1 warning in 0.21s\n",
+    "stderr_tail": ""
+  },
+  "retrieval": {
+    "status": "PASS",
+    "mode": "vector_only_fallback",
+    "fallback_reason": "Traceback (most recent call last):\n  File \"D:\\project\\XA202612-2\\evaluation\\run_retrieval_eval.py\", line 712, in <module>\n    main()\n    ~~~~^^\n  File \"D:\\project\\XA202612-2\\evaluation\\run_retrieval_eval.py\", line 673, in main\n    retriever = build_retriever(memories, embed_fn, dim, cfg)\n  File \"D:\\project\\XA202612-2\\evaluation\\run_retrieval_eval.py\", line 131, in build_retriever\n    kw.build_index([\n    ~~~~~~~~~~~~~~^^\n        (m[\"id\"], m[\"content\"],\n        ^^^^^^^^^^^^^^^^^^^^^^^\n    ...<5 lines>...\n        for m in memories\n        ^^^^^^^^^^^^^^^^^\n    ])\n    ^^\n  File \"D:\\project\\XA202612-2\\evaluation\\..\\memoryhub\\retrieval\\keyword_search.py\", line 79, in build_index\n    raise ImportError(\"rank-bm25 δ��װ����ִ��: pip install rank-bm25\")\nImportError: rank-bm25 δ��װ����ִ��: pip install rank-bm25\n",
+    "hybrid_attempt": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "command": [
+        "D:\\conda\\python.exe",
+        "evaluation/run_retrieval_eval.py",
+        "--dataset",
+        "evaluation\\datasets\\memoryhub_knowledge_retrieval_v1_dev.json",
+        "--provider",
+        "mock",
+        "--engine",
+        "faiss",
+        "--output-json",
+        "evaluation\\results\\vnext_baseline\\retrieval_eval.json",
+        "--output-md",
+        "evaluation\\results\\vnext_baseline\\retrieval_eval.md"
+      ],
+      "stdout_tail": "数据集: 108 条记忆, 30 个查询\nEmbedding: provider=mock, dim=768\n",
+      "stderr_tail": "Traceback (most recent call last):\n  File \"D:\\project\\XA202612-2\\evaluation\\run_retrieval_eval.py\", line 712, in <module>\n    main()\n    ~~~~^^\n  File \"D:\\project\\XA202612-2\\evaluation\\run_retrieval_eval.py\", line 673, in main\n    retriever = build_retriever(memories, embed_fn, dim, cfg)\n  File \"D:\\project\\XA202612-2\\evaluation\\run_retrieval_eval.py\", line 131, in build_retriever\n    kw.build_index([\n    ~~~~~~~~~~~~~~^^\n        (m[\"id\"], m[\"content\"],\n        ^^^^^^^^^^^^^^^^^^^^^^^\n    ...<5 lines>...\n        for m in memories\n        ^^^^^^^^^^^^^^^^^\n    ])\n    ^^\n  File \"D:\\project\\XA202612-2\\evaluation\\..\\memoryhub\\retrieval\\keyword_search.py\", line 79, in build_index\n    raise ImportError(\"rank-bm25 δ��װ����ִ��: pip install rank-bm25\")\nImportError: rank-bm25 δ��װ����ִ��: pip install rank-bm25\n"
+    },
+    "report": {
+      "groups": {
+        "vector_only": {
+          "engine": "faiss",
+          "mode": "vector_only",
+          "indexed_active_memory_count": 104,
+          "overall": {
+            "count": 30,
+            "recall_5": 0.2167,
+            "recall_10": 0.2333,
+            "precision_5": 0.02,
+            "precision_10": 0.0133,
+            "mrr": 0.0483,
+            "cross_user_rate": 0.02,
+            "latency_p50_ms": 9.563,
+            "latency_p95_ms": 10.014,
+            "latency_p99_ms": 10.092,
+            "latency_max_ms": 10.12
+          },
+          "per_query": [
+            {
+              "query_id": "q_dev_001",
+              "retrieved": [
+                "know_dev_065",
+                "know_dev_100",
+                "know_dev_002",
+                "know_dev_097",
+                "know_dev_052",
+                "know_dev_102",
+                "know_dev_050",
+                "know_dev_053",
+                "know_dev_008",
+                "know_dev_078"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.1,
+              "latency_ms": 9.187
+            },
+            {
+              "query_id": "q_dev_002",
+              "retrieved": [
+                "know_dev_017",
+                "know_dev_061",
+                "know_dev_033",
+                "know_dev_003",
+                "know_dev_091",
+                "know_dev_018",
+                "know_dev_041",
+                "know_dev_051",
+                "know_dev_055",
+                "know_dev_094"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.366
+            },
+            {
+              "query_id": "q_dev_003",
+              "retrieved": [
+                "know_dev_073",
+                "know_dev_060",
+                "know_dev_085",
+                "know_dev_077",
+                "know_dev_019",
+                "know_dev_044",
+                "know_dev_099",
+                "know_dev_093",
+                "know_dev_052",
+                "know_dev_011"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.591
+            },
+            {
+              "query_id": "q_dev_004",
+              "retrieved": [
+                "know_dev_062",
+                "know_dev_051",
+                "know_dev_039",
+                "know_dev_063",
+                "know_dev_030",
+                "know_dev_052",
+                "know_dev_025",
+                "know_dev_081",
+                "know_dev_104",
+                "know_dev_046"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.635
+            },
+            {
+              "query_id": "q_dev_005",
+              "retrieved": [
+                "know_dev_098",
+                "know_dev_018",
+                "know_dev_013",
+                "know_dev_009",
+                "know_dev_081",
+                "know_dev_022",
+                "know_dev_020",
+                "know_dev_096",
+                "know_dev_051",
+                "know_dev_102"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.1,
+              "latency_ms": 10.023
+            },
+            {
+              "query_id": "q_dev_006",
+              "retrieved": [
+                "know_dev_086",
+                "know_dev_103",
+                "know_dev_061",
+                "know_dev_041",
+                "know_dev_055",
+                "know_dev_040",
+                "know_dev_019",
+                "know_dev_054",
+                "know_dev_029",
+                "know_dev_056"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.73
+            },
+            {
+              "query_id": "q_dev_007",
+              "retrieved": [
+                "know_dev_022",
+                "know_dev_024",
+                "know_dev_067",
+                "know_dev_050",
+                "know_dev_056",
+                "know_dev_104",
+                "know_dev_011",
+                "know_dev_061",
+                "know_dev_077",
+                "know_dev_078"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.637
+            },
+            {
+              "query_id": "q_dev_008",
+              "retrieved": [
+                "know_dev_041",
+                "know_dev_030",
+                "know_dev_021",
+                "know_dev_037",
+                "know_dev_015",
+                "know_dev_033",
+                "know_dev_009",
+                "know_dev_002",
+                "know_dev_017",
+                "know_dev_011"
+              ],
+              "recall_5": 1.0,
+              "recall_10": 1.0,
+              "precision_5": 0.2,
+              "precision_10": 0.1,
+              "mrr": 0.2,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.822
+            },
+            {
+              "query_id": "q_dev_009",
+              "retrieved": [
+                "know_dev_081",
+                "know_dev_026",
+                "know_dev_027",
+                "know_dev_077",
+                "know_dev_042",
+                "know_dev_004",
+                "know_dev_088",
+                "know_dev_039",
+                "know_dev_014",
+                "know_dev_086"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.257
+            },
+            {
+              "query_id": "q_dev_010",
+              "retrieved": [
+                "know_dev_062",
+                "know_dev_057",
+                "know_dev_099",
+                "know_dev_027",
+                "know_dev_085",
+                "know_dev_091",
+                "know_dev_098",
+                "know_dev_064",
+                "know_dev_083",
+                "know_dev_009"
+              ],
+              "recall_5": 1.0,
+              "recall_10": 1.0,
+              "precision_5": 0.2,
+              "precision_10": 0.1,
+              "mrr": 0.25,
+              "cross_user_rate": 0.0,
+              "latency_ms": 10.002
+            },
+            {
+              "query_id": "q_dev_011",
+              "retrieved": [
+                "know_dev_074",
+                "know_dev_071",
+                "know_dev_020",
+                "know_dev_058",
+                "know_dev_042",
+                "know_dev_076",
+                "know_dev_077",
+                "know_dev_056",
+                "know_dev_034",
+                "know_dev_013"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 10.12
+            },
+            {
+              "query_id": "q_dev_012",
+              "retrieved": [
+                "know_dev_070",
+                "know_dev_103",
+                "know_dev_104",
+                "know_dev_014",
+                "know_dev_028",
+                "know_dev_035",
+                "know_dev_041",
+                "know_dev_059",
+                "know_dev_011",
+                "know_dev_083"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.258
+            },
+            {
+              "query_id": "q_dev_013",
+              "retrieved": [
+                "know_dev_045",
+                "know_dev_029",
+                "know_dev_085",
+                "know_dev_094",
+                "know_dev_012",
+                "know_dev_070",
+                "know_dev_096",
+                "know_dev_066",
+                "know_dev_003",
+                "know_dev_057"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.499
+            },
+            {
+              "query_id": "q_dev_014",
+              "retrieved": [
+                "know_dev_024",
+                "know_dev_021",
+                "know_dev_041",
+                "know_dev_031",
+                "know_dev_035",
+                "know_dev_056",
+                "know_dev_066",
+                "know_dev_034",
+                "know_dev_102",
+                "know_dev_004"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.1,
+              "latency_ms": 9.536
+            },
+            {
+              "query_id": "q_dev_015",
+              "retrieved": [
+                "know_dev_104",
+                "know_dev_027",
+                "know_dev_053",
+                "know_dev_010",
+                "know_dev_013",
+                "know_dev_054",
+                "know_dev_098",
+                "know_dev_040",
+                "know_dev_074",
+                "know_dev_011"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.406
+            },
+            {
+              "query_id": "q_dev_016",
+              "retrieved": [
+                "know_dev_103",
+                "know_dev_055",
+                "know_dev_053",
+                "know_dev_100",
+                "know_dev_006",
+                "know_dev_009",
+                "know_dev_058",
+                "know_dev_005",
+                "know_dev_101",
+                "know_dev_004"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.1,
+              "latency_ms": 9.319
+            },
+            {
+              "query_id": "q_dev_017",
+              "retrieved": [
+                "know_dev_048",
+                "know_dev_003",
+                "know_dev_073",
+                "know_dev_034",
+                "know_dev_033",
+                "know_dev_013",
+                "know_dev_005",
+                "know_dev_101",
+                "know_dev_089",
+                "know_dev_001"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.1,
+              "latency_ms": 9.291
+            },
+            {
+              "query_id": "q_dev_018",
+              "retrieved": [
+                "know_dev_001",
+                "know_dev_091",
+                "know_dev_023",
+                "know_dev_006",
+                "know_dev_040",
+                "know_dev_074",
+                "know_dev_088",
+                "know_dev_085",
+                "know_dev_034",
+                "know_dev_068"
+              ],
+              "recall_5": 1.0,
+              "recall_10": 1.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.37
+            },
+            {
+              "query_id": "q_dev_019",
+              "retrieved": [
+                "know_dev_008",
+                "know_dev_001",
+                "know_dev_017",
+                "know_dev_027",
+                "know_dev_053",
+                "know_dev_004",
+                "know_dev_091",
+                "know_dev_099",
+                "know_dev_028",
+                "know_dev_082"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.679
+            },
+            {
+              "query_id": "q_dev_020",
+              "retrieved": [
+                "know_dev_018",
+                "know_dev_027",
+                "know_dev_037",
+                "know_dev_044",
+                "know_dev_008",
+                "know_dev_069",
+                "know_dev_033",
+                "know_dev_063",
+                "know_dev_102",
+                "know_dev_090"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.1,
+              "latency_ms": 9.515
+            },
+            {
+              "query_id": "q_dev_021",
+              "retrieved": [
+                "know_dev_014",
+                "know_dev_073",
+                "know_dev_088",
+                "know_dev_062",
+                "know_dev_023",
+                "know_dev_039",
+                "know_dev_046",
+                "know_dev_100",
+                "know_dev_094",
+                "know_dev_077"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.641
+            },
+            {
+              "query_id": "q_dev_022",
+              "retrieved": [
+                "know_dev_079",
+                "know_dev_097",
+                "know_dev_083",
+                "know_dev_052",
+                "know_dev_034",
+                "know_dev_008",
+                "know_dev_099",
+                "know_dev_078",
+                "know_dev_046",
+                "know_dev_005"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.415
+            },
+            {
+              "query_id": "q_dev_023",
+              "retrieved": [
+                "know_dev_104",
+                "know_dev_023",
+                "know_dev_041",
+                "know_dev_015",
+                "know_dev_073",
+                "know_dev_060",
+                "know_dev_083",
+                "know_dev_022",
+                "know_dev_032",
+                "know_dev_081"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.439
+            },
+            {
+              "query_id": "q_dev_024",
+              "retrieved": [
+                "know_dev_077",
+                "know_dev_010",
+                "know_dev_003",
+                "know_dev_085",
+                "know_dev_044",
+                "know_dev_017",
+                "know_dev_081",
+                "know_dev_038",
+                "know_dev_084",
+                "know_dev_039"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.109
+            },
+            {
+              "query_id": "q_dev_025",
+              "retrieved": [
+                "know_dev_018",
+                "know_dev_028",
+                "know_dev_053",
+                "know_dev_050",
+                "know_dev_043",
+                "know_dev_071",
+                "know_dev_056",
+                "know_dev_017",
+                "know_dev_069",
+                "know_dev_039"
+              ],
+              "recall_5": 0.5,
+              "recall_10": 1.0,
+              "precision_5": 0.2,
+              "precision_10": 0.2,
+              "mrr": 1.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.977
+            },
+            {
+              "query_id": "q_dev_026",
+              "retrieved": [
+                "know_dev_092",
+                "know_dev_013",
+                "know_dev_080",
+                "know_dev_099",
+                "know_dev_064",
+                "know_dev_073",
+                "know_dev_060",
+                "know_dev_081",
+                "know_dev_075",
+                "know_dev_005"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.989
+            },
+            {
+              "query_id": "q_dev_027",
+              "retrieved": [
+                "know_dev_006",
+                "know_dev_033",
+                "know_dev_093",
+                "know_dev_046",
+                "know_dev_063",
+                "know_dev_075",
+                "know_dev_008",
+                "know_dev_081",
+                "know_dev_055",
+                "know_dev_020"
+              ],
+              "recall_5": 0.0,
+              "recall_10": 0.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.219
+            },
+            {
+              "query_id": "q_dev_028",
+              "retrieved": [
+                "know_dev_061",
+                "know_dev_096",
+                "know_dev_015",
+                "know_dev_013",
+                "know_dev_026",
+                "know_dev_088",
+                "know_dev_012",
+                "know_dev_048",
+                "know_dev_010",
+                "know_dev_046"
+              ],
+              "recall_5": 1.0,
+              "recall_10": 1.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.797
+            },
+            {
+              "query_id": "q_dev_029",
+              "retrieved": [
+                "know_dev_039",
+                "know_dev_070",
+                "know_dev_023",
+                "know_dev_021",
+                "know_dev_038",
+                "know_dev_045",
+                "know_dev_019",
+                "know_dev_025",
+                "know_dev_006",
+                "know_dev_013"
+              ],
+              "recall_5": 1.0,
+              "recall_10": 1.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.841
+            },
+            {
+              "query_id": "q_dev_030",
+              "retrieved": [
+                "know_dev_011",
+                "know_dev_023",
+                "know_dev_034",
+                "know_dev_076",
+                "know_dev_074",
+                "know_dev_077",
+                "know_dev_067",
+                "know_dev_010",
+                "know_dev_086",
+                "know_dev_080"
+              ],
+              "recall_5": 1.0,
+              "recall_10": 1.0,
+              "precision_5": 0.0,
+              "precision_10": 0.0,
+              "mrr": 0.0,
+              "cross_user_rate": 0.0,
+              "latency_ms": 9.898
+            }
+          ]
+        }
+      }
+    }
+  },
+  "latency": {
+    "status": "PASS",
+    "groups": {
+      "vector_only": {
+        "count": 30,
+        "recall_5": 0.2167,
+        "recall_10": 0.2333,
+        "precision_5": 0.02,
+        "precision_10": 0.0133,
+        "mrr": 0.0483,
+        "cross_user_rate": 0.02,
+        "latency_p50_ms": 9.563,
+        "latency_p95_ms": 10.014,
+        "latency_p99_ms": 10.092,
+        "latency_max_ms": 10.12
+      }
+    }
+  },
+  "write_bypass_scan": {
+    "status": "PASS",
+    "command": [
+      "D:\\conda\\python.exe",
+      "-m",
+      "pytest",
+      "tests/test_no_production_write_bypass.py",
+      "tests/test_vnext_contracts.py",
+      "tests/test_vnext_interface.py",
+      "-q"
+    ],
+    "test": "tests/test_no_production_write_bypass.py"
+  },
+  "artifacts": {
+    "output_dir": "evaluation\\results\\vnext_baseline"
+  },
+  "dataset_validation": {
+    "status": "PASS",
+    "report": {
+      "passed": true,
+      "errors": [],
+      "warnings": [
+        {
+          "section": "queries",
+          "id": "q_dev_018",
+          "message": "有答案查询无任何 relevance≥2 的记忆"
+        }
+      ],
+      "stats": {
+        "memory_count": 108,
+        "query_count": 30,
+        "knowledge_type_distribution": {
+          "workflow": 45,
+          "case": 31,
+          "template": 32
+        },
+        "status_distribution": {
+          "active": 104,
+          "archived": 1,
+          "deleted": 1,
+          "replaced": 2
+        },
+        "difficulty_distribution": {
+          "exact": 5,
+          "semantic": 10,
+          "hard-negative": 7,
+          "cross-domain": 5,
+          "no-answer": 3
+        },
+        "unique_users": 2,
+        "unique_projects": 2,
+        "no_answer_queries": 3,
+        "total_errors": 0,
+        "total_warnings": 1,
+        "passed": true
+      }
+    }
+  },
+  "status": "PASS"
+}
