@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from memoryhub.domain.candidate import can_transition
+from memoryhub.domain.episode import hash_resume_token, resume_token_matches
 from memoryhub.storage.database import Database
 from memoryhub.storage.models import (
     EpisodeEventRow,
@@ -24,6 +26,10 @@ from memoryhub.storage.models import (
 
 class VersionConflictError(RuntimeError):
     """The caller attempted to update state from an obsolete version."""
+
+
+class EpisodeResumeTokenError(VersionConflictError):
+    """The caller supplied an invalid or stale episode resume token."""
 
 
 class EpisodeSequenceConflictError(RuntimeError):
@@ -42,6 +48,7 @@ class WorkingStateView:
     task_id: str
     version: int
     state: dict[str, Any]
+    field_sources: dict[str, str]
     last_event_id: str | None
 
 
@@ -56,6 +63,24 @@ class EpisodeEventView:
     event_type: str
     payload: dict[str, Any]
     source_event_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class EpisodeSnapshotView:
+    episode_id: str
+    tenant_id: str
+    user_id: str
+    task_id: str
+    session_id: str
+    status: str
+    current_phase: str
+    goal: str
+    snapshot: dict[str, Any]
+    snapshot_version: int
+    last_event_seq: int
+    stale_resources: list[str]
+    required_revalidation: list[str]
+    resource_versions: dict[str, str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +131,7 @@ class WorkingStateRepository:
         state: dict[str, Any],
         session_id: str = "",
         version: int = 1,
+        field_sources: dict[str, str] | None = None,
     ) -> WorkingStateView:
         row = WorkingStateRow(
             working_state_id=working_state_id,
@@ -114,6 +140,7 @@ class WorkingStateRepository:
             task_id=task_id,
             session_id=session_id,
             state=dict(state),
+            field_sources=dict(field_sources or {}),
             version=version,
         )
         with self.db.session() as session:
@@ -139,22 +166,41 @@ class WorkingStateRepository:
         expected_version: int,
         state: dict[str, Any],
         event_id: str | None = None,
+        field_sources: dict[str, str] | None = None,
     ) -> WorkingStateView:
         with self.db.session() as session:
-            row = (
-                session.query(WorkingStateRow)
-                .filter_by(tenant_id=tenant_id, user_id=user_id, task_id=task_id)
-                .one_or_none()
-            )
+            row = session.query(WorkingStateRow).filter_by(
+                tenant_id=tenant_id, user_id=user_id, task_id=task_id
+            ).one_or_none()
             if row is None:
                 raise KeyError("working state not found")
             if row.version != expected_version:
                 raise VersionConflictError(
                     f"working state version {row.version} != expected {expected_version}"
                 )
-            row.state = dict(state)
-            row.version = expected_version + 1
-            row.last_event_id = event_id
+            values: dict[str, Any] = {
+                "state": dict(state),
+                "version": expected_version + 1,
+                "last_event_id": event_id,
+            }
+            if field_sources is not None:
+                values["field_sources"] = dict(field_sources)
+            updated_count = (
+                session.query(WorkingStateRow)
+                .filter_by(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    task_id=task_id,
+                    version=expected_version,
+                )
+                .update(values, synchronize_session=False)
+            )
+            if updated_count != 1:
+                raise VersionConflictError(
+                    f"working state version changed while updating expected {expected_version}"
+                )
+            session.expire(row)
+            session.refresh(row)
             session.flush()
             return self._view(row)
 
@@ -167,6 +213,7 @@ class WorkingStateRepository:
             task_id=row.task_id,
             version=row.version,
             state=dict(row.state or {}),
+            field_sources=dict(row.field_sources or {}),
             last_event_id=row.last_event_id,
         )
 
@@ -186,10 +233,9 @@ class EpisodeRepository:
         task_id: str,
         session_id: str = "",
         goal: str = "",
-    ) -> None:
+    ) -> EpisodeSnapshotView:
         with self.db.session() as session:
-            session.add(
-                TaskEpisodeRow(
+            row = TaskEpisodeRow(
                     episode_id=episode_id,
                     tenant_id=tenant_id,
                     user_id=user_id,
@@ -197,7 +243,20 @@ class EpisodeRepository:
                     session_id=session_id,
                     goal=goal,
                 )
+            session.add(row)
+            session.flush()
+            return self._snapshot_view(row)
+
+    def get(
+        self, *, tenant_id: str, user_id: str, episode_id: str
+    ) -> EpisodeSnapshotView | None:
+        with self.db.session() as session:
+            row = (
+                session.query(TaskEpisodeRow)
+                .filter_by(tenant_id=tenant_id, user_id=user_id, episode_id=episode_id)
+                .one_or_none()
             )
+            return self._snapshot_view(row) if row is not None else None
 
     def append_event(
         self,
@@ -225,6 +284,18 @@ class EpisodeRepository:
             )
             if episode is None:
                 raise KeyError("episode not found")
+            existing = (
+                session.query(EpisodeEventRow)
+                .filter_by(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    episode_id=episode_id,
+                    source_event_id=source_event_id,
+                )
+                .one_or_none()
+            )
+            if existing is not None:
+                return self._view(existing)
             next_seq = episode.last_event_seq + 1
             if expected_seq is not None and expected_seq != next_seq:
                 raise EpisodeSequenceConflictError(
@@ -245,6 +316,114 @@ class EpisodeRepository:
             episode.last_event_seq = next_seq
             session.flush()
             return self._view(row)
+
+    def save_snapshot(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        episode_id: str,
+        task_id: str,
+        session_id: str,
+        status: str,
+        current_phase: str,
+        goal: str,
+        snapshot: dict[str, Any],
+        last_event_seq: int,
+        expected_snapshot_version: int,
+        resume_token: str,
+        stale_resources: list[str] | None = None,
+        required_revalidation: list[str] | None = None,
+        resource_versions: dict[str, str] | None = None,
+    ) -> EpisodeSnapshotView:
+        with self.db.session() as session:
+            row = (
+                session.query(TaskEpisodeRow)
+                .filter_by(tenant_id=tenant_id, user_id=user_id, episode_id=episode_id)
+                .one_or_none()
+            )
+            if row is None:
+                raise KeyError("episode not found")
+            if row.task_id != task_id:
+                raise KeyError("episode task mismatch")
+            if row.snapshot_version != expected_snapshot_version:
+                raise VersionConflictError(
+                    "episode snapshot version "
+                    f"{row.snapshot_version} != expected {expected_snapshot_version}"
+                )
+            if last_event_seq < row.last_event_seq:
+                raise VersionConflictError("episode snapshot cannot move backwards")
+            row.session_id = session_id
+            row.status = status
+            row.current_phase = current_phase
+            row.goal = goal
+            row.snapshot = dict(snapshot)
+            row.snapshot_version = expected_snapshot_version + 1
+            row.last_event_seq = last_event_seq
+            row.resume_token_hash = hash_resume_token(resume_token)
+            row.stale_resources = list(stale_resources or [])
+            row.required_revalidation = list(required_revalidation or [])
+            row.resource_versions = dict(resource_versions or {})
+            session.flush()
+            return self._snapshot_view(row)
+
+    def resume(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        episode_id: str,
+        resume_token: str,
+        expected_snapshot_version: int | None = None,
+    ) -> EpisodeSnapshotView:
+        with self.db.session() as session:
+            row = (
+                session.query(TaskEpisodeRow)
+                .filter_by(tenant_id=tenant_id, user_id=user_id, episode_id=episode_id)
+                .one_or_none()
+            )
+            if row is None:
+                raise KeyError("episode not found")
+            if (
+                expected_snapshot_version is not None
+                and row.snapshot_version != expected_snapshot_version
+            ):
+                raise VersionConflictError(
+                    "episode snapshot version "
+                    f"{row.snapshot_version} != expected {expected_snapshot_version}"
+                )
+            if not resume_token_matches(resume_token, row.resume_token_hash):
+                raise EpisodeResumeTokenError("invalid or stale resume token")
+            return self._snapshot_view(row)
+
+    def close(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        episode_id: str,
+        expected_snapshot_version: int,
+        status: str,
+        resume_token: str,
+    ) -> EpisodeSnapshotView:
+        with self.db.session() as session:
+            row = (
+                session.query(TaskEpisodeRow)
+                .filter_by(tenant_id=tenant_id, user_id=user_id, episode_id=episode_id)
+                .one_or_none()
+            )
+            if row is None:
+                raise KeyError("episode not found")
+            if row.snapshot_version != expected_snapshot_version:
+                raise VersionConflictError(
+                    "episode snapshot version "
+                    f"{row.snapshot_version} != expected {expected_snapshot_version}"
+                )
+            row.status = status
+            row.snapshot_version = expected_snapshot_version + 1
+            row.resume_token_hash = hash_resume_token(resume_token)
+            session.flush()
+            return self._snapshot_view(row)
 
     def list_events(
         self, *, tenant_id: str, user_id: str, episode_id: str
@@ -271,6 +450,28 @@ class EpisodeRepository:
             payload=dict(row.payload or {}),
             source_event_id=row.source_event_id,
         )
+
+    @staticmethod
+    def _snapshot_view(row: TaskEpisodeRow) -> EpisodeSnapshotView:
+        view = EpisodeSnapshotView(
+            episode_id=row.episode_id,
+            tenant_id=row.tenant_id,
+            user_id=row.user_id,
+            task_id=row.task_id,
+            session_id=row.session_id,
+            status=row.status,
+            current_phase=row.current_phase,
+            goal=row.goal,
+            snapshot=dict(row.snapshot or {}),
+            snapshot_version=row.snapshot_version,
+            last_event_seq=row.last_event_seq,
+            stale_resources=list(row.stale_resources or []),
+            required_revalidation=list(row.required_revalidation or []),
+            resource_versions=dict(row.resource_versions or {}),
+        )
+        # A private attribute cannot be added to a frozen slots dataclass. The
+        # public resume path therefore reads the row directly below.
+        return view
 
 
 class CandidateRepository:
@@ -299,6 +500,8 @@ class CandidateRepository:
         scope: str,
         status: str = "ACCUMULATING",
     ) -> CandidateView:
+        if status not in CandidateRepository._TRANSITIONS:
+            raise InvalidCandidateTransitionError(f"unknown candidate status: {status}")
         row = MemoryCandidateRow(
             candidate_id=candidate_id,
             tenant_id=tenant_id,
@@ -329,7 +532,7 @@ class CandidateRepository:
             if row is None:
                 raise KeyError("candidate not found")
             allowed = self._TRANSITIONS.get(row.status, set())
-            if status not in allowed:
+            if status not in allowed or not can_transition(row.status, status):
                 raise InvalidCandidateTransitionError(
                     f"candidate transition {row.status}->{status} is not allowed"
                 )
@@ -349,6 +552,46 @@ class CandidateRepository:
                 .one_or_none()
             )
             return self._view(row) if row is not None else None
+
+    def list_for_review(
+        self, *, tenant_id: str, user_id: str, status: str | None = None
+    ) -> list[CandidateView]:
+        """Return staging rows only through an explicit candidate-review path."""
+
+        with self.db.session() as session:
+            query = session.query(MemoryCandidateRow).filter_by(
+                tenant_id=tenant_id, user_id=user_id, formation_status="CANDIDATE"
+            )
+            if status is not None:
+                query = query.filter_by(status=status)
+            return [self._view(row) for row in query.order_by(MemoryCandidateRow.created_at).all()]
+
+    def search(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        normalized_key: str | None = None,
+        include_candidates: bool = False,
+    ) -> list[CandidateView]:
+        """Search the repository with a safe default of no ordinary recall.
+
+        Candidate rows are formation staging data.  Callers must opt in and
+        use the returned rows as review input; the default path cannot recall
+        them as normal memories.
+        """
+
+        if not include_candidates:
+            return []
+        with self.db.session() as session:
+            query = session.query(MemoryCandidateRow).filter_by(
+                tenant_id=tenant_id, user_id=user_id, formation_status="CANDIDATE"
+            )
+            if normalized_key:
+                query = query.filter_by(normalized_key=normalized_key)
+            return [self._view(row) for row in query.order_by(MemoryCandidateRow.created_at).all()]
+
+    list_for_retrieval = search
 
     @staticmethod
     def _view(row: MemoryCandidateRow) -> CandidateView:
@@ -487,7 +730,9 @@ __all__ = [
     "CandidateRepository",
     "CandidateView",
     "EpisodeEventView",
+    "EpisodeResumeTokenError",
     "EpisodeRepository",
+    "EpisodeSnapshotView",
     "EpisodeSequenceConflictError",
     "EvidenceRepository",
     "EvidenceView",

@@ -31,9 +31,9 @@
 | S1-01 | DONE | S0-03, S0-05 | Codex 2026-08-22 | EVIDENCE.md#s1-01 | 7 张表、治理字段、约束/索引、legacy additive migration 和幂等初始化通过 |
 | S1-02 | DONE | S1-01 | Codex 2026-08-22 | EVIDENCE.md#s1-02 | CAS/seq/状态迁移/Evidence 去重/Activation 事务测试通过 |
 | S1-03 | DONE | S0-04, S1-02 | Codex 2026-08-22 | EVIDENCE.md#s1-03-final-validation-checkpoint | 11 定向、45 受影响回归通过；安全风险环境 PARTIAL 已记录 |
-| S1-04 | TODO | S1-02, S1-03 | | | Working State Patch/CAS |
-| S1-05 | TODO | S1-02, S1-04 | | | Episode Append/Snapshot/Resume |
-| S1-06 | TODO | S1-02 | | | Candidate Repository 与检索隔离 |
+| S1-04 | DONE | S1-02, S1-03 | Codex 2026-08-22 (B04) | EVIDENCE.md#s1-04-checkpoint | Working State Patch/CAS |
+| S1-05 | DONE | S1-02, S1-04 | Codex 2026-08-22 (B04) | EVIDENCE.md#s1-05-checkpoint | Episode Append/Snapshot/Resume |
+| S1-06 | DONE | S1-02 | Codex 2026-08-22 (B04) | EVIDENCE.md#s1-06-and-b04-final-validation | Candidate Repository 与检索隔离 |
 | S1-07 | TODO | S0-03, S1-02 | | | Long-Term Authority Facade |
 | S1-08 | TODO | S1-03, S1-04, S1-05, S1-06, S1-07 | | | Canonical Write Service |
 | S1-09 | TODO | S1-08 | | | REST/MCP/CLI/SDK 写入口收敛 |
@@ -80,7 +80,7 @@
 
 ## Invariant check
 
-- IN_PROGRESS count: 1
+- IN_PROGRESS count: 0
 - Dependency violations: None
 - DONE without evidence: None
-- Last checked: 2026-08-22 13:29 +08:00
+- Last checked: 2026-08-22 17:10 +08:00

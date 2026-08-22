@@ -6,6 +6,83 @@
 - B02 (`S0-05`～`S0-08`, S0 Gate): commit `1b84af1`; `Batch-ID: B02`; validation 46 passed, 6 deselected, and ruff passed.
 - Scope audit: B01/B02 commits contain only their assigned S0 artifacts. S1 storage/repository/Event Gateway files remain outside both commits.
 
+## B04 start reconciliation
+
+- Date/time: 2026-08-22 17:10 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; branch `dev-remem`
+- Commands:
+  ```text
+  git branch --show-current
+  git rev-parse HEAD
+  git status --short --untracked-files=all
+  git diff --stat
+  git diff --name-only
+  rg --files -g 'AGENTS.md' -g '!vnext-schema-*' -g '!**/.pytest*'
+  ```
+- Result: PASS for repository reconciliation. HEAD=`476cb5a79af7afd15541a0d54aaf01c7d0e308f4`; no tracked worktree changes; no applicable `AGENTS.md` found. Ignored pytest/schema scratch directories were not considered batch artifacts.
+- Continuity: `BATCH_BOARD.md` had B04 READY and no IN_PROGRESS batch; `TASK_BOARD.md` had no B04 task in progress. S1-01/S1-02/S1-03 are DONE with existing evidence.
+- Decision: claim the smallest dependency-satisfied B04 task, S1-04; do not touch S1-07 or later batches.
+- Artifact/trace: `STATE.md`, `TASK_BOARD.md`, `BATCH_BOARD.md`, `EVIDENCE.md`, `SESSION_LOG.md`, `DECISIONS.md`
+- Follow-up: inspect Working contracts/repositories and implement the S1-04 domain/application slice.
+
+## S1-04 checkpoint
+
+- Date/time: 2026-08-22 17:35 +08:00
+- Environment: Windows PowerShell; system Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: Working State field-level Patch/CAS, source precedence, semantic merge, and structured compression
+- Commands:
+  ```text
+  python -m pytest tests/test_vnext_task_state.py -q
+  python -m pytest tests/test_vnext_repositories.py tests/test_vnext_storage_schema.py tests/test_vnext_contracts.py tests/test_vnext_interface.py -q
+  python -m ruff check memoryhub/domain/contracts.py memoryhub/domain/__init__.py memoryhub/domain/working.py memoryhub/domain/episode.py memoryhub/domain/candidate.py memoryhub/application/__init__.py memoryhub/application/working_service.py memoryhub/application/episode_service.py memoryhub/storage/models.py memoryhub/storage/database.py memoryhub/storage/vnext_repositories.py tests/test_vnext_task_state.py
+  python -m compileall -q memoryhub/domain memoryhub/application memoryhub/storage
+  git diff --check
+  ```
+- Result: PASS; B04 task-state tests 3 passed; affected S1-02/storage/contract/interface regression 25 passed; ruff, compileall, and diff check passed. Pytest emitted only the existing unknown `asyncio_mode` warning.
+- Summary: Working service applies only field-level operations; stale `base_version` raises `VersionConflictError`; lower-priority inferred/tool changes cannot overwrite a higher-priority user field; semantic list fields merge deterministically; compressed output is structured and bounded. Field-source metadata is persisted separately from state.
+- Artifact/report/trace: `memoryhub/domain/working.py`, `memoryhub/application/working_service.py`, `memoryhub/storage/vnext_repositories.py`, `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `tests/test_vnext_task_state.py`
+- Acceptance: S1-04 DONE. S1-05 is the only B04 task now IN_PROGRESS.
+- Follow-up: run the Episode-specific tests and affected regressions; preserve explicit evidence for stale resources, token rejection, replay, close, and optimistic conflict.
+
+## S1-05 checkpoint
+
+- Date/time: 2026-08-22 17:50 +08:00
+- Environment: Windows PowerShell; system Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: Episode Append + Snapshot + Resume + Close, replay, stale-resource checks, and resume token
+- Commands:
+  ```text
+  python -m pytest tests/test_vnext_task_state.py tests/test_vnext_repositories.py tests/test_vnext_storage_schema.py -q
+  python -m ruff check memoryhub/domain/episode.py memoryhub/application/episode_service.py memoryhub/storage/models.py memoryhub/storage/database.py memoryhub/storage/vnext_repositories.py tests/test_vnext_task_state.py
+  ```
+- Result: PASS; 11 tests passed; ruff passed. Pytest emitted only the existing unknown `asyncio_mode` warning.
+- Summary: Episode append assigns monotonic sequence and returns an existing source event on retry; snapshot increments its CAS version and stores only a SHA-256 resume-token hash; resume rejects wrong tokens and stale expected versions; replay applies events newer than the snapshot; current resource-version differences appear in `stale_resources` and `required_revalidation`; close allows ACTIVE/SUSPENDED to COMPLETED/FAILED only.
+- Artifact/report/trace: `memoryhub/domain/episode.py`, `memoryhub/application/episode_service.py`, `memoryhub/storage/vnext_repositories.py`, `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `tests/test_vnext_task_state.py`
+- Acceptance: S1-05 DONE. S1-06 is the only B04 task now IN_PROGRESS.
+- Follow-up: finish Candidate repository status/isolation validation, then execute B04-wide affected and risk regressions.
+
+## S1-06 and B04 final validation
+
+- Date/time: 2026-08-22 18:20 +08:00
+- Environment: Windows PowerShell; system Python/pytest/ruff; branch `dev-remem`; HEAD before commit `476cb5a79af7afd15541a0d54aaf01c7d0e308f4`
+- Acceptance item: Candidate legal status migration and ordinary retrieval isolation; B04 exit criteria for Working/Episode recovery and visible conflicts
+- Commands:
+  ```text
+  python -m pytest tests/test_vnext_task_state.py tests/test_vnext_event_gateway.py tests/test_vnext_repositories.py tests/test_vnext_storage_schema.py tests/test_vnext_contracts.py tests/test_vnext_interface.py tests/test_vnext_golden_fixtures.py tests/test_no_production_write_bypass.py -q
+  python -m pytest tests/test_safety_pipeline.py -q
+  python -m pytest tests/test_safety_contract.py tests/test_safe_errors.py -q
+  python -m pytest tests/test_memory_write_contract_schema.py -q -k "capture"
+  python -m ruff check memoryhub/domain/contracts.py memoryhub/domain/__init__.py memoryhub/domain/working.py memoryhub/domain/episode.py memoryhub/domain/candidate.py memoryhub/application/__init__.py memoryhub/application/event_gateway.py memoryhub/application/working_service.py memoryhub/application/episode_service.py memoryhub/storage/models.py memoryhub/storage/database.py memoryhub/storage/vnext_repositories.py tests/test_vnext_task_state.py
+  python -m compileall -q memoryhub/domain memoryhub/application memoryhub/storage
+  git diff --check
+  ```
+- Result: PASS for B04 functional/risk evidence: affected vNext/working/episode/candidate/gateway/write-bypass suite 65 passed (48 affected regression + 17 final risk subset); Safety Pipeline 46 passed; Safety Contract + Safe Errors 31 passed; legacy write-contract capture 1 passed with 2 deselected; ruff/compileall/diff-check passed. Existing pytest warning: unknown `asyncio_mode`.
+- Candidate summary: `ACCUMULATING -> REVIEW -> CONFIRMED` and terminal transition rejection pass; repository `search()` and `list_for_retrieval()` default to an empty result and only an explicit `include_candidates=True` review path can inspect Candidate rows; tenant/user filters remain mandatory.
+- Exit criteria: Working CAS conflicts are explicit; Episode token/version conflicts are explicit; snapshot replay and stale-resource/revalidation outputs are verified; Candidate rows cannot enter ordinary repository retrieval.
+- Environment PARTIAL evidence: the broader affected command including `tests/test_user_isolation.py` reached 48 passed and 6 setup-time failures because optional `rank-bm25` is not installed; separate legacy safety/write command reached 78 passed and 2 setup-time failures because the host denied pytest `tmp_path` lock creation under `C:\Users\11929\AppData\Local\Temp\pytest-of-11929`. No B04 assertion failure resulted.
+- Artifact/report/trace: `memoryhub/domain/working.py`, `memoryhub/application/working_service.py`, `memoryhub/domain/episode.py`, `memoryhub/application/episode_service.py`, `memoryhub/domain/candidate.py`, `memoryhub/storage/vnext_repositories.py`, `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `tests/test_vnext_task_state.py`
+- Acceptance: S1-04, S1-05, and S1-06 DONE; B04 functional exit criteria PASS with environment limitations explicitly retained.
+- Follow-up: update batch continuity files, stage only B04 artifacts plus required continuity files, then create the single local B04 commit.
+
 ## Bootstrap
 
 - Date/time: 2026-08-22 13:10 +08:00

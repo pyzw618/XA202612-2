@@ -266,3 +266,16 @@
 - Blockers: None for B03; host temporary-directory permission remains an unrelated risk-test limitation.
 - Commit plan: 只创建一次普通本地提交，标题 feat(vnext): complete B03 s1 storage ingress，正文 trailer Batch-ID: B03；连续性文件使用 SELF (Batch-ID: B03)，不回填 SHA、不 push。
 - Exact next step: 审查暂存清单后创建唯一 B03 提交；提交后只读核对 HEAD SHA 和文件清单，最终交接 docs/last_improve/codex_batches/B04_s1_task_state.md 并停止。
+## Checkpoint 2026-08-22-19 — B04 completion
+
+- Started: 2026-08-22 17:10 +08:00
+- Ended: pending single local B04 commit and read-only verification
+- Branch/HEAD before B04 commit: `dev-remem` / `476cb5a79af7afd15541a0d54aaf01c7d0e308f4`
+- Restored batch/task: B04 READY with no in-progress task; claimed S1-04, then progressed S1-05 and S1-06 after each checkpoint.
+- Completed changes: Working State field Patch/CAS with source precedence, semantic merge and compression; Episode Append/Snapshot/Resume/Close with replay, hashed resume token and stale-resource reporting; Candidate legal transitions and explicit default retrieval isolation; additive persistence columns and B04 tests.
+- Files changed: B04 source/tests plus required continuity files only.
+- Validation: B04 functional/risk subset 65 passed; Safety Pipeline 46 passed; Safety Contract + Safe Errors 31 passed; legacy write capture 1 passed/2 deselected; ruff, compileall, and diff-check passed. Environment PARTIAL: missing `rank-bm25` caused 6 legacy user-isolation setup failures; host pytest temp lock permissions caused 2 legacy tmp_path setup failures. No B04 business assertion failed.
+- Task status changes: S1-04 DONE; S1-05 DONE; S1-06 DONE. B04 DONE; B05 READY.
+- Blockers: none for B04; environment limitations are recorded in `EVIDENCE.md#s1-06-and-b04-final-validation`.
+- Commit plan: stage only B04 source/tests/spec/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B04 s1 task state` with trailer `Batch-ID: B04`; do not push/amend/rebase or start B05.
+- Exact next step: inspect staged scope, create the single B04 commit, read-only verify HEAD SHA and submitted file list, then stop and hand off `docs/last_improve/codex_batches/B05_s1_authority_write.md`.

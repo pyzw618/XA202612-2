@@ -173,6 +173,8 @@ class WorkingPatchOperation(BaseModel):
     op: Literal["add", "replace", "remove"]
     path: str = Field(min_length=2, pattern=r"^/")
     value: Any = None
+    source: str = Field(default="system", min_length=1)
+    priority: int | None = Field(default=None, ge=0, le=100)
 
 
 class WorkingPatch(GovernedModel):

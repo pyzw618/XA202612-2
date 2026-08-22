@@ -1,5 +1,11 @@
 """vNext domain contracts and state vocabulary."""
 
+from .candidate import (
+    ALLOWED_CANDIDATE_TRANSITIONS,
+    can_transition,
+    is_candidate_retrievable,
+    validate_transition,
+)
 from .contracts import (
     Activation,
     ActivationStatus,
@@ -27,6 +33,26 @@ from .contracts import (
     map_legacy_memory_level,
     map_legacy_memory_status,
     map_legacy_memory_type,
+)
+from .episode import (
+    EpisodeLifecycleError,
+    EpisodeResumeConflict,
+    allowed_close_status,
+    hash_resume_token,
+    new_resume_token,
+    replay_episode,
+    resume_token_matches,
+    stale_resource_ids,
+)
+from .working import (
+    DEFAULT_SOURCE_PRIORITIES,
+    SEMANTIC_LIST_FIELDS,
+    PatchApplication,
+    WorkingPatchError,
+    WorkingSourceConflict,
+    apply_operations,
+    compress_working_state,
+    source_priority,
 )
 
 __all__ = [
@@ -56,4 +82,24 @@ __all__ = [
     "map_legacy_memory_level",
     "map_legacy_memory_status",
     "map_legacy_memory_type",
+    "DEFAULT_SOURCE_PRIORITIES",
+    "PatchApplication",
+    "SEMANTIC_LIST_FIELDS",
+    "WorkingPatchError",
+    "WorkingSourceConflict",
+    "apply_operations",
+    "compress_working_state",
+    "source_priority",
+    "EpisodeLifecycleError",
+    "EpisodeResumeConflict",
+    "allowed_close_status",
+    "hash_resume_token",
+    "new_resume_token",
+    "replay_episode",
+    "resume_token_matches",
+    "stale_resource_ids",
+    "ALLOWED_CANDIDATE_TRANSITIONS",
+    "can_transition",
+    "is_candidate_retrievable",
+    "validate_transition",
 ]

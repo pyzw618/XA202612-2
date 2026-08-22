@@ -133,6 +133,12 @@ class Database:
                 "result_memory_id": "VARCHAR(32)",
                 "resolved_at": "DATETIME",
             },
+            "working_states": {
+                "field_sources": "JSON DEFAULT '{}'",
+            },
+            "task_episodes": {
+                "resource_versions": "JSON DEFAULT '{}'",
+            },
             "memory_lineage": {
                 "tenant_id": "VARCHAR(64)",
                 "user_id": "VARCHAR(64)",
