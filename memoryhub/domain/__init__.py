@@ -44,6 +44,13 @@ from .episode import (
     resume_token_matches,
     stale_resource_ids,
 )
+from .long_term import (
+    AuthorityError,
+    AuthorityStatusConflictError,
+    AuthorityValidation,
+    AuthorityVersionConflictError,
+    LongTermAuthorityFacade,
+)
 from .working import (
     DEFAULT_SOURCE_PRIORITIES,
     SEMANTIC_LIST_FIELDS,
@@ -98,6 +105,11 @@ __all__ = [
     "replay_episode",
     "resume_token_matches",
     "stale_resource_ids",
+    "AuthorityError",
+    "AuthorityStatusConflictError",
+    "AuthorityValidation",
+    "AuthorityVersionConflictError",
+    "LongTermAuthorityFacade",
     "ALLOWED_CANDIDATE_TRANSITIONS",
     "can_transition",
     "is_candidate_retrievable",

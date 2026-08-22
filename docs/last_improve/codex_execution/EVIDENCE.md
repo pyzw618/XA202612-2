@@ -1,5 +1,52 @@
 # MemoryHub vNext Execution Evidence
 
+## B05 start reconciliation
+
+- Date/time: 2026-08-22 18:30 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; branch `dev-remem`
+- Commands: `git branch --show-current`; `git rev-parse HEAD`; `git status --short --untracked-files=all`; `git diff --stat`; `git diff --name-only`; `git log -6 --oneline`; `rg --files -g 'AGENTS.md'`; required continuity/code/test inventory reads.
+- Result: PASS for repository reconciliation. HEAD=`06403d636c55b1b6b33257986ca911a13e7571a9`, B04 commit is present, no tracked worktree diff, no applicable `AGENTS.md`; ignored pytest/schema scratch directories remain outside scope.
+- Continuity: `BATCH_BOARD.md` had B05 READY and no IN_PROGRESS batch; `TASK_BOARD.md` had no B05 task in progress; S1-01～S1-06 are DONE with evidence. The stale B04-only `STATE.md` text was corrected before implementation.
+- Decision: claim S1-07, the smallest dependency-satisfied B05 task; do not touch S1-09 or later batches.
+- Follow-up: implement `domain/long_term.py` and `storage/authority_repository.py`, with focused Authority version/status/scope compatibility tests.
+
+## S1-07 checkpoint
+
+- Date/time: 2026-08-22 18:40 +08:00
+- Environment: Windows PowerShell; system Python/pytest/ruff; SQLite/SQLAlchemy
+- Acceptance item: Long-Term Authority Facade unifies Preference/Knowledge/FACT representations while preserving legacy API compatibility; tenant/scope/version/status invariants are enforced.
+- Commands:
+  ```text
+  python -m pytest tests/test_vnext_authority_write.py -q
+  python -m ruff check memoryhub/domain/long_term.py memoryhub/domain/__init__.py memoryhub/storage/authority_repository.py memoryhub/storage/models.py memoryhub/storage/database.py memoryhub/storage/memory_metadata.py memoryhub/core/domain_writer.py memoryhub/application/canonical_write.py memoryhub/application/__init__.py tests/test_vnext_authority_write.py
+  python -m compileall -q memoryhub/domain memoryhub/application memoryhub/storage
+  ```
+- Result: PASS; 3 Authority-focused tests passed; scoped ruff and compileall passed; only the existing unknown `asyncio_mode` pytest warning appeared.
+- Summary: vNext writes bind `tenant_id` and preserve the complete `LongTermEnvelope` in governed metadata; Preference, semantic FACT, procedural and episodic types map through the existing legacy repositories; ACTIVE chain duplicates and stale versions fail; SUPERSEDED/DELETED are excluded by default; cross-tenant reads return no row.
+- Artifacts: `memoryhub/domain/long_term.py`, `memoryhub/storage/authority_repository.py`, `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `tests/test_vnext_authority_write.py`
+- Acceptance: S1-07 DONE; S1-08 is the only B05 task now IN_PROGRESS.
+- Follow-up: validate the assembled canonical write and its Event/Working/Episode/Reflection/Authority transaction evidence.
+
+## S1-08 checkpoint
+
+- Date/time: 2026-08-22 18:40 +08:00
+- Status: IN_PROGRESS; implementation and focused end-to-end test are present, affected/regression/risk validation remains.
+- Implementation: `CanonicalWriteService` now sequences approved EventGateway output into optional Working Patch, Episode event/snapshot, durable async Extraction/Reflection task, and optional Long-Term submission. Long-Term submission delegates to `MemoryWriteService`/`DomainMemoryWriter`.
+- Focused evidence currently available: the third Authority test passed and verified one Event, one tenant idempotency record, one Reflection task, one Preference row, and one each of tenant/content-version-consistent Lineage, Evidence and `long_term` Outbox records; repeating the identical event returns IDEMPOTENT without duplicating the task or Evidence.
+- Next command: run `tests/test_vnext_authority_write.py`, vNext/task-state/storage/writer/outbox regressions, then safety/write-bypass risk tests.
+
+## S1-08 final validation and B05 acceptance
+
+- Date/time: 2026-08-22 20:55 +08:00
+- Status: PASS; S1-08 DONE and B05 accepted.
+- Focused validation: `python -m pytest tests/test_vnext_authority_write.py -q` → 4 passed.
+- Affected regression validation: `tests/test_vnext_authority_write.py`, `tests/test_domain_memory_writer.py`, `tests/test_vnext_repositories.py`, `tests/test_vnext_storage_schema.py`, `tests/test_vnext_event_gateway.py`, `tests/test_lifecycle_outbox.py`, and `tests/test_projection_outbox.py` → 38 passed.
+- Safety/risk validation: `tests/test_no_production_write_bypass.py`, `tests/test_safety_pipeline.py`, `tests/test_safety_contract.py`, `tests/test_safety_memory_write.py`, `tests/test_vnext_contracts.py`, and `tests/test_vnext_interface.py` → 100 passed.
+- Static validation: B05-added/affected modules passed scoped ruff and `python -m compileall -q memoryhub/domain memoryhub/application memoryhub/storage`; `git diff --check` passed. Full-file ruff on `memoryhub/adapter/schemas.py` still reports five pre-existing W291/E501 findings outside the added `extra_payload` field.
+- Environment: default pytest temp creation failed with Windows `PermissionError`; the affected and safety suites passed in a controlled temporary execution. The environment warning `Unknown config option: asyncio_mode` remains non-blocking.
+- Acceptance: Canonical Write sequences approved Event output through optional Working/Episode updates, durable Reflection task creation, and optional Long-Term submission; the Authority transaction produces the business row, tenant idempotency record, Evidence, Lineage, and Outbox consistently; duplicate events return IDEMPOTENT without duplicate task/Evidence.
+- Continuity: S1-08 marked DONE, B05 marked DONE, B06 marked READY, and the B05 commit is `SELF (Batch-ID: B05)`.
+
 ## Batch commit reconciliation
 
 - B01 (`S0-01`～`S0-04`): commit `a502f9a`; `Batch-ID: B01`; validation 65 passed and ruff passed.

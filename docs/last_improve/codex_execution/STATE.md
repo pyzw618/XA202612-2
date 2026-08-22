@@ -1,22 +1,40 @@
 # MemoryHub vNext Codex Execution State
 
-> Last updated: 2026-08-22 16:55 +08:00
+> Last updated: 2026-08-22 20:55 +08:00
 > Updated by: Codex session 2026-08-22
 
 ## Objective
 
 完成 A/B/C/D 一体化执行任务方案中的 S0～S5 必做任务，通过 P0/P1 与发布 Gate。
 
-## B04 authoritative position
+## B05 authoritative position
 
-- Last updated: 2026-08-22 18:20 +08:00; updated by Codex session 2026-08-22 (B04)
-- Current batch: B04 (`S1-04`～`S1-06`); batch status: IN_PROGRESS
-- Current batch prompt: `docs/last_improve/codex_batches/B04_s1_task_state.md`
-- Current task: none; S1-04, S1-05, and S1-06 DONE; B04 ready to commit
-- Dependencies: S1-02 and S1-03 DONE with valid evidence
-- Start reconciliation: branch `dev-remem`; HEAD `476cb5a79af7afd15541a0d54aaf01c7d0e308f4`; no tracked worktree diff; no applicable `AGENTS.md`
-- Next checkpoint: after the single B04 commit, read-only verify HEAD SHA and stop; next session uses B05 prompt
-- Hard stop: do not execute or modify S1-07 or any later batch; after B04 acceptance only mark B05 READY and stop after the single B04 commit
+- Last updated: 2026-08-22 20:55 +08:00; updated by Codex session 2026-08-22 (B05)
+- Current batch: B05 (`S1-07`～`S1-08`); batch status: DONE
+- Current batch prompt: `docs/last_improve/codex_batches/B05_s1_authority_write.md`
+- Current task: None; S1-07 and S1-08 DONE
+- Dependencies: S0-03, S1-02, S1-03, S1-04, S1-05, and S1-06 DONE with valid evidence
+- Start reconciliation: branch `dev-remem`; HEAD `06403d636c55b1b6b33257986ca911a13e7571a9`; no tracked worktree diff; no applicable `AGENTS.md`; BATCH_BOARD was B05 READY and TASK_BOARD had no B05 task in progress
+- Reconciliation: prior STATE text was stale B04 handoff; B04 commit `06403d6` is present and BATCH_BOARD/TASK_BOARD facts authorize B05. No user-owned unrelated changes observed.
+- Acceptance: S1-08 end-to-end, affected/risk regressions, safety/contract regressions, static checks, continuity update, and the single B05 commit are complete.
+- Next batch: B06 READY; next prompt is `docs/last_improve/codex_batches/B06_s1_entrypoints_gate.md`.
+- Hard stop: do not execute or modify S1-09 or any later batch in this session; stop after read-only verification of the single B05 commit.
+
+### S1-08 final validation and B05 acceptance
+
+- Status: DONE; B05 is DONE and B06 is READY.
+- Validation: focused Authority tests 4 passed; affected storage/writer/outbox regressions 38 passed; safety, write-bypass, and contract/interface regressions 100 passed; B05 modules ruff and compileall passed; `git diff --check` passed.
+- Environment note: the default pytest temp directory was blocked by Windows permissions; the same regression sets passed in a controlled temporary run. Existing `memoryhub/adapter/schemas.py` contains five pre-existing full-file ruff findings outside the B05-added field.
+- Commit: `SELF (Batch-ID: B05)`; no push, amend, rebase, or B06 implementation performed.
+
+### S1-07 checkpoint
+
+- Status: DONE; S1-08 is now the single IN_PROGRESS task in B05.
+- Implementation: added tenant-scoped Long-Term Authority Facade/Repository; unified Preference, Semantic FACT, Procedural and Episodic legacy representations under `LongTermEnvelope`; ACTIVE chain uniqueness and monotonic content versions are enforced; inactive versions are hidden by default.
+- Compatibility: existing Preference/Knowledge rows remain the storage adapter; additive tenant/metadata fields carry vNext identity without a second Authority table.
+- Evidence: `EVIDENCE.md#s1-07-checkpoint`
+- Validation: Authority-focused tests 3 passed; scoped ruff and compileall passed.
+- Next checkpoint: validate Canonical Write event→Working→Episode→Reflection→Long-Term and transaction metadata consistency.
 
 ### S1-04 checkpoint
 

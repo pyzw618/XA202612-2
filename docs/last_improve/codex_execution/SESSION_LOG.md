@@ -279,3 +279,39 @@
 - Blockers: none for B04; environment limitations are recorded in `EVIDENCE.md#s1-06-and-b04-final-validation`.
 - Commit plan: stage only B04 source/tests/spec/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B04 s1 task state` with trailer `Batch-ID: B04`; do not push/amend/rebase or start B05.
 - Exact next step: inspect staged scope, create the single B04 commit, read-only verify HEAD SHA and submitted file list, then stop and hand off `docs/last_improve/codex_batches/B05_s1_authority_write.md`.
+
+## Checkpoint 2026-08-22-20 — B05 start reconciliation
+
+- Started: 2026-08-22 18:30 +08:00
+- Ended: in progress
+- Branch/HEAD: `dev-remem` / `06403d636c55b1b6b33257986ca911a13e7571a9`
+- Restored batch/task: B05 READY with no in-progress task; claimed the smallest dependency-satisfied task S1-07.
+- Initial reconciliation: B04 commit is present; working tree has no tracked diff; no applicable `AGENTS.md`; S1-01～S1-06 are DONE with evidence. The old STATE B04 handoff was stale and has been reconciled to the repository and BATCH_BOARD facts.
+- Boundary: only S1-07 and S1-08; no S1-09 or later work.
+- Completed changes: updated B05 start state and claimed S1-07; no production code changed yet.
+- Validation run: branch/HEAD/status/diff/log and required continuity/code inventory checked.
+- Task status changes: B05 READY → IN_PROGRESS; S1-07 TODO → IN_PROGRESS.
+- Blockers: None.
+- Exact next step: implement the tenant/version/status-safe Long-Term Authority Facade and its repository adapter, reusing the existing Preference/Knowledge write path.
+
+## Checkpoint 2026-08-22-21 — S1-07 complete; S1-08 claimed
+
+- Started: 2026-08-22 18:30 +08:00
+- Ended: in progress
+- Restored task: `S1-07 IN_PROGRESS`
+- Completed changes: added `memoryhub/domain/long_term.py`, `memoryhub/storage/authority_repository.py`, additive tenant/metadata compatibility fields for Preference/Knowledge, and vNext metadata propagation through DomainMemoryWriter's Lineage/Evidence/Outbox repositories.
+- Files changed: `memoryhub/domain/long_term.py`, `memoryhub/domain/__init__.py`, `memoryhub/storage/authority_repository.py`, `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `memoryhub/adapter/schemas.py`, `memoryhub/storage/memory_metadata.py`, `memoryhub/core/domain_writer.py`, plus the new B05 test file.
+- Validation run: `python -m pytest tests/test_vnext_authority_write.py -q` → 3 passed; scoped ruff and `python -m compileall -q memoryhub/domain memoryhub/application memoryhub/storage` passed; one existing pytest config warning remains.
+- Task status changes: `S1-07 IN_PROGRESS → DONE`; `S1-08 TODO → IN_PROGRESS`.
+- Design decision: retain the existing Preference/Knowledge Authority adapter and make the vNext envelope/tenant metadata explicit; do not add a second long-term business table.
+- Blockers: None.
+- Exact next step: run the S1-08 affected storage/writer/outbox regressions, then harden any transaction/idempotency edge cases within B05 only.
+
+## Checkpoint 2026-08-22-22 — B05 final validation and acceptance
+
+- Started: 2026-08-22 18:30 +08:00; ended: 2026-08-22 20:55 +08:00.
+- Validation: focused Authority 4 passed; affected storage/writer/outbox set 38 passed; safety/write-bypass/contract set 100 passed; B05 scoped ruff and compileall passed; `git diff --check` passed.
+- Environment: default pytest temporary directory hit Windows permission errors; the same suites passed in a controlled temporary run. Existing full-file lint findings in `memoryhub/adapter/schemas.py` are recorded as non-blocking pre-existing issues.
+- Task status changes: S1-08 IN_PROGRESS → DONE; B05 IN_PROGRESS → DONE; B06 TODO → READY.
+- Commit policy: stage only B05 production/spec/test/continuity artifacts; create exactly one local commit with `Batch-ID: B05`; do not push, amend, rebase, or begin B06.
+- Hard stop: after read-only verification of the B05 commit, end the session and hand off `docs/last_improve/codex_batches/B06_s1_entrypoints_gate.md`.

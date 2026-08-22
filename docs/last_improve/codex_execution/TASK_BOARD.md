@@ -34,8 +34,8 @@
 | S1-04 | DONE | S1-02, S1-03 | Codex 2026-08-22 (B04) | EVIDENCE.md#s1-04-checkpoint | Working State Patch/CAS |
 | S1-05 | DONE | S1-02, S1-04 | Codex 2026-08-22 (B04) | EVIDENCE.md#s1-05-checkpoint | Episode Append/Snapshot/Resume |
 | S1-06 | DONE | S1-02 | Codex 2026-08-22 (B04) | EVIDENCE.md#s1-06-and-b04-final-validation | Candidate Repository 与检索隔离 |
-| S1-07 | TODO | S0-03, S1-02 | | | Long-Term Authority Facade |
-| S1-08 | TODO | S1-03, S1-04, S1-05, S1-06, S1-07 | | | Canonical Write Service |
+| S1-07 | DONE | S0-03, S1-02 | Codex 2026-08-22 (B05) | EVIDENCE.md#s1-07-checkpoint | Long-Term Authority Facade |
+| S1-08 | DONE | S1-03, S1-04, S1-05, S1-06, S1-07 | Codex 2026-08-22 (B05) | EVIDENCE.md#s1-08-final-validation-and-b05-acceptance | Canonical Write Service |
 | S1-09 | TODO | S1-08 | | | REST/MCP/CLI/SDK 写入口收敛 |
 | S1-10 | TODO | S1-05, S1-08 | | | 任务恢复接口与 P0 贯通 |
 | S1-11 | TODO | S1-07 | | | Authority 到 Projection 重建 |

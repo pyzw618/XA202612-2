@@ -64,6 +64,11 @@ class MemoryLineageRepository:
         semantic_version: int,
         transition_action: str,
         session: Session,
+        tenant_id: str | None = None,
+        user_id: str | None = None,
+        content_version: int = 1,
+        schema_version: str = "vnext/v1",
+        policy_version: str | None = None,
     ) -> MemoryLineageRow:
         previous = (
             session.query(MemoryLineageRow)
@@ -91,9 +96,14 @@ class MemoryLineageRepository:
             lineage_id=lineage_id,
             memory_id=memory_id,
             memory_type=memory_type,
+            tenant_id=tenant_id,
+            user_id=user_id,
             parent_memory_id=parent_memory_id or None,
             root_memory_id=root_id,
             semantic_version=max(1, semantic_version),
+            content_version=max(1, int(content_version)),
+            schema_version=schema_version,
+            policy_version=policy_version,
             evidence_revision=evidence_revision,
             transition_action=transition_action,
         )
@@ -147,6 +157,12 @@ class MemoryEvidenceRepository:
         evidences: list[Evidence],
         provenance: MemoryProvenance,
         session: Session,
+        tenant_id: str | None = None,
+        user_id: str | None = None,
+        content_version: int = 1,
+        schema_version: str = "vnext/v1",
+        policy_version: str | None = None,
+        sensitivity_level: str | None = None,
     ) -> list[str]:
         source_items = evidences or [
             Evidence(
@@ -180,9 +196,15 @@ class MemoryEvidenceRepository:
                     )[:48],
                     memory_id=memory_id,
                     memory_type=memory_type,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
                     event_id=event_id,
                     source_hash=source_hash,
                     source_type=self._source_type(evidence, provenance).value,
+                    schema_version=schema_version,
+                    content_version=max(1, int(content_version)),
+                    policy_version=policy_version,
+                    sensitivity_level=sensitivity_level,
                     excerpt=(evidence.content or "")[:1000],
                     occurred_at=evidence.timestamp or datetime.now(),
                     quality_score=max(0.0, min(1.0, float(evidence.weight))),
@@ -285,6 +307,11 @@ class MemoryProjectionOutboxRepository:
         operation: str,
         payload: dict[str, Any],
         session: Session,
+        tenant_id: str | None = None,
+        user_id: str | None = None,
+        event_id: str | None = None,
+        content_version: int = 1,
+        projection_type: str = "vector",
     ) -> MemoryProjectionOutboxRow:
         payload_hash = canonical_sha256(payload)
         outbox_id = "outbox_" + canonical_sha256(
@@ -293,6 +320,9 @@ class MemoryProjectionOutboxRepository:
                 "memory_type": memory_type,
                 "operation": operation,
                 "payload_hash": payload_hash,
+                "tenant_id": tenant_id or "",
+                "content_version": max(1, int(content_version)),
+                "projection_type": projection_type,
             }
         )[:48]
         row = session.get(MemoryProjectionOutboxRow, outbox_id)
@@ -301,7 +331,12 @@ class MemoryProjectionOutboxRepository:
                 outbox_id=outbox_id,
                 memory_id=memory_id,
                 memory_type=memory_type,
+                tenant_id=tenant_id,
+                user_id=user_id,
                 operation=operation,
+                event_id=event_id,
+                content_version=max(1, int(content_version)),
+                projection_type=projection_type,
                 payload_hash=payload_hash,
                 status="pending",
             )

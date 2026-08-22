@@ -1483,6 +1483,7 @@ class KnowledgeMemory(BaseModel):
 
     # --- 证据链 ---
     evidences: list[Evidence] = Field(default_factory=list)
+    extra_payload: dict[str, Any] = Field(default_factory=dict)
 
     # --- 健康度（遗忘模块使用）---
     health_score: float = 1.0  # [0, 1]，越低越容易被遗忘

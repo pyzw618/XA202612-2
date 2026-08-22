@@ -106,6 +106,7 @@ class Database:
                 "quality": "JSON",
             },
             "preferences": {
+                "tenant_id": "VARCHAR(64)",
                 "payload": "JSON",
                 "is_global": "BOOLEAN DEFAULT 0",
                 "quality_score": "FLOAT DEFAULT 1.0",
@@ -121,6 +122,8 @@ class Database:
                 "access_count_30d": "INTEGER DEFAULT 0",
             },
             "knowledge": {
+                "tenant_id": "VARCHAR(64)",
+                "extra_payload": "JSON",
                 "pending_index": "BOOLEAN DEFAULT 1",
                 "index_version": "INTEGER DEFAULT 0",
                 "health_score": "FLOAT DEFAULT 1.0",
@@ -175,6 +178,10 @@ class Database:
                         )
                 # SQLite 不支持在 ALTER TABLE 中直接加索引，需单独创建
                 if table in ("preferences", "knowledge"):
+                    conn.exec_driver_sql(
+                        f"CREATE INDEX IF NOT EXISTS ix_{table}_tenant_id "
+                        f"ON {table} (tenant_id)"
+                    )
                     conn.exec_driver_sql(
                         f"CREATE INDEX IF NOT EXISTS ix_{table}_pending_index "
                         f"ON {table} (pending_index)"
@@ -314,6 +321,7 @@ def _know_row_to_pydantic(row: KnowledgeRow) -> KnowledgeMemory:
         version=row.version or 1,
         parent_id=row.parent_id or "",
         evidences=row.evidences or [],
+        extra_payload=row.extra_payload or {},
         health_score=row.health_score if row.health_score is not None else 1.0,
         stability=row.stability if row.stability is not None else 1.0,
         last_accessed_at=row.last_accessed_at,
@@ -493,6 +501,9 @@ class PreferenceRepository:
                 root_id = parent.root_id or parent.memory_id
         row = PreferenceRow(
             memory_id=memory.memory_id,
+            tenant_id=(
+                memory.extra_payload.get("vnext_authority", {}) or {}
+            ).get("tenant_id"),
             user_id=memory.user_id,
             preference_type=(
                 memory.preference_type.value
@@ -729,6 +740,9 @@ class KnowledgeRepository:
                 )
         row = KnowledgeRow(
             memory_id=memory.memory_id,
+            tenant_id=(
+                memory.extra_payload.get("vnext_authority", {}) or {}
+            ).get("tenant_id"),
             user_id=memory.user_id,
             knowledge_type=(
                 memory.knowledge_type.value
@@ -766,6 +780,7 @@ class KnowledgeRepository:
                 if memory.evidences
                 else []
             ),
+            extra_payload=memory.extra_payload,
             health_score=memory.health_score,
             stability=memory.stability,
             last_accessed_at=memory.last_accessed_at,

@@ -170,3 +170,29 @@
 - Compatibility/migration impact: 仅影响 vNext Event Gateway；legacy EventIngestionService 保持不变。拒绝结果仍为安全元数据，不保存正文。
 - Rollback: 关闭 vNext Gateway/Feature Flag，保留已提交 Authority rows；不删除新表。
 - Supersedes: None
+
+## DEC-20260822-014
+
+- Date: 2026-08-22
+- Task: S1-07/S1-08
+- Status: ACTIVE
+- Decision: Long-Term Authority uses the existing Preference/Knowledge rows as the compatibility Authority adapter; vNext binds tenant identity and the complete LongTermEnvelope in additive governed metadata, while Canonical Write delegates long-term persistence to MemoryWriteService/DomainMemoryWriter.
+- Evidence/reason: The accepted ADR forbids a second Authority write store and requires reuse of the existing Evidence/Lineage/Outbox write chain. B05 focused tests verify tenant isolation, ACTIVE-chain uniqueness, default inactive filtering, and one transaction-produced business/Evidence/Lineage/Outbox set.
+- Affected files/contracts: `memoryhub/domain/long_term.py`, `memoryhub/storage/authority_repository.py`, `memoryhub/application/canonical_write.py`, additive legacy columns and Domain Writer metadata propagation.
+- Alternatives considered: create a separate `long_term_authority` table or let each adapter write legacy tables directly; rejected because either creates dual Authority or bypasses the canonical writer.
+- Compatibility/migration impact: legacy rows remain readable by existing APIs; rows without vNext metadata remain compatibility-only and are not returned by tenant-scoped vNext Authority reads.
+- Rollback: disable vNext callers/flag and continue legacy adapters; additive columns/metadata are inert for legacy writes.
+- Supersedes: None
+
+## DEC-20260822-015
+
+- Date: 2026-08-22
+- Task: B05 acceptance
+- Status: ACTIVE
+- Decision: Accept S1-07/S1-08 after focused, affected, safety, contract, and static validation; keep B06 READY and stop this session at the B05 commit boundary.
+- Evidence/reason: Authority-focused validation passed 4 tests; affected storage/writer/outbox regressions passed 38 tests; safety/write-bypass/contract/interface regressions passed 100 tests; duplicate canonical events remained idempotent and the Authority business/Evidence/Lineage/Outbox set remained transaction-consistent.
+- Affected files/contracts: B05 Authority Facade, Authority adapter, Canonical Write Service, additive metadata propagation, B05 specification/tests, and continuity artifacts.
+- Alternatives considered: continue into REST/MCP/CLI/SDK entrypoint convergence; rejected because S1-09 is outside B05 authorization.
+- Compatibility/migration impact: no second Authority store introduced; legacy Preference/Knowledge storage remains the compatibility adapter and existing APIs remain available.
+- Rollback: disable vNext callers/flag and use legacy adapters; retain additive columns and B05 artifacts for diagnosis.
+- Supersedes: None

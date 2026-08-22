@@ -62,6 +62,8 @@ class PreferenceRow(Base):
     __tablename__ = "preferences"
 
     memory_id = Column(String(32), primary_key=True)
+    # Nullable for legacy rows; vNext Authority writes always bind a tenant.
+    tenant_id = Column(String(64), index=True, nullable=True)
     user_id = Column(String(64), index=True)
     memory_type = Column(String(16), default="preference")
     preference_type = Column(String(32))
@@ -109,6 +111,8 @@ class KnowledgeRow(Base):
     )
 
     memory_id = Column(String(32), primary_key=True)
+    # Nullable for legacy rows; vNext Authority writes always bind a tenant.
+    tenant_id = Column(String(64), index=True, nullable=True)
     user_id = Column(String(64), index=True)
     memory_type = Column(String(16), default="knowledge")
     knowledge_type = Column(String(32))
@@ -134,6 +138,7 @@ class KnowledgeRow(Base):
     version = Column(Integer, default=1)
     parent_id = Column(String(32))
     evidences = Column(JSON)
+    extra_payload = Column(JSON)
     # --- 向量索引同步状态 ---
     pending_index = Column(Boolean, default=True, index=True)
     index_version = Column(Integer, default=0, index=True)

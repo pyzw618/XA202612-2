@@ -1,5 +1,6 @@
 """Application services for vNext canonical paths."""
 
+from .canonical_write import CanonicalWriteResult, CanonicalWriteService
 from .episode_service import (
     EpisodeResumeResult,
     EpisodeService,
@@ -13,6 +14,8 @@ __all__ = [
     "EventGateway",
     "EventGatewayResult",
     "GatewayStatus",
+    "CanonicalWriteResult",
+    "CanonicalWriteService",
     "EpisodeResumeResult",
     "EpisodeService",
     "EpisodeSnapshotResult",

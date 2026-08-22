@@ -56,6 +56,15 @@ class DomainMemoryWriter:
         if repo is None:
             raise RuntimeError(f"domain_writer.repository_unavailable:{memory.memory_type}")
         operation = self._projection_operation(memory)
+        authority = dict(
+            getattr(memory, "extra_payload", {}).get("vnext_authority", {}) or {}
+        )
+        tenant_id = authority.get("tenant_id")
+        user_id = authority.get("user_id") or memory.user_id
+        content_version = int(authority.get("content_version", memory.version) or memory.version)
+        schema_version = str(authority.get("schema_version", "vnext/v1"))
+        policy_version = authority.get("policy_version")
+        sensitivity_level = authority.get("sensitivity_level")
 
         with self.db.session() as session:
             repo.save(memory, session=session)
@@ -67,6 +76,11 @@ class DomainMemoryWriter:
                 semantic_version=max(1, int(memory.version)),
                 transition_action=decision.value,
                 session=session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                content_version=content_version,
+                schema_version=schema_version,
+                policy_version=policy_version,
             )
             evidence_ids = self.evidence_repo.record_all(
                 memory_id=memory.memory_id,
@@ -74,6 +88,12 @@ class DomainMemoryWriter:
                 evidences=list(getattr(memory, "evidences", []) or []),
                 provenance=provenance,
                 session=session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                content_version=content_version,
+                schema_version=schema_version,
+                policy_version=policy_version,
+                sensitivity_level=sensitivity_level,
             )
             outbox = self.outbox_repo.enqueue(
                 memory_id=memory.memory_id,
@@ -88,6 +108,11 @@ class DomainMemoryWriter:
                     "evidence_revision": lineage.evidence_revision,
                 },
                 session=session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                event_id=provenance.event_id,
+                content_version=content_version,
+                projection_type="long_term",
             )
             session.flush()
             return MemoryWriteReceipt(
