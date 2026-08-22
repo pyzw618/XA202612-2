@@ -251,3 +251,18 @@
 - Governance: 本次状态回写与批次提示词作为独立执行治理提交，不计入业务批次；取消 B01-B03 transition baseline。
 - Blockers: None
 - Exact next step: 提交执行治理文档；随后保持 B03 业务文件未提交，等待 B03 会话完成验收。
+
+## Checkpoint 2026-08-22-18 — B03 completion
+
+- Started: 2026-08-22 16:01
+- Ended: pending single local commit and read-only verification
+- Branch/HEAD before B03 commit: dev-remem / 5032c61f93bb16a724d6d9acb5be1269ae7cb2a9
+- Restored task/batch: S1-03 IN_PROGRESS / B03 IN_PROGRESS
+- Completed changes: 完成 S1-03 Event Gateway；修复 SQLite 并发跨表读偏差；补足 MASK fail-closed、Scope-before-Policy、tenant idempotency、global Event ID、atomic commit、Evidence/Frequency 不变和并发回归；同步更新 S1-01/S1-02/S1-03 证据与批次治理状态。
+- Files changed: memoryhub/application/__init__.py, memoryhub/application/event_gateway.py, memoryhub/storage/database.py, memoryhub/storage/models.py, memoryhub/storage/vnext_repositories.py, docs/spec/VNEXT_EVENT_GATEWAY.md, docs/spec/VNEXT_STORAGE_SCHEMA.md, tests/test_vnext_event_gateway.py, tests/test_vnext_repositories.py, tests/test_vnext_storage_schema.py, docs/last_improve/codex_execution/*
+- Validation run: Event Gateway 11 passed；受影响 vNext 回归 45 passed；Safety Pipeline 46 passed；Safety Contract + Safe Errors 31 passed；legacy write capture 1 passed、2 deselected；ruff、compileall、git diff --check passed。Safety Gate/Audit/Memory Write 文件系统用例因主机 pytest 临时目录权限记录 PARTIAL，无 B03 业务断言失败。
+- Task status changes: S1-03 IN_PROGRESS → DONE；B03 IN_PROGRESS → DONE；B04 TODO → READY。
+- Decisions added: DEC-20260822-013
+- Blockers: None for B03; host temporary-directory permission remains an unrelated risk-test limitation.
+- Commit plan: 只创建一次普通本地提交，标题 feat(vnext): complete B03 s1 storage ingress，正文 trailer Batch-ID: B03；连续性文件使用 SELF (Batch-ID: B03)，不回填 SHA、不 push。
+- Exact next step: 审查暂存清单后创建唯一 B03 提交；提交后只读核对 HEAD SHA 和文件清单，最终交接 docs/last_improve/codex_batches/B04_s1_task_state.md 并停止。

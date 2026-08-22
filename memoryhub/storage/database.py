@@ -11,14 +11,12 @@ import os
 import re
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import create_engine, func, inspect, or_
+from sqlalchemy import create_engine, func, or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from memoryhub.adapter.schemas import (
-    Evidence,
     ExtractionTask,
     ExtractionTaskStatus,
     ExtractionType,
@@ -68,6 +66,12 @@ class Database:
         """初始化数据库 schema — 创建所有表。"""
         os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
 
+        # Repeated migration/initialization must release the previous pool
+        # first.  This is required on Windows where an undisposed SQLite pool
+        # keeps the database file locked between idempotent runs.
+        if self.engine is not None:
+            self.engine.dispose()
+
         self.engine = create_engine(
             f"sqlite:///{self.db_path}",
             echo=False,
@@ -86,9 +90,17 @@ class Database:
         """Apply additive SQLite migrations required by the current data contract."""
         migrations = {
             "events": {
+                "tenant_id": "VARCHAR(64)",
                 "turn_id": "VARCHAR(64)",
                 "tool_calls": "JSON",
                 "schema_version": "VARCHAR(16) DEFAULT '1.1'",
+                "content_version": "INTEGER DEFAULT 1",
+                "policy_version": "VARCHAR(64)",
+                "retention_class": "VARCHAR(32)",
+                "sensitivity_level": "VARCHAR(32)",
+                "policy_action": "VARCHAR(16)",
+                "idempotency_key": "VARCHAR(128)",
+                "trace_id": "VARCHAR(64)",
                 "source_hash": "VARCHAR(64)",
                 "redactions": "JSON",
                 "quality": "JSON",
@@ -121,6 +133,29 @@ class Database:
                 "result_memory_id": "VARCHAR(32)",
                 "resolved_at": "DATETIME",
             },
+            "memory_lineage": {
+                "tenant_id": "VARCHAR(64)",
+                "user_id": "VARCHAR(64)",
+                "content_version": "INTEGER DEFAULT 1",
+                "schema_version": "VARCHAR(16) DEFAULT 'vnext/v1'",
+                "policy_version": "VARCHAR(64)",
+            },
+            "memory_evidence": {
+                "tenant_id": "VARCHAR(64)",
+                "user_id": "VARCHAR(64)",
+                "content_ref": "VARCHAR(256)",
+                "schema_version": "VARCHAR(16) DEFAULT 'vnext/v1'",
+                "content_version": "INTEGER DEFAULT 1",
+                "policy_version": "VARCHAR(64)",
+                "sensitivity_level": "VARCHAR(32)",
+            },
+            "memory_projection_outbox": {
+                "tenant_id": "VARCHAR(64)",
+                "user_id": "VARCHAR(64)",
+                "event_id": "VARCHAR(64)",
+                "content_version": "INTEGER DEFAULT 1",
+                "projection_type": "VARCHAR(32) DEFAULT 'vector'",
+            },
         }
         with self.engine.begin() as conn:
             for table, columns in migrations.items():
@@ -147,6 +182,23 @@ class Database:
             # and existing SQLite files.  Create their lookup indexes explicitly as
             # well so databases initialized by older releases receive the same plan.
             for index_ddl in (
+                "CREATE INDEX IF NOT EXISTS ix_events_tenant_id "
+                "ON events (tenant_id)",
+                "CREATE INDEX IF NOT EXISTS ix_events_idempotency_key "
+                "ON events (idempotency_key)",
+                "CREATE INDEX IF NOT EXISTS ix_events_trace_id "
+                "ON events (trace_id)",
+                "CREATE INDEX IF NOT EXISTS ix_memory_lineage_tenant_user "
+                "ON memory_lineage (tenant_id, user_id)",
+                "CREATE INDEX IF NOT EXISTS ix_memory_evidence_tenant_user "
+                "ON memory_evidence (tenant_id, user_id)",
+                "CREATE INDEX IF NOT EXISTS ix_memory_projection_outbox_tenant_user "
+                "ON memory_projection_outbox (tenant_id, user_id)",
+                "CREATE INDEX IF NOT EXISTS ix_memory_projection_outbox_event_id "
+                "ON memory_projection_outbox (event_id)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_projection_outbox_event_version "
+                "ON memory_projection_outbox "
+                "(tenant_id, event_id, content_version, projection_type, operation)",
                 "CREATE INDEX IF NOT EXISTS ix_memory_lineage_memory_type_created_at "
                 "ON memory_lineage (memory_id, memory_type, created_at)",
                 "CREATE INDEX IF NOT EXISTS ix_memory_lineage_root_memory_id "
@@ -552,7 +604,7 @@ class PreferenceRepository:
 
     def update_status(self, memory_id: str, status: str, user_id: str = "") -> bool:
         """更新状态"""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime
 
         with self.db.session() as s:
             q = s.query(PreferenceRow).filter(PreferenceRow.memory_id == memory_id)
@@ -774,7 +826,9 @@ class KnowledgeRepository:
                 return None
             return _know_row_to_pydantic(row)
 
-    def get_by_type(self, user_id: str, knowledge_type: str = "", status: str = "active") -> list[KnowledgeMemory]:
+    def get_by_type(
+        self, user_id: str, knowledge_type: str = "", status: str = "active"
+    ) -> list[KnowledgeMemory]:
         """按类型查询"""
         with self.db.session() as s:
             q = s.query(KnowledgeRow).filter(
@@ -786,7 +840,9 @@ class KnowledgeRepository:
             rows = q.order_by(KnowledgeRow.confidence.desc()).all()
             return [_know_row_to_pydantic(r) for r in rows]
 
-    def get_by_scope(self, user_id: str, scene: str, task_type: str, status: str = "active") -> list[KnowledgeMemory]:
+    def get_by_scope(
+        self, user_id: str, scene: str, task_type: str, status: str = "active"
+    ) -> list[KnowledgeMemory]:
         """按场景和任务类型查询"""
         with self.db.session() as s:
             query = s.query(KnowledgeRow).filter(
@@ -887,9 +943,17 @@ class ConflictRepository:
                 "old_content": conflict.old_content,
                 "new_content": conflict.new_content,
                 "conflict_field": conflict.conflict_field,
-                "decision": conflict.decision.value if hasattr(conflict.decision, "value") else conflict.decision,
+                "decision": (
+                    conflict.decision.value
+                    if hasattr(conflict.decision, "value")
+                    else conflict.decision
+                ),
                 "reason": conflict.reason,
-                "result_memory_id": conflict.result_memory_id if hasattr(conflict, "result_memory_id") else "",
+                "result_memory_id": (
+                    conflict.result_memory_id
+                    if hasattr(conflict, "result_memory_id")
+                    else ""
+                ),
                 "resolved_at": conflict.resolved_at,
             }
             row = s.get(ConflictRow, conflict.conflict_id)
@@ -1361,7 +1425,9 @@ class ShortTermMemoryRepository:
     def add(self, *, user_id: str, session_id: str, event_id: str,
             source_type: str = "", text: str = "", payload: dict | None = None,
             scene: str = "", task_type: str = "", ttl_until=None) -> str:
-        row_id = f"stm_{hashlib.sha256(f'{user_id}:{session_id}:{event_id}'.encode()).hexdigest()[:24]}"
+        row_id = (
+            f"stm_{hashlib.sha256(f'{user_id}:{session_id}:{event_id}'.encode()).hexdigest()[:24]}"
+        )
         with self.db.session() as s:
             if s.get(ShortTermMemoryRow, row_id) is None:
                 s.add(

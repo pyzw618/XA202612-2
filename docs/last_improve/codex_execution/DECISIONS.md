@@ -157,3 +157,16 @@
 - Compatibility/migration impact: B01/B02 已依据文件归属追溯拆成独立提交 `a502f9a`/`1b84af1`；B03 继续保持未提交，完整验收后创建自己的唯一提交。提交使用 `Batch-ID: Bxx` trailer，文件内用 `SELF` 引用自身提交，避免递归回填 SHA。
 - Rollback: 后续批次可停止自动提交并恢复为仅记录工作区状态；不重写已经产生的提交历史。
 - Supersedes: None
+
+## DEC-20260822-013
+
+- Date: 2026-08-22
+- Task: S1-03
+- Status: ACTIVE
+- Decision: Event Gateway 只提交 Policy 返回的治理事件；REVIEW/DROP/未净化 MASK fail-closed 且不创建 Event/IdempotencyRecord。幂等键按 `(tenant_id, idempotency_key)`，Event ID 按其全局主键约束检查；唯一键竞争在事务回滚后重读，统一返回 IDEMPOTENT/CONFLICT。
+- Evidence/reason: S1-03 定向 11 tests passed；并发重复提交产生 1 个 Event/IdempotencyRecord，7 次重试为 IDEMPOTENT；敏感 payload 未进入拒绝路径的存储记录；既有 Evidence/Frequency 在重复提交后保持不变。数据库约束与 Gateway 的检查范围必须一致，避免并发或跨租户 Event ID 竞争泄漏 IntegrityError。
+- Affected files/contracts: `memoryhub/application/event_gateway.py`, `tests/test_vnext_event_gateway.py`, `docs/spec/VNEXT_EVENT_GATEWAY.md`
+- Alternatives considered: 只依赖读前检查；被拒绝，因为并发提交可同时通过检查并在唯一键处失败。允许 MASK 原 payload 直接提交；被拒绝，因为会把未净化正文写入 Authority。
+- Compatibility/migration impact: 仅影响 vNext Event Gateway；legacy EventIngestionService 保持不变。拒绝结果仍为安全元数据，不保存正文。
+- Rollback: 关闭 vNext Gateway/Feature Flag，保留已提交 Authority rows；不删除新表。
+- Supersedes: None

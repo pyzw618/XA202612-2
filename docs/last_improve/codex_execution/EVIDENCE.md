@@ -248,3 +248,67 @@
 
 - Initial ruff attempt found one unused `IdempotencyRecordRow` import；removed and reran with all affected storage files passing。
 - Existing full `tests/test_memory_write_contract_schema.py`/projection regression remains unable to create pytest `tmp_path` on this host；non-temp legacy contract coverage passed and the new repository suite uses an explicit repository DB path。
+
+## S1-03 implementation checkpoint
+
+- Date/time: 2026-08-22 16:22 +08:00
+- Environment: Windows PowerShell; system `python`, pytest, ruff; SQLite/SQLAlchemy
+- Acceptance item: Event Gateway ordered ingress, Policy action handling, tenant-scoped idempotency and atomic commit
+- Commands:
+  ```text
+  python -m pytest tests/test_vnext_event_gateway.py -q
+  python -m ruff check memoryhub/application/event_gateway.py tests/test_vnext_event_gateway.py
+  ```
+- Result: PASS；11 tests passed；ruff passed；唯一警告为既有 pytest 配置 `asyncio_mode` 未识别。
+- Summary: Envelope 类型校验后依次执行 identity、Scope、Policy；REVIEW/DROP 在持久化前停止；MASK 若未改变 payload 则 fail-closed，只有 Policy 返回的净化 payload 才提交；幂等键按 tenant 隔离；Event ID 冲突按数据库全局主键范围检查；唯一键并发竞争回滚后重读为 IDEMPOTENT/CONFLICT，不向调用方泄漏 `IntegrityError`。重复并发提交实测 1 个 COMMITTED、7 个 IDEMPOTENT，Event 与 IdempotencyRecord 各 1 行。
+- Sensitive-data evidence: REVIEW/DROP 与未净化 MASK 均未写 `events` 或 `idempotency_records`；IdempotencyRecord 只保存 request hash、event/trace 引用，不保存 payload；Gateway 无日志/队列写入。
+- Artifact/report/trace: `memoryhub/application/event_gateway.py`, `tests/test_vnext_event_gateway.py`, `docs/spec/VNEXT_EVENT_GATEWAY.md`
+- Follow-up: 运行 S1-03 受影响 vNext 回归、write-bypass/safety 风险测试及批次级验收；未完成前保持 S1-03 IN_PROGRESS。
+
+## S1-03 regression checkpoint
+
+- Date/time: 2026-08-22 16:29 +08:00
+- Environment: Windows PowerShell; system `python`, pytest; SQLite/SQLAlchemy
+- Commands:
+  ```text
+  python -m pytest tests/test_vnext_event_gateway.py tests/test_vnext_repositories.py tests/test_vnext_storage_schema.py tests/test_vnext_contracts.py tests/test_vnext_interface.py tests/test_vnext_golden_fixtures.py tests/test_no_production_write_bypass.py -q
+  python -m pytest tests/test_safety_pipeline.py tests/test_safety_gate.py tests/test_safety_audit_log.py tests/test_safety_memory_write.py tests/test_safety_contract.py tests/test_safe_errors.py tests/test_memory_write_contract_schema.py -q
+  ```
+- Result: 受影响 vNext 回归 PASS，44 passed，1 个既有 `asyncio_mode` 警告。风险组合 PARTIAL，81 passed、1 skipped、70 setup errors；70 errors 均发生在 pytest fixture setup，主机拒绝创建 `C:\Users\11929\AppData\Local\Temp\pytest-of-11929\pytest-*\\.lock`，没有业务断言失败。
+- Summary: Event Gateway 与既有 safety/write-bypass 边界没有回归；临时目录权限问题与 B03 代码无因果关系，拆分不依赖 `tmp_path` 的安全契约/错误测试继续验证。
+- Artifact/report/trace: `tests/test_vnext_event_gateway.py`, `tests/test_vnext_repositories.py`, `tests/test_vnext_storage_schema.py`, `tests/test_vnext_contracts.py`, `tests/test_vnext_interface.py`, `tests/test_vnext_golden_fixtures.py`, `tests/test_no_production_write_bypass.py`
+- Follow-up: 运行不依赖 pytest 临时目录的安全风险测试；若仍受环境阻断，保留精确命令/结果并按事实决定是否可验收。
+
+## S1-03 safety risk checkpoint
+
+- Date/time: 2026-08-22 16:34 +08:00
+- Environment: Windows PowerShell; system `python`, pytest
+- Commands:
+  ```text
+  python -m pytest tests/test_safety_pipeline.py -q
+  python -m pytest tests/test_safety_contract.py tests/test_safe_errors.py -q
+  python -m pytest tests/test_memory_write_contract_schema.py -q -k "capture"
+  python -m pytest --basetemp .pytest-b03-safety-basetemp tests/test_safety_gate.py tests/test_safety_audit_log.py tests/test_safety_memory_write.py tests/test_memory_write_contract_schema.py -q
+  ```
+- Result: PASS（可执行拆分）：Safety Pipeline 46 passed；Safety Contract + Safe Errors 31 passed；legacy write contract capture 1 passed、2 deselected。带工作区 basetemp 的组合仍因该目录权限在 pytest session cleanup 阶段报 `WinError 5`，且其业务用例 setup 同样受目录访问限制；无 B03 业务断言失败。
+- Summary: 既有 Safety Pipeline、契约、safe-error、Evidence schema 回归通过；剩余文件系统审计/隔离用例明确记录为环境 PARTIAL，不作为 B03 Event Gateway 通过依据。
+- Artifact/report/trace: `tests/test_safety_pipeline.py`, `tests/test_safety_contract.py`, `tests/test_safe_errors.py`, `tests/test_memory_write_contract_schema.py`
+- Follow-up: 进行最终 B03 全量验收、diff/产物归属审查；若无新增业务失败，将三项任务写 DONE、B04 写 READY 后只创建一次提交。
+
+## S1-03 final validation checkpoint
+
+- Date/time: 2026-08-22 16:48 +08:00
+- Environment: Windows PowerShell; system `python`, pytest, ruff; SQLite/SQLAlchemy
+- Commands:
+  ```text
+  python -m pytest tests/test_vnext_event_gateway.py -q
+  python -m pytest tests/test_vnext_event_gateway.py tests/test_vnext_repositories.py tests/test_vnext_storage_schema.py tests/test_vnext_contracts.py tests/test_vnext_interface.py tests/test_vnext_golden_fixtures.py tests/test_no_production_write_bypass.py -q
+  python -m ruff check memoryhub/application/event_gateway.py tests/test_vnext_event_gateway.py
+  python -m ruff check memoryhub/application/event_gateway.py memoryhub/application/__init__.py memoryhub/storage/database.py memoryhub/storage/models.py memoryhub/storage/vnext_repositories.py tests/test_vnext_event_gateway.py tests/test_vnext_repositories.py tests/test_vnext_storage_schema.py
+  python -m compileall -q memoryhub/application memoryhub/storage
+  git diff --check
+  ```
+- Result: PASS；Event Gateway 11 passed；受影响 vNext 回归 45 passed；ruff、compileall、diff-check passed；唯一测试警告为既有 `asyncio_mode` 未识别。
+- Summary: 修复 SQLite 并发跨表读偏差：同租户同幂等键的已存在 Event 不再直接报 Event ID 冲突，而是在当前 Session 结束后重读 IdempotencyRecord；并发重复提交维持 1 个 COMMITTED、其余 IDEMPOTENT。Evidence/Frequency 不由 Gateway 触碰，重复提交回归保持既有 Evidence=1、Candidate frequency=3。
+- Acceptance: Policy 在 Event/幂等提交前生效；敏感 REVIEW/DROP/未净化 MASK 不写 Event、队列或幂等记录；tenant-scoped idempotency、全局 Event ID、事务回滚和并发竞争均有证据；没有生产写旁路变更。
+- Follow-up: 只读审查 Git diff/暂存清单；将 S1-01/S1-02/S1-03 置 DONE、B03 置 DONE、B04 置 READY，写入 `SELF (Batch-ID: B03)`，然后只创建一次本地提交。

@@ -30,7 +30,7 @@
 | S0-08 | DONE | S0-03, S0-04 | Codex 2026-08-22 | EVIDENCE.md#s0-08 | Golden fixtures、SHA-256 和 44 项 S0 Gate 回归通过 |
 | S1-01 | DONE | S0-03, S0-05 | Codex 2026-08-22 | EVIDENCE.md#s1-01 | 7 张表、治理字段、约束/索引、legacy additive migration 和幂等初始化通过 |
 | S1-02 | DONE | S1-01 | Codex 2026-08-22 | EVIDENCE.md#s1-02 | CAS/seq/状态迁移/Evidence 去重/Activation 事务测试通过 |
-| S1-03 | IN_PROGRESS | S0-04, S1-02 | Codex 2026-08-22 | | Event Gateway |
+| S1-03 | DONE | S0-04, S1-02 | Codex 2026-08-22 | EVIDENCE.md#s1-03-final-validation-checkpoint | 11 定向、45 受影响回归通过；安全风险环境 PARTIAL 已记录 |
 | S1-04 | TODO | S1-02, S1-03 | | | Working State Patch/CAS |
 | S1-05 | TODO | S1-02, S1-04 | | | Episode Append/Snapshot/Resume |
 | S1-06 | TODO | S1-02 | | | Candidate Repository 与检索隔离 |

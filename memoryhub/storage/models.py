@@ -9,6 +9,7 @@ from datetime import datetime
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Float,
@@ -30,6 +31,8 @@ class EventRow(Base):
     __tablename__ = "events"
 
     event_id = Column(String(32), primary_key=True)
+    # Nullable during the compatibility window; vNext writes require both keys.
+    tenant_id = Column(String(64), index=True, nullable=True)
     source_type = Column(String(32), index=True)
     event_type = Column(String(64), index=True)
     user_id = Column(String(64), index=True)
@@ -42,6 +45,13 @@ class EventRow(Base):
     payload = Column(JSON)
     tool_calls = Column(JSON)
     schema_version = Column(String(16), default="1.1")
+    content_version = Column(Integer, nullable=False, default=1)
+    policy_version = Column(String(64), nullable=True)
+    retention_class = Column(String(32), nullable=True)
+    sensitivity_level = Column(String(32), nullable=True)
+    policy_action = Column(String(16), nullable=True)
+    idempotency_key = Column(String(128), nullable=True, index=True)
+    trace_id = Column(String(64), nullable=True, index=True)
     source_hash = Column(String(64), index=True)
     redactions = Column(JSON)
     quality = Column(JSON)
@@ -197,11 +207,16 @@ class MemoryLineageRow(Base):
     )
 
     lineage_id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), index=True, nullable=True)
+    user_id = Column(String(64), index=True, nullable=True)
     memory_id = Column(String(64), nullable=False, index=True)
     memory_type = Column(String(16), nullable=False, index=True)
     parent_memory_id = Column(String(64), nullable=True)
     root_memory_id = Column(String(64), nullable=True)
     semantic_version = Column(Integer, nullable=False, default=1)
+    content_version = Column(Integer, nullable=False, default=1)
+    schema_version = Column(String(16), nullable=False, default="vnext/v1")
+    policy_version = Column(String(64), nullable=True)
     evidence_revision = Column(Integer, nullable=False, default=1)
     transition_action = Column(String(16), nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
@@ -228,10 +243,17 @@ class MemoryEvidenceRow(Base):
     )
 
     evidence_id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), index=True, nullable=True)
+    user_id = Column(String(64), index=True, nullable=True)
     memory_id = Column(String(64), nullable=False, index=True)
     memory_type = Column(String(16), nullable=False, index=True)
     event_id = Column(String(64), nullable=False)
     source_hash = Column(String(64), nullable=False)
+    content_ref = Column(String(256), nullable=True)
+    schema_version = Column(String(16), nullable=False, default="vnext/v1")
+    content_version = Column(Integer, nullable=False, default=1)
+    policy_version = Column(String(64), nullable=True)
+    sensitivity_level = Column(String(32), nullable=True)
     source_type = Column(String(32), nullable=False)
     excerpt = Column(Text, nullable=False, default="")
     occurred_at = Column(DateTime, nullable=False, default=datetime.now)
@@ -253,9 +275,14 @@ class MemoryProjectionOutboxRow(Base):
     )
 
     outbox_id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), index=True, nullable=True)
+    user_id = Column(String(64), index=True, nullable=True)
     memory_id = Column(String(64), nullable=False, index=True)
     memory_type = Column(String(16), nullable=False, index=True)
     operation = Column(String(32), nullable=False)
+    event_id = Column(String(64), nullable=True, index=True)
+    content_version = Column(Integer, nullable=False, default=1)
+    projection_type = Column(String(32), nullable=False, default="vector")
     payload_hash = Column(String(64), nullable=False)
     status = Column(String(16), nullable=False, default="pending", index=True)
     attempts = Column(Integer, nullable=False, default=0)
@@ -323,3 +350,207 @@ class MidTermMemoryRow(Base):
     decay_score = Column(Float, default=1.0)
     status = Column(String(16), default="active", index=True)  # active | consolidated | archived
     created_at = Column(DateTime, default=datetime.now)
+
+
+class WorkingStateRow(Base):
+    """Versioned task working state; one current row per tenant/user/task."""
+
+    __tablename__ = "working_states"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "user_id", "task_id", name="uq_working_states_owner_task"
+        ),
+        CheckConstraint("version >= 1", name="ck_working_states_version_positive"),
+    )
+
+    working_state_id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    task_id = Column(String(128), nullable=False, index=True)
+    session_id = Column(String(128), nullable=False, default="")
+    version = Column(Integer, nullable=False, default=1)
+    state = Column(JSON, nullable=False, default=dict)
+    last_event_id = Column(String(64), nullable=True)
+    schema_version = Column(String(16), nullable=False, default="vnext/v1")
+    content_version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+
+class TaskEpisodeRow(Base):
+    """Episode authority row with resumable snapshot and monotonic sequence."""
+
+    __tablename__ = "task_episodes"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('ACTIVE','SUSPENDED','COMPLETED','FAILED','ARCHIVED')",
+            name="ck_task_episodes_status",
+        ),
+        CheckConstraint("snapshot_version >= 1", name="ck_task_episodes_snapshot_version"),
+        CheckConstraint("last_event_seq >= 0", name="ck_task_episodes_last_event_seq"),
+    )
+
+    episode_id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    task_id = Column(String(128), nullable=False, index=True)
+    session_id = Column(String(128), nullable=False, default="")
+    status = Column(String(16), nullable=False, default="ACTIVE", index=True)
+    current_phase = Column(String(64), nullable=False, default="")
+    goal = Column(Text, nullable=False, default="")
+    snapshot = Column(JSON, nullable=False, default=dict)
+    snapshot_version = Column(Integer, nullable=False, default=1)
+    last_event_seq = Column(Integer, nullable=False, default=0)
+    resume_token_hash = Column(String(128), nullable=True)
+    stale_resources = Column(JSON, nullable=False, default=list)
+    required_revalidation = Column(JSON, nullable=False, default=list)
+    schema_version = Column(String(16), nullable=False, default="vnext/v1")
+    content_version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+
+class EpisodeEventRow(Base):
+    """Append-only episode event stream, unique by episode and sequence."""
+
+    __tablename__ = "episode_events"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "episode_id", "seq_no", name="uq_episode_events_seq"),
+        CheckConstraint("seq_no >= 1", name="ck_episode_events_seq_positive"),
+    )
+
+    episode_event_id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    episode_id = Column(String(64), nullable=False, index=True)
+    task_id = Column(String(128), nullable=False, index=True)
+    seq_no = Column(Integer, nullable=False)
+    event_type = Column(String(64), nullable=False)
+    payload = Column(JSON, nullable=False, default=dict)
+    source_event_id = Column(String(64), nullable=False, index=True)
+    content_version = Column(Integer, nullable=False, default=1)
+    occurred_at = Column(DateTime, nullable=False, default=datetime.now)
+
+
+class MemoryCandidateRow(Base):
+    """Candidate staging row; status is explicit so ordinary retrieval can exclude it."""
+
+    __tablename__ = "memory_candidates"
+    __table_args__ = (
+        CheckConstraint(
+            "formation_status = 'CANDIDATE'",
+            name="ck_memory_candidates_formation_status",
+        ),
+        CheckConstraint(
+            "status IN ('ACCUMULATING','CONFIRMED','REJECTED','REVIEW')",
+            name="ck_memory_candidates_status",
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_memory_candidates_confidence",
+        ),
+        UniqueConstraint(
+            "tenant_id", "user_id", "candidate_id", name="uq_memory_candidates_owner_id"
+        ),
+    )
+
+    candidate_id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    memory_type = Column(String(32), nullable=False, index=True)
+    normalized_key = Column(String(256), nullable=False, index=True)
+    claim = Column(JSON, nullable=False)
+    scope_level = Column(String(32), nullable=False, index=True)
+    scope = Column(String(256), nullable=False, index=True)
+    formation_status = Column(String(32), nullable=False, default="CANDIDATE")
+    status = Column(String(16), nullable=False, default="ACCUMULATING", index=True)
+    confidence = Column(Float, nullable=False, default=0.0)
+    utility = Column(Float, nullable=False, default=0.0)
+    stability = Column(Float, nullable=False, default=0.0)
+    frequency = Column(Integer, nullable=False, default=0)
+    evidence_refs = Column(JSON, nullable=False, default=list)
+    supporting_episode_ids = Column(JSON, nullable=False, default=list)
+    conflicting_memory_ids = Column(JSON, nullable=False, default=list)
+    content_version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+
+class MemoryActivationRow(Base):
+    """Retrieval activation audit row, separate from memory lifecycle state."""
+
+    __tablename__ = "memory_activations"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "user_id", "query_id", "memory_id", "content_version",
+            name="uq_memory_activations_query_memory_version",
+        ),
+        CheckConstraint("rank >= 1", name="ck_memory_activations_rank_positive"),
+    )
+
+    activation_id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    query_id = Column(String(128), nullable=False, index=True)
+    memory_id = Column(String(64), nullable=False, index=True)
+    task_id = Column(String(128), nullable=False, default="")
+    intent = Column(String(32), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="RECALLED", index=True)
+    rank = Column(Integer, nullable=False)
+    initial_score = Column(Float, nullable=False, default=0.0)
+    reranked_score = Column(Float, nullable=False, default=0.0)
+    included_in_context = Column(Boolean, nullable=False, default=False)
+    content_version = Column(Integer, nullable=False, default=1)
+    activated_at = Column(DateTime, nullable=False, default=datetime.now)
+    used_at = Column(DateTime, nullable=True)
+
+
+class RetrievalLogRow(Base):
+    """Trace-safe retrieval summary; raw query/content is intentionally absent."""
+
+    __tablename__ = "retrieval_logs"
+    __table_args__ = (
+        CheckConstraint("candidate_count >= 0", name="ck_retrieval_logs_candidate_count"),
+        CheckConstraint("selected_count >= 0", name="ck_retrieval_logs_selected_count"),
+    )
+
+    retrieval_log_id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    query_id = Column(String(128), nullable=False, index=True)
+    trace_id = Column(String(64), nullable=False, index=True)
+    intent = Column(String(32), nullable=False, index=True)
+    consistency = Column(String(32), nullable=False, default="EVENTUAL")
+    plan = Column(JSON, nullable=False, default=dict)
+    candidate_count = Column(Integer, nullable=False, default=0)
+    selected_count = Column(Integer, nullable=False, default=0)
+    degraded_channels = Column(JSON, nullable=False, default=list)
+    latency_ms = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+
+
+class IdempotencyRecordRow(Base):
+    """Tenant-scoped request deduplication record without raw request body."""
+
+    __tablename__ = "idempotency_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "idempotency_key", name="uq_idempotency_records_tenant_key"
+        ),
+        CheckConstraint(
+            "status IN ('ACCEPTED','COMMITTED','REJECTED')",
+            name="ck_idempotency_records_status",
+        ),
+    )
+
+    idempotency_record_id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    idempotency_key = Column(String(128), nullable=False)
+    request_hash = Column(String(64), nullable=False)
+    status = Column(String(16), nullable=False, default="ACCEPTED", index=True)
+    response_ref = Column(String(256), nullable=True)
+    event_id = Column(String(64), nullable=True, index=True)
+    trace_id = Column(String(64), nullable=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    expires_at = Column(DateTime, nullable=True, index=True)
