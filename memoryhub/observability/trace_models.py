@@ -23,6 +23,7 @@ class TraceSpanKind(str):
     EVOLUTION = "EVOLUTION"
     RETRIEVAL = "RETRIEVAL"
     LEGACY = "LEGACY"
+    INFRASTRUCTURE = "INFRASTRUCTURE"
 
 
 class TraceSpan(BaseModel):
@@ -47,6 +48,7 @@ class TraceSpan(BaseModel):
         "EVOLUTION",
         "RETRIEVAL",
         "LEGACY",
+        "INFRASTRUCTURE",
     ]
     layer: str = Field(default="")
     tenant_id: str = Field(min_length=1)

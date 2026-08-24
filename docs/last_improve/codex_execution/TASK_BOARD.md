@@ -1,5 +1,15 @@
 # MemoryHub vNext Task Board
 
+## B15 live reconciliation — 2026-08-25
+
+- S4-07 and S4-08 are DONE after validation; S4 Gate is PASS.
+- B16/S5 remains untouched; no B16/S5 task was executed or modified in this session.
+
+## B15 checkpoint — 2026-08-25
+
+- S4-07: DONE; evidence is `EVIDENCE.md#s4-07-checkpoint`.
+- S4-08: DONE; S4 Gate PASS.
+
 状态：TODO | READY | IN_PROGRESS | BLOCKED | DONE | DEFERRED
 
 ## Gate status
@@ -10,7 +20,7 @@
 | S1 | PASS | EVIDENCE.md#s1-gate |
 | S2 | PASS | EVIDENCE.md#b09-final-validation-and-acceptance |
 | S3 | PASS | EVIDENCE.md#b12-final-validation-and-s3-gate-acceptance |
-| S4 | TODO | |
+| S4 | PASS | EVIDENCE.md#s4-gate |
 | S5 | TODO | |
 | P0 | TODO | |
 | P1 | TODO | |
@@ -65,8 +75,8 @@
 | S4-04 | DONE | S1-07, S4-01 | Codex 2026-08-24 (B14) | EVIDENCE.md#s4-04-checkpoint | Forget 状态机 |
 | S4-05 | DONE | S4-04 | Codex 2026-08-24 (B14) | EVIDENCE.md#s4-05-checkpoint | Forget 管理接口 |
 | S4-06 | DONE | S2-09, S3-08, S4-03 | Codex 2026-08-24 (B14) | EVIDENCE.md#s4-06-checkpoint | 诊断 API |
-| S4-07 | TODO | S4-01, S4-02, S4-03, S4-04, S4-05 | | | 故障注入矩阵 |
-| S4-08 | TODO | S4-01, S4-02, S4-03, S4-04, S4-05, S4-07 | | | 基础设施 Trace/指标 |
+| S4-07 | DONE | S4-01, S4-02, S4-03, S4-04, S4-05 | Codex 2026-08-25 (B15) | EVIDENCE.md#s4-07-checkpoint | 故障注入矩阵 |
+| S4-08 | DONE | S4-01, S4-02, S4-03, S4-04, S4-05, S4-07 | Codex 2026-08-25 (B15) | EVIDENCE.md#s4-08-and-s4-gate | 基础设施 Trace/指标 |
 | S5-01 | TODO | S2-09, S3-08, S4-08 | | | 五类 Trace 关联、采样、脱敏 |
 | S5-02 | TODO | S2-10, S3-10, S4-07 | | | 四层 Benchmark Runner |
 | S5-03 | TODO | S5-02 | | | 四系统对照与消融 |
@@ -83,4 +93,4 @@
 - IN_PROGRESS count: 0
 - Dependency violations: None
 - DONE without evidence: None
-- Last checked: 2026-08-24; B14 S4-04～S4-06 DONE with evidence; S4-07/S4-08 remain TODO.
+- Last checked: 2026-08-25; B15 S4-07/S4-08 DONE and S4 Gate PASS with evidence.

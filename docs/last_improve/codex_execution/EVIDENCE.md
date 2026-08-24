@@ -1,5 +1,28 @@
 # MemoryHub vNext Execution Evidence
 
+## B15 start reconciliation
+
+- Repository facts: branch `dev-remem`, HEAD `d0ffff4745c3094a8437006fb2e7a5c38e5fd0e1`; existing untracked evaluation DB artifacts preserved.
+- S4-01 through S4-06 have valid DONE evidence; no current in-progress task existed, so S4-07 was claimed.
+- Planned S4-07 matrix: vector timeout, duplicate delivery, worker crash, pre-commit crash, post-commit crash, stale cache, index corruption, and duplicate event.
+
+## S4-07 checkpoint
+
+- Deliverables: `tests/test_vnext_reliability.py`, `evaluation/run_reliability_eval.py`, and `evaluation/results/vnext_reliability_report.json`.
+- Command: `.venv\\Scripts\\python.exe -m pytest tests/test_vnext_reliability.py -q` → `9 passed`.
+- Evaluation: `.venv\\Scripts\\python.exe evaluation/run_reliability_eval.py --output-json evaluation/results/vnext_reliability_report.json` → `passed=true`, all 8 matrix cases.
+- Static: targeted ruff, compileall, and `git diff --check` passed.
+- Acceptance: S4-07 DONE; S4-08 claimed next. No B16/S5 work performed.
+
+## S4-08 and S4 Gate
+
+- Metrics/Trace deliverables: `memoryhub/observability/metrics.py`, `memoryhub/observability/trace_models.py`, `memoryhub/observability/trace_store.py`, and Outbox worker instrumentation.
+- Metrics snapshot includes latency summaries, projection lag, recovery time, repair rate, Forget success rate, and residual retrieval count.
+- Regression: vNext suite 270 passed; S4 risk/recovery suite 109 passed; projection rebuild/Authority write suite 15 passed.
+- Static: targeted ruff, compileall, and `git diff --check` passed.
+- S4 Gate PASS: Authority pre-commit atomicity, post-commit Outbox recovery, duplicate/ordering safety, index repair, residual retrieval 0, and fail-closed stale/deleted reads are covered.
+- Exit: S4-07 DONE, S4-08 DONE, S4 Gate PASS; B16 READY only.
+
 ## B10 start reconciliation
 
 - Date/time: 2026-08-24 11:58 +08:00

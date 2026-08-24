@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 
 from memoryhub.storage.memory_metadata import (
@@ -34,6 +35,8 @@ class ProjectionOutboxWorker:
         outbox_repo: MemoryProjectionOutboxRepository | None = None,
         base_retry_seconds: int = 5,
         max_retry_seconds: int = 3600,
+        metrics=None,
+        trace_store=None,
     ) -> None:
         self.pref_repo = pref_repo
         self.know_repo = know_repo
@@ -42,10 +45,13 @@ class ProjectionOutboxWorker:
         self.outbox_repo = outbox_repo or MemoryProjectionOutboxRepository(db)
         self.base_retry_seconds = base_retry_seconds
         self.max_retry_seconds = max_retry_seconds
+        self.metrics = metrics
+        self.trace_store = trace_store
 
     def run_once(self, *, limit: int = 100) -> ProjectionOutboxResult:
         result = ProjectionOutboxResult()
         for item in self.outbox_repo.claim_ready(limit=limit):
+            started = time.perf_counter()
             try:
                 self._project(item)
             except Exception as exc:
@@ -56,6 +62,8 @@ class ProjectionOutboxWorker:
                     lease_token=item.lease_token,
                 )
                 result.failed.append(item.outbox_id)
+                if self.metrics is not None:
+                    self.metrics.record_projection(success=False)
                 logger.warning("projection outbox %s failed: %s", item.outbox_id, code)
             else:
                 self.outbox_repo.mark_succeeded(
@@ -63,6 +71,21 @@ class ProjectionOutboxWorker:
                 )
                 self._bump_projection_version(item)
                 result.succeeded.append(item.outbox_id)
+                if self.metrics is not None:
+                    self.metrics.record_projection(
+                        success=True,
+                        lag_ms=(time.perf_counter() - started) * 1000,
+                    )
+            if self.trace_store is not None:
+                self.trace_store.record_infrastructure(
+                    trace_id=f"projection-{item.outbox_id}",
+                    tenant_id=item.tenant_id or "unknown",
+                    user_id=item.user_id or "unknown",
+                    operation="projection",
+                    outcome="succeeded" if item.outbox_id in result.succeeded else "failed",
+                    duration_ms=(time.perf_counter() - started) * 1000,
+                    ids={"outbox_id": item.outbox_id, "memory_id": item.memory_id},
+                )
         return result
 
     def replay(

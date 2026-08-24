@@ -1,5 +1,11 @@
 # MemoryHub vNext Batch Board
 
+## B15 live reconciliation — 2026-08-25
+
+- B15 was the sole active batch for this session; S4-07 and S4-08 are DONE and S4 Gate is PASS.
+- B15 scope was limited to S4-07, S4-08, and S4 Gate. B16 remains untouched and is READY only.
+- Start branch/HEAD: `dev-remem` / `d0ffff4745c3094a8437006fb2e7a5c38e5fd0e1`.
+
 状态：TODO | READY | IN_PROGRESS | BLOCKED | DONE
 
 > 一个会话只允许执行一个批次。批次完成后仅将下一批次置为 READY，并结束当前会话。
@@ -20,17 +26,17 @@
 | B12 | DONE | S3-08～S3-10；S3 Gate | `../codex_batches/B12_s3_entrypoints_eval_gate.md` | SELF (Batch-ID: B12) | S3 Gate PASS；所有入口一致 ID/版本/顺序/trace；评测可复现 |
 | B13 | DONE | S4-01～S4-03 | `../codex_batches/B13_s4_projection_repair.md` | SELF (Batch-ID: B13) | Outbox lease/backoff/Dead Letter/delete priority; Projection Version; Repair Worker |
 | B14 | DONE | S4-04～S4-06 | `../codex_batches/B14_s4_forget_diagnostics.md` | SELF (Batch-ID: B14) | Forget tombstone/read block, managed authorization, redacted diagnostics; full suite has unrelated API acceptance failure |
-| B15 | READY | S4-07～S4-08；S4 Gate | `../codex_batches/B15_s4_reliability_gate.md` | — | Next batch only; not executed in B14 |
-| B16 | TODO | S5-01～S5-04 | `../codex_batches/B16_s5_benchmark_dashboard.md` | — | |
+| B15 | DONE | S4-07～S4-08；S4 Gate | `../codex_batches/B15_s4_reliability_gate.md` | SELF (Batch-ID: B15) | Fault matrix automated; Infrastructure Trace/metrics; S4 Gate PASS |
+| B16 | READY | S5-01～S5-04 | `../codex_batches/B16_s5_benchmark_dashboard.md` | — | Next batch only; not executed in B15 |
 | B17 | TODO | S5-05～S5-08 | `../codex_batches/B17_s5_migration_cutover.md` | — | |
 | B18 | TODO | S5-09～S5-10；S5/P0/P1/Release Gate | `../codex_batches/B18_release.md` | — | |
 
 ## Invariant check
 
 - IN_PROGRESS count: 0
-- READY count: 1（B15）
+- READY count: 1（B16）
 - Overlapping formal task IDs: None
 - Missing formal task IDs: None
-- Current prompt: `../codex_batches/B14_s4_forget_diagnostics.md` completed；next prompt is `../codex_batches/B15_s4_reliability_gate.md` only in a new session
-- Hard stop after current batch: create the single B14 commit, read-only verify, then end the session；不得进入 B15
-- Commit invariant: B01～B13 已独立提交；B14 待创建唯一 `Batch-ID: B14` 提交；B15～B18 各要求唯一 `Batch-ID` 提交
+- Current prompt: `../codex_batches/B15_s4_reliability_gate.md` completed; next prompt is `../codex_batches/B16_s5_benchmark_dashboard.md` only in a new session
+- Hard stop after current batch: create the single B15 commit, read-only verify, then end the session; do not enter B16
+- Commit invariant: B01～B14 已独立提交；B15 requires exactly one `Batch-ID: B15` commit; B16～B18 remain unexecuted

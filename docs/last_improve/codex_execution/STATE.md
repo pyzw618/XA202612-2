@@ -1,5 +1,28 @@
 # MemoryHub vNext Codex Execution State
 
+## B15 start reconciliation — 2026-08-25
+
+- Current batch: B15 (`S4-07` to `S4-08` plus S4 Gate), status `IN_PROGRESS`.
+- Branch/HEAD: `dev-remem` / `d0ffff4745c3094a8437006fb2e7a5c38e5fd0e1`.
+- Existing untracked `evaluation/results/*.db` artifacts are preserved; no source diff was present at start.
+- S4-01 through S4-06 are DONE with evidence. No task was already IN_PROGRESS, so S4-07 is claimed.
+- Scope boundary: only S4-07, S4-08, and S4 Gate. B16/S5 must not be executed or modified.
+- Exact next action: add and validate the seven-case fault-injection matrix.
+
+## S4-07 checkpoint — 2026-08-25
+
+- Status: DONE. Added `tests/test_vnext_reliability.py` and `evaluation/run_reliability_eval.py`.
+- Matrix covers vector timeout, duplicate delivery, worker crash, pre/post commit crash, stale cache, index corruption, and duplicate event.
+- Evidence: focused matrix `9 passed`; evaluation runner emitted `evaluation/results/vnext_reliability_report.json`; targeted ruff, compileall, and diff-check passed.
+- Next task: S4-08 IN_PROGRESS; add Infrastructure Trace and reliability metrics integration/evidence.
+
+## S4-08 and S4 Gate checkpoint — 2026-08-25
+
+- S4-08 DONE: metrics cover Write/Search/Context latency, Projection lag, Recovery time, Repair rate, Forget success, and residual retrieval; redacted Infrastructure Trace spans are supported and Outbox worker outcomes are emitted.
+- Evidence: vNext regression 270 passed; S4 risk/recovery set 109 passed; projection rebuild/Authority write set 15 passed; targeted ruff, compileall, and diff-check passed.
+- S4 Gate PASS: pre-commit atomicity, post-commit Outbox recovery, duplicate/ordering safety, index repair, residual retrieval count 0, and fail-closed stale/deleted reads are evidenced.
+- B15 DONE; B16 READY only. No B16 content was executed or modified.
+
 ## B14 final validation and acceptance
 
 - Date: 2026-08-24; branch `dev-remem`; B14 was the sole READY batch and no B14 task was previously IN_PROGRESS. No applicable `AGENTS.md` was found; existing untracked `evaluation/results/*.db` artifacts were preserved and excluded.

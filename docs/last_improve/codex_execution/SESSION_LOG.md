@@ -547,3 +547,18 @@
 - Files changed: `memoryhub/application/forget_service.py`, `memoryhub/application/diagnostic_service.py`, `memoryhub/adapter/vnext_api.py`, `memoryhub/app.py`, `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `docs/spec/VNEXT_INTERFACE.md`, `tests/test_vnext_forget_diagnostics.py`, and B14 continuity files.
 - Commit plan: stage only B14 source/tests/documentation/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B14 s4 forget diagnostics` with trailer `Batch-ID: B14`; do not push, amend, rebase, or enter B15.
 - Hard stop: after read-only verification of the single B14 commit, hand off `docs/last_improve/codex_batches/B15_s4_reliability_gate.md` and stop.
+
+## Checkpoint 2026-08-25 — B15 S4-07
+
+- Restored B15 from READY; claimed S4-07 after verifying S4-01 through S4-06 evidence.
+- Added the deterministic eight-case fault matrix, evaluation runner, redacted Infrastructure Trace span support, and metrics collector.
+- Focused reliability tests: 9 passed; evaluation report passed; targeted static checks passed.
+- S4-07 DONE; S4-08 IN_PROGRESS. Next action: run affected vNext and risk regressions, then verify S4 Gate.
+
+## Checkpoint 2026-08-25 — B15 final validation and acceptance
+
+- B15 S4-07/S4-08 completed within scope; no B16/S5 code, tests, research, or task claim performed.
+- Validation: reliability matrix 9 passed; vNext regression 270 passed; risk/recovery set 109 passed; projection rebuild/Authority set 15 passed; ruff/compileall/diff-check passed.
+- S4 Gate PASS. Forget residual retrieval count is 0; Projection recovery is covered by repair/rebuild and Outbox replay evidence.
+- Continuity: B15 DONE, B16 READY only; next prompt `docs/last_improve/codex_batches/B16_s5_benchmark_dashboard.md`.
+- Commit plan: stage only B15 source/tests/evaluation/continuity artifacts, create exactly one local commit titled `feat(vnext): complete B15 s4 reliability gate` with trailer `Batch-ID: B15`; then read-only verify SHA and stop.

@@ -311,5 +311,34 @@ class TraceStore:
         )
         return self.record(span)
 
+    def record_infrastructure(
+        self,
+        *,
+        trace_id: str,
+        tenant_id: str,
+        user_id: str,
+        operation: str,
+        outcome: str,
+        duration_ms: float = 0.0,
+        ids: dict[str, str] | None = None,
+        reason_codes: list[str] | None = None,
+        parent_id: str | None = None,
+    ) -> TraceSpan:
+        """Record infrastructure outcomes without storing payload or query text."""
+        span = TraceSpan(
+            span_id=f"span-infrastructure-{trace_id}-{len(self._records)}",
+            trace_id=trace_id,
+            parent_id=parent_id,
+            kind=TraceSpanKind.INFRASTRUCTURE,
+            layer="INFRASTRUCTURE",
+            tenant_id=tenant_id,
+            user_id=user_id,
+            ids=dict(ids or {}),
+            classification={"operation": operation, "outcome": outcome},
+            scores={"duration_ms": float(duration_ms)},
+            reason_codes=list(reason_codes or []),
+        )
+        return self.record(span)
+
 
 __all__ = ["TraceStore"]
