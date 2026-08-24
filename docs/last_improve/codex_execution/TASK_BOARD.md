@@ -49,9 +49,9 @@
 | S2-08 | DONE | S0-06, S2-02, S2-03, S2-04, S2-05, S2-06, S2-07 | Codex 2026-08-24 (B09) | EVIDENCE.md#s2-08-checkpoint | Formation Shadow |
 | S2-09 | DONE | S2-02, S2-03, S2-04, S2-05, S2-06, S2-07 | Codex 2026-08-24 (B09) | EVIDENCE.md#s2-09-checkpoint | Formation/Evolution Trace |
 | S2-10 | DONE | S2-08, S2-09 | Codex 2026-08-24 (B09) | EVIDENCE.md#s2-10-checkpoint | Formation 与恢复评测 |
-| S3-01 | TODO | S0-04 | | | Retrieval Request/Response |
-| S3-02 | TODO | S3-01 | | | 7 类 Intent Router |
-| S3-03 | TODO | S3-02, S1-07 | | | Retrieval Planner 与多通道 |
+| S3-01 | DONE | S0-04 | Codex 2026-08-24 (B10) | EVIDENCE.md#s3-01-checkpoint | Retrieval Request/Response |
+| S3-02 | DONE | S3-01 | Codex 2026-08-24 (B10) | EVIDENCE.md#s3-02-checkpoint | 7 类 Intent Router |
+| S3-03 | DONE | S3-02, S1-07 | Codex 2026-08-24 (B10) | EVIDENCE.md#s3-03-checkpoint | Retrieval Planner 与多通道 |
 | S3-04 | TODO | S3-03 | | | Fusion 与 Reranker |
 | S3-05 | TODO | S3-04, S2-06 | | | Authority 校验与 Scope Resolver |
 | S3-06 | TODO | S3-05 | | | Context Budget Manager |

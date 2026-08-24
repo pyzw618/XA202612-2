@@ -1,7 +1,41 @@
 # MemoryHub vNext Codex Execution State
 
-> Last updated: 2026-08-24 08:55 +08:00
-> Updated by: Codex session 2026-08-24 (B09)
+> Last updated: 2026-08-24 11:58 +08:00
+> Updated by: Codex session 2026-08-24 (B10)
+
+## B10 start reconciliation
+
+- Last updated: 2026-08-24 11:58 +08:00; updated by Codex session 2026-08-24 (B10)
+- Current batch: B10 (`S3-01`～`S3-03`); batch status: IN_PROGRESS
+- Current batch prompt: `docs/last_improve/codex_batches/B10_s3_request_planning.md`
+- Current task: S3-03 DONE; S3-01 DONE; S3-02 DONE
+- Dependencies: S0-04 DONE with valid evidence; S1-07 DONE with valid evidence
+- Start reconciliation: branch `dev-remem`; HEAD `1c08cde2f99c0c7e996dd55c0b2844a275cabb95` (B09 commit `feat(vnext): complete B09 s2 shadow eval gate`); working tree clean; no applicable `AGENTS.md`; BATCH_BOARD was B10 READY and TASK_BOARD had no B10 task in progress
+- Reconciliation: B09 commit is present and BATCH_BOARD/TASK_BOARD facts authorize B10. No user-owned unrelated changes observed.
+- Acceptance: prior B09 acceptance remains valid.
+- Boundary: only S3-01, S3-02, S3-03; no S3-04 or later batches.
+- Exact next action: run B10 focused tests, affected vNext regressions, and static checks; then finalize B10 commit.
+
+### S3-03 checkpoint
+
+- Status: DONE; Retrieval Planner produces channel plans per intent with necessary channels only, authority-checked enforcement, production Milvus gate, and degraded-channel visibility.
+- Implementation: `memoryhub/retrieval/planner.py` with `RetrievalPlan`, `RetrievalPlanner`, per-intent channel sets, scope/layer/type metadata filters, and safe fallbacks.
+- Evidence: `tests/test_vnext_retrieval_planner.py` 12 passed; ruff/compileall passed.
+- Next checkpoint: B10 batch validation and single local commit.
+
+### S3-02 checkpoint
+
+- Status: DONE; 7-class Intent Router with rule-based scoring, optional LLM scorer, MIXED/low-confidence degradation, and explainable target layers/types.
+- Implementation: `memoryhub/retrieval/intent_router.py` with `IntentRouter`, `RoutedIntent`, confidence bands, and fail-closed fallback.
+- Evidence: `tests/test_vnext_intent_router.py` 14 passed; ruff/compileall passed.
+- Next checkpoint: S3-03 Retrieval Planner and multi-channel recall.
+
+### S3-01 checkpoint
+
+- Status: DONE; bidirectional compatibility between `MemoryRetrievalRequest/Response` and legacy `SearchRequest/Response` verified.
+- Implementation: `MemoryRetrievalRequest.from_legacy_search_request`, `MemoryRetrievalResponse.to_legacy_search_response`, enhanced `LegacySearchCompatibilityResponse.from_vnext`, and helper mappings in `memoryhub/adapter/vnext_schemas.py`.
+- Evidence: `tests/test_vnext_interface.py` 9 passed; ruff/compileall passed.
+- Next checkpoint: S3-02 Query Understanding and 7-class Intent Router.
 
 ## B09 final validation and acceptance
 

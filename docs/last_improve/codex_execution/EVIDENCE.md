@@ -1,5 +1,87 @@
 # MemoryHub vNext Execution Evidence
 
+## B10 start reconciliation
+
+- Date/time: 2026-08-24 11:58 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; branch `dev-remem`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  git branch --show-current
+  git rev-parse HEAD
+  git status --short --untracked-files=all
+  git diff --stat
+  git log -1 --format="%H%n%s%n%b"
+  rg --files -g 'AGENTS.md'
+  ```
+- Result: PASS for repository reconciliation. HEAD=`1c08cde2f99c0c7e996dd55c0b2844a275cabb95`, B09 commit `feat(vnext): complete B09 s2 shadow eval gate` with trailer `Batch-ID: B09` is present, working tree clean, no applicable `AGENTS.md` found.
+- Continuity: `BATCH_BOARD.md` had B10 READY and no IN_PROGRESS batch; `TASK_BOARD.md` had no B10 task in progress; S0-04 and S1-07 are DONE with evidence.
+- Decision: claim B10 and the smallest dependency-satisfied task S3-01; do not touch S3-04 or later batches.
+
+## S3-01 checkpoint
+
+- Date/time: 2026-08-24 12:05 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_interface.py -q
+  .venv/Scripts/python -m ruff check memoryhub/adapter/vnext_schemas.py tests/test_vnext_interface.py
+  .venv/Scripts/python -m compileall -q memoryhub/adapter/vnext_schemas.py tests/test_vnext_interface.py
+  ```
+- Result: PASS; 9 tests passed; ruff/compileall passed.
+- Changes: `memoryhub/adapter/vnext_schemas.py` adds `MemoryRetrievalRequest.from_legacy_search_request`, `MemoryRetrievalResponse.to_legacy_search_response`, helper mappings, and enhanced `LegacySearchCompatibilityResponse.from_vnext`; `tests/test_vnext_interface.py` adds bidirectional compatibility tests.
+- Compatibility verified: old `SearchRequest` maps to vNext scope/intent/page_size; vNext response maps back to old `SearchResponse` with populated `results`/`preferences`/`facts`/`knowledge` lists and stable metadata.
+
+## S3-02 checkpoint
+
+- Date/time: 2026-08-24 12:35 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_intent_router.py -q
+  .venv/Scripts/python -m ruff check memoryhub/retrieval/intent_router.py tests/test_vnext_intent_router.py
+  .venv/Scripts/python -m compileall -q memoryhub/retrieval/intent_router.py tests/test_vnext_intent_router.py
+  ```
+- Result: PASS; 14 tests passed; ruff/compileall passed.
+- Changes: `memoryhub/retrieval/intent_router.py` with `IntentRouter` and `RoutedIntent`; 7-class rule-based scoring with optional LLM scorer, MIXED/low-confidence degradation, and explainable target layers/types.
+- Behavior verified: CURRENT_STATE/TASK_HISTORY/PREFERENCE/SEMANTIC_FACT/PROCEDURE/EXPERIENCE each route correctly; MIXED produced for close/tied intents; empty/ambiguous queries degrade to MIXED; hint overrides rules; LLM fallback is fail-closed.
+
+## S3-03 checkpoint
+
+- Date/time: 2026-08-24 12:50 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_retrieval_planner.py -q
+  .venv/Scripts/python -m ruff check memoryhub/retrieval/planner.py tests/test_vnext_retrieval_planner.py
+  .venv/Scripts/python -m compileall -q memoryhub/retrieval/planner.py tests/test_vnext_retrieval_planner.py
+  ```
+- Result: PASS; 12 tests passed; ruff/compileall passed.
+- Changes: `memoryhub/retrieval/planner.py` with `RetrievalPlan` and `RetrievalPlanner`; per-intent channel selection (vector/keyword/metadata/working/episode/authority), AUTHORITY_CHECKED enforcement, production Milvus gate, and degraded-channel reporting.
+- Behavior verified: CURRENT_STATE uses working+metadata; TASK_HISTORY uses episode+metadata; Long-Term intents use vector+keyword+metadata+authority; EXPERIENCE adds episode; MIXED uses all channels; unavailable channels are listed as degraded; metadata filters carry tenant/user/scope/layer/type.
+
+## B10 final validation and acceptance
+
+- Date/time: 2026-08-24 13:05 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_interface.py tests/test_vnext_intent_router.py tests/test_vnext_retrieval_planner.py -q
+  .venv/Scripts/python -m pytest tests/test_vnext_*.py -q
+  .venv/Scripts/python -m pytest tests/test_safety_pipeline.py tests/test_safety_contract.py tests/test_safe_errors.py tests/test_ingestion_schema.py tests/test_memory_write_contract_schema.py -q
+  .venv/Scripts/python -m pytest tests/test_no_production_write_bypass.py tests/test_vnext_repositories.py tests/test_vnext_event_gateway.py tests/test_vnext_task_state.py tests/test_vnext_authority_write.py tests/test_vnext_p0_flow.py tests/test_vnext_entrypoints.py tests/test_vnext_boundary_detector.py tests/test_vnext_reflection.py tests/test_vnext_candidate_service.py tests/test_vnext_consolidation_service.py tests/test_vnext_evolution.py tests/test_vnext_long_term_validation.py tests/test_vnext_formation_shadow.py tests/test_vnext_formation_trace.py tests/test_vnext_formation_eval.py -q
+  .venv/Scripts/python -m ruff check memoryhub/adapter/vnext_schemas.py memoryhub/retrieval/intent_router.py memoryhub/retrieval/planner.py tests/test_vnext_interface.py tests/test_vnext_intent_router.py tests/test_vnext_retrieval_planner.py
+  .venv/Scripts/python -m compileall -q memoryhub/adapter/vnext_schemas.py memoryhub/retrieval/intent_router.py memoryhub/retrieval/planner.py tests/test_vnext_interface.py tests/test_vnext_intent_router.py tests/test_vnext_retrieval_planner.py
+  git diff --check
+  ```
+- Result:
+  - B10 focused tests: 35 passed.
+  - Affected vNext regression (`tests/test_vnext_*.py`): 188 passed.
+  - Safety/contract/error regression: 101 passed.
+  - Broader affected vNext/S1/S2 regression: 116 passed.
+  - Static checks: ruff/compileall passed; `git diff --check` passed (line-ending warnings only).
+- Gate check: B10 exit criteria met -- old client compatibility preserved via bidirectional request/response adapters; 7-class routing is explainable with `RoutedIntent.reason` and `mixed_intents`; each intent enables only necessary channels; channel degradation is visible in `RetrievalPlan.degraded_channels` and reason string.
+- Commit plan: stage only B10 source/tests/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B10 s3 request planning` with trailer `Batch-ID: B10`; do not push, amend, rebase, or begin B11.
+
 ## B07 start reconciliation
 
 - Date/time: 2026-08-24 07:05 +08:00

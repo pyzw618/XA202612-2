@@ -14,9 +14,9 @@
 | B06 | DONE | S1-09～S1-11；S1 Gate | `../codex_batches/B06_s1_entrypoints_gate.md` | `b9432ab` | S1 Gate PASS；下一批次 B07 已置为 READY |
 | B07 | DONE | S2-01～S2-03 | `../codex_batches/B07_s2_reflection_candidates.md` | `e8c55d3` | 边界、Reflection、Candidate 归一完成；B08 已置 READY |
 | B08 | DONE | S2-04～S2-07 | `../codex_batches/B08_s2_consolidation_evolution.md` | `SELF (Batch-ID: B08)` | 固化与演化可解释、Fast Path 受约束、Procedure 来源受约束；B09 已置 READY |
-| B09 | DONE | S2-08～S2-10；S2 Gate | `../codex_batches/B09_s2_shadow_eval_gate.md` | `SELF (Batch-ID: B09)` | Shadow 不写 ACTIVE；Trace 默认脱敏；Formation 评测可复现；S2 Gate PASS；B10 已置 READY |
-| B10 | READY | S3-01～S3-03 | `../codex_batches/B10_s3_request_planning.md` | — | |
-| B11 | TODO | S3-04～S3-07 | `../codex_batches/B11_s3_fusion_context.md` | — | |
+| B09 | DONE | S2-08～S2-10；S2 Gate | `../codex_batches/B09_s2_shadow_eval_gate.md` | `1c08cde` | Shadow 不写 ACTIVE；Trace 默认脱敏；Formation 评测可复现；S2 Gate PASS；B10 已置 READY |
+| B10 | DONE | S3-01～S3-03 | `../codex_batches/B10_s3_request_planning.md` | `SELF (Batch-ID: B10)` | 旧客户端兼容；7 类 Intent Router 可解释；Planner 多通道降级可见；B11 已置 READY |
+| B11 | READY | S3-04～S3-07 | `../codex_batches/B11_s3_fusion_context.md` | — | |
 | B12 | TODO | S3-08～S3-10；S3 Gate | `../codex_batches/B12_s3_entrypoints_eval_gate.md` | — | |
 | B13 | TODO | S4-01～S4-03 | `../codex_batches/B13_s4_projection_repair.md` | — | |
 | B14 | TODO | S4-04～S4-06 | `../codex_batches/B14_s4_forget_diagnostics.md` | — | |

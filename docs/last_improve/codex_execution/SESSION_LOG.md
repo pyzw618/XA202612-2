@@ -393,6 +393,28 @@
 - Commit plan: stage only B08 source/tests/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B08 s2 consolidation evolution` with trailer `Batch-ID: B08`; do not push, amend, rebase, or begin B09.
 - Hard stop: after read-only verification of the B08 commit, end the session and hand off `docs/last_improve/codex_batches/B09_s2_shadow_eval_gate.md`.
 
+## Checkpoint 2026-08-24-06 — B10 final validation and acceptance
+
+- Started: 2026-08-24 11:58 +08:00
+- Ended: 2026-08-24 13:05 +08:00
+- Branch/HEAD: `dev-remem` / `1c08cde2f99c0c7e996dd55c0b2844a275cabb95`
+- Restored batch/task: B10 READY with no in-progress task; completed S3-01, S3-02, S3-03.
+- Completed changes:
+  - S3-01: enhanced `memoryhub/adapter/vnext_schemas.py` with `MemoryRetrievalRequest.from_legacy_search_request`, `MemoryRetrievalResponse.to_legacy_search_response`, legacy-type helpers, and enhanced `LegacySearchCompatibilityResponse.from_vnext`.
+  - S3-02: `memoryhub/retrieval/intent_router.py` with 7-class `IntentRouter`, rule-based scoring, optional LLM scorer, MIXED/low-confidence degradation, and `RoutedIntent` targets/reason.
+  - S3-03: `memoryhub/retrieval/planner.py` with `RetrievalPlan` and `RetrievalPlanner`; per-intent channel selection, AUTHORITY_CHECKED enforcement, production Milvus gate, and degraded-channel reporting.
+- Files changed: `memoryhub/adapter/vnext_schemas.py`, `memoryhub/retrieval/intent_router.py`, `memoryhub/retrieval/planner.py`, `tests/test_vnext_interface.py`, `tests/test_vnext_intent_router.py`, `tests/test_vnext_retrieval_planner.py`, plus continuity files.
+- Validation run:
+  - B10 focused: `tests/test_vnext_interface.py`, `tests/test_vnext_intent_router.py`, `tests/test_vnext_retrieval_planner.py` → 35 passed.
+  - Affected vNext regression (`tests/test_vnext_*.py`) → 188 passed.
+  - Safety/contract/error regression → 101 passed.
+  - Broader affected vNext/S1/S2 regression → 116 passed.
+  - Static: ruff/compileall passed; `git diff --check` passed (line-ending warnings only).
+- Task status changes: S3-01 DONE; S3-02 DONE; S3-03 DONE; B10 IN_PROGRESS → DONE; B11 TODO → READY.
+- Blockers: None for B10.
+- Commit plan: stage only B10 source/tests/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B10 s3 request planning` with trailer `Batch-ID: B10`; do not push, amend, rebase, or begin B11.
+- Hard stop: after read-only verification of the B10 commit, end the session and hand off `docs/last_improve/codex_batches/B11_s3_fusion_context.md`.
+
 ## Checkpoint 2026-08-24-05 — B09 final validation and acceptance
 
 - Started: 2026-08-24 08:40 +08:00

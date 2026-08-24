@@ -12,6 +12,17 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+# Compatibility adapters for the legacy SearchRequest/Response surface live in
+# this wire-contract module so higher layers can convert without duplication.
+from memoryhub.adapter.schemas import (
+    FactMemory,
+    KnowledgeMemory,
+    PreferenceMemory,
+    SceneScope,
+    SearchRequest,
+    SearchResponse,
+    SearchResult,
+)
 from memoryhub.domain.contracts import (
     Activation,
     EpisodeSnapshot,
@@ -117,6 +128,36 @@ class MemoryRetrievalRequest(APIModel):
     cursor: str = ""
     page_size: int = Field(default=20, ge=1, le=100)
 
+    @classmethod
+    def from_legacy_search_request(
+        cls,
+        request: SearchRequest,
+        *,
+        tenant_id: str | None = None,
+        request_id: str = "",
+    ) -> "MemoryRetrievalRequest":
+        """Upgrade a legacy SearchRequest to the vNext retrieval contract.
+
+        The legacy request has no tenant_id; callers should supply it explicitly.
+        When omitted, the tenant_id falls back to user_id so unit tests and
+        legacy adapters keep working, but production callers must provide it.
+        """
+        scope_level, scope = _legacy_scope_to_vnext(request.context, request.project_id)
+        fallback_request_id = f"legacy-{request.user_id}-{hash(request.query) & 0xFFFFFFFF:08x}"
+        return cls(
+            api_version="vnext/v1",
+            request_id=request_id or fallback_request_id,
+            tenant_id=tenant_id or request.user_id or "default",
+            user_id=request.user_id or "default",
+            query=request.query,
+            session_id=request.session_id,
+            scope_level=scope_level,
+            scope=scope,
+            intent_hint=_legacy_intent_hint(request.level, request.memory_types),
+            token_budget=max(128, request.top_k * 40),
+            page_size=max(1, min(100, request.top_k or 5)),
+        )
+
 
 class RetrievedMemory(APIModel):
     tenant_id: str = Field(min_length=1)
@@ -160,6 +201,35 @@ class MemoryRetrievalResponse(APIModel):
     warnings: list[str] = Field(default_factory=list)
     next_cursor: str = ""
     total_count: int = Field(default=0, ge=0)
+
+    def to_legacy_search_response(self, *, latency_ms: float = 0.0) -> SearchResponse:
+        """Downgrade a vNext response to the legacy SearchResponse shape.
+
+        This preserves the wire contract for existing REST/MCP/CLI clients while
+        still carrying vNext identity in result metadata.
+        """
+        results: list[SearchResult] = []
+        preferences: list[PreferenceMemory] = []
+        knowledge: list[KnowledgeMemory] = []
+        facts: list[FactMemory] = []
+        for item in self.selected_memories:
+            result = _retrieved_memory_to_search_result(item)
+            results.append(result)
+            typed = _retrieved_memory_to_legacy_typed(item)
+            if isinstance(typed, PreferenceMemory):
+                preferences.append(typed)
+            elif isinstance(typed, KnowledgeMemory):
+                knowledge.append(typed)
+            elif isinstance(typed, FactMemory):
+                facts.append(typed)
+        return SearchResponse(
+            results=results,
+            preferences=preferences,
+            knowledge=knowledge,
+            facts=facts,
+            latency_ms=round(latency_ms, 2),
+            total_count=self.total_count,
+        )
 
 
 class ResumeTaskRequest(APIModel):
@@ -253,7 +323,12 @@ class DiagnosticResponse(APIModel):
 
 
 class LegacySearchCompatibilityResponse(APIModel):
-    """Stable old response shape; it contains no retrieval algorithm."""
+    """Stable old response shape; it contains no retrieval algorithm.
+
+    Prefer ``MemoryRetrievalResponse.to_legacy_search_response`` for full
+    backward-compatible SearchResponse objects; this dict-only adapter remains
+    for lightweight diagnostics and dashboards.
+    """
 
     results: list[dict[str, Any]] = Field(default_factory=list)
     preferences: list[dict[str, Any]] = Field(default_factory=list)
@@ -264,27 +339,198 @@ class LegacySearchCompatibilityResponse(APIModel):
     trace_id: str = ""
 
     @classmethod
-    def from_vnext(cls, response: MemoryRetrievalResponse) -> "LegacySearchCompatibilityResponse":
-        results = [
-            {
-                "memory_id": item.memory_id,
-                "memory_type": item.memory_type.value.lower(),
-                "content": item.content,
-                "score": item.score,
-                "memory_level": item.layer.value.lower(),
-                "metadata": {
-                    "scope": item.scope,
-                    "content_version": item.content_version,
-                },
-            }
-            for item in response.selected_memories
-        ]
+    def from_vnext(
+        cls,
+        response: MemoryRetrievalResponse,
+        *,
+        latency_ms: float = 0.0,
+    ) -> "LegacySearchCompatibilityResponse":
+        results = []
+        preferences = []
+        knowledge = []
+        facts = []
+        for item in response.selected_memories:
+            results.append(_retrieved_memory_to_legacy_dict(item))
+            typed = _retrieved_memory_to_legacy_typed(item)
+            if isinstance(typed, PreferenceMemory):
+                preferences.append(typed.model_dump())
+            elif isinstance(typed, KnowledgeMemory):
+                knowledge.append(typed.model_dump())
+            elif isinstance(typed, FactMemory):
+                facts.append(typed.model_dump())
         return cls(
             results=results,
-            latency_ms=0.0,
+            preferences=preferences,
+            knowledge=knowledge,
+            facts=facts,
+            latency_ms=round(latency_ms, 2),
             total_count=response.total_count,
             trace_id=response.trace_id,
         )
+
+
+# ---------------------------------------------------------------------------
+# Legacy SearchRequest/SearchResponse compatibility helpers (S3-01)
+# ---------------------------------------------------------------------------
+
+
+def _legacy_scope_to_vnext(
+    context: SceneScope,
+    project_id: str,
+) -> tuple[MemoryScope | None, str]:
+    """Map legacy SceneScope/project_id to vNext scope_level and scope string."""
+    if project_id:
+        return MemoryScope.PROJECT, f"PROJECT:{project_id}"
+    if context.task_type:
+        return MemoryScope.TASK, f"TASK:{context.task_type}"
+    if context.app:
+        return MemoryScope.APPLICATION, f"APPLICATION:{context.app}"
+    if context.scene:
+        return MemoryScope.SESSION, f"SESSION:{context.scene}"
+    return None, ""
+
+
+def _legacy_intent_hint(level: str, memory_types: list[str]) -> RetrievalIntent:
+    """Infer a vNext intent hint from legacy level/memory_type filters."""
+    normalized_level = (level or "").strip().lower()
+    if normalized_level == "short":
+        return RetrievalIntent.CURRENT_STATE
+    if normalized_level == "mid":
+        return RetrievalIntent.TASK_HISTORY
+    normalized_types = {t.strip().lower() for t in memory_types if isinstance(t, str)}
+    if normalized_types == {"preference"}:
+        return RetrievalIntent.PREFERENCE
+    if normalized_types and normalized_types <= {"knowledge", "fact"}:
+        return RetrievalIntent.SEMANTIC_FACT
+    return RetrievalIntent.MIXED
+
+
+def _legacy_memory_level(layer: LifecycleLayer) -> str:
+    return {
+        LifecycleLayer.WORKING: "short",
+        LifecycleLayer.EPISODE: "mid",
+        LifecycleLayer.LONG_TERM: "long",
+    }.get(layer, "long")
+
+
+def _legacy_memory_type(memory_type: MemoryType) -> str:
+    if memory_type is MemoryType.PREFERENCE:
+        return "preference"
+    if memory_type is MemoryType.SEMANTIC:
+        return "fact"
+    return "knowledge"
+
+
+def _legacy_scene_scope(scope_level: MemoryScope, scope: str) -> SceneScope:
+    value = scope.split(":", 1)[-1] if ":" in scope else scope
+    if scope_level is MemoryScope.GLOBAL:
+        return SceneScope()
+    if scope_level is MemoryScope.PROJECT:
+        return SceneScope(scene=value)
+    return SceneScope(scene=value, task_type=value, app=value)
+
+
+def _extract_content_text(content: dict[str, Any]) -> str:
+    for key in ("text", "content", "value", "name"):
+        value = content.get(key)
+        if isinstance(value, str) and value:
+            return value
+    parts = [str(v) for v in content.values() if isinstance(v, str)]
+    return " ".join(parts)
+
+
+def _retrieved_memory_to_legacy_dict(item: RetrievedMemory) -> dict[str, Any]:
+    # The legacy dict adapter preserves the original vNext layer value so that
+    # lightweight dashboards continue to see the vNext layer identity.
+    return {
+        "memory_id": item.memory_id,
+        "memory_type": _legacy_memory_type(item.memory_type),
+        "content": _extract_content_text(item.content),
+        "score": item.score,
+        "source": "+".join(item.source_ids) or "vnext",
+        "memory_level": item.layer.value.lower(),
+        "metadata": {
+            "scope": item.scope,
+            "scope_level": item.scope_level.value,
+            "content_version": item.content_version,
+            "evolution_status": item.evolution_status,
+            "score_breakdown": item.score_breakdown,
+        },
+    }
+
+
+def _retrieved_memory_to_search_result(item: RetrievedMemory) -> SearchResult:
+    return SearchResult(
+        memory_id=item.memory_id,
+        memory_type=_legacy_memory_type(item.memory_type),
+        content=_extract_content_text(item.content),
+        score=item.score,
+        source="+".join(item.source_ids) or "vnext",
+        metadata={
+            "scope": item.scope,
+            "scope_level": item.scope_level.value,
+            "content_version": item.content_version,
+            "evolution_status": item.evolution_status,
+            "score_breakdown": item.score_breakdown,
+        },
+        memory_level=_legacy_memory_level(item.layer),
+    )
+
+
+def _retrieved_memory_to_legacy_typed(
+    item: RetrievedMemory,
+) -> PreferenceMemory | KnowledgeMemory | FactMemory | None:
+    """Best-effort conversion to one of the legacy typed memory models."""
+    from memoryhub.adapter.schemas import MemoryLevel, MemoryStatus
+
+    status_map = {
+        "ACTIVE": MemoryStatus.ACTIVE,
+        "ARCHIVED": MemoryStatus.ARCHIVED,
+        "DELETED": MemoryStatus.DELETED,
+        "DORMANT": MemoryStatus.PENDING,
+        "SUPERSEDED": MemoryStatus.ARCHIVED,
+    }
+    level_map = {
+        LifecycleLayer.WORKING: MemoryLevel.SHORT,
+        LifecycleLayer.EPISODE: MemoryLevel.MID,
+        LifecycleLayer.LONG_TERM: MemoryLevel.LONG,
+    }
+    common: dict[str, Any] = {
+        "user_id": item.user_id,
+        "memory_id": item.memory_id,
+        "confidence": item.score,
+        "status": status_map.get(item.evolution_status.upper(), MemoryStatus.ACTIVE),
+        "version": item.content_version,
+        "level": level_map.get(item.layer, MemoryLevel.LONG),
+    }
+    content_text = _extract_content_text(item.content)
+    if item.memory_type is MemoryType.PREFERENCE:
+        return PreferenceMemory(
+            **common,
+            scope=_legacy_scene_scope(item.scope_level, item.scope),
+            text=content_text,
+            payload=item.content,
+            preference_type="output_style",
+            is_global=item.scope_level is MemoryScope.GLOBAL,
+        )
+    if item.memory_type is MemoryType.SEMANTIC:
+        scope_label = "global" if item.scope_level is MemoryScope.GLOBAL else "project"
+        return FactMemory(
+            **common,
+            scope=scope_label,
+            fact_id=item.memory_id,
+            source_text=content_text,
+            object_value=content_text,
+        )
+    if item.memory_type in (MemoryType.PROCEDURAL, MemoryType.EPISODIC):
+        return KnowledgeMemory(
+            **common,
+            scope=_legacy_scene_scope(item.scope_level, item.scope),
+            name=item.content.get("name", item.memory_id),
+            content=content_text,
+            steps=item.content.get("steps", []),
+        )
+    return None
 
 
 __all__ = [
