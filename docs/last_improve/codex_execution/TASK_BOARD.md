@@ -59,9 +59,9 @@
 | S3-08 | DONE | S3-03, S3-04, S3-05, S3-06, S3-07 | Codex 2026-08-24 (B12) | EVIDENCE.md#s3-08-checkpoint | Activation、Log、Trace |
 | S3-09 | DONE | S3-08 | Codex 2026-08-24 (B12) | EVIDENCE.md#s3-09-checkpoint | REST/MCP/CLI/SDK 检索收敛 |
 | S3-10 | DONE | S3-09 | Codex 2026-08-24 (B12) | EVIDENCE.md#s3-10-checkpoint | Retrieval/Context 评测 |
-| S4-01 | TODO | S1-01, S1-07 | | | Outbox 升级 |
-| S4-02 | TODO | S4-01, S3-08 | | | Projection Version 与 Authority Checked |
-| S4-03 | TODO | S4-01, S4-02 | | | Repair Worker |
+| S4-01 | DONE | S1-01, S1-07 | Codex 2026-08-24 (B13) | EVIDENCE.md#s4-01-checkpoint | Outbox 升级 |
+| S4-02 | DONE | S4-01, S3-08 | Codex 2026-08-24 (B13) | EVIDENCE.md#s4-02-checkpoint | Projection Version 与 Authority Checked |
+| S4-03 | DONE | S4-01, S4-02 | Codex 2026-08-24 (B13) | EVIDENCE.md#s4-03-checkpoint | Repair Worker |
 | S4-04 | TODO | S1-07, S4-01 | | | Forget 状态机 |
 | S4-05 | TODO | S4-04 | | | Forget 管理接口 |
 | S4-06 | TODO | S2-09, S3-08, S4-03 | | | 诊断 API |
@@ -83,4 +83,4 @@
 - IN_PROGRESS count: 0
 - Dependency violations: None
 - DONE without evidence: None
-- Last checked: 2026-08-24 14:00 +08:00
+- Last checked: 2026-08-24 16:05 +08:00

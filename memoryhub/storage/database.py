@@ -116,6 +116,7 @@ class Database:
                 "extra_payload": "JSON",
                 "pending_index": "BOOLEAN DEFAULT 1",
                 "index_version": "INTEGER DEFAULT 0",
+                "projection_version": "INTEGER DEFAULT 0",
                 "health_score": "FLOAT DEFAULT 1.0",
                 "stability": "FLOAT DEFAULT 1.0",
                 "last_accessed_at": "DATETIME",
@@ -126,6 +127,7 @@ class Database:
                 "extra_payload": "JSON",
                 "pending_index": "BOOLEAN DEFAULT 1",
                 "index_version": "INTEGER DEFAULT 0",
+                "projection_version": "INTEGER DEFAULT 0",
                 "health_score": "FLOAT DEFAULT 1.0",
                 "stability": "FLOAT DEFAULT 1.0",
                 "last_accessed_at": "DATETIME",
@@ -164,6 +166,13 @@ class Database:
                 "event_id": "VARCHAR(64)",
                 "content_version": "INTEGER DEFAULT 1",
                 "projection_type": "VARCHAR(32) DEFAULT 'vector'",
+                "max_attempts": "INTEGER DEFAULT 5",
+                "priority": "INTEGER DEFAULT 0",
+                "backoff_policy": "JSON",
+                "lease_version": "INTEGER DEFAULT 0",
+                "lease_token": "VARCHAR(64)",
+                "lease_expires_at": "DATETIME",
+                "dead_lettered_at": "DATETIME",
             },
         }
         with self.engine.begin() as conn:
@@ -189,6 +198,10 @@ class Database:
                     conn.exec_driver_sql(
                         f"CREATE INDEX IF NOT EXISTS ix_{table}_index_version "
                         f"ON {table} (index_version)"
+                    )
+                    conn.exec_driver_sql(
+                        f"CREATE INDEX IF NOT EXISTS ix_{table}_projection_version "
+                        f"ON {table} (projection_version)"
                     )
 
             # Base.metadata.create_all() creates newly introduced tables on both new

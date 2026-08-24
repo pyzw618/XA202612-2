@@ -29,6 +29,8 @@ from memoryhub.domain.contracts import (
 from memoryhub.retrieval.intent_router import IntentRouter, RoutedIntent
 from memoryhub.retrieval.planner import RetrievalPlan, RetrievalPlanner
 from memoryhub.retrieval.scope_resolver import ScopeResolver
+from memoryhub.storage.authority_repository import AuthorityRepository
+from memoryhub.storage.memory_metadata import MemoryProjectionOutboxRepository
 
 ChannelExecutor = Callable[
     [MemoryRetrievalRequest, RetrievalPlan, str],
@@ -76,12 +78,28 @@ class RetrievalService:
         activation_repository: Any | None = None,
         retrieval_log_repository: Any | None = None,
         trace_store: Any | None = None,
+        authority_repository: AuthorityRepository | None = None,
+        db: Any | None = None,
     ) -> None:
         self.intent_router = intent_router or IntentRouter()
         self.planner = planner or RetrievalPlanner()
-        self.context_service = context_service or ContextService()
+        self.authority_repository = authority_repository
+        self.db = db
+        self.context_service = context_service or ContextService(
+            authority_repository=authority_repository,
+            repair_callback=self._enqueue_repair,
+        )
         self.channel_executors = dict(channel_executors or {})
-        self.scope_resolver = scope_resolver or ScopeResolver()
+        if scope_resolver is not None:
+            self.scope_resolver = scope_resolver
+        elif authority_repository is not None:
+            self.scope_resolver = ScopeResolver(
+                authority_repository=authority_repository,
+                authority_checked=True,
+                repair_callback=self._enqueue_repair,
+            )
+        else:
+            self.scope_resolver = ScopeResolver()
         self.activation_repository = activation_repository
         self.retrieval_log_repository = retrieval_log_repository
         self.trace_store = trace_store
@@ -206,6 +224,33 @@ class RetrievalService:
     ) -> ContextPayload:
         """Convenience wrapper that returns only the context payload."""
         return self.retrieve(request, **kwargs).response.context
+
+    def _enqueue_repair(self, memory: RetrievedMemory) -> None:
+        """Enqueue a high-priority projection repair without failing retrieval."""
+        if self.db is None:
+            return
+        try:
+            with self.db.session() as session:
+                MemoryProjectionOutboxRepository(self.db).enqueue(
+                    memory_id=memory.memory_id,
+                    memory_type=memory.memory_type.value,
+                    operation="upsert",
+                    payload={
+                        "memory_id": memory.memory_id,
+                        "memory_type": memory.memory_type.value,
+                        "operation": "upsert",
+                        "content_version": memory.content_version,
+                        "projection_type": "vector",
+                    },
+                    session=session,
+                    tenant_id=memory.tenant_id,
+                    user_id=memory.user_id,
+                    content_version=memory.content_version,
+                    projection_type="vector",
+                    priority=10,
+                )
+        except Exception:
+            pass
 
     def _record_activations(
         self,

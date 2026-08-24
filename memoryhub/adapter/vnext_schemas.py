@@ -168,6 +168,7 @@ class RetrievedMemory(APIModel):
     scope_level: MemoryScope
     scope: str = Field(min_length=1)
     content_version: int = Field(ge=1)
+    projection_version: int = Field(default=0, ge=0)
     evolution_status: str = Field(min_length=1)
     content: dict[str, Any] = Field(default_factory=dict)
     score: float = Field(ge=0.0)

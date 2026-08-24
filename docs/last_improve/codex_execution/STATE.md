@@ -1,7 +1,24 @@
 # MemoryHub vNext Codex Execution State
 
-> Last updated: 2026-08-24 14:00 +08:00
-> Updated by: Codex session 2026-08-24 (B12)
+> Last updated: 2026-08-24 16:05 +08:00
+> Updated by: Codex session 2026-08-24 (B13)
+
+## B13 final validation and acceptance
+
+- Last updated: 2026-08-24 16:05 +08:00; updated by Codex session 2026-08-24 (B13)
+- Current batch: B13 (`S4-01`～`S4-03`); batch status: DONE
+- Current task: none; S4-01, S4-02, S4-03 DONE
+- Dependencies: S1-01, S1-07 DONE with valid evidence; S3-08 DONE with valid evidence
+- Final validation: branch `dev-remem`; HEAD `fc3286f8d3b880659f8ded062ea42cac8d38df9a` (B12 commit `feat(vnext): complete B12 s3 entrypoints eval gate`); B13-scope changes staged; untracked test DB artifacts in `evaluation/results/`; no applicable `AGENTS.md`
+- Acceptance:
+  - S4-01 Versioned Outbox: `memoryhub/storage/models.py` outbox lease/backoff/dead-letter/delete-priority columns and partial unique index; `memoryhub/storage/memory_metadata.py` claim/mark/replay with lease verification, priority ordering, and dead-letter replay.
+  - S4-02 Projection Version & Authority Checked: `PreferenceRow`/`KnowledgeRow` `projection_version`; `AuthorityRepository` preserves projection_version; `ProjectionOutboxWorker` bumps projection_version after success; `CanonicalWriteService` enqueues vector projection; `ScopeResolver` rejects stale projections and triggers repair enqueue; `RetrievalService`/`ContextService` wire authority_checked.
+  - S4-03 Point & Offline Repair: `memoryhub/storage/repair.py` `RepairService`/`RepairWorker` diagnose missing/stale/orphan/incompatible and enqueue upsert/delete; `scripts/repair_projections.py` supports `--memory-id`, `--dry-run`, `--run-worker`, tenant/user scan and offline worker.
+  - B13 focused tests 13 passed; affected vNext regression 258 passed; safety/contract/error + write-bypass 83 passed; static checks passed; `git diff --check` passed (CRLF warnings only).
+  - Batches B01～B12 acceptance remains valid; no S4-04 or later code modified.
+- Next batch: B14 READY; next prompt is `docs/last_improve/codex_batches/B14_s4_forget_diagnostics.md`.
+- Boundary: only S4-01, S4-02, S4-03; no S4-04 or later batches.
+- Commit plan: create exactly one local commit titled `feat(vnext): complete B13 s4 projection repair` with trailer `Batch-ID: B13`; do not push, amend, rebase, or enter B14.
 
 ## B12 final validation and acceptance
 

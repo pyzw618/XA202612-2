@@ -18,8 +18,8 @@
 | B10 | DONE | S3-01～S3-03 | `../codex_batches/B10_s3_request_planning.md` | `SELF (Batch-ID: B10)` | 旧客户端兼容；7 类 Intent Router 可解释；Planner 多通道降级可见；B11 已置 READY |
 | B11 | DONE | S3-04～S3-07 | `../codex_batches/B11_s3_fusion_context.md` | `SELF (Batch-ID: B11)` | Fusion/Reranker 可解释；Authority/Scope 冲突可解释；Budget 保护硬约束；Context Builder 结构化；B12 已置 READY |
 | B12 | DONE | S3-08～S3-10；S3 Gate | `../codex_batches/B12_s3_entrypoints_eval_gate.md` | SELF (Batch-ID: B12) | S3 Gate PASS；所有入口一致 ID/版本/顺序/trace；评测可复现 |
-| B13 | READY | S4-01～S4-03 | `../codex_batches/B13_s4_projection_repair.md` | — | |
-| B14 | TODO | S4-04～S4-06 | `../codex_batches/B14_s4_forget_diagnostics.md` | — | |
+| B13 | DONE | S4-01～S4-03 | `../codex_batches/B13_s4_projection_repair.md` | SELF (Batch-ID: B13) | Outbox lease/backoff/Dead Letter/delete priority; Projection Version; Repair Worker |
+| B14 | READY | S4-04～S4-06 | `../codex_batches/B14_s4_forget_diagnostics.md` | — | |
 | B15 | TODO | S4-07～S4-08；S4 Gate | `../codex_batches/B15_s4_reliability_gate.md` | — | |
 | B16 | TODO | S5-01～S5-04 | `../codex_batches/B16_s5_benchmark_dashboard.md` | — | |
 | B17 | TODO | S5-05～S5-08 | `../codex_batches/B17_s5_migration_cutover.md` | — | |
@@ -28,9 +28,9 @@
 ## Invariant check
 
 - IN_PROGRESS count: 0
-- READY count: 1（B13）
+- READY count: 1（B14）
 - Overlapping formal task IDs: None
 - Missing formal task IDs: None
-- Current prompt: `../codex_batches/B12_s3_entrypoints_eval_gate.md` completed；next prompt is `../codex_batches/B13_s4_projection_repair.md` only in a new session
-- Hard stop after current batch: create the single B12 commit, read-only verify, then end the session；不得进入 B13
-- Commit invariant: B01/B02/B06/B07/B08/B09/B10/B11 已独立提交；B12 待创建唯一 `Batch-ID: B12` 提交；B03～B18 各要求唯一 `Batch-ID` 提交
+- Current prompt: `../codex_batches/B13_s4_projection_repair.md` completed；next prompt is `../codex_batches/B14_s4_forget_diagnostics.md` only in a new session
+- Hard stop after current batch: create the single B13 commit, read-only verify, then end the session；不得进入 B14
+- Commit invariant: B01/B02/B06/B07/B08/B09/B10/B11/B12 已独立提交；B13 待创建唯一 `Batch-ID: B13` 提交；B03～B18 各要求唯一 `Batch-ID` 提交

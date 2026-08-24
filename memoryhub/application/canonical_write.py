@@ -22,6 +22,7 @@ from memoryhub.application.working_service import WorkingPatchResult, WorkingSer
 from memoryhub.domain.contracts import (
     EpisodeEventContract,
     EpisodeSnapshot,
+    EvolutionStatus,
     LongTermEnvelope,
     MemoryEventContract,
     WorkingPatch,
@@ -29,6 +30,7 @@ from memoryhub.domain.contracts import (
 )
 from memoryhub.domain.long_term import LongTermAuthorityFacade
 from memoryhub.storage.database import Database, ExtractionTaskRepository
+from memoryhub.storage.memory_metadata import MemoryProjectionOutboxRepository
 from memoryhub.storage.vnext_repositories import EpisodeRepository, WorkingStateRepository
 
 
@@ -211,7 +213,36 @@ class CanonicalWriteService:
             )
         else:
             repository.save(envelope)
+        self._enqueue_projection_outbox(event, envelope)
         return envelope, receipt
+
+    def _enqueue_projection_outbox(
+        self, event: MemoryEventContract, envelope: LongTermEnvelope
+    ) -> None:
+        """Enqueue a vector projection outbox item after a successful Authority write."""
+        operation = "delete" if envelope.evolution_status is EvolutionStatus.DELETED else "upsert"
+        priority = 10 if operation == "delete" else 0
+        payload = {
+            "memory_id": envelope.memory_id,
+            "memory_type": envelope.memory_type.value,
+            "operation": operation,
+            "content_version": envelope.content_version,
+            "projection_type": "vector",
+        }
+        with self.db.session() as session:
+            MemoryProjectionOutboxRepository(self.db).enqueue(
+                memory_id=envelope.memory_id,
+                memory_type=envelope.memory_type.value,
+                operation=operation,
+                payload=payload,
+                session=session,
+                tenant_id=envelope.tenant_id,
+                user_id=envelope.user_id,
+                event_id=event.event_id,
+                content_version=envelope.content_version,
+                projection_type="vector",
+                priority=priority,
+            )
 
     @staticmethod
     def _memory_action(

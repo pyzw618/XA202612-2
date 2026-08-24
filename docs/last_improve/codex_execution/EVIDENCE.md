@@ -1113,3 +1113,67 @@
   - [x] 有限预算下硬约束与当前步骤不丢失：q-budget-protects-constraints verifies constraint_preservation=1.0 and budget_compliance=1.0 under token_budget=128.
   - [x] REST/MCP/CLI/SDK 不存在各自拼 Context 的实现：S3-09 entrypoint tests verify `/vnext/search`, `/vnext/context`, legacy `/search`, SDK `vnext_search`/`vnext_context` all delegate to `RetrievalService`.
 - Acceptance: B12 DONE; S3-08, S3-09, S3-10 DONE; S3 Gate PASS; B13 READY.
+
+
+## B13 start reconciliation
+
+- Date/time: 2026-08-24 14:10 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; branch `dev-remem`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  git branch --show-current
+  git rev-parse HEAD
+  git status --short --untracked-files=all
+  git diff --stat
+  git log -1 --format="%H%n%s%n%b"
+  rg --files -g 'AGENTS.md'
+  ```
+- Result: PASS for repository reconciliation. HEAD=`fc3286f8d3b880659f8ded062ea42cac8d38df9a`, B12 commit `feat(vnext): complete B12 s3 entrypoints eval gate` with trailer `Batch-ID: B12` is present; B13-scope changes already in working tree; no applicable `AGENTS.md` found.
+- Continuity: `BATCH_BOARD.md` had B13 READY and no IN_PROGRESS batch; `TASK_BOARD.md` had no B13 task in progress; S1-01, S1-07 and S3-08 are DONE with evidence.
+- Decision: claim B13 and the smallest dependency-satisfied task S4-01; do not touch S4-04 or later batches.
+
+### S4-01 checkpoint
+
+- Status: DONE; versioned Outbox with leasing, backoff, Dead Letter and delete priority.
+- Implementation: `memoryhub/storage/models.py` adds outbox `max_attempts`, `priority`, `backoff_policy`, `lease_version`, `lease_token`, `lease_expires_at`, `dead_lettered_at` and partial unique index `(tenant_id,memory_id,memory_type,operation,event_id)`; `PreferenceRow`/`KnowledgeRow` add `projection_version`; `memoryhub/storage/database.py` additive schema; `memoryhub/storage/memory_metadata.py` `MemoryProjectionOutboxRepository.claim_ready` returns leased items, reclaims expired leases, orders by `priority DESC, created_at ASC`, `mark_succeeded`/`mark_failed` verify lease token, failed items graduate to dead-letter, `replay` resets failed/dead-letter to pending.
+- Evidence: `tests/test_vnext_projection_outbox.py` 7 passed; `tests/test_projection_outbox.py` 4 passed.
+- Validation: ruff/compileall passed.
+- Next checkpoint: S4-02 Projection Version and Authority Checked.
+
+### S4-02 checkpoint
+
+- Status: DONE; Projection Version persisted and Authority Checked stale rejection with repair trigger.
+- Implementation: `memoryhub/storage/authority_repository.py` preserves `projection_version` on save and reads it back; `memoryhub/storage/projection_outbox.py` `ProjectionOutboxWorker` captures lease token and bumps `projection_version` after success; `memoryhub/application/canonical_write.py` enqueues vector projection outbox after Authority write with delete priority 10; `memoryhub/retrieval/scope_resolver.py` rejects candidates whose `projection_version < authority.projection_version` and triggers `repair_callback`; `memoryhub/application/retrieval_service.py` injects `AuthorityRepository` into `ScopeResolver` and provides `_enqueue_repair`; `memoryhub/application/context_service.py` wires authority-checked resolver; `memoryhub/adapter/vnext_schemas.py` exposes `projection_version` on `RetrievedMemory`.
+- Evidence: `tests/test_vnext_projection_version.py` 2 passed; `tests/test_vnext_authority_write.py` 5 passed; `tests/test_vnext_scope_resolver.py` 10 passed; affected retrieval/context entrypoints regression passed.
+- Validation: ruff/compileall passed.
+- Next checkpoint: S4-03 Repair Worker.
+
+### S4-03 checkpoint
+
+- Status: DONE; point and offline Repair Worker covering missing/stale/orphan/incompatible drift.
+- Implementation: `memoryhub/storage/repair.py` `RepairService.diagnose`/`repair_one`/`repair_all` and `RepairWorker.run_once`; diagnosis maps zero `projection_version` to missing, lagging `projection_version` to stale, deleted/superseded status to orphan, unsupported types to incompatible; actions are `upsert`/`delete` outbox enqueues with safe priority; `scripts/repair_projections.py` CLI supports `--memory-id`, `--memory-type`, `--tenant-id`, `--user-id`, `--dry-run`, `--run-worker`, `--limit`.
+- Evidence: `tests/test_vnext_repair_worker.py` 4 passed; `scripts/repair_projections.py` compiles and imports cleanly.
+- Validation: ruff/compileall passed.
+- Next checkpoint: B13 batch validation and single local commit.
+
+## B13 final validation and acceptance
+
+- Date/time: 2026-08-24 16:05 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; branch `dev-remem`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_projection_outbox.py tests/test_vnext_projection_version.py tests/test_vnext_repair_worker.py tests/test_projection_outbox.py -q
+  .venv/Scripts/python -m pytest tests/test_vnext_*.py -q
+  .venv/Scripts/python -m pytest tests/test_safety_pipeline.py tests/test_safety_contract.py tests/test_safe_errors.py tests/test_no_production_write_bypass.py -q
+  .venv/Scripts/python -m ruff check memoryhub/storage/models.py memoryhub/storage/memory_metadata.py memoryhub/storage/projection_outbox.py memoryhub/storage/authority_repository.py memoryhub/storage/repair.py memoryhub/application/canonical_write.py memoryhub/application/retrieval_service.py memoryhub/retrieval/scope_resolver.py memoryhub/application/context_service.py memoryhub/adapter/vnext_schemas.py memoryhub/storage/database.py scripts/repair_projections.py scripts/rebuild_projections.py tests/test_vnext_projection_outbox.py tests/test_vnext_projection_version.py tests/test_vnext_repair_worker.py tests/test_projection_outbox.py
+  .venv/Scripts/python -m compileall -q memoryhub/storage scripts
+  git diff --check
+  ```
+- Result:
+  - B13 focused: 17 passed.
+  - Affected vNext regression (`tests/test_vnext_*.py`): 258 passed.
+  - Safety/contract/error regression: 77 passed.
+  - Write-bypass regression: 6 passed.
+  - Static: ruff/compileall passed; `git diff --check` passed (CRLF line-ending warnings only).
+- Acceptance: S4-01, S4-02, S4-03 complete; B13 is DONE; B14 is READY.
+- Boundary: only S4-01, S4-02, S4-03; no S4-04 or later batches touched.

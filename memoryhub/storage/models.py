@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase
 
@@ -85,6 +86,7 @@ class PreferenceRow(Base):
     # --- 向量索引同步状态 ---
     pending_index = Column(Boolean, default=True, index=True)
     index_version = Column(Integer, default=0, index=True)
+    projection_version = Column(Integer, default=0, index=True)
 
     tags = Column(JSON)
     extra_payload = Column(JSON)
@@ -142,6 +144,7 @@ class KnowledgeRow(Base):
     # --- 向量索引同步状态 ---
     pending_index = Column(Boolean, default=True, index=True)
     index_version = Column(Integer, default=0, index=True)
+    projection_version = Column(Integer, default=0, index=True)
 
     health_score = Column(Float, default=1.0, index=True)
     stability = Column(Float, default=1.0)
@@ -277,6 +280,16 @@ class MemoryProjectionOutboxRow(Base):
             "memory_id",
             "memory_type",
         ),
+        Index(
+            "uq_memory_projection_outbox_event",
+            "tenant_id",
+            "memory_id",
+            "memory_type",
+            "operation",
+            "event_id",
+            unique=True,
+            sqlite_where=text("event_id IS NOT NULL"),
+        ),
     )
 
     outbox_id = Column(String(64), primary_key=True)
@@ -291,8 +304,15 @@ class MemoryProjectionOutboxRow(Base):
     payload_hash = Column(String(64), nullable=False)
     status = Column(String(16), nullable=False, default="pending", index=True)
     attempts = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=5)
     next_retry_at = Column(DateTime, nullable=True)
     error_code = Column(String(128), nullable=False, default="")
+    priority = Column(Integer, nullable=False, default=0)
+    backoff_policy = Column(JSON, nullable=True, default=dict)
+    lease_version = Column(Integer, nullable=False, default=0)
+    lease_token = Column(String(64), nullable=True, index=True)
+    lease_expires_at = Column(DateTime, nullable=True)
+    dead_lettered_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 

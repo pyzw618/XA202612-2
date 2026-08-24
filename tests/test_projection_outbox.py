@@ -83,7 +83,8 @@ def test_projection_worker_records_stable_error_backoff_and_replay(tmp_path):
     with db.session() as session:
         row = session.get(MemoryProjectionOutboxRow, receipt.outbox_id)
         assert row.status == "completed"
-        assert row.attempts == 2
+        # replay resets attempts before the retry, so the successful attempt is counted as 1.
+        assert row.attempts == 1
     db.close()
 
 
@@ -100,6 +101,7 @@ def test_projection_outbox_reclaims_stale_processing_lease(tmp_path):
         row = session.get(MemoryProjectionOutboxRow, receipt.outbox_id)
         from datetime import datetime, timedelta
 
+        row.lease_expires_at = datetime.now() - timedelta(seconds=600)
         row.updated_at = datetime.now() - timedelta(seconds=600)
 
     worker = ProjectionOutboxWorker(

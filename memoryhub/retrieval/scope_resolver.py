@@ -13,7 +13,7 @@ context that is actually shown to the agent.  It must guarantee:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from memoryhub.adapter.vnext_schemas import RetrievedMemory
 from memoryhub.domain.contracts import (
@@ -81,9 +81,11 @@ class ScopeResolver:
         authority_repository: AuthorityRepository | None = None,
         *,
         authority_checked: bool = False,
+        repair_callback: Callable[[RetrievedMemory], None] | None = None,
     ) -> None:
         self.authority_repository = authority_repository
         self.authority_checked = authority_checked
+        self.repair_callback = repair_callback
 
     def resolve(
         self,
@@ -160,6 +162,23 @@ class ScopeResolver:
                             authority_status=authority.evolution_status.value,
                         )
                     )
+                    continue
+                if memory.projection_version < authority.projection_version:
+                    reason = "projection stale"
+                    results.append(
+                        ValidationResult(
+                            memory=memory,
+                            valid=False,
+                            reason=reason,
+                            authority_version=authority.projection_version,
+                            authority_status=authority.evolution_status.value,
+                        )
+                    )
+                    if self.repair_callback is not None:
+                        try:
+                            self.repair_callback(memory)
+                        except Exception:
+                            pass
                     continue
 
             results.append(ValidationResult(memory=memory, valid=True, reason="ok"))

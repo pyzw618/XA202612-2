@@ -110,6 +110,9 @@ class AuthorityRepository:
             self.preference_repository.save(legacy, session=session)  # type: ignore[arg-type]
         else:
             self.knowledge_repository.save(legacy, session=session)  # type: ignore[arg-type]
+        # Preserve the existing projection_version column; Authority writes never
+        # artificially inflate it. The projection worker owns column updates.
+        self._preserve_projection_version(session, envelope)
 
     def get(
         self,
@@ -181,6 +184,9 @@ class AuthorityRepository:
             "created_at": envelope.created_at,
             "updated_at": envelope.updated_at,
         }
+        # Carry projection_version in extra_payload metadata since legacy models
+        # do not define the field directly.
+        metadata["vnext_authority"]["projection_version"] = envelope.projection_version
         if envelope.memory_type is MemoryType.PREFERENCE:
             content = envelope.content
             text = content.get("text") or content.get("value") or json.dumps(
@@ -222,6 +228,25 @@ class AuthorityRepository:
             single_value=content.get("single_value"),
         )
 
+    def _preserve_projection_version(
+        self, session: Session, envelope: LongTermEnvelope
+    ) -> None:
+        model = PreferenceRow if envelope.memory_type is MemoryType.PREFERENCE else KnowledgeRow
+        row = (
+            session.query(model)
+            .filter_by(
+                memory_id=envelope.memory_id,
+                tenant_id=envelope.tenant_id,
+                user_id=envelope.user_id,
+            )
+            .first()
+        )
+        if row is None:
+            return
+        # New rows start at 0; existing rows keep their current projection_version.
+        if row.projection_version is None:
+            row.projection_version = 0
+
     @staticmethod
     def _legacy_scope(envelope: LongTermEnvelope) -> SceneScope:
         if envelope.scope_level is MemoryScope.GLOBAL:
@@ -255,14 +280,22 @@ class AuthorityRepository:
             .one_or_none()
         )
         if pref is not None:
-            return self._from_legacy(_pref_row_to_pydantic(pref), tenant_id=tenant_id)
+            return self._from_legacy(
+                _pref_row_to_pydantic(pref),
+                tenant_id=tenant_id,
+                projection_version=pref.projection_version,
+            )
         know = (
             session.query(KnowledgeRow)
             .filter_by(memory_id=memory_id, tenant_id=tenant_id, user_id=user_id)
             .one_or_none()
         )
         if know is not None:
-            return self._from_legacy(_know_row_to_pydantic(know), tenant_id=tenant_id)
+            return self._from_legacy(
+                _know_row_to_pydantic(know),
+                tenant_id=tenant_id,
+                projection_version=know.projection_version,
+            )
         return None
 
     def _list_in_session(
@@ -284,10 +317,18 @@ class AuthorityRepository:
             .all()
         )
         values = [
-            self._from_legacy(_pref_row_to_pydantic(row), tenant_id=tenant_id)
+            self._from_legacy(
+                _pref_row_to_pydantic(row),
+                tenant_id=tenant_id,
+                projection_version=row.projection_version,
+            )
             for row in prefs
         ] + [
-            self._from_legacy(_know_row_to_pydantic(row), tenant_id=tenant_id)
+            self._from_legacy(
+                _know_row_to_pydantic(row),
+                tenant_id=tenant_id,
+                projection_version=row.projection_version,
+            )
             for row in knows
         ]
         if not include_inactive:
@@ -300,11 +341,18 @@ class AuthorityRepository:
 
     @staticmethod
     def _from_legacy(
-        memory: PreferenceMemory | KnowledgeMemory, *, tenant_id: str
+        memory: PreferenceMemory | KnowledgeMemory,
+        *,
+        tenant_id: str,
+        projection_version: int | None = None,
     ) -> LongTermEnvelope:
         metadata = dict(getattr(memory, "extra_payload", {}) or {}).get("vnext_authority")
         if isinstance(metadata, dict):
-            return LongTermEnvelope.model_validate(metadata)
+            envelope = LongTermEnvelope.model_validate(metadata)
+            # Column value wins if set; otherwise fall back to metadata.
+            if projection_version and projection_version > 0:
+                envelope.projection_version = projection_version
+            return envelope
 
         if isinstance(memory, PreferenceMemory):
             memory_type = MemoryType.PREFERENCE
@@ -354,7 +402,7 @@ class AuthorityRepository:
             evolution_status=status_map.get(memory.status, EvolutionStatus.DORMANT),
             confidence=float(memory.confidence),
             utility=0.0,
-            projection_version=0,
+            projection_version=projection_version or 0,
             evidence_refs=[
                 str(item.get("evidence_id", "legacy"))
                 for item in (memory.evidences or [])

@@ -22,6 +22,7 @@ from memoryhub.retrieval.fusion import FusionResult, ReciprocalRankFusion
 from memoryhub.retrieval.planner import RetrievalPlan
 from memoryhub.retrieval.reranker import VNextReranker
 from memoryhub.retrieval.scope_resolver import ScopeResolution, ScopeResolver
+from memoryhub.storage.authority_repository import AuthorityRepository
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,10 +58,14 @@ class ContextService:
         reranker: VNextReranker | None = None,
         scope_resolver: ScopeResolver | None = None,
         budget_manager: BudgetManager | None = None,
+        authority_repository: AuthorityRepository | None = None,
+        repair_callback: Any | None = None,
     ) -> None:
         self.fusion_engine = fusion_engine or ReciprocalRankFusion()
         self.reranker = reranker or VNextReranker()
         self.scope_resolver = scope_resolver or ScopeResolver()
+        self.authority_repository = authority_repository
+        self.repair_callback = repair_callback
         self.context_builder = StructuredContextBuilder(
             budget_manager=budget_manager or BudgetManager()
         )
@@ -95,7 +100,15 @@ class ContextService:
         )
 
         # 3. Scope resolution
-        scope_resolution = self.scope_resolver.resolve(
+        if plan.authority_checked and self.authority_repository is not None:
+            scope_resolver = ScopeResolver(
+                authority_repository=self.authority_repository,
+                authority_checked=True,
+                repair_callback=self.repair_callback,
+            )
+        else:
+            scope_resolver = self.scope_resolver
+        scope_resolution = scope_resolver.resolve(
             reranked,
             preferred_scope_level=request.scope_level,
             preferred_scope=request.scope,

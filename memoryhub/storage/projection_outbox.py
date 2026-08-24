@@ -53,13 +53,15 @@ class ProjectionOutboxWorker:
                 self.outbox_repo.mark_failed(
                     item.outbox_id,
                     error_code=code,
-                    base_delay_seconds=self.base_retry_seconds,
-                    max_delay_seconds=self.max_retry_seconds,
+                    lease_token=item.lease_token,
                 )
                 result.failed.append(item.outbox_id)
                 logger.warning("projection outbox %s failed: %s", item.outbox_id, code)
             else:
-                self.outbox_repo.mark_succeeded(item.outbox_id)
+                self.outbox_repo.mark_succeeded(
+                    item.outbox_id, lease_token=item.lease_token
+                )
+                self._bump_projection_version(item)
                 result.succeeded.append(item.outbox_id)
         return result
 
@@ -84,6 +86,16 @@ class ProjectionOutboxWorker:
             memory,
             remove=item.operation == "delete",
         )
+
+    def _bump_projection_version(self, item: ProjectionOutboxItem) -> None:
+        """Mirror the projected content version back to the Authority row."""
+        with self.outbox_repo.db.session() as session:
+            self.outbox_repo.update_projection_version(
+                item.memory_id,
+                item.memory_type,
+                item.content_version,
+                session=session,
+            )
 
     @staticmethod
     def _error_code(exc: Exception) -> str:

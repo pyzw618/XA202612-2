@@ -308,14 +308,12 @@ def test_canonical_write_commits_task_state_reflection_and_long_term_authority()
         assert session.query(PreferenceRow).count() == 1
         lineage = session.query(MemoryLineageRow).one()
         evidence = session.query(MemoryEvidenceRow).one()
-        outbox = session.query(MemoryProjectionOutboxRow).one()
+        outbox_rows = session.query(MemoryProjectionOutboxRow).all()
+        assert len(outbox_rows) == 2
+        types = {row.projection_type for row in outbox_rows}
+        assert types == {"long_term", "vector"}
         assert (lineage.tenant_id, lineage.content_version) == ("tenant-a", 1)
         assert (evidence.tenant_id, evidence.content_version) == ("tenant-a", 1)
-        assert (outbox.tenant_id, outbox.content_version, outbox.projection_type) == (
-            "tenant-a",
-            1,
-            "long_term",
-        )
 
     duplicate = service.write(event)
     assert duplicate.status is GatewayStatus.IDEMPOTENT

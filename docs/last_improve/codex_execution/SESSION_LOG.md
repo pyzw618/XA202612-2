@@ -500,3 +500,41 @@
 - Blockers: None.
 - Commit plan: stage only B12 source/tests/dataset/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B12 s3 entrypoints eval gate` with trailer `Batch-ID: B12`; do not push, amend, rebase, or begin B13.
 - Hard stop: after read-only verification of the single B12 commit, end the session and hand off `docs/last_improve/codex_batches/B13_s4_projection_repair.md`.
+
+
+## Checkpoint 2026-08-24-10 — B13 start reconciliation
+
+- Started: 2026-08-24 14:10 +08:00
+- Ended: 2026-08-24 14:49 UTC
+- Branch/HEAD: `dev-remem` / `fc3286f8d3b880659f8ded062ea42cac8d38df9a`
+- Restored task: S4-01 IN_PROGRESS.
+- Initial reconciliation: B12 commit is present; working tree has B13-scope changes in progress and untracked test DB artifacts in `evaluation/results/`; no applicable `AGENTS.md`.
+- Completed changes: reconciled continuity files to B13 facts; read existing Outbox/Projection/Authority/Retrieval code and confirmed design.
+- Files changed: `docs/last_improve/codex_execution/STATE.md`, `docs/last_improve/codex_execution/BATCH_BOARD.md`, `docs/last_improve/codex_execution/TASK_BOARD.md`, `docs/last_improve/codex_execution/EVIDENCE.md`, `docs/last_improve/codex_execution/SESSION_LOG.md`
+- Validation run: repository reconciliation passed.
+- Task status changes: B13 TODO → IN_PROGRESS; S4-01 TODO → IN_PROGRESS.
+- Blockers: None.
+- Exact next action: complete S4-01 schema/outbox implementation and run focused tests.
+
+## Checkpoint 2026-08-24-11 — B13 final validation and acceptance
+
+- Started: 2026-08-24 14:49 UTC
+- Ended: 2026-08-24 16:05 +08:00
+- Branch/HEAD: `dev-remem` / `fc3286f8d3b880659f8ded062ea42cac8d38df9a`
+- Restored task/batch: B13 IN_PROGRESS with S4-01 IN_PROGRESS; completed S4-01, S4-02, S4-03.
+- Completed changes:
+  - S4-01: `memoryhub/storage/models.py` outbox lease/backoff/dead-letter/priority columns and partial unique index; `memoryhub/storage/memory_metadata.py` versioned claim/mark/replay; `memoryhub/storage/database.py` additive schema.
+  - S4-02: `memoryhub/storage/authority_repository.py` projection_version preservation; `memoryhub/storage/projection_outbox.py` worker lease and projection_version bump; `memoryhub/application/canonical_write.py` vector projection enqueue; `memoryhub/retrieval/scope_resolver.py` authority-checked stale rejection and repair callback; `memoryhub/application/retrieval_service.py` and `memoryhub/application/context_service.py` wire authority repository; `memoryhub/adapter/vnext_schemas.py` projection_version field.
+  - S4-03: `memoryhub/storage/repair.py` `RepairService`/`RepairWorker` missing/stale/orphan/incompatible diagnosis and repair enqueue; `scripts/repair_projections.py` point/offline repair CLI with `--memory-id`, `--dry-run`, `--run-worker`, tenant/user scan.
+  - Tests: `tests/test_vnext_projection_outbox.py`, `tests/test_vnext_projection_version.py`, `tests/test_vnext_repair_worker.py`; updated `tests/test_projection_outbox.py` and `tests/test_vnext_authority_write.py` for new semantics.
+- Files changed: `memoryhub/storage/models.py`, `memoryhub/storage/memory_metadata.py`, `memoryhub/storage/projection_outbox.py`, `memoryhub/storage/authority_repository.py`, `memoryhub/storage/database.py`, `memoryhub/storage/repair.py`, `memoryhub/application/canonical_write.py`, `memoryhub/application/retrieval_service.py`, `memoryhub/application/context_service.py`, `memoryhub/retrieval/scope_resolver.py`, `memoryhub/adapter/vnext_schemas.py`, `scripts/repair_projections.py`, `tests/test_projection_outbox.py`, `tests/test_vnext_authority_write.py`, `tests/test_vnext_projection_outbox.py`, `tests/test_vnext_projection_version.py`, `tests/test_vnext_repair_worker.py`, plus continuity files.
+- Validation run:
+  - B13 focused: `tests/test_vnext_projection_outbox.py` (7), `tests/test_vnext_projection_version.py` (2), `tests/test_vnext_repair_worker.py` (4), `tests/test_projection_outbox.py` (4) → 17 passed.
+  - Affected vNext regression: `tests/test_vnext_*.py` → 258 passed.
+  - Safety/contract/error regression: `tests/test_safety_pipeline.py`, `tests/test_safety_contract.py`, `tests/test_safe_errors.py` → 77 passed.
+  - Write-bypass regression: `tests/test_no_production_write_bypass.py` → 6 passed.
+  - Static: ruff/compileall passed; `git diff --check` passed (CRLF warnings only).
+- Task status changes: S4-01 IN_PROGRESS → DONE; S4-02 TODO → DONE; S4-03 TODO → DONE; B13 IN_PROGRESS → DONE; B14 TODO → READY.
+- Blockers: None.
+- Commit plan: stage only B13 source/tests/script/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B13 s4 projection repair` with trailer `Batch-ID: B13`; do not push, amend, rebase, or begin B14.
+- Hard stop: after read-only verification of the single B13 commit, end the session and hand off `docs/last_improve/codex_batches/B14_s4_forget_diagnostics.md`.
