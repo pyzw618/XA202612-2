@@ -171,7 +171,7 @@ class RetrievedMemory(APIModel):
     evolution_status: str = Field(min_length=1)
     content: dict[str, Any] = Field(default_factory=dict)
     score: float = Field(ge=0.0)
-    score_breakdown: dict[str, float] = Field(default_factory=dict)
+    score_breakdown: dict[str, Any] = Field(default_factory=dict)
     source_ids: list[str] = Field(default_factory=list)
 
 

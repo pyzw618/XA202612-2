@@ -1,7 +1,7 @@
 # MemoryHub vNext Codex Execution State
 
-> Last updated: 2026-08-24 11:58 +08:00
-> Updated by: Codex session 2026-08-24 (B10)
+> Last updated: 2026-08-24 13:25 +08:00
+> Updated by: Codex session 2026-08-24 (B11)
 
 ## B10 start reconciliation
 
@@ -268,8 +268,66 @@
 2. Complete S1-05 and S1-06 with targeted, regression, and risk evidence before batch acceptance.
 3. Only after full acceptance update BATCH_BOARD/SESSION_LOG, mark B05 READY, create the single B04 commit, and read-only verify its SHA; do not push, amend, rebase, or enter B05.
 
+## B11 start reconciliation
+
+- Last updated: 2026-08-24 12:42 +08:00; updated by Codex session 2026-08-24 (B11)
+- Current batch: B11 (`S3-04`～`S3-07`); batch status: IN_PROGRESS
+- Current batch prompt: `docs/last_improve/codex_batches/B11_s3_fusion_context.md`
+- Current task: S3-04 IN_PROGRESS; S3-05, S3-06, S3-07 TODO
+- Dependencies: S3-01, S3-02, S3-03 DONE with valid evidence; S2-06 DONE with valid evidence
+- Start reconciliation: branch `dev-remem`; HEAD `b7bab109b45e45fd9a74555c9a8693ac811ac203` (B10 commit `feat(vnext): complete B10 s3 request planning`); working tree clean; no applicable `AGENTS.md`; BATCH_BOARD was B11 READY and TASK_BOARD had no B11 task in progress
+- Reconciliation: B10 commit is present and BATCH_BOARD/TASK_BOARD facts authorize B11. No user-owned unrelated changes observed.
+- Acceptance: prior B10 acceptance remains valid.
+- Boundary: only S3-04, S3-05, S3-06, S3-07; no S3-08 or later batches.
+- Exact next action: implement S3-04 candidate deduplication, Fusion and unified Reranker in `memoryhub/retrieval/fusion.py` and upgrade `memoryhub/retrieval/reranker.py`.
+
 ## Legacy B03 exact next actions
 
 1. 只暂存 B03 产物和六份连续性文件，创建唯一普通本地提交，正文包含 Batch-ID: B03。
 2. 提交后只读核对 HEAD SHA、提交文件和工作区状态；不 push、amend、rebase 或进入 B04。
 3. 新会话使用 docs/last_improve/codex_batches/B04_s1_task_state.md。
+
+
+## B11 final validation and acceptance
+
+- Last updated: 2026-08-24 13:25 +08:00; updated by Codex session 2026-08-24 (B11)
+- Current batch: B11 (`S3-04`～`S3-07`); batch status: DONE
+- Current task: none; S3-04, S3-05, S3-06, S3-07 DONE
+- Dependencies: S3-01, S3-02, S3-03 DONE with valid evidence; S2-06 DONE with valid evidence
+- Final validation: branch `dev-remem`; HEAD `b7bab109b45e45fd9a74555c9a8693ac811ac203` (B10 commit); B11-scope changes staged; no user-owned unrelated changes observed.
+- Acceptance:
+  - S3-04 Fusion/Reranker: `memoryhub/retrieval/fusion.py` with RRF/ScoreFusion and deduplication; `memoryhub/retrieval/reranker.py` upgraded with `VNextReranker` preserving legacy `Reranker`.
+  - S3-05 Authority/Scope Resolver: `memoryhub/retrieval/scope_resolver.py` filters DELETED/SUPERSEDED, validates against Authority, resolves conflicts by TASK>PROJECT>APPLICATION>DOMAIN>GLOBAL.
+  - S3-06 Budget: `memoryhub/retrieval/context_builder.py` protects working state/constraints/procedures, trims long-term memory, records dropped reasons.
+  - S3-07 Context Builder: `memoryhub/application/context_service.py` orchestrates fusion→rerank→scope→budget→structured context with full traceability.
+  - B11 focused tests 38 passed; affected vNext regression 226 passed; safety/contract/error regression 77 passed; write-bypass 6 passed; static checks passed; `git diff --check` passed.
+- Next batch: B12 READY; next prompt is `docs/last_improve/codex_batches/B12_s3_entrypoints_eval_gate.md`.
+- Boundary: only S3-04, S3-05, S3-06, S3-07; no S3-08 or later batches.
+- Commit plan: create exactly one local commit titled `feat(vnext): complete B11 s3 fusion context` with trailer `Batch-ID: B11`; do not push, amend, rebase, or enter B12.
+
+### S3-04 checkpoint
+
+- Status: DONE; candidate deduplication, RRF/ScoreFusion and unified vNext Reranker with explainable score breakdown.
+- Implementation: `memoryhub/retrieval/fusion.py`, `memoryhub/retrieval/reranker.py`, `memoryhub/retrieval/__init__.py`.
+- Evidence: `tests/test_vnext_fusion_reranker.py` 17 passed; ruff/compileall passed.
+- Next checkpoint: S3-05 Authority validation and Scope conflict resolution.
+
+### S3-05 checkpoint
+
+- Status: DONE; Authority validity check, DELETED/SUPERSEDED filtering, scope precedence conflict resolution with auditable reason codes.
+- Implementation: `memoryhub/retrieval/scope_resolver.py`.
+- Evidence: `tests/test_vnext_scope_resolver.py` 10 passed; ruff/compileall passed.
+- Next checkpoint: S3-06 Context Budget Manager.
+
+### S3-06 checkpoint
+
+- Status: DONE; categorized budget quotas, hard constraint protection, procedure priority, long-term memory trimming and dropped-reason tracking.
+- Implementation: `memoryhub/retrieval/context_builder.py`.
+- Evidence: `tests/test_vnext_context_budget.py` 8 passed; ruff/compileall passed.
+- Next checkpoint: S3-07 structured Context Builder service.
+
+### S3-07 checkpoint
+
+- Status: DONE; end-to-end Context Service wires fusion→rerank→scope→budget→rendered ContextPayload with trace/dropped diagnostics.
+- Implementation: `memoryhub/application/context_service.py`, `memoryhub/application/__init__.py`.
+- Evidence: `tests/test_vnext_context_service.py` 5 passed; ruff/compileall passed.

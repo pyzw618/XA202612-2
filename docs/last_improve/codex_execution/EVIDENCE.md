@@ -893,3 +893,113 @@
   - Formation evaluator is reproducible, dataset expectations match predictions, and P1 paired scenarios cover Evidence Promotion, Procedure Formation and Evolution Coexist.
   - S2 Gate checklist is verified by automated tests.
 - Acceptance: B09 DONE; S2-08, S2-09, S2-10 DONE; S2 Gate PASS; B10 READY.
+
+
+## B11 start reconciliation
+
+- Date/time: 2026-08-24 12:42 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; branch `dev-remem`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  git branch -v
+  git status --short
+  git rev-parse HEAD
+  ```
+- Result: PASS for repository reconciliation. HEAD=`b7bab109b45e45fd9a74555c9a8693ac811ac203`, B10 commit `feat(vnext): complete B10 s3 request planning` with trailer `Batch-ID: B10` is present, working tree clean, no applicable `AGENTS.md` found.
+- Continuity: `BATCH_BOARD.md` had B10 DONE, B11 READY and no IN_PROGRESS batch; `TASK_BOARD.md` had no B11 task in progress; S3-01, S3-02, S3-03 and S2-06 are DONE with evidence.
+- Decision: claim B11 and the smallest dependency-satisfied task S3-04; do not touch S3-08 or later batches.
+
+## S3-04 checkpoint
+
+- Date/time: 2026-08-24 12:55 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_fusion_reranker.py -q
+  .venv/Scripts/python -m ruff check memoryhub/retrieval/fusion.py memoryhub/retrieval/reranker.py memoryhub/retrieval/__init__.py
+  .venv/Scripts/python -m compileall -q memoryhub/retrieval/fusion.py memoryhub/retrieval/reranker.py memoryhub/retrieval/__init__.py
+  ```
+- Result: PASS; 17 tests passed; ruff/compileall passed.
+- Changes:
+  - `memoryhub/retrieval/fusion.py` adds `ReciprocalRankFusion`, `ScoreFusion`, `FusionResult`, and `deduplicate_candidates`.
+  - `memoryhub/retrieval/reranker.py` upgrades with `VNextReranker` (relevance, scope, confidence, freshness, health, intent type boost) while preserving legacy `Reranker`.
+  - `memoryhub/retrieval/__init__.py` exports fusion and reranker symbols.
+- Acceptance:
+  - Same `memory_id/version` is deduplicated, highest `content_version` retained, dropped versions tracked.
+  - RRF and linear ScoreFusion produce explainable scores with `channel_scores`, `fused`, and per-channel contributions.
+  - `VNextReranker` returns new `RetrievedMemory` objects with `score_breakdown` and does not mutate inputs.
+
+## S3-05 checkpoint
+
+- Date/time: 2026-08-24 13:05 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_scope_resolver.py -q
+  .venv/Scripts/python -m ruff check memoryhub/retrieval/scope_resolver.py memoryhub/retrieval/__init__.py
+  .venv/Scripts/python -m compileall -q memoryhub/retrieval/scope_resolver.py memoryhub/retrieval/__init__.py
+  ```
+- Result: PASS; 10 tests passed; ruff/compileall passed.
+- Changes: `memoryhub/retrieval/scope_resolver.py` adds `ScopeResolver`, `ScopeResolution`, `ConflictGroup`, `ValidationResult`, and `filter_blocked_statuses`.
+- Acceptance:
+  - DELETED and SUPERSEDED candidates are dropped with explicit reasons.
+  - Authority-checked mode rejects stale projection versions and deleted Authority rows.
+  - Scope conflicts resolve by TASK>PROJECT>APPLICATION>DOMAIN>GLOBAL; exact preferred scope match takes priority.
+  - Each conflict group records selected memory, dropped memories, and auditable resolution text.
+
+## S3-06 checkpoint
+
+- Date/time: 2026-08-24 13:15 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_context_budget.py -q
+  .venv/Scripts/python -m ruff check memoryhub/retrieval/context_builder.py memoryhub/retrieval/__init__.py
+  .venv/Scripts/python -m compileall -q memoryhub/retrieval/context_builder.py memoryhub/retrieval/__init__.py
+  ```
+- Result: PASS; 8 tests passed; ruff/compileall passed.
+- Changes: `memoryhub/retrieval/context_builder.py` adds `BudgetManager`, `BudgetAllocation`, `BudgetResult`, `StructuredContextBuilder`, and `estimate_tokens`.
+- Acceptance:
+  - Working state and constraints are always kept even under severe budget pressure.
+  - Procedures receive a dedicated quota before general long-term memories.
+  - Long-term memories are ranked by score and trimmed with per-memory dropped reasons.
+  - `ContextPayload` carries `original_tokens`, `selected_tokens`, `relevant_memory_ids`, `source_ids`, `conflict_notes`, and `rendered_context`.
+
+## S3-07 checkpoint
+
+- Date/time: 2026-08-24 13:20 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_context_service.py -q
+  .venv/Scripts/python -m ruff check memoryhub/application/context_service.py memoryhub/application/__init__.py
+  .venv/Scripts/python -m compileall -q memoryhub/application/context_service.py memoryhub/application/__init__.py
+  ```
+- Result: PASS; 5 tests passed; ruff/compileall passed.
+- Changes: `memoryhub/application/context_service.py` adds `ContextService` and `ContextAssemblyResult`; `memoryhub/application/__init__.py` exports them.
+- Acceptance:
+  - End-to-end pipeline: fusion → rerank → scope resolution → budget → structured context.
+  - Deleted memories are dropped by Authority/scope validation and recorded in `stage_dropped`.
+  - Scope conflicts keep the narrower scope and drop broader ones with reasons.
+  - Trace output records fusion candidates, deduplication count, reranked count, selected count, invalid count, and budget tokens.
+
+## B11 final validation and acceptance
+
+- Date/time: 2026-08-24 13:25 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_fusion_reranker.py tests/test_vnext_scope_resolver.py tests/test_vnext_context_budget.py tests/test_vnext_context_service.py -q
+  .venv/Scripts/python -m pytest tests/test_vnext_*.py -q
+  .venv/Scripts/python -m pytest tests/test_safety_pipeline.py tests/test_safety_contract.py tests/test_safe_errors.py -q
+  .venv/Scripts/python -m pytest tests/test_no_production_write_bypass.py -q
+  .venv/Scripts/python -m ruff check memoryhub/retrieval/ memoryhub/application/ memoryhub/adapter/vnext_schemas.py tests/test_vnext_fusion_reranker.py tests/test_vnext_scope_resolver.py tests/test_vnext_context_budget.py tests/test_vnext_context_service.py
+  .venv/Scripts/python -m compileall -q memoryhub/retrieval/ memoryhub/application/ memoryhub/adapter/vnext_schemas.py tests/test_vnext_fusion_reranker.py tests/test_vnext_scope_resolver.py tests/test_vnext_context_budget.py tests/test_vnext_context_service.py
+  git diff --check
+  ```
+- Result: PASS; B11 focused 38 passed; affected vNext regression 226 passed; safety/contract/error 77 passed; write-bypass 6 passed; ruff/compileall passed; `git diff --check` passed (CRLF warnings only).
+- Exit criteria:
+  - Old/deleted/superseded/scope-inferior objects do not leak into Context.
+  - Fusion scores, reranker factors, conflict resolutions, and budget decisions are all explainable via `score_breakdown`, `resolution`, and `dropped_reasons`.
+  - Hard constraints and current task state are protected by the budget manager.
+- Acceptance: B11 DONE; S3-04, S3-05, S3-06, S3-07 DONE; B12 READY.

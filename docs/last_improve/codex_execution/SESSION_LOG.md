@@ -436,3 +436,27 @@
 - Blockers: None for B09.
 - Commit plan: stage only B09 source/tests/datasets/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B09 s2 shadow eval gate` with trailer `Batch-ID: B09`; do not push, amend, rebase, or begin B10.
 - Hard stop: after read-only verification of the B09 commit, end the session and hand off `docs/last_improve/codex_batches/B10_s3_request_planning.md`.
+
+
+## Checkpoint 2026-08-24-07 — B11 completion
+
+- Started: 2026-08-24 12:42 +08:00
+- Ended: 2026-08-24 13:25 +08:00
+- Branch/HEAD: `dev-remem` / `b7bab109b45e45fd9a74555c9a8693ac811ac203`
+- Restored batch/task: B11 READY with no in-progress task; claimed S3-04, then progressed S3-05, S3-06, and S3-07 after each checkpoint.
+- Completed changes:
+  - S3-04: `memoryhub/retrieval/fusion.py` with `ReciprocalRankFusion`, `ScoreFusion`, deduplication; `memoryhub/retrieval/reranker.py` upgraded with `VNextReranker` while keeping legacy `Reranker`.
+  - S3-05: `memoryhub/retrieval/scope_resolver.py` with Authority validation, DELETED/SUPERSEDED filtering, and TASK>PROJECT>APPLICATION>DOMAIN>GLOBAL conflict resolution.
+  - S3-06: `memoryhub/retrieval/context_builder.py` with `BudgetManager`, categorized quotas, hard constraint protection, procedure priority, semantic trimming, and dropped-reason tracking.
+  - S3-07: `memoryhub/application/context_service.py` with end-to-end fusion→rerank→scope→budget→structured context assembly and traceability.
+- Files changed: `memoryhub/retrieval/fusion.py`, `memoryhub/retrieval/reranker.py`, `memoryhub/retrieval/scope_resolver.py`, `memoryhub/retrieval/context_builder.py`, `memoryhub/retrieval/__init__.py`, `memoryhub/application/context_service.py`, `memoryhub/application/__init__.py`, `memoryhub/adapter/vnext_schemas.py`, `tests/test_vnext_fusion_reranker.py`, `tests/test_vnext_scope_resolver.py`, `tests/test_vnext_context_budget.py`, `tests/test_vnext_context_service.py`, plus continuity files.
+- Validation run:
+  - B11 focused: 38 passed.
+  - Affected vNext regression (`tests/test_vnext_*.py`): 226 passed.
+  - Safety/contract/error regression: 77 passed.
+  - Write-bypass regression: 6 passed.
+  - Static: ruff/compileall passed; `git diff --check` passed (line-ending warnings only).
+- Task status changes: S3-04 IN_PROGRESS → DONE; S3-05 TODO → DONE; S3-06 TODO → DONE; S3-07 TODO → DONE; B11 IN_PROGRESS → DONE; B12 TODO → READY.
+- Blockers: None for B11.
+- Commit plan: stage only B11 source/tests/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B11 s3 fusion context` with trailer `Batch-ID: B11`; do not push, amend, rebase, or begin B12.
+- Hard stop: after read-only verification of the single B11 commit, end the session and hand off `docs/last_improve/codex_batches/B12_s3_entrypoints_eval_gate.md`.

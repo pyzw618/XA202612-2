@@ -13,6 +13,7 @@ from .consolidation_service import (
     PromotionDecision,
     TypeWeights,
 )
+from .context_service import ContextAssemblyResult, ContextService
 from .episode_service import (
     EpisodeResumeResult,
     EpisodeService,
@@ -35,6 +36,8 @@ __all__ = [
     "REJECT_REASONS",
     "REVIEW_REASONS",
     "TypeWeights",
+    "ContextAssemblyResult",
+    "ContextService",
     "EventGateway",
     "EventGatewayResult",
     "GatewayStatus",

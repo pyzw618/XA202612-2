@@ -52,10 +52,10 @@
 | S3-01 | DONE | S0-04 | Codex 2026-08-24 (B10) | EVIDENCE.md#s3-01-checkpoint | Retrieval Request/Response |
 | S3-02 | DONE | S3-01 | Codex 2026-08-24 (B10) | EVIDENCE.md#s3-02-checkpoint | 7 类 Intent Router |
 | S3-03 | DONE | S3-02, S1-07 | Codex 2026-08-24 (B10) | EVIDENCE.md#s3-03-checkpoint | Retrieval Planner 与多通道 |
-| S3-04 | TODO | S3-03 | | | Fusion 与 Reranker |
-| S3-05 | TODO | S3-04, S2-06 | | | Authority 校验与 Scope Resolver |
-| S3-06 | TODO | S3-05 | | | Context Budget Manager |
-| S3-07 | TODO | S3-06 | | | Context Builder |
+| S3-04 | DONE | S3-03 | Codex 2026-08-24 (B11) | EVIDENCE.md#s3-04-checkpoint | Fusion 与 Reranker |
+| S3-05 | DONE | S3-04, S2-06 | Codex 2026-08-24 (B11) | EVIDENCE.md#s3-05-checkpoint | Authority 校验与 Scope Resolver |
+| S3-06 | DONE | S3-05 | Codex 2026-08-24 (B11) | EVIDENCE.md#s3-06-checkpoint | Context Budget Manager |
+| S3-07 | DONE | S3-06 | Codex 2026-08-24 (B11) | EVIDENCE.md#s3-07-checkpoint | Context Builder |
 | S3-08 | TODO | S3-03, S3-04, S3-05, S3-06, S3-07 | | | Activation、Log、Trace |
 | S3-09 | TODO | S3-08 | | | REST/MCP/CLI/SDK 检索收敛 |
 | S3-10 | TODO | S3-09 | | | Retrieval/Context 评测 |
@@ -83,4 +83,4 @@
 - IN_PROGRESS count: 0
 - Dependency violations: None
 - DONE without evidence: None
-- Last checked: 2026-08-24 08:55 +08:00
+- Last checked: 2026-08-24 13:25 +08:00

@@ -16,8 +16,8 @@
 | B08 | DONE | S2-04～S2-07 | `../codex_batches/B08_s2_consolidation_evolution.md` | `SELF (Batch-ID: B08)` | 固化与演化可解释、Fast Path 受约束、Procedure 来源受约束；B09 已置 READY |
 | B09 | DONE | S2-08～S2-10；S2 Gate | `../codex_batches/B09_s2_shadow_eval_gate.md` | `1c08cde` | Shadow 不写 ACTIVE；Trace 默认脱敏；Formation 评测可复现；S2 Gate PASS；B10 已置 READY |
 | B10 | DONE | S3-01～S3-03 | `../codex_batches/B10_s3_request_planning.md` | `SELF (Batch-ID: B10)` | 旧客户端兼容；7 类 Intent Router 可解释；Planner 多通道降级可见；B11 已置 READY |
-| B11 | READY | S3-04～S3-07 | `../codex_batches/B11_s3_fusion_context.md` | — | |
-| B12 | TODO | S3-08～S3-10；S3 Gate | `../codex_batches/B12_s3_entrypoints_eval_gate.md` | — | |
+| B11 | DONE | S3-04～S3-07 | `../codex_batches/B11_s3_fusion_context.md` | `SELF (Batch-ID: B11)` | Fusion/Reranker 可解释；Authority/Scope 冲突可解释；Budget 保护硬约束；Context Builder 结构化；B12 已置 READY |
+| B12 | READY | S3-08～S3-10；S3 Gate | `../codex_batches/B12_s3_entrypoints_eval_gate.md` | — | |
 | B13 | TODO | S4-01～S4-03 | `../codex_batches/B13_s4_projection_repair.md` | — | |
 | B14 | TODO | S4-04～S4-06 | `../codex_batches/B14_s4_forget_diagnostics.md` | — | |
 | B15 | TODO | S4-07～S4-08；S4 Gate | `../codex_batches/B15_s4_reliability_gate.md` | — | |
@@ -28,9 +28,9 @@
 ## Invariant check
 
 - IN_PROGRESS count: 0
-- READY count: 1（B10）
+- READY count: 1（B12）
 - Overlapping formal task IDs: None
 - Missing formal task IDs: None
-- Current prompt: `../codex_batches/B09_s2_shadow_eval_gate.md` completed；next prompt is `../codex_batches/B10_s3_request_planning.md` only in a new session
-- Hard stop after current batch: create the single B09 commit, read-only verify, then end the session；不得进入 B10
-- Commit invariant: B01/B02/B06/B07/B08 已独立提交；B03～B18 各要求唯一 `Batch-ID` 提交
+- Current prompt: `../codex_batches/B11_s3_fusion_context.md` completed；next prompt is `../codex_batches/B12_s3_entrypoints_eval_gate.md` only in a new session
+- Hard stop after current batch: create the single B11 commit, read-only verify, then end the session；不得进入 B12
+- Commit invariant: B01/B02/B06/B07/B08/B09/B10 已独立提交；B11 待创建唯一 `Batch-ID: B11` 提交；B03～B18 各要求唯一 `Batch-ID` 提交
