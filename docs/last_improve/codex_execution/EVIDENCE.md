@@ -705,3 +705,109 @@
 - Result: PASS for repository reconciliation. HEAD=`e8c55d31f2c2e48330c8eae460d2084f6d8a26b7` (B07 commit), working tree clean, no applicable `AGENTS.md` found.
 - Continuity: `BATCH_BOARD.md` had B08 READY and no IN_PROGRESS batch; `TASK_BOARD.md` had no B08 task in progress; S1-01～S1-11, S1 Gate, S2-01～S2-03 DONE with evidence.
 - Decision: claim B08 and the smallest dependency-satisfied task S2-04; do not touch S2-08 or later batches.
+
+## B09 start reconciliation
+
+- Date/time: 2026-08-24 08:40 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; branch `dev-remem`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  git branch --show-current
+  git rev-parse HEAD
+  git status --short --untracked-files=all
+  git diff --stat
+  rg --files -g 'AGENTS.md'
+  ```
+- Result: PASS for repository reconciliation. HEAD=`6c0131921be35bdd9a7846148ffa0da0e87ed884` (B08 commit), working tree clean, no applicable `AGENTS.md` found.
+- Continuity: `BATCH_BOARD.md` had B09 READY and no IN_PROGRESS batch; `TASK_BOARD.md` had no B09 task in progress; S1-01～S1-11, S1 Gate, S2-01～S2-07 DONE with evidence.
+- Decision: claim B09 and the smallest dependency-satisfied task S2-08; do not touch S3-01 or later batches.
+
+## S2-08 checkpoint
+
+- Date/time: 2026-08-24 08:40 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: Formation Shadow mode that compares vNext reflection/candidate/consolidation with a deterministic legacy stub without writing ACTIVE Long-Term memories.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_formation_shadow.py -q
+  .venv/Scripts/python -m ruff check memoryhub/application/formation_shadow.py tests/test_vnext_formation_shadow.py
+  .venv/Scripts/python -m compileall -q memoryhub/application/formation_shadow.py tests/test_vnext_formation_shadow.py
+  ```
+- Result: PASS; 9 shadow tests passed; ruff/compileall passed.
+- Summary: `FormationShadowService.compare_event` runs the vNext pipeline side-by-side with `DeterministicLegacyExtractionAdapter`; differences are classified as `PREMATURE_PROMOTION`, `MISSED_PROMOTION`, `SCOPE_MISMATCH`, `TYPE_MISMATCH` and `VALIDATION_ISSUE`. The service uses `InMemoryCandidateRepository`, never calls an Authority write, and records redacted spans to the supplied `TraceStore`.
+
+## S2-09 checkpoint
+
+- Date/time: 2026-08-24 08:45 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: Formation/Evolution Trace with redacted spans and chainable indexes.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_formation_trace.py -q
+  .venv/Scripts/python -m ruff check memoryhub/observability/ tests/test_vnext_formation_trace.py
+  .venv/Scripts/python -m compileall -q memoryhub/observability/ tests/test_vnext_formation_trace.py
+  ```
+- Result: PASS; 4 trace tests passed; ruff/compileall passed.
+- Summary: `TraceSpan` stores only IDs, hashes, classifications, scores, reason codes and timestamps; no raw text. `TraceStore` provides `list_by_trace`, `list_by_event`, `list_by_candidate`, `list_by_memory` and `formation_chain`. Convenience helpers record EVENT, WORKING, EPISODE, CANDIDATE, CONSOLIDATION, EVOLUTION and LEGACY spans.
+
+## S2-10 checkpoint
+
+- Date/time: 2026-08-24 08:50 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: Formation datasets, evaluator and P1 paired scenarios with annotated expectations.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_formation_eval.py -q
+  .venv/Scripts/python -m evaluation.metrics.formation_eval --output evaluation/results/vnext_formation_eval_report.json
+  .venv/Scripts/python -m ruff check evaluation/metrics/formation_eval.py tests/test_vnext_formation_eval.py
+  .venv/Scripts/python -m compileall -q evaluation/metrics/formation_eval.py tests/test_vnext_formation_eval.py
+  ```
+- Result: PASS; 6 eval tests passed; evaluator CLI produced a report where predicted decisions/scope levels match the annotated expectations for all single-event samples and P1 pairs.
+- Summary: `FormationEvaluator` loads `evaluation/datasets/vnext_formation_eval.json` and `evaluation/datasets/vnext_formation_p1_pairs.json`, runs each scenario through `FormationShadowService`, and computes Precision, Recall, Premature/Missed Promotion rates, Scope/Type accuracy, Resume Constraint Preservation and Safe Rate. The P1 pair dataset was calibrated so that `E2E-P1-01` promotes after two independent DOCX instructions, `E2E-P1-03` keeps repairs under review while flagging legacy premature promotion, and `E2E-P1-06` shows GLOBAL Markdown coexisting with a promoted PROJECT DOCX preference.
+
+## S2 Gate checkpoint
+
+- Date/time: 2026-08-24 08:55 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: S2 Gate checklist (P1-A) verified in automated tests.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_formation_shadow.py tests/test_vnext_formation_eval.py -q -k "s2_gate"
+  .venv/Scripts/python -m pytest tests/test_vnext_formation_shadow.py tests/test_vnext_formation_trace.py tests/test_vnext_formation_eval.py tests/test_vnext_boundary_detector.py tests/test_vnext_reflection.py tests/test_vnext_candidate_service.py tests/test_vnext_consolidation_service.py tests/test_vnext_evolution.py tests/test_vnext_long_term_validation.py tests/test_vnext_task_state.py tests/test_vnext_repositories.py tests/test_vnext_storage_schema.py tests/test_vnext_event_gateway.py tests/test_vnext_authority_write.py tests/test_vnext_entrypoints.py tests/test_vnext_p0_flow.py tests/test_no_production_write_bypass.py tests/test_safety_pipeline.py tests/test_safety_contract.py tests/test_safe_errors.py -q
+  .venv/Scripts/python -m ruff check memoryhub/application/formation_shadow.py memoryhub/observability/ evaluation/metrics/formation_eval.py tests/test_vnext_formation_shadow.py tests/test_vnext_formation_trace.py tests/test_vnext_formation_eval.py
+  .venv/Scripts/python -m compileall -q memoryhub/application/formation_shadow.py memoryhub/observability/ evaluation/metrics/formation_eval.py tests/test_vnext_formation_shadow.py tests/test_vnext_formation_trace.py tests/test_vnext_formation_eval.py
+  git diff --check
+  ```
+- Result: PASS; S2 Gate focused tests 10 passed; full affected vNext/S2/safety/contract regression 196 passed; ruff/compileall passed; `git diff --check` line-ending warnings only.
+- Checklist:
+  1. “这次用 DOCX”只形成局部 Candidate：`test_s2_gate_docx_forms_local_candidate_not_global` asserts PROJECT scope and REVIEW/PROMOTE without GLOBAL.
+  2. 多个独立任务明确证据能推动固化：`test_s2_gate_repeated_evidence_promotes_with_reason_codes` and `E2E-P1-01` show two independent DOCX events promote to PROJECT.
+  3. Global Markdown 与 Project-A DOCX 以 COEXIST 保存：`test_s2_gate_global_markdown_and_project_docx_coexist` records both a GLOBAL Markdown candidate and a PROJECT DOCX candidate, with the latter promoted.
+  4. 两次成功修复形成 Procedure：`test_s2_gate_repair_forms_procedural_candidate` and `E2E-P1-03` produce a PROCEDURAL candidate from two repair events.
+  5. 所有决策可由 Evidence、阈值、reason code 解释：`test_s2_gate_decisions_are_explainable_by_reason_codes` asserts every consolidation decision carries non-empty reasons.
+- Acceptance: S2 Gate PASS.
+
+## B09 final validation and acceptance
+
+- Date/time: 2026-08-24 08:55 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Commands:
+  ```text
+  git branch --show-current
+  git rev-parse HEAD
+  git status --short --untracked-files=all
+  git diff --stat
+  .venv/Scripts/python -m pytest tests/test_vnext_formation_shadow.py tests/test_vnext_formation_trace.py tests/test_vnext_formation_eval.py -q
+  .venv/Scripts/python -m evaluation.metrics.formation_eval --output evaluation/results/vnext_formation_eval_report.json
+  .venv/Scripts/python -m pytest tests/test_vnext_boundary_detector.py tests/test_vnext_reflection.py tests/test_vnext_candidate_service.py tests/test_vnext_consolidation_service.py tests/test_vnext_evolution.py tests/test_vnext_long_term_validation.py tests/test_vnext_task_state.py tests/test_vnext_repositories.py tests/test_vnext_storage_schema.py tests/test_vnext_event_gateway.py tests/test_vnext_authority_write.py tests/test_vnext_entrypoints.py tests/test_vnext_p0_flow.py tests/test_no_production_write_bypass.py tests/test_safety_pipeline.py tests/test_safety_contract.py tests/test_safe_errors.py -q
+  .venv/Scripts/python -m ruff check memoryhub/application/formation_shadow.py memoryhub/observability/ evaluation/metrics/formation_eval.py tests/test_vnext_formation_shadow.py tests/test_vnext_formation_trace.py tests/test_vnext_formation_eval.py
+  .venv/Scripts/python -m compileall -q memoryhub/application/formation_shadow.py memoryhub/observability/ evaluation/metrics/formation_eval.py tests/test_vnext_formation_shadow.py tests/test_vnext_formation_trace.py tests/test_vnext_formation_eval.py
+  git diff --check
+  ```
+- Result: PASS; B09 focused tests 23 passed; affected vNext/S2 regression 196 passed; safety/contract/error regressions included; ruff/compileall passed; `git diff --check` line-ending warnings only.
+- Exit criteria:
+  - Shadow never writes ACTIVE Long-Term memories and produces classified differences.
+  - Formation/Evolution Trace is redacted by default and chainable by event/candidate/memory IDs.
+  - Formation evaluator is reproducible, dataset expectations match predictions, and P1 paired scenarios cover Evidence Promotion, Procedure Formation and Evolution Coexist.
+  - S2 Gate checklist is verified by automated tests.
+- Acceptance: B09 DONE; S2-08, S2-09, S2-10 DONE; S2 Gate PASS; B10 READY.

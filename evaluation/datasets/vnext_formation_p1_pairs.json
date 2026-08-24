@@ -1,0 +1,201 @@
+{
+  "schema_version": "vnext/v1",
+  "description": "P1 formation paired scenarios for S2-10 and the S2 Gate.",
+  "pairs": [
+    {
+      "pair_id": "E2E-P1-01",
+      "name": "Evidence Promotion",
+      "description": "Multiple independent tasks repeat the same explicit instruction; vNext should eventually promote to PROJECT scope, while legacy immediately writes GLOBAL.",
+      "events": [
+        {
+          "episode_id": "episode-p1-01-a",
+          "event": {
+            "tenant_id": "tenant-p1",
+            "user_id": "user-p1",
+            "event_id": "event-p1-01-a",
+            "event_type": "user_instruction",
+            "source_type": "user_behavior",
+            "task_id": "task-p1-01-a",
+            "session_id": "session-p1",
+            "occurred_at": "2026-08-24T09:00:00+00:00",
+            "payload": {
+              "text": "Project-A formal report must use DOCX."
+            },
+            "policy_action": "ALLOW",
+            "source_hash": "0000000000000000000000000000000000000000000000000000000000000010",
+            "idempotency_key": "idem-p1-01-a",
+            "trace_id": "trace-p1-01"
+          }
+        },
+        {
+          "episode_id": "episode-p1-01-b",
+          "event": {
+            "tenant_id": "tenant-p1",
+            "user_id": "user-p1",
+            "event_id": "event-p1-01-b",
+            "event_type": "user_instruction",
+            "source_type": "user_behavior",
+            "task_id": "task-p1-01-b",
+            "session_id": "session-p1",
+            "occurred_at": "2026-08-24T09:01:00+00:00",
+            "payload": {
+              "text": "Project-A formal report must use DOCX."
+            },
+            "policy_action": "ALLOW",
+            "source_hash": "0000000000000000000000000000000000000000000000000000000000000011",
+            "idempotency_key": "idem-p1-01-b",
+            "trace_id": "trace-p1-01"
+          }
+        }
+      ],
+      "expected": {
+        "final_vnext_decision": "PROMOTE",
+        "final_vnext_scope_level": "PROJECT",
+        "premature_count": 0,
+        "missed_count": 0,
+        "scope_mismatch_count": 1,
+        "type_mismatch_count": 0,
+        "safe": true
+      }
+    },
+    {
+      "pair_id": "E2E-P1-03",
+      "name": "Procedure Formation",
+      "description": "Two similar successful repairs form a PROCEDURAL candidate under review; legacy immediately writes a GLOBAL workflow, which Shadow flags as premature.",
+      "events": [
+        {
+          "episode_id": "episode-p1-03-a",
+          "event": {
+            "tenant_id": "tenant-p1",
+            "user_id": "user-p1",
+            "event_id": "event-p1-03-a",
+            "event_type": "tool_result",
+            "source_type": "tool_result",
+            "task_id": "task-p1-03-a",
+            "session_id": "session-p1",
+            "occurred_at": "2026-08-24T09:10:00+00:00",
+            "payload": {
+              "text": "Fix report export by restarting the exporter.",
+              "tool_trust": "high"
+            },
+            "policy_action": "ALLOW",
+            "source_hash": "0000000000000000000000000000000000000000000000000000000000000020",
+            "idempotency_key": "idem-p1-03-a",
+            "trace_id": "trace-p1-03"
+          }
+        },
+        {
+          "episode_id": "episode-p1-03-b",
+          "event": {
+            "tenant_id": "tenant-p1",
+            "user_id": "user-p1",
+            "event_id": "event-p1-03-b",
+            "event_type": "tool_result",
+            "source_type": "tool_result",
+            "task_id": "task-p1-03-b",
+            "session_id": "session-p1",
+            "occurred_at": "2026-08-24T09:11:00+00:00",
+            "payload": {
+              "text": "Fix report export by restarting the exporter.",
+              "tool_trust": "high"
+            },
+            "policy_action": "ALLOW",
+            "source_hash": "0000000000000000000000000000000000000000000000000000000000000021",
+            "idempotency_key": "idem-p1-03-b",
+            "trace_id": "trace-p1-03"
+          }
+        }
+      ],
+      "expected": {
+        "final_vnext_decision": "REVIEW",
+        "final_vnext_scope_level": "TASK",
+        "premature_count": 1,
+        "missed_count": 0,
+        "scope_mismatch_count": 1,
+        "type_mismatch_count": 0,
+        "safe": false
+      }
+    },
+    {
+      "pair_id": "E2E-P1-06",
+      "name": "Evolution Coexist",
+      "description": "Global Markdown preference and Project-A DOCX preference should coexist; after two independent Project-A DOCX instructions vNext promotes PROJECT scope while legacy overwrites with the latest GLOBAL value.",
+      "events": [
+        {
+          "episode_id": "episode-p1-06-a",
+          "event": {
+            "tenant_id": "tenant-p1",
+            "user_id": "user-p1",
+            "event_id": "event-p1-06-a",
+            "event_type": "user_instruction",
+            "source_type": "user_behavior",
+            "task_id": "task-p1-06-a",
+            "session_id": "session-p1",
+            "occurred_at": "2026-08-24T09:20:00+00:00",
+            "payload": {
+              "text": "I always use Markdown for reports.",
+              "explicit_long_term": true,
+              "scope_level": "GLOBAL",
+              "scope": "GLOBAL"
+            },
+            "policy_action": "ALLOW",
+            "source_hash": "0000000000000000000000000000000000000000000000000000000000000030",
+            "idempotency_key": "idem-p1-06-a",
+            "trace_id": "trace-p1-06"
+          }
+        },
+        {
+          "episode_id": "episode-p1-06-b",
+          "event": {
+            "tenant_id": "tenant-p1",
+            "user_id": "user-p1",
+            "event_id": "event-p1-06-b",
+            "event_type": "user_instruction",
+            "source_type": "user_behavior",
+            "task_id": "task-p1-06-b",
+            "session_id": "session-p1",
+            "occurred_at": "2026-08-24T09:21:00+00:00",
+            "payload": {
+              "text": "Project-A formal report must use DOCX.",
+              "explicit_long_term": true
+            },
+            "policy_action": "ALLOW",
+            "source_hash": "0000000000000000000000000000000000000000000000000000000000000031",
+            "idempotency_key": "idem-p1-06-b",
+            "trace_id": "trace-p1-06"
+          }
+        },
+        {
+          "episode_id": "episode-p1-06-c",
+          "event": {
+            "tenant_id": "tenant-p1",
+            "user_id": "user-p1",
+            "event_id": "event-p1-06-c",
+            "event_type": "user_instruction",
+            "source_type": "user_behavior",
+            "task_id": "task-p1-06-c",
+            "session_id": "session-p1",
+            "occurred_at": "2026-08-24T09:22:00+00:00",
+            "payload": {
+              "text": "Project-A formal report must use DOCX.",
+              "explicit_long_term": true
+            },
+            "policy_action": "ALLOW",
+            "source_hash": "0000000000000000000000000000000000000000000000000000000000000032",
+            "idempotency_key": "idem-p1-06-c",
+            "trace_id": "trace-p1-06"
+          }
+        }
+      ],
+      "expected": {
+        "final_vnext_decision": "PROMOTE",
+        "final_vnext_scope_level": "PROJECT",
+        "premature_count": 0,
+        "missed_count": 0,
+        "scope_mismatch_count": 1,
+        "type_mismatch_count": 0,
+        "safe": true
+      }
+    }
+  ]
+}

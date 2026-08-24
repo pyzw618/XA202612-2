@@ -14,8 +14,8 @@
 | B06 | DONE | S1-09～S1-11；S1 Gate | `../codex_batches/B06_s1_entrypoints_gate.md` | `b9432ab` | S1 Gate PASS；下一批次 B07 已置为 READY |
 | B07 | DONE | S2-01～S2-03 | `../codex_batches/B07_s2_reflection_candidates.md` | `e8c55d3` | 边界、Reflection、Candidate 归一完成；B08 已置 READY |
 | B08 | DONE | S2-04～S2-07 | `../codex_batches/B08_s2_consolidation_evolution.md` | `SELF (Batch-ID: B08)` | 固化与演化可解释、Fast Path 受约束、Procedure 来源受约束；B09 已置 READY |
-| B09 | READY | S2-08～S2-10；S2 Gate | `../codex_batches/B09_s2_shadow_eval_gate.md` | — | 等待新会话领取 |
-| B10 | TODO | S3-01～S3-03 | `../codex_batches/B10_s3_request_planning.md` | — | |
+| B09 | DONE | S2-08～S2-10；S2 Gate | `../codex_batches/B09_s2_shadow_eval_gate.md` | `SELF (Batch-ID: B09)` | Shadow 不写 ACTIVE；Trace 默认脱敏；Formation 评测可复现；S2 Gate PASS；B10 已置 READY |
+| B10 | READY | S3-01～S3-03 | `../codex_batches/B10_s3_request_planning.md` | — | |
 | B11 | TODO | S3-04～S3-07 | `../codex_batches/B11_s3_fusion_context.md` | — | |
 | B12 | TODO | S3-08～S3-10；S3 Gate | `../codex_batches/B12_s3_entrypoints_eval_gate.md` | — | |
 | B13 | TODO | S4-01～S4-03 | `../codex_batches/B13_s4_projection_repair.md` | — | |
@@ -28,9 +28,9 @@
 ## Invariant check
 
 - IN_PROGRESS count: 0
-- READY count: 1（B09）
+- READY count: 1（B10）
 - Overlapping formal task IDs: None
 - Missing formal task IDs: None
-- Current prompt: `../codex_batches/B08_s2_consolidation_evolution.md` completed；next prompt is B09 only in a new session
-- Hard stop after current batch: create the single B08 commit, read-only verify, then end the session；不得进入 B09
+- Current prompt: `../codex_batches/B09_s2_shadow_eval_gate.md` completed；next prompt is `../codex_batches/B10_s3_request_planning.md` only in a new session
+- Hard stop after current batch: create the single B09 commit, read-only verify, then end the session；不得进入 B10
 - Commit invariant: B01/B02/B06/B07/B08 已独立提交；B03～B18 各要求唯一 `Batch-ID` 提交

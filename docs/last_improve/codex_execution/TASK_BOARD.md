@@ -8,7 +8,7 @@
 |---|---|---|
 | S0 | PASS | EVIDENCE.md#s0-gate |
 | S1 | PASS | EVIDENCE.md#s1-gate |
-| S2 | TODO | |
+| S2 | PASS | EVIDENCE.md#b09-final-validation-and-acceptance |
 | S3 | TODO | |
 | S4 | TODO | |
 | S5 | TODO | |
@@ -46,9 +46,9 @@
 | S2-05 | DONE | S2-04 | Codex 2026-08-24 (B08) | EVIDENCE.md#s2-05-checkpoint | Fast Path 治理 |
 | S2-06 | DONE | S1-07, S2-04 | Codex 2026-08-24 (B08) | EVIDENCE.md#s2-06-checkpoint | Evolution 状态变化 |
 | S2-07 | DONE | S2-04, S2-06 | Codex 2026-08-24 (B08) | EVIDENCE.md#s2-07-checkpoint | Long-Term 内容校验与 Procedure |
-| S2-08 | TODO | S0-06, S2-02, S2-03, S2-04, S2-05, S2-06, S2-07 | | | Formation Shadow |
-| S2-09 | TODO | S2-02, S2-03, S2-04, S2-05, S2-06, S2-07 | | | Formation/Evolution Trace |
-| S2-10 | TODO | S2-08, S2-09 | | | Formation 与恢复评测 |
+| S2-08 | DONE | S0-06, S2-02, S2-03, S2-04, S2-05, S2-06, S2-07 | Codex 2026-08-24 (B09) | EVIDENCE.md#s2-08-checkpoint | Formation Shadow |
+| S2-09 | DONE | S2-02, S2-03, S2-04, S2-05, S2-06, S2-07 | Codex 2026-08-24 (B09) | EVIDENCE.md#s2-09-checkpoint | Formation/Evolution Trace |
+| S2-10 | DONE | S2-08, S2-09 | Codex 2026-08-24 (B09) | EVIDENCE.md#s2-10-checkpoint | Formation 与恢复评测 |
 | S3-01 | TODO | S0-04 | | | Retrieval Request/Response |
 | S3-02 | TODO | S3-01 | | | 7 类 Intent Router |
 | S3-03 | TODO | S3-02, S1-07 | | | Retrieval Planner 与多通道 |
@@ -83,4 +83,4 @@
 - IN_PROGRESS count: 0
 - Dependency violations: None
 - DONE without evidence: None
-- Last checked: 2026-08-24 08:00 +08:00
+- Last checked: 2026-08-24 08:55 +08:00

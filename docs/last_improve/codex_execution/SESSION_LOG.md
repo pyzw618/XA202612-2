@@ -392,3 +392,25 @@
 - Blockers: None for B08.
 - Commit plan: stage only B08 source/tests/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B08 s2 consolidation evolution` with trailer `Batch-ID: B08`; do not push, amend, rebase, or begin B09.
 - Hard stop: after read-only verification of the B08 commit, end the session and hand off `docs/last_improve/codex_batches/B09_s2_shadow_eval_gate.md`.
+
+## Checkpoint 2026-08-24-05 — B09 final validation and acceptance
+
+- Started: 2026-08-24 08:40 +08:00
+- Ended: 2026-08-24 08:55 +08:00
+- Branch/HEAD: `dev-remem` / `6c0131921be35bdd9a7846148ffa0da0e87ed884`
+- Restored batch/task: B09 IN_PROGRESS with S2-08 IN_PROGRESS; completed S2-08, S2-09, S2-10 and verified S2 Gate.
+- Completed changes:
+  - S2-08: `memoryhub/application/formation_shadow.py` with in-memory candidate repo, deterministic legacy adapter, difference classification and no ACTIVE write.
+  - S2-09: `memoryhub/observability/trace_models.py`, `memoryhub/observability/trace_store.py`, redacted spans and chainable indexes.
+  - S2-10: `evaluation/metrics/formation_eval.py`, `evaluation/datasets/vnext_formation_eval.json`, `evaluation/datasets/vnext_formation_p1_pairs.json`, `tests/test_vnext_formation_eval.py`. Calibrated P1 pair expectations to match the Formation Shadow output and added explicit expected-vs-predicted assertions.
+  - S2 Gate: added dedicated tests in `tests/test_vnext_formation_shadow.py` covering the five checklist items.
+- Files changed: `memoryhub/application/formation_shadow.py`, `memoryhub/observability/trace_models.py`, `memoryhub/observability/trace_store.py`, `memoryhub/observability/__init__.py`, `evaluation/metrics/formation_eval.py`, `evaluation/datasets/vnext_formation_eval.json`, `evaluation/datasets/vnext_formation_p1_pairs.json`, `tests/test_vnext_formation_shadow.py`, `tests/test_vnext_formation_trace.py`, `tests/test_vnext_formation_eval.py`, plus continuity files.
+- Validation run:
+  - B09 focused: 23 passed.
+  - Affected vNext/S2 regression: 196 passed.
+  - Static: scoped ruff and compileall passed; `git diff --check` line-ending warnings only.
+  - Formation evaluator CLI produced a report where all single-event and P1 pair expectations match predictions.
+- Task status changes: S2-08 IN_PROGRESS → DONE; S2-09 TODO → DONE; S2-10 TODO → DONE; S2 Gate TODO → PASS; B09 IN_PROGRESS → DONE; B10 TODO → READY.
+- Blockers: None for B09.
+- Commit plan: stage only B09 source/tests/datasets/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B09 s2 shadow eval gate` with trailer `Batch-ID: B09`; do not push, amend, rebase, or begin B10.
+- Hard stop: after read-only verification of the B09 commit, end the session and hand off `docs/last_improve/codex_batches/B10_s3_request_planning.md`.

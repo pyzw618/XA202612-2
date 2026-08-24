@@ -1,20 +1,37 @@
 # MemoryHub vNext Codex Execution State
 
-> Last updated: 2026-08-24 07:05 +08:00
-> Updated by: Codex session 2026-08-24 (B07)
+> Last updated: 2026-08-24 08:55 +08:00
+> Updated by: Codex session 2026-08-24 (B09)
 
-## B08 final validation and acceptance
+## B09 final validation and acceptance
 
-- Last updated: 2026-08-24 08:35 +08:00; updated by Codex session 2026-08-24 (B08)
-- Current batch: B08 (`S2-04`～`S2-07`); batch status: DONE
-- Current batch prompt: `docs/last_improve/codex_batches/B08_s2_consolidation_evolution.md`
-- Current task: None; S2-04, S2-05, S2-06, S2-07 DONE
-- Dependencies: S1-01～S1-11 DONE with valid evidence; S1 Gate PASS; S2-01, S2-02, S2-03 DONE with valid evidence
-- Start reconciliation: branch `dev-remem`; HEAD `e8c55d31f2c2e48330c8eae460d2084f6d8a26b7` (B07 commit); working tree clean; no applicable `AGENTS.md`; BATCH_BOARD was B08 READY and TASK_BOARD had no B08 task in progress
-- Acceptance: S2-04 promotion scoring/thresholds/reason codes, S2-05 Fast Path governance, S2-06 evolution actions/state changes and S2-07 type-specific long-term validation are implemented and verified. Affected vNext regressions, safety/contract/error regressions and static checks pass.
-- Validation: B08 focused tests 38 passed; affected vNext regression 82 passed; safety/contract/error regressions 77 passed; core B08 modules ruff/compileall passed; `git diff --check` passed (line-ending warnings only).
-- Next batch: B09 READY; next prompt is `docs/last_improve/codex_batches/B09_s2_shadow_eval_gate.md`.
-- Hard stop: do not execute or modify S2-08 or any later batch in this session; stop after read-only verification of the single B08 commit.
+- Last updated: 2026-08-24 08:55 +08:00; updated by Codex session 2026-08-24 (B09)
+- Current batch: B09 (`S2-08`～`S2-10` and S2 Gate); batch status: DONE
+- Current task: none; S2-08, S2-09, S2-10 DONE; S2 Gate PASS
+- Dependencies: S1-01～S1-11 DONE; S1 Gate PASS; S2-01～S2-07 DONE with valid evidence
+- Reconciliation: branch `dev-remem`; HEAD `6c0131921be35bdd9a7846148ffa0da0e87ed884` (B08 commit); B09 work staged for single local commit; no applicable `AGENTS.md`
+- Acceptance:
+  - S2-08 Formation Shadow: `memoryhub/application/formation_shadow.py` with in-memory candidate repo, no ACTIVE Long-Term write, classified differences.
+  - S2-09 Formation/Evolution Trace: `memoryhub/observability/trace_models.py`, `trace_store.py`, redacted by default, chainable indexes.
+  - S2-10 Formation datasets/evaluator: `evaluation/datasets/vnext_formation_eval.json`, `vnext_formation_p1_pairs.json`, `evaluation/metrics/formation_eval.py`, focused tests.
+  - B09 focused tests 23 passed; affected vNext/S2 regression 196 passed; ruff/compileall/diff-check passed; evaluator CLI report matches annotated expectations.
+  - S2 Gate checklist verified in tests: DOCX stays local, repeated evidence promotes, Markdown GLOBAL and DOCX PROJECT coexist, repairs form procedural candidate, decisions carry reason codes.
+- Next batch: B10 READY; next prompt is `docs/last_improve/codex_batches/B10_s3_request_planning.md`.
+- Boundary: only S2-08, S2-09, S2-10 and S2 Gate; no S3-01 or later batches touched.
+- Commit plan: create exactly one local commit titled `feat(vnext): complete B09 s2 shadow eval gate` with trailer `Batch-ID: B09`; do not push, amend, rebase or enter B10.
+
+## B09 start reconciliation
+
+- Last updated: 2026-08-24 08:40 +08:00; updated by Codex session 2026-08-24 (B09)
+- Current batch: B09 (`S2-08`～`S2-10` and S2 Gate); batch status: IN_PROGRESS
+- Current batch prompt: `docs/last_improve/codex_batches/B09_s2_shadow_eval_gate.md`
+- Current task: S2-08 IN_PROGRESS; S2-09, S2-10 TODO; S2 Gate TODO
+- Dependencies: S1-01～S1-11 DONE with valid evidence; S1 Gate PASS; S2-01, S2-02, S2-03, S2-04, S2-05, S2-06, S2-07 DONE with valid evidence
+- Start reconciliation: branch `dev-remem`; HEAD `6c0131921be35bdd9a7846148ffa0da0e87ed884` (B08 commit `feat(vnext): complete B08 s2 consolidation evolution`); working tree clean; no applicable `AGENTS.md`; BATCH_BOARD was B09 READY and TASK_BOARD had no B09 task in progress
+- Reconciliation: B08 commit is present and BATCH_BOARD/TASK_BOARD facts authorize B09. No user-owned unrelated changes observed.
+- Acceptance: prior B08 acceptance remains valid.
+- Boundary: only S2-08, S2-09, S2-10 and S2 Gate; no S3-01 or later batches.
+- Exact next action: implement S2-08 Formation Shadow mode in `application/reflection_service.py` / feature flag.
 
 ## B08 start reconciliation
 

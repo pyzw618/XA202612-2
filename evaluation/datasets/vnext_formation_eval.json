@@ -1,0 +1,139 @@
+{
+  "schema_version": "vnext/v1",
+  "description": "Formation Shadow single-event evaluation samples for S2-10.",
+  "samples": [
+    {
+      "sample_id": "S2-10-SINGLE-DOCX",
+      "episode_id": "episode-docx-1",
+      "event": {
+        "tenant_id": "tenant-eval",
+        "user_id": "user-eval",
+        "event_id": "event-docx-1",
+        "event_type": "user_instruction",
+        "source_type": "user_behavior",
+        "task_id": "task-docx-1",
+        "session_id": "session-eval",
+        "occurred_at": "2026-08-24T08:00:00+00:00",
+        "payload": {
+          "text": "This time please use DOCX for Project-A reports."
+        },
+        "policy_action": "ALLOW",
+        "source_hash": "0000000000000000000000000000000000000000000000000000000000000001",
+        "idempotency_key": "idem-docx-1",
+        "trace_id": "trace-docx-1"
+      },
+      "expected": {
+        "vnext_memory_type": "PREFERENCE",
+        "vnext_scope_level": "PROJECT",
+        "vnext_decision": "REVIEW",
+        "legacy_memory_type": "PREFERENCE",
+        "legacy_scope_level": "GLOBAL",
+        "premature": true,
+        "missed": false,
+        "scope_mismatch": true,
+        "type_mismatch": false,
+        "safe": false
+      }
+    },
+    {
+      "sample_id": "S2-10-SINGLE-MARKDOWN",
+      "episode_id": "episode-md-1",
+      "event": {
+        "tenant_id": "tenant-eval",
+        "user_id": "user-eval",
+        "event_id": "event-md-1",
+        "event_type": "user_instruction",
+        "source_type": "user_behavior",
+        "task_id": "task-md-1",
+        "session_id": "session-eval",
+        "occurred_at": "2026-08-24T08:01:00+00:00",
+        "payload": {
+          "text": "Use Markdown for the weekly summary."
+        },
+        "policy_action": "ALLOW",
+        "source_hash": "0000000000000000000000000000000000000000000000000000000000000002",
+        "idempotency_key": "idem-md-1",
+        "trace_id": "trace-md-1"
+      },
+      "expected": {
+        "vnext_memory_type": "PREFERENCE",
+        "vnext_scope_level": "TASK",
+        "vnext_decision": "REVIEW",
+        "legacy_memory_type": "PREFERENCE",
+        "legacy_scope_level": "GLOBAL",
+        "premature": true,
+        "missed": false,
+        "scope_mismatch": true,
+        "type_mismatch": false,
+        "safe": false
+      }
+    },
+    {
+      "sample_id": "S2-10-PROCEDURE-REVIEW",
+      "episode_id": "episode-proc-1",
+      "event": {
+        "tenant_id": "tenant-eval",
+        "user_id": "user-eval",
+        "event_id": "event-proc-1",
+        "event_type": "tool_result",
+        "source_type": "tool_result",
+        "task_id": "task-proc-1",
+        "session_id": "session-eval",
+        "occurred_at": "2026-08-24T08:02:00+00:00",
+        "payload": {
+          "text": "I fixed the report export by restarting the exporter.",
+          "tool_trust": "high"
+        },
+        "policy_action": "ALLOW",
+        "source_hash": "0000000000000000000000000000000000000000000000000000000000000003",
+        "idempotency_key": "idem-proc-1",
+        "trace_id": "trace-proc-1"
+      },
+      "expected": {
+        "vnext_memory_type": "PROCEDURAL",
+        "vnext_scope_level": "TASK",
+        "vnext_decision": "REVIEW",
+        "legacy_memory_type": "PROCEDURAL",
+        "legacy_scope_level": "GLOBAL",
+        "premature": true,
+        "missed": false,
+        "scope_mismatch": true,
+        "type_mismatch": false,
+        "safe": false
+      }
+    },
+    {
+      "sample_id": "S2-10-FACT-REVIEW",
+      "episode_id": "episode-fact-1",
+      "event": {
+        "tenant_id": "tenant-eval",
+        "user_id": "user-eval",
+        "event_id": "event-fact-1",
+        "event_type": "user_instruction",
+        "source_type": "user_behavior",
+        "task_id": "task-fact-1",
+        "session_id": "session-eval",
+        "occurred_at": "2026-08-24T08:03:00+00:00",
+        "payload": {
+          "text": "The active Python version is 3.11."
+        },
+        "policy_action": "ALLOW",
+        "source_hash": "0000000000000000000000000000000000000000000000000000000000000004",
+        "idempotency_key": "idem-fact-1",
+        "trace_id": "trace-fact-1"
+      },
+      "expected": {
+        "vnext_memory_type": "SEMANTIC",
+        "vnext_scope_level": "TASK",
+        "vnext_decision": "REVIEW",
+        "legacy_memory_type": "SEMANTIC",
+        "legacy_scope_level": "GLOBAL",
+        "premature": true,
+        "missed": false,
+        "scope_mismatch": true,
+        "type_mismatch": false,
+        "safe": false
+      }
+    }
+  ]
+}
