@@ -17,6 +17,10 @@ from memoryhub.adapter.vnext_schemas import (
     APIError,
     APIErrorCode,
     ContextPayload,
+    DiagnosticRequest,
+    DiagnosticResponse,
+    ForgetRequest,
+    ForgetResponse,
     MemoryRetrievalRequest,
     MemoryRetrievalResponse,
     ResumeTaskResponse,
@@ -24,6 +28,7 @@ from memoryhub.adapter.vnext_schemas import (
     WriteEventResponse,
 )
 from memoryhub.application.canonical_write import CanonicalWriteService
+from memoryhub.application.forget_service import ForgetService
 from memoryhub.application.retrieval_service import RetrievalService
 from memoryhub.domain.contracts import (
     EpisodeEventContract,
@@ -305,9 +310,9 @@ def _derive_source_hash(event_data: dict[str, Any]) -> str:
         "payload": event_data.get("payload", {}),
     }
     return hashlib.sha256(
-        json.dumps(
-            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode("utf-8")
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
     ).hexdigest()
 
 
@@ -379,6 +384,96 @@ def _retrieval_service(request: Request) -> RetrievalService:
             detail={"code": "retrieval.service_unavailable"},
         )
     return service
+
+
+def _forget_service(request: Request) -> ForgetService:
+    service = getattr(request.app.state, "forget_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail={"code": "forget.service_unavailable"})
+    return service
+
+
+def _admin_authorized(request: Request, admin: str | None) -> bool:
+    authorizer = getattr(request.app.state, "management_authorizer", None)
+    if callable(authorizer):
+        return bool(authorizer(request))
+    return str(admin or "").strip().lower() in {"1", "true", "admin", "diagnostic"}
+
+
+@router.post("/forget", response_model=ForgetResponse)
+async def vnext_forget(
+    req: ForgetRequest,
+    request: Request,
+    x_memoryhub_admin: str | None = Header(default=None, alias="X-MemoryHub-Admin"),
+) -> ForgetResponse:
+    tenant_id, user_id = _tenant_user(request, tenant_id=req.tenant_id, user_id=req.user_id)
+    if tenant_id != req.tenant_id or user_id != req.user_id:
+        raise HTTPException(status_code=401, detail={"code": APIErrorCode.UNAUTHORIZED.value})
+    try:
+        result = _forget_service(request).execute(
+            req,
+            actor_id=user_id,
+            high_risk_authorized=_admin_authorized(request, x_memoryhub_admin),
+        )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": APIErrorCode.UNAUTHORIZED.value, "message": str(exc)},
+        ) from exc
+    return result.response
+
+
+@router.get("/forget/{record_id}", response_model=ForgetResponse)
+async def vnext_forget_status(
+    record_id: str, request: Request, identity: tuple[str, str] = Depends(_tenant_user)
+) -> ForgetResponse:
+    found = _forget_service(request).get(record_id, tenant_id=identity[0], user_id=identity[1])
+    if found is None:
+        raise HTTPException(status_code=404, detail={"code": APIErrorCode.NOT_FOUND.value})
+    return found.response
+
+
+@router.get("/forget", response_model=list[ForgetResponse])
+async def vnext_forget_history(
+    request: Request, identity: tuple[str, str] = Depends(_tenant_user)
+) -> list[ForgetResponse]:
+    return [
+        item.response
+        for item in _forget_service(request).list(tenant_id=identity[0], user_id=identity[1])
+    ]
+
+
+@router.post("/diagnostics", response_model=DiagnosticResponse)
+async def vnext_diagnostics(
+    req: DiagnosticRequest,
+    request: Request,
+    x_memoryhub_admin: str | None = Header(default=None, alias="X-MemoryHub-Admin"),
+) -> DiagnosticResponse:
+    if not _admin_authorized(request, x_memoryhub_admin):
+        raise HTTPException(status_code=403, detail={"code": APIErrorCode.UNAUTHORIZED.value})
+    tenant_id, user_id = _tenant_user(request, tenant_id=req.tenant_id, user_id=req.user_id)
+    if (tenant_id, user_id) != (req.tenant_id, req.user_id):
+        raise HTTPException(status_code=401, detail={"code": APIErrorCode.UNAUTHORIZED.value})
+    service = getattr(request.app.state, "diagnostic_service", None)
+    if service is None:
+        raise HTTPException(
+            status_code=503, detail={"code": APIErrorCode.SERVICE_UNAVAILABLE.value}
+        )
+    items = service.inspect(
+        target_type=req.target_type,
+        target_id=req.target_id,
+        tenant_id=req.tenant_id,
+        user_id=req.user_id,
+        include_sensitive=req.include_sensitive,
+    )
+    return DiagnosticResponse(
+        request_id=req.request_id,
+        trace_id=req.request_id,
+        target_type=req.target_type,
+        target_id=req.target_id,
+        items=items,
+        redacted=not req.include_sensitive,
+    )
 
 
 @router.post("/search", response_model=MemoryRetrievalResponse)

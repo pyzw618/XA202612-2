@@ -1177,3 +1177,29 @@
   - Static: ruff/compileall passed; `git diff --check` passed (CRLF line-ending warnings only).
 - Acceptance: S4-01, S4-02, S4-03 complete; B13 is DONE; B14 is READY.
 - Boundary: only S4-01, S4-02, S4-03; no S4-04 or later batches touched.
+## S4-04 checkpoint
+
+- Status: DONE; Forget state machine enforces Authority-first read blocking, projection cleanup through delete outbox, explicit states, durable idempotency and retry-safe verification.
+- Implementation: `memoryhub/application/forget_service.py`; additive `forget_history` state/tenant/idempotency/audit columns and migration in `memoryhub/storage/models.py` and `memoryhub/storage/database.py`.
+- Evidence: `tests/test_vnext_forget_diagnostics.py` and manual tombstone/idempotency check; first Forget returned `READ_BLOCKED`, Authority active read returned no result, tombstone remained `DELETED`, and delete outbox priority was `100`.
+
+## S4-05 checkpoint
+
+- Status: DONE; vNext Forget execute/status/history routes provide explicit confirmation, high-risk management authorization, tenant/user isolation and idempotent replay.
+- Implementation: `memoryhub/adapter/vnext_api.py`, `memoryhub/application/forget_service.py`, `docs/spec/VNEXT_INTERFACE.md`.
+- Evidence: focused Forget tests 3 passed; high-risk request without authorization failed closed; duplicate idempotency key persisted one Forget row.
+
+## S4-06 checkpoint
+
+- Status: DONE; diagnostics API covers memory/evidence/lineage/projection/candidate/retrieval trace, requires admin authorization and defaults to redacted, tenant-scoped output.
+- Implementation: `memoryhub/application/diagnostic_service.py`, vNext diagnostics route and app wiring.
+- Evidence: diagnostics redaction/tenant test passed; affected vNext suite 43 passed; safety/isolation/write-bypass suite 58 passed; ruff/compileall/diff-check passed.
+
+## B14 final validation and acceptance
+
+- Environment: Windows PowerShell, `.venv` Python 3.11.6, branch `dev-remem`; untracked test DB artifacts in `evaluation/results/` were preserved and excluded.
+- Focused/affected: `pytest tests/test_vnext_forget_diagnostics.py tests/test_vnext_interface.py tests/test_vnext_projection_outbox.py tests/test_vnext_projection_version.py tests/test_vnext_repair_worker.py tests/test_projection_outbox.py tests/test_vnext_retrieval_service.py tests/test_vnext_entrypoints.py -q` → 43 passed.
+- Risk: `pytest tests/test_user_isolation.py tests/test_no_production_write_bypass.py tests/test_safety_pipeline.py -q` → 58 passed.
+- Static: targeted ruff, compileall and `git diff --check` passed.
+- Full suite: PARTIAL; first failure is pre-existing `tests/test_api_acceptance.py::test_api_02_events_write_round_trip` asserting retrieval after event write (`total_count == 0`, no preferences). No B14-specific test failed before this stop.
+- Acceptance: B14 S4-04/S4-05/S4-06 DONE; B15 READY; no S4-07 or later content executed.

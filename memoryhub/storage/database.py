@@ -174,6 +174,16 @@ class Database:
                 "lease_expires_at": "DATETIME",
                 "dead_lettered_at": "DATETIME",
             },
+            "forget_history": {
+                "tenant_id": "VARCHAR(64)",
+                "request_id": "VARCHAR(128)",
+                "idempotency_key": "VARCHAR(128)",
+                "state": "VARCHAR(32) DEFAULT 'ACCEPTED'",
+                "actor_id": "VARCHAR(128)",
+                "reason": "TEXT",
+                "affected_memory_ids": "JSON",
+                "warnings": "JSON",
+            },
         }
         with self.engine.begin() as conn:
             for table, columns in migrations.items():
@@ -222,6 +232,11 @@ class Database:
                 "ON memory_projection_outbox (tenant_id, user_id)",
                 "CREATE INDEX IF NOT EXISTS ix_memory_projection_outbox_event_id "
                 "ON memory_projection_outbox (event_id)",
+                "CREATE INDEX IF NOT EXISTS ix_forget_history_tenant_user "
+                "ON forget_history (tenant_id, user_id)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_forget_history_idempotency "
+                "ON forget_history (tenant_id, user_id, idempotency_key) "
+                "WHERE idempotency_key IS NOT NULL",
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_projection_outbox_event_version "
                 "ON memory_projection_outbox "
                 "(tenant_id, event_id, content_version, projection_type, operation)",

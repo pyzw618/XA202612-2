@@ -1,5 +1,16 @@
 # MemoryHub vNext Codex Execution State
 
+## B14 final validation and acceptance
+
+- Date: 2026-08-24; branch `dev-remem`; B14 was the sole READY batch and no B14 task was previously IN_PROGRESS. No applicable `AGENTS.md` was found; existing untracked `evaluation/results/*.db` artifacts were preserved and excluded.
+- Current batch: B14 (`S4-04`～`S4-06`); batch status: DONE; current task: none.
+- S4-04 DONE: `ForgetService` writes an Authority `DELETED` tombstone first, enqueues high-priority projection deletes in one transaction, persists state/idempotency/audit metadata, and advances to `VERIFIED` only after outbox success.
+- S4-05 DONE: vNext Forget execute/status/history routes enforce explicit confirmation and fail closed for high-risk selectors without management authorization; tenant/user scoping and idempotency are enforced.
+- S4-06 DONE: diagnostics cover memory/evidence/lineage/projection/candidate/retrieval trace surfaces, are tenant-scoped, require admin authorization, and redact sensitive fields by default.
+- Validation: B14/affected focused suite 43 passed; safety/isolation/write-bypass risk suite 58 passed; ruff, compileall and diff-check passed. Full repository run is PARTIAL because `tests/test_api_acceptance.py::test_api_02_events_write_round_trip` failed its retrieval assertion before any B14-specific failure; this is unrelated to Forget/diagnostics.
+- Next batch: B15 READY; next prompt is `docs/last_improve/codex_batches/B15_s4_reliability_gate.md`.
+- Boundary: only S4-04～S4-06 and required continuity/API documentation were changed; no S4-07 or later work was executed.
+
 > Last updated: 2026-08-24 16:05 +08:00
 > Updated by: Codex session 2026-08-24 (B13)
 

@@ -538,3 +538,12 @@
 - Blockers: None.
 - Commit plan: stage only B13 source/tests/script/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B13 s4 projection repair` with trailer `Batch-ID: B13`; do not push, amend, rebase, or begin B14.
 - Hard stop: after read-only verification of the single B13 commit, end the session and hand off `docs/last_improve/codex_batches/B14_s4_forget_diagnostics.md`.
+## Checkpoint 2026-08-24-12 — B14 final validation and acceptance
+
+- Restored batch: B14 READY with no in-progress task; claimed S4-04, then completed S4-05 and S4-06 after each checkpoint.
+- Completed changes: Authority-first Forget tombstone/state machine; durable idempotent Forget management routes; tenant-scoped redacted diagnostics API; additive Forget schema migration; vNext API documentation; focused tests.
+- Validation: B14 affected suite 43 passed; safety/isolation/write-bypass risk suite 58 passed; ruff/compileall/diff-check passed. Full suite PARTIAL at unrelated `tests/test_api_acceptance.py::test_api_02_events_write_round_trip` retrieval assertion.
+- Task status changes: S4-04 TODO → DONE; S4-05 TODO → DONE; S4-06 TODO → DONE; B14 READY → DONE; B15 TODO → READY.
+- Files changed: `memoryhub/application/forget_service.py`, `memoryhub/application/diagnostic_service.py`, `memoryhub/adapter/vnext_api.py`, `memoryhub/app.py`, `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `docs/spec/VNEXT_INTERFACE.md`, `tests/test_vnext_forget_diagnostics.py`, and B14 continuity files.
+- Commit plan: stage only B14 source/tests/documentation/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B14 s4 forget diagnostics` with trailer `Batch-ID: B14`; do not push, amend, rebase, or enter B15.
+- Hard stop: after read-only verification of the single B14 commit, hand off `docs/last_improve/codex_batches/B15_s4_reliability_gate.md` and stop.

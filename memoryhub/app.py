@@ -626,6 +626,10 @@ def create_app(
             activation_repository=ActivationRepository(db),
             retrieval_log_repository=RetrievalLogRepository(db),
         )
+        from memoryhub.application.diagnostic_service import DiagnosticService
+        from memoryhub.application.forget_service import ForgetService
+        app.state.forget_service = ForgetService(db, authority_repository)
+        app.state.diagnostic_service = DiagnosticService(db)
 
         # 前端 agent 演示适配层：事件处理协调器（依赖 memory_write_service 同步检索索引）
         from memoryhub.core.processing import EventProcessingCoordinator

@@ -60,6 +60,11 @@ Retrieval 和 Context 串起来。
 
 ### Diagnostic
 
+vNext 路由包括 `POST /api/memory/vnext/forget`、`GET /api/memory/vnext/forget`、
+`GET /api/memory/vnext/forget/{record_id}` 和 `POST /api/memory/vnext/diagnostics`。
+Forget 先持久化 `DELETED` Authority tombstone，再投递高优先级 projection delete；
+诊断接口要求管理授权并按 tenant/user 过滤，默认返回脱敏字段。
+
 管理接口和用户检索接口权限分离。默认 `include_sensitive=false`，结果脱敏且
 包含 actor/reason/idempotency/audit 的应用服务记录；DTO 本身不授权调用方。
 

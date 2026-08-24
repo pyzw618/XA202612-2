@@ -193,9 +193,17 @@ class ForgetRow(Base):
     __tablename__ = "forget_history"
 
     record_id = Column(String(32), primary_key=True)
+    tenant_id = Column(String(64), nullable=True, index=True)
     user_id = Column(String(64), index=True)
+    request_id = Column(String(128), nullable=True, index=True)
+    idempotency_key = Column(String(128), nullable=True, index=True)
+    state = Column(String(32), nullable=False, default="ACCEPTED", index=True)
+    actor_id = Column(String(128), nullable=True)
+    reason = Column(Text, nullable=True)
     instruction = Column(Text)
     target_memory_ids = Column(JSON)
+    affected_memory_ids = Column(JSON, nullable=True)
+    warnings = Column(JSON, nullable=True)
     deleted_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now)
 
