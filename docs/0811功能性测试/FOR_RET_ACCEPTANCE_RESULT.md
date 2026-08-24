@@ -1,6 +1,6 @@
 # FOR / RET 专项验收测试结果记录
 
-对应 `docs/tests/0811功能性测试/TEST_PLAN.md` 6.7 遗忘模块(FOR-01~07)与 6.8 检索链路(RET-01~09),实现为 `tests/test_for_acceptance.py` 与 `tests/test_ret_acceptance.py`。
+对应 `docs/0811功能性测试/TEST_PLAN.md` 6.7 遗忘模块(FOR-01~07)与 6.8 检索链路(RET-01~09),实现为 `tests/test_for_acceptance.py` 与 `tests/test_ret_acceptance.py`。
 
 ## 执行结果
 

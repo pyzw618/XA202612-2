@@ -1,6 +1,6 @@
 # SEC 专项验收测试结果记录
 
-对应 `docs/tests/0811功能性测试/TEST_PLAN.md` 6.1 安全模块专项(SEC-01~19),实现为 `tests/test_sec_acceptance.py`。
+对应 `docs/0811功能性测试/TEST_PLAN.md` 6.1 安全模块专项(SEC-01~19),实现为 `tests/test_sec_acceptance.py`。
 
 ## 执行结果
 

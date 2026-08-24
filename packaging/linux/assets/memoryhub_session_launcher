@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+
+# Configure the per-user OpenCode integration at every login. The installer
+# may run inside KARE as root and therefore cannot reliably discover the
+# desktop user's home directory during package configuration.
+/usr/bin/memoryhub-configure-opencode --current-user || true
+
+# Revisions 1-5 used a user systemd unit. KARE rewrote that unit into a
+# host-side Type=forking wrapper which can remain enabled after an upgrade.
+# Disable the per-user link before starting the session-native replacement.
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user disable --now memoryhub.service >/dev/null 2>&1 || true
+fi
+legacy_user_link="$HOME/.config/systemd/user/default.target.wants/memoryhub.service"
+if [ -L "$legacy_user_link" ]; then
+    rm -f "$legacy_user_link"
+fi
+
+# The service launcher stays in the foreground so the desktop session (and
+# KARE, when present) can supervise its lifetime without a PID file.
+exec /usr/bin/memoryhub_service_launcher

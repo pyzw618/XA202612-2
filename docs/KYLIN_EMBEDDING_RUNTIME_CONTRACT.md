@@ -1,6 +1,6 @@
 # 银河麒麟 Embedding 运行时契约
 
-> 依据：`memoryhub/embedding/kylin_client.py`、`docs/refactor/REFACTOR_PLAN_V2.md` §4.6、`docs/refactor/MAIN_TO_REMEM_REFACTOR_ROADMAP.md` §7。
+> 依据：`memoryhub/embedding/kylin_client.py`、`docs/REFACTOR_PLAN_V2.md` §4.6、`docs/refactor/MAIN_TO_REMEM_REFACTOR_ROADMAP.md` §7。
 > 状态：部署/验收前置文档；真机验收前需按本契约逐项确认。
 
 ## 1. 目标运行环境
@@ -86,4 +86,4 @@ runtime.allow_fallback = false
 
 ---
 
-*关联：`docs/refactor/REFACTOR_PLAN_V2.md` §4.6、`docs/refactor/MAIN_TO_REMEM_REFACTOR_ROADMAP.md` §7、`scripts/check_kylin_embedding_runtime.py`。*
+*关联：`docs/REFACTOR_PLAN_V2.md` §4.6、`docs/refactor/MAIN_TO_REMEM_REFACTOR_ROADMAP.md` §7、`scripts/check_kylin_embedding_runtime.py`。*

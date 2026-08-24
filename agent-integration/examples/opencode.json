@@ -9,7 +9,7 @@
   "mcp": {
     "memoryhub": {
       "type": "local",
-      "command": ["python", "-m", "memoryhub_mcp"],
+      "command": ["memoryhub-mcp"],
       "cwd": "agent-integration",
       "environment": {
         "MEMORYHUB_API_URL": "{env:MEMORYHUB_API_URL}",

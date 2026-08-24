@@ -1,6 +1,6 @@
 # FCT 专项验收测试结果记录
 
-对应 `docs/tests/0811功能性测试/TEST_PLAN.md` 6.6 事实记忆(FCT-01~05)。本次聚焦 **FCT-01 事实抽取**,新增 LLM 不可用时的确定性规则降级抽取,测试补在 `tests/test_fact/test_extractor.py::TestTripleExtractorRuleFallback`。
+对应 `docs/0811功能性测试/TEST_PLAN.md` 6.6 事实记忆(FCT-01~05)。本次聚焦 **FCT-01 事实抽取**,新增 LLM 不可用时的确定性规则降级抽取,测试补在 `tests/test_fact/test_extractor.py::TestTripleExtractorRuleFallback`。
 
 ## 执行结果
 

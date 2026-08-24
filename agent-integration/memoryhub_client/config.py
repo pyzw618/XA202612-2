@@ -60,7 +60,11 @@ class ClientConfig:
     ) -> "ClientConfig":
         project_root = find_project_root(cwd)
         project_file = project_root / ".memoryhub" / "config.json"
-        global_file = Path(os.environ.get("APPDATA", Path.home())) / "memoryhub" / "config.json"
+        if os.name == "nt" and not os.environ.get("XDG_CONFIG_HOME"):
+            config_home = Path(os.environ.get("APPDATA", Path.home() / ".config"))
+        else:
+            config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        global_file = config_home / "memoryhub" / "config.json"
         values: dict[str, object] = {}
         values.update(_read_json(global_file))
         values.update(_read_json(project_file))

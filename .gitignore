@@ -280,3 +280,9 @@ desktop-client/build-release/
 # ---- Vibecoding ----
 .claude
 .opencode
+.test-deps/
+
+# Linux DEB build output
+/packaging/linux/build/
+/packaging/linux/dist/
+*.deb

@@ -12,6 +12,7 @@ sqlalchemy>=2.0.0
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 python-dotenv>=1.0.0
+PyYAML>=6.0
 
 # REVIEW 隔离区认证加密
 cryptography>=42.0

@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 export const DEFAULT_CONFIG = {
   apiUrl: "http://127.0.0.1:8099",
-  userId: "opencode",
+  userId: process.env.MEMORYHUB_USER_ID || process.env.USER || process.env.USERNAME || "opencode",
   scene: "code",
   taskType: "coding_task",
   maxResultChars: 1000,
@@ -81,7 +81,7 @@ export function normalizeToolRecord({ tool, args = {}, output = {}, sessionID, c
 export function buildEvent({ sessionID, records = [], cfg = DEFAULT_CONFIG, summary = false }) {
   const toolCalls = records.map((record, index) => ({ ...record, sequence: index + 1 }))
   const text = summary ? String(records.at(-1)?.result || "") : "opencode tool activity"
-  if (!toolCalls.length && (!cfg.recordSummaries || !text)) return null
+  if (!toolCalls.length || (summary && (!cfg.recordSummaries || !text))) return null
   const event = {
     event_id: `evt_op_${sha256Hex(`${sessionID}:${summary ? "summary" : Date.now()}`).slice(0, 16)}`,
     source_type: summary ? "user_behavior" : "tool_result",
@@ -96,7 +96,7 @@ export function buildEvent({ sessionID, records = [], cfg = DEFAULT_CONFIG, summ
     payload: {
       action: summary ? "session_summary" : "tool_trace",
       tool_call_count: toolCalls.length,
-      ...(cfg.projectRoot && cfg.recordProjects ? { project_root: cfg.projectRoot, project_name: String(cfg.projectRoot).split(/[\\/]/).at(-1) } : {}),
+      ...(cfg.projectRoot && cfg.recordProjects !== false ? { project_root: cfg.projectRoot, project_name: String(cfg.projectRoot).split(/[\\/]/).at(-1) } : {}),
     },
     tool_calls: toolCalls,
     schema_version: "1.1",

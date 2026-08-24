@@ -2,7 +2,7 @@
 
 > 日期：2026-08-18
 > 分支：`dev-remem`
-> 依据：`docs/refactor/REFACTOR_PLAN_V2.md` §4.2.1（赛题要求 2：工具选择偏好提取）
+> 依据：`docs/REFACTOR_PLAN_V2.md` §4.2.1（赛题要求 2：工具选择偏好提取）
 > 验证环境：`mhub311` conda（Python 3.11.15）
 
 ## 1. 实施项（全部完成）

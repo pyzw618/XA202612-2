@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+# Keep user preparation and the long-running server in one executable.  The
+# underscore-only filename avoids KARE's command escaping bug for executable
+# paths containing hyphens.
+/usr/lib/memoryhub/prepare-user
+
+: "${MEMORYHUB_CONFIG:=/etc/memoryhub/config.yaml}"
+: "${MEMORYHUB_RUNTIME_MODE:=development}"
+: "${MEMORYHUB_RUNTIME_ALLOW_FALLBACK:=true}"
+: "${MEMORYHUB_EMBEDDING_PROVIDER:=mock}"
+: "${MEMORYHUB_VECTOR_ENGINE_PROVIDER:=faiss}"
+: "${MEMORYHUB_DB_PATH:=$HOME/.local/share/MemoryHub/data/memoryhub.db}"
+export MEMORYHUB_CONFIG MEMORYHUB_RUNTIME_MODE MEMORYHUB_RUNTIME_ALLOW_FALLBACK
+export MEMORYHUB_EMBEDDING_PROVIDER MEMORYHUB_VECTOR_ENGINE_PROVIDER MEMORYHUB_DB_PATH
+
+exec /opt/memoryhub/venv/bin/python -m uvicorn memoryhub.app:app \
+    --host 127.0.0.1 --port 8099

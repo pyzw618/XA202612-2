@@ -2,6 +2,8 @@
 
 > **本文档是多人协作的核心参考，所有模块间的数据交互必须遵循此规范。**
 > **修改任何数据结构或接口签名，必须同步更新本文档。**
+>
+> **代码事实（v0.1.0）**：本文档中所有 Pydantic 模型以 `memoryhub/adapter/schemas.py`（1781 行）为唯一权威；REST 端点由 `memoryhub/app.py:171-866` 注册的 5 个 Router 实际暴露；ORM 表以 `memoryhub/storage/database.py` + `models.py` 为准。所有代码行号引用请参考 `grep -n` 实际位置。
 
 ---
 
@@ -13,6 +15,8 @@
 4. [数据流转图](#4-数据流转图)
 5. [REST API 规范](#5-rest-api-规范)
 6. [存储层映射](#6-存储层映射)
+7. [谱系 / 证据 / Outbox 辅助表](#7-谱系--证据--outbox-辅助表)
+8. [错误模型](#8-错误模型)
 
 ---
 
@@ -29,7 +33,7 @@ class SceneScope(BaseModel):
     app: str = ""           # 来源应用: "os_agent" | "manual"
 ```
 
-**说明**: `scene` 是粗粒度分类，`task_type` 是细粒度分类（用 `.` 分隔层级），`app` 标识来源。检索时先匹配 `scene`，再匹配 `task_type`。
+**说明**: `scene` 是粗粒度分类，`task_type` 是细粒度分类（用 `.` 分隔层级），`app` 标识来源。检索时先匹配 `scene`，再匹配 `task_type`。`v2.search` 支持按 `project` 进一步过滤（`memoryhub/adapter/memory_v2_api.py:227-271`）。
 
 ---
 
@@ -48,17 +52,19 @@ class Evidence(BaseModel):
     decision: ConflictDecision | None = None   # 冲突消解决策（如 OVERRIDE, MERGE, COEXIST, PENDING 或 None），在证据链数据结构中，新增冲突处理决策字段 decision，以便在证据层面追踪与冲突消解相关的决策状态
 ```
 
+**权威位置**：业务侧证据以 `MemoryEvidenceRepository`（`memoryhub/storage/memory_metadata.py:136`）持久化到 `memory_evidence` 表；旧版 `EvidenceStore.save/load/delete` JSONL 仅为兼容适配，新代码以前者为准。
+
 ---
 
-### 1.3 MemoryEvent — 统一事件模型
+### 1.3 MemoryEvent — 统一事件模型（Schema 1.1）
 
-**所有多源数据完成清洗、标准化和质量评分后的唯一标准格式。** 这是接入模块与存储、偏好抽取、知识沉淀、冲突检测等下游模块之间的共享契约。
+**所有多源数据完成清洗、标准化和质量评分后的唯一标准格式。** 这是接入模块与存储、偏好抽取、知识沉淀、冲突检测等下游模块之间的共享契约。`schemas.py:268`。
 
 ```python
 class MemoryEvent(BaseModel):
     event_id: str                 # 事件唯一 ID
     source_type: SourceType       # tool_result | user_behavior | manual_config
-    event_type: str               # 来源内的具体动作，如 tool_result、user_action
+    event_type: str               # 来源内的具体动作，开放字符串
     user_id: str                  # 用户 ID；无法识别时为空并降低质量分
     session_id: str               # 会话或任务链 ID，可为空
     turn_id: str                  # 同一轮 Agent 调用链的关联 ID，可为空
@@ -69,7 +75,7 @@ class MemoryEvent(BaseModel):
     payload: dict                 # 来源特有结构化内容
     tool_calls: list[ToolCallResult] # 工具调用明细，按 sequence 排序
     schema_version: Literal["1.0", "1.1"] # 新事件默认 1.1
-    source_hash: str              # 清洗后原始事件的 64 位 SHA-256
+    source_hash: str              # canonical SHA-256（normalizer.py:18-163 计算）
     redactions: list[str]         # 脱敏类型，如 api_key、token、email、phone
     quality: EventQuality         # 总分、分项分数、状态和问题列表
 
@@ -92,7 +98,9 @@ class ToolCallResult(BaseModel):
     error: str                    # 失败原因；成功时为空
 ```
 
-`MemoryEvent` 顶层禁止未声明字段。工具轨迹使用强类型 `tool_calls`，其他来源特有扩展只能进入 `payload`。`text` 只表示最终回答或摘要，不能用它替代工具结果。只要 `event_type=agent_response`，就必须提供非空 `turn_id`、`text` 和至少一个 `tool_calls` 项；每个工具调用的工具名、参数、结果、状态和顺序都必须保留。
+**写入门径**：所有 `MemoryEvent` 进入系统后必须走 `SafetyWriteGate.route()`（`core/safety/gate.py:181-`）取得 `ApprovedWrite` 才能写入 SQLite / Embedding / 向量 / 证据。开发/测试栈可通过 `skip_write_gate=True` 绕过门禁。
+
+`MemoryEvent` 顶层禁止未声明字段（`extra="forbid"`）。工具轨迹使用强类型 `tool_calls`，其他来源特有扩展只能进入 `payload`。`text` 只表示最终回答或摘要，不能用它替代工具结果。只要 `event_type=agent_response`，就必须提供非空 `turn_id`、`text` 和至少一个 `tool_calls` 项；每个工具调用的工具名、参数、结果、状态和顺序都必须保留。
 
 如果系统采用流式写入，可以把每次调用拆成一条 `tool_result` 事件，并使用同一个 `session_id + turn_id` 关联；如果系统在 Agent 回复完成后一次性写入，则把这一轮的所有调用放在同一个 `agent_response` 事件的 `tool_calls` 列表中。
 
@@ -102,11 +110,11 @@ class ToolCallResult(BaseModel):
 
 #### payload 字段结构（按 source_type 区分）
 
-| source_type | event_type 示例 | payload 典型结构 |
-|---|---|---|
-| `tool_result` | `tool_result`、`task_trajectory`、`agent_response` | `tool_calls[]` 保存 `tool_name`、`arguments`、`result`、`status`；`payload` 只放聚合元数据 |
-| `user_behavior` | `user_action`、`user_feedback` | `{"action": str, "target": str, "value": Any}` |
-| `manual_config` | `manual_config` | `{"key": str, "value": Any}` |
+| source_type | event_type 示例 | payload 典型结构 | 适配器 |
+|---|---|---|---|
+| `tool_result` | `tool_result`、`task_trajectory`、`agent_response` | `tool_calls[]` 保存 `tool_name`、`arguments`、`result`、`status`；`payload` 只放聚合元数据 | `core/ingestion/adapters/tool_result_adapter.py:ToolResultAdapter` |
+| `user_behavior` | `user_action`、`user_feedback`、`selection / correction / confirm / message / cancel` | `{"action": str, "target": str, "value": Any}` | `core/ingestion/adapters/behavior_adapter.py:BehaviorAdapter`（VALID_BEHAVIOR_TYPES 5 类） |
+| `manual_config` | `manual_config` | 版本化 `ManualConfig{config_id, config_type, payload, version, parent_id, root_id}` | `core/ingestion/adapters/config_adapter.py:ConfigAdapter` |
 
 #### 多工具调用示例
 
@@ -158,11 +166,11 @@ class ToolCallResult(BaseModel):
 }
 ```
 
-#### 从旧版字段迁移
+#### 从旧版字段迁移（已稳定，禁止继续使用旧字段）
 
 旧格式不再是模块间契约。接入适配器可以读取旧字段，但必须在交给下游之前完成以下转换；`MemoryEvent` 不会静默接受旧字段。
 
-| 旧字段 | 规范字段/处理方式 |
+| 旧字段（已弃用） | 规范字段/处理方式 |
 |---|---|
 | `source` | 归一为 `source_type`，不能直接传 `os_agent` 等应用名 |
 | `content` | 来源结构化内容放入 `payload`；可抽取文本放入 `text` |
@@ -174,7 +182,7 @@ class ToolCallResult(BaseModel):
 
 ---
 
-### 1.4 PreferenceMemory — 偏好记忆
+### 1.4 PreferenceMemory — 偏好记忆（`schemas.py:1392`）
 
 ```python
 class PreferenceMemory(BaseModel):
@@ -190,11 +198,11 @@ class PreferenceMemory(BaseModel):
     is_global: bool = False                # 是否为全局通用偏好（用于跨场景兜底）
 
     # --- 置信度、质量与状态 ---
-    confidence: float = 0.5       # [0, 1] 综合置信度
+    confidence: float = 0.5       # [0, 1] 综合置信度（UnifiedConfidenceCalculator.calculate）
     quality_score: float = 1.0    # [0, 1] 来源 MemoryEvent 的质量评分
     extract_source: str = "implicit_inference" # 提取来源: explicit_feedback / implicit_inference
     status: MemoryStatus = MemoryStatus.ACTIVE   # 记忆状态: active / archived / deleted / pending
-   level: MemoryLevel = MemoryLevel.MID      # 记忆层级: short / mid / long
+    level: MemoryLevel = MemoryLevel.MID      # 记忆层级: short / mid / long
 
     # --- 版本管理 ---
     version: int = 1            # 版本号，从 1 开始递增
@@ -206,13 +214,27 @@ class PreferenceMemory(BaseModel):
     tags: list[str] = Field(default_factory=list) # 偏好标签/关键词，用于辅助检索
     extra_payload: dict[str, Any] = Field(default_factory=dict) # 偏好提取/交互过程中的元数据扩展
 
+    # --- 健康度（驱动自动遗忘，core/forget/health.py） ---
+    health_score: float | None = None
+    stability: float | None = None
+    last_accessed_at: datetime | None = None
+    access_count_30d: int = 0
+
     # --- 时间戳 ---
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 ```
+
+**置信度计算**（`memoryhub/core/preference/confidence.py:36-154` + `core/memory/confidence.py:26-71`）：
+- 来源权重 `SOURCE_WEIGHTS`（confidence.py:39-43）：`USER_BEHAVIOR=1.0` / `MANUAL_CONFIG=0.95` / `TOOL_RESULT=0.6` / 未知 = 0.4
+- 时间衰减：半衰期 14 天指数衰减
+- 统一公式 `0.85 + 0.15·min(source, quality)` 弱链抑制
+- evidence_count 桶化：`1 / 2 / 3+ → 0.55 / 0.75 / 0.90`
+- 统一置信度上限：`reject_threshold=0.35`、`review_threshold=0.55`
+
 **全局偏好兜底规则**：当按 `SceneScope` 未能命中特定场景偏好时，自动降级匹配 `is_global = True` 的通用偏好作为默认配置。
 
-**版本溯源规则**：新版本继承旧版本的 `root_id`（若旧版本无 `root_id` 则指向旧版本 `memory_id`），实现整条版本树完整追溯至初代节点。
+**版本溯源规则**：新版本继承旧版本的 `root_id`（若旧版本无 `root_id` 则指向旧版本 `memory_id`），实现整条版本树完整追溯至初代节点。完整谱系见 `MemoryLineageRepository`（`memoryhub/storage/memory_metadata.py:51`）和 v2 API `GET /api/memory/v2/memories/{id}/lineage`。
 
 **证据决策标记规则**：在偏好消解冲突时，需在关联的 `Evidence.decision` 中明确标记决策状态（如 `OVERRIDE`、`MERGE`、`COEXIST` 等），记录冲突处理逻辑。
 
@@ -222,14 +244,14 @@ class PreferenceMemory(BaseModel):
 
 ---
 
-### 1.5 KnowledgeMemory — 知识记忆
+### 1.5 KnowledgeMemory — 知识记忆（`schemas.py:1445`）
 
 ```python
 class KnowledgeMemory(BaseModel):
     memory_id: str          # 唯一 ID，格式: "know_" + 8 位 UUID 片段
     user_id: str
     memory_type: str        # 固定值 "knowledge"
-    knowledge_type: KnowledgeType  # 知识类型（见枚举）
+    knowledge_type: KnowledgeType  # 知识类型（见枚举，含 FACT）
 
     # --- 知识内容 ---
     name: str               # 知识名称，如 "项目周报生成流程"
@@ -237,10 +259,17 @@ class KnowledgeMemory(BaseModel):
     steps: list[str]        # 工作流步骤（WORKFLOW 类型必填）
     tools: list[str]        # 工具链（WORKFLOW 类型必填）
     template_body: str      # 模板正文（TEMPLATE 类型必填）
+
+    # --- 事实三元组（FACT 类型，与 knowledge 共用存储） ---
+    subject: str | None = None          # S-P-O 主语
+    predicate: str | None = None        # 谓词
+    object_value: str | None = None     # 宾语
+    object_type: str | None = None      # 宾语类型
+
     scope: SceneScope       # 生效场景
 
     # --- 质量指标 ---
-    confidence: float       # 置信度 [0, 1]
+    confidence: float       # 置信度 [0, 1]（6 因子加权，见下）
     success_count: int      # 成功复用次数
     total_count: int        # 总调用次数
     status: MemoryStatus
@@ -258,24 +287,30 @@ class KnowledgeMemory(BaseModel):
     updated_at: datetime
 ```
 
+**置信度计算**（`memoryhub/core/knowledge/confidence.py:39-110`）6 因子加权：
+- event_quality 0.28 / completion 0.20 / structure 0.20 / evidence 0.14 / outcome 0.10 / consistency 0.08
+
 #### knowledge_type 与必填字段对照
 
-| knowledge_type | 必填字段 | 说明 |
-|---|---|---|
-| `workflow` | `name`, `steps`, `tools` | 工作流知识 |
-| `case` | `name`, `content` | 历史案例 |
-| `template` | `name`, `template_body` | 可复用模板 |
+| knowledge_type | 必填字段 | 说明 | 抽取位置 |
+|---|---|---|---|
+| `workflow` | `name`, `steps`, `tools` | 工作流知识 | `KnowledgeExtractor._build_workflow`（`extractor.py:245-312`） |
+| `case` | `name`, `content` | 历史案例 | `KnowledgeExtractor._build_case`（`extractor.py:245-312`） |
+| `template` | `name`, `template_body` | 可复用模板 | `TemplateBuilder.build_from_case`（`template_builder.py:23-232`） |
+| `fact` | `subject`, `predicate`, `object_value` | 事实三元组（S-P-O） | `KnowledgeExtractor.extract_facts`（`extractor.py:98-163`）；单值谓词包括 `负责人/ceo/founder/总部/成立于/位于/owner/headquarters` |
+
+**重要架构决策**：v0.1.0 起，**事实三元组并入知识链**，不复用独立的 fact 子系统；写入路径 `POST /api/memory/knowledge`（`knowledge_type=fact`）或 `POST /api/memory/facts/propose`，列表 `GET /api/memory/facts` 自动转发 `knowledge_type=fact` 过滤，冲突 `fact_conflicts` + `POST /api/memory/knowledge/{id}/resolve`。这避免了「事实走偏门」的统一写入契约漏网。
 
 ---
 
-### 1.6 ConflictRecord — 冲突记录
+### 1.6 ConflictRecord — 冲突记录（`schemas.py:1503`）
 
 ```python
 class ConflictRecord(BaseModel):
     conflict_id: str        # 唯一 ID，格式: "conf_" + 8 位 UUID 片段
     old_memory_id: str      # 旧记忆 ID
     new_memory_id: str      # 新记忆 ID
-    memory_type: str        # "preference" | "knowledge"
+    memory_type: str        # "preference" | "knowledge" | "fact"
 
     # --- 冲突内容 ---
     old_content: str        # 旧记忆内容摘要
@@ -283,7 +318,7 @@ class ConflictRecord(BaseModel):
     conflict_field: str     # 冲突的具体字段
 
     # --- 处理结果 ---
-    decision: ConflictDecision  # 处理决策（见枚举）
+    decision: ConflictDecision | KnowledgeConflictResolution  # 处理决策（见枚举）
     reason: str             # 处理原因说明
     result_memory_id: str   # 处理后产生的新记忆 ID（如有）
 
@@ -293,7 +328,7 @@ class ConflictRecord(BaseModel):
 
 ---
 
-### 1.7 ForgetRecord — 遗忘记录
+### 1.7 ForgetRecord — 遗忘记录（`schemas.py:1535`）
 
 ```python
 class ForgetRecord(BaseModel):
@@ -303,14 +338,56 @@ class ForgetRecord(BaseModel):
     target_memory_ids: list[str]   # 被删除的记忆 ID 列表
     target_scope: SceneScope       # 遗忘的场景范围
     deleted_count: int      # 实际删除数量
+    deleted_snapshot: list[dict] | None = None  # 被删记忆快照（management_api.py:972-1022）
     created_at: datetime
 ```
 
 ---
 
+### 1.8 FactMemory — 事实三元组（`schemas.py:1556`，并入知识链）
+
+```python
+class FactMemory(BaseModel):
+    fact_id: str            # "fact_<8位hex>"
+    user_id: str
+    subject: str            # S
+    predicate: str          # P
+    object_value: str       # O
+    object_type: str | None
+    scope: str              # "global" | "project"
+    project_id: str | None
+    source_id: str | None
+    evidence: str | None
+    confidence: float
+    version: int
+    status: str             # active | superseded | disputed | deleted
+    access_count: int
+    created_at: datetime
+    observed_at: datetime | None
+```
+
+---
+
+### 1.9 ManualConfig — 手动配置（`schemas.py:178`，版本化）
+
+```python
+class ManualConfig(BaseModel):
+    config_id: str
+    config_type: str
+    payload: dict[str, Any]
+    version: int
+    parent_id: str | None
+    root_id: str | None
+    created_at: datetime
+```
+
+`ConfigAdapter`（`core/ingestion/adapters/config_adapter.py:28-180`）负责 `to_manual_config / to_event / from_event`。
+
+---
+
 ## 2. 枚举类型定义
 
-### SourceType — 接入来源大类
+### SourceType — 接入来源大类（`schemas.py:36`）
 
 | 值 | 含义 | payload 一致性要求 |
 |---|---|---|
@@ -320,7 +397,7 @@ class ForgetRecord(BaseModel):
 
 `event_type` 是开放字符串，不再使用封闭枚举。它描述来源内的具体事件，例如 `tool_result`、`user_action`、`user_feedback`、`task_trajectory`；`source_type` 才是接入路由和质量一致性校验使用的稳定枚举。
 
-### ToolCallStatus — 工具调用状态
+### ToolCallStatus — 工具调用状态（`schemas.py:52`）
 
 | 值 | 含义 |
 |---|---|
@@ -330,7 +407,7 @@ class ForgetRecord(BaseModel):
 | `cancelled` | 工具调用被取消 |
 | `partial` | 只获得部分结果 |
 
-### QualityStatus — 接入质量状态
+### QualityStatus — 接入质量状态（`schemas.py:44`）
 
 | 值 | 处理策略 |
 |---|---|
@@ -338,44 +415,47 @@ class ForgetRecord(BaseModel):
 | `review` | `0.60 <= score < 0.80`，或存在缺字段、非法来源/时间等问题，进入复核队列 |
 | `rejected` | `score < 0.60`，或同时缺少用户标识且时间非法，仅保留审计记录 |
 
-质量分统一按以下公式计算，不再使用旧版 `source_reliability`、`execution_success` 等因子：
+**质量分计算公式**（`memoryhub/core/ingestion/quality.py:10-118`，4 维加权）：
 
 ```text
-score = 0.40 * completeness
+score = 0.30 * completeness
       + 0.30 * validity
       + 0.20 * consistency
-      + 0.10 * freshness
+      + 0.20 * freshness
 ```
 
-### PreferenceType — 偏好类型
+MIN/REVIEW 阈值常量：`MIN_QUALITY_THRESHOLD = 0.2` / `REVIEW_QUALITY_THRESHOLD = 0.5`；tool 失败 / 部分失败 / 空内容直接降到 REJECTED。
+
+### PreferenceType — 偏好类型（`schemas.py:62`，7 类）
 
 | 值 | 含义 | 示例 |
 |---|---|---|
 | `output_style` | 输出风格偏好 | "喜欢 Markdown 输出" |
-| `tool_preference` | 工具选择偏好 | "文件任务优先用本地检索" |
+| `tool_preference` | 工具选择偏好 | "文件任务优先用本地检索"（由 `ToolPreferenceMiner` 挖掘） |
 | `workflow_preference` | 操作流程偏好 | "生成报告前先列提纲" |
 | `safety_preference` | 安全策略偏好 | "不保存 API Key" |
 | `scene_preference` | 场景偏好 | "写论文要正式" |
 | `format_preference` | 格式偏好 | "周报三段式结构" |
 | `language_preference` | 语言偏好 | "默认中文回答" |
 
-### KnowledgeType — 知识类型
+### KnowledgeType — 知识类型（`schemas.py:74`，**含 FACT**）
 
-| 值 | 含义 |
-|---|---|
-| `workflow` | 工作流知识 |
-| `case` | 历史案例 |
-| `template` | 可复用模板 |
+| 值 | 含义 | 必填字段 |
+|---|---|---|
+| `workflow` | 工作流知识 | `name`, `steps`, `tools` |
+| `case` | 历史案例 | `name`, `content` |
+| `template` | 可复用模板 | `name`, `template_body` |
+| **`fact`** | 事实三元组 S-P-O（与知识共用存储 / 抽取 / 检索 / 评测） | `subject`, `predicate`, `object_value` |
 
-### MemoryLevel — 记忆层级
+### MemoryLevel — 记忆层级（`schemas.py:83`）
 
 | 值 | 含义 | 生命周期 |
 |---|---|---|
-| `short` | 短期记忆 | 当前任务内 |
-| `mid` | 中期记忆 | 几天到几周 |
-| `long` | 长期记忆 | 持久保存 |
+| `short` | 短期工作记忆 | TTL 24h（`EventIngestionService._buffer_short_term`） |
+| `mid` | 中期情景 / episode | `SessionConsolidator` 聚合 |
+| `long` | 长期记忆（preference / knowledge / fact） | `MemoryConsolidator` 合并 |
 
-### ConflictDecision — 冲突处理决策
+### ConflictDecision — 偏好冲突处理决策（`schemas.py:91`，4 类）
 
 | 值 | 含义 |
 |---|---|
@@ -384,25 +464,49 @@ score = 0.40 * completeness
 | `coexist` | 按场景并存 |
 | `pending` | 待用户确认 |
 
-### MemoryStatus — 记忆状态
+### MemoryDecision — 统一记忆处理决策（`schemas.py:100`，**8 类**，v0.1.0 新增）
+
+| 值 | 含义 |
+|---|---|
+| `NEW` | 新建记忆 |
+| `REINFORCE` | 反馈确认，强化（艾宾浩斯复习） |
+| `REVISE` | 修改记忆 |
+| `SUPERSEDE` | 取代旧版（生成新版本，旧版 archived） |
+| `COEXIST` | 与旧版共存 |
+| `DUPLICATE` | 与已有重复 |
+| `REVIEW` | 待审查 |
+| `REJECT` | 拒绝 |
+
+### KnowledgeConflictResolution — 知识冲突解决（`schemas.py:113`）
+
+| 值 | 含义 |
+|---|---|
+| `equivalent` | 等价，可合并 |
+| `no_conflict` | 无冲突 |
+| `concrete_conflict` | 真实冲突，需裁决（overrides / merged_name+content+steps+tools） |
+
+由 LLM 在 `KnowledgeUpdater` 内返回，约束见 `core/knowledge/prompts.py:3-51`。
+
+### MemoryStatus — 记忆状态（`schemas.py:121`）
 
 | 值 | 含义 |
 |---|---|
 | `active` | 活跃（正常检索和使用） |
 | `archived` | 已归档（不参与检索，但保留历史） |
-| `deleted` | 已删除（逻辑删除） |
+| `deleted` | 已删除（逻辑删除，可经 `/api/memory/memories/{id}?hard=true` 物理删除） |
 | `pending` | 待确认 |
 
-### SensitiveLevel — 敏感等级
+### SensitiveLevel / SafetyAction / SafetyFindingTarget — 安全相关（`schemas.py:130-148`）
 
-| 值 | 含义 |
+| 枚举 | 值 |
 |---|---|
-| `none` | 无敏感信息 |
-| `low` | 低敏感（如 IP 地址） |
-| `medium` | 中敏感（如手机号、邮箱） |
-| `high` | 高敏感（如 API Key、密码、身份证） |
+| `SensitiveLevel` | `none \| low \| medium \| high`（只表示风险，不决定动作） |
+| `SafetyAction` | `allow \| mask \| review \| reject`（处理动作；聚合优先级 `REJECT > REVIEW > MASK > ALLOW`） |
+| `SafetyFindingTarget` | `text_span \| whole_value`（命中定位语义，不参与风险等级或策略动作聚合） |
 
 ---
+
+## 3. 模块接口规范
 
 ## 3. 模块接口规范
 
@@ -1275,12 +1379,19 @@ OS Agent 发起检索请求
 
 ## 5. REST API 规范
 
+> **5 个 Router 总览**（`memoryhub/app.py:265-269`）：
+> - `memory_router`（`adapter/api.py:58`）：`/api/memory` 标准 REST
+> - `agent_router`（`adapter/agent_api.py:24`）：`/api/agent` Agent 演示适配
+> - `agent_root_router`（`adapter/agent_api.py:27`）：`/api` Agent 健康探测
+> - `management_router`（`adapter/management_api.py:44`）：`/api/memory` 管理类
+> - `memory_v2_router`（`adapter/memory_v2_api.py:18`）：`/api/memory/v2` 谱系/证据/投影只读
+
 ### 5.1 事件写入
 
 ```
-POST /api/memory/events
+POST /api/memory/events                              # api.py:457-500
 
-请求体 (WriteEventRequest):
+请求体 (WriteEventRequest, schemas.py:1685):
 {
     "events": [
         {
@@ -1290,28 +1401,10 @@ POST /api/memory/events
             "turn_id": "turn_007",
             "source_type": "tool_result",
             "event_type": "agent_response",
-            "payload": {
-                "response_status": "success"
-            },
+            "payload": {"response_status": "success"},
             "tool_calls": [
-                {
-                    "call_id": "call_001",
-                    "tool_name": "file_search",
-                    "arguments": {"query": "项目周报"},
-                    "result": {"files": ["weekly-report.docx"]},
-                    "status": "success",
-                    "sequence": 1,
-                    "error": ""
-                },
-                {
-                    "call_id": "call_002",
-                    "tool_name": "calendar_read",
-                    "arguments": {"range": "this_week"},
-                    "result": {"events": [{"title": "周会"}]},
-                    "status": "success",
-                    "sequence": 2,
-                    "error": ""
-                }
+                {"call_id":"call_001","tool_name":"file_search","arguments":{"query":"项目周报"},"result":{"files":["weekly-report.docx"]},"status":"success","sequence":1,"error":""},
+                {"call_id":"call_002","tool_name":"calendar_read","arguments":{"range":"this_week"},"result":{"events":[{"title":"周会"}]},"status":"success","sequence":2,"error":""}
             ],
             "scene": "office",
             "task_type": "office.weekly_report",
@@ -1320,15 +1413,7 @@ POST /api/memory/events
             "schema_version": "1.1",
             "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "redactions": [],
-            "quality": {
-                "score": 1.0,
-                "status": "accepted",
-                "completeness": 1.0,
-                "validity": 1.0,
-                "consistency": 1.0,
-                "freshness": 1.0,
-                "issues": []
-            }
+            "quality": {"score":1.0,"status":"accepted","completeness":1.0,"validity":1.0,"consistency":1.0,"freshness":1.0,"issues":[]}
         }
     ]
 }
@@ -1341,88 +1426,154 @@ POST /api/memory/events
 }
 ```
 
-### 5.2 记忆检索
+### 5.2 记忆检索（生产栈 MilvusHybridRetriever）
 
 ```
-POST /api/memory/search
+POST /api/memory/search                              # api.py:912-970
+POST /api/memory/context                             # api.py:973-1032（返回可注入 prompt 的 context_text）
 
-请求体 (SearchRequest):
+请求体 (SearchRequest, schemas.py:1584):
 {
     "user_id": "u001",
     "query": "按上次的方式生成项目周报",
-    "context": {
-        "scene": "office",
-        "task_type": "office.weekly_report",
-        "app": "os_agent"
-    },
+    "context": {"scene": "office", "task_type": "office.weekly_report", "app": "os_agent"},
     "top_k": 5,
-    "memory_types": ["preference", "knowledge"],
-    "min_confidence": 0.5
+    "memory_types": ["preference", "knowledge", "fact"],
+    "min_confidence": 0.5,
+    "level": "long",                                    # v0.1.0 新增；short / mid / long / None
+    "session_id": "sess_001",                           # v0.1.0 新增；命中时注入短期记忆
+    "project": "my-project"                             # v0.1.0 新增；项目隔离
 }
 
-响应 (SearchResponse):
+响应 (SearchResponse, schemas.py:1610):
 {
     "preferences": [
-        {
-            "memory_id": "pref_001",
-            "content": "项目周报默认使用 Markdown 格式",
-            "confidence": 0.92,
-            "scope": {"scene": "office", "task_type": "office.weekly_report"}
-        }
+        {"memory_id": "pref_001", "content": "项目周报默认使用 Markdown 格式", "confidence": 0.92,
+         "scope": {"scene": "office", "task_type": "office.weekly_report"}, "memory_level": "long"}
     ],
     "knowledge": [
-        {
-            "memory_id": "know_001",
-            "name": "项目周报生成流程",
-            "steps": ["读取日历", "检索文件", "提取进展", "整理风险", "生成报告"],
-            "tools": ["calendar", "file_search", "doc_reader", "report_writer"]
-        }
+        {"memory_id": "know_001", "name": "项目周报生成流程",
+         "steps": ["读取日历", "检索文件", "提取进展", "整理风险", "生成报告"],
+         "tools": ["calendar", "file_search", "doc_reader", "report_writer"]}
     ],
+    "facts": [...],                                      # v0.1.0 新增；FACT 类型
+    "short_term": [...],                                 # v0.1.0 新增；命中短期工作记忆
+    "mid_term": [...],                                   # v0.1.0 新增；命中中期情景
     "latency_ms": 128.5,
-    "total_count": 2
+    "total_count": 2,
+    "index_version": 17                                  # v0.1.0 新增；缓存键隔离
 }
 ```
 
-### 5.3 精准遗忘
+`/api/memory/v2/search`（`memory_v2_api.py:227-271`）支持可选 `include_provenance=true`，响应附加 `lineage_count / evidence_count / audit_ids`（仍脱敏）。
+
+### 5.3 精准遗忘（NL / 范围 / ID 三入口）
 
 ```
-POST /api/memory/forget
+POST /api/memory/forget/preview                       # api.py:1455-1471，仅定位候选
+POST /api/memory/forget                               # api.py:1535-1557
+GET  /api/memory/forget/history                       # api.py:1560-1576
+GET  /api/memory/forget/history/{record_id}           # management_api.py:972-1022（含被删记忆快照）
+GET  /api/memory/forget/rules                         # 用户级遗忘规则
+POST /api/memory/forget/rules
+DELETE /api/memory/forget/rules/{rule_id}
 
-请求体 (ForgetRequest):
+请求体 (ForgetRequest, schemas.py:1711):
 {
     "user_id": "u001",
-    "instruction": "忘掉我关于周报格式的偏好"
+    "instruction": "忘掉我关于周报格式的偏好",
+    "target_memory_ids": [],                           # 可选，精确 ID
+    "target_scope": {"scene": "office"},               # 可选，范围
+    "cascade": true                                    # 级联清理向量/证据/冲突
 }
 
 响应 (ForgetResponse):
 {
     "record_id": "forg_xyz789",
     "deleted_count": 1,
-    "deleted_ids": ["pref_001"],
-    "audit_log": "删除偏好记忆 1 条: 项目周报默认使用 Markdown"
+    "deleted_ids": ["pref_001"]
 }
 ```
 
-### 5.4 其他接口
+### 5.4 其他接口（按 5 Router 分类完整索引）
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/memory/preferences` | 列出偏好（支持 scene/status 过滤） |
-| GET | `/api/memory/preferences/{id}` | 获取单条偏好 |
-| GET | `/api/memory/preferences/{id}/versions` | 获取版本链 |
-| GET | `/api/memory/knowledge` | 列出知识 |
-| GET | `/api/memory/knowledge/{id}` | 获取单条知识 |
-| GET | `/api/memory/conflicts` | 列出冲突记录 |
-| POST | `/api/memory/conflicts/{id}/resolve` | 手动解决冲突 |
-| POST | `/api/memory/feedback` | 提交用户反馈 |
-| POST | `/api/memory/evaluate/{task_name}` | 运行评测 |
-| GET | `/api/memory/evaluate/reports` | 列出评测报告 |
+#### `/api/memory`（`memoryhub/adapter/api.py`）— 标准记忆 REST
 
-> 管理后台类接口（记忆状态流转 PATCH/POST `/memories/...`、批量删除、硬删除、
-> 健康度 `GET /memories/health`、生命周期触发 `POST /lifecycle/auto-forget`、
-> 审计日志 `GET /safety/audit-logs`、隔离区 `GET /safety/quarantine`、
-> 系统状态 `GET /system/status` 等）由 `memoryhub/adapter/management_api.py`
-> 提供，供 Qt 桌面客户端（`desktop-client/`）消费。
+| 方法 | 路径 | 行号 | 用途 |
+|---|---|---|---|
+| GET | `/api/memory/health` | 68-71 | 健康 + SQLite 状态 |
+| POST | `/api/memory/events` | 457-500 | 写入 MemoryEvent 列表 |
+| POST | `/api/memory/memories/preference` | 1355-1378 | 显式写偏好 |
+| POST | `/api/memory/memories/knowledge` | 1381-1404 | 显式写知识 |
+| POST | `/api/memory/feedback` | 1197-1269 | 用户反馈 confirm / reject / update |
+| POST | `/api/memory/search` | 912-970 | 混合检索 |
+| POST | `/api/memory/context` | 973-1032 | prompt-ready 上下文 |
+| GET | `/api/memory/preferences[/{id}[/versions]]` | 1040-1076 | 偏好列表 / 详情 / 版本链 |
+| GET | `/api/memory/knowledge[/{id}]` | 1084-1116 | 知识列表 / 详情 |
+| GET | `/api/memory/conflicts` | 1124-1151 | 冲突列表（支持分页） |
+| POST | `/api/memory/conflicts/{id}/resolve` | 1161-1189 | 冲突裁决 |
+| POST | `/api/memory/sources/tool_result` | 515-539 | 经 ToolResultAdapter |
+| POST | `/api/memory/sources/behavior` | 561-586 | 经 BehaviorAdapter |
+| POST | `/api/memory/sources/config` | 589-624 | 经 ConfigAdapter（版本化） |
+| GET | `/api/memory/extraction/tasks` | 732-793 | 抽取任务（含 pending / retry / dead_letter / metrics / run / retry） |
+| GET | `/api/memory/facts` `/facts/{id}` `/facts/{id}/evidence` `DELETE /facts/{id}` `POST /facts/propose` | 671-718, 1484-1524 | 事实（FACT 并入知识链） |
+| POST | `/api/memory/forget/preview` | 1455-1471 | 遗忘候选预览 |
+| POST | `/api/memory/forget` | 1535-1557 | 执行自然语言遗忘 |
+| GET | `/api/memory/forget/history` | 1560-1576 | 遗忘历史 |
+| GET | `/api/memory/forget/rules` CRUD | 1588-1627 | 用户级遗忘规则 |
+| GET | `/api/memory/events/session/{session_id}` | 1474-1481 | 单会话事件 |
+| POST | `/api/memory/admin/reconcile` | 719-729 | SQLite ↔ Milvus 漂移对账 |
+| POST | `/api/memory/evaluate/{task_name}` | 1630-1727 | 触发评测（retrieval / latency / preference / conflict） |
+| GET | `/api/memory/evaluate/reports` | 1630-1727 | 历史评测报告 |
+| CRUD | `/api/memory/safety/user-rules` | 236-377 | 用户自定义敏感规则（需 `X-MemoryHub-User`） |
+
+#### `/api/agent` + `/api`（`memoryhub/adapter/agent_api.py`）— Agent 演示适配层
+
+| 方法 | 路径 | 行号 | 用途 |
+|---|---|---|---|
+| GET | `/api/agent/health` | 30-33 | Agent 适配层健康检查 |
+| GET | `/api/health` | 27 (root_router) | Agent 侧根健康探测 |
+| DELETE | `/api/agent/preferences` | 46-79 | 清空某用户偏好（同时清向量） |
+| DELETE | `/api/agent/demo-data` | 82-146 | 重置演示数据（7 张表） |
+| POST | `/api/agent/replay` | 215-247 | 演示回放（schema `conversation-replay/1.0`） |
+| POST | `/api/agent/step` | 250-353 | 执行一轮：写事件 + 抽取 + 检索，返回候选卡 |
+| POST | `/api/agent/actions/{action_id}/decision` | 356-422 | `fact_commit / fact_reject / conflict_resolve / forget_commit` |
+
+#### `/api/memory` 管理类（`memoryhub/adapter/management_api.py`）— 后台管理
+
+| 方法 | 路径 | 行号 | 用途 |
+|---|---|---|---|
+| PUT | `/api/memory/{memory_type}/{memory_id}` | 457-465 | 统一记忆更新（UnifiedMemoryUpdate） |
+| PATCH | `/api/memory/memories/{memory_id}/status` | 468-483 | 单条状态流转 |
+| POST | `/api/memory/memories/status` | 486-508 | 批量状态流转 |
+| POST | `/api/memory/memories/delete` | 511-532 | 批量软删除 |
+| DELETE | `/api/memory/memories/{memory_id}?hard=true` | 535-553 | 硬删除 |
+| GET | `/api/memory/knowledge/{id}/versions` | 556-569 | 知识版本历史 |
+| GET | `/api/memory/memories/health` | 571-661 | 健康度（按 status / user_id） |
+| POST | `/api/memory/lifecycle/auto-forget` | 669-684 | 立即执行自动遗忘扫描 |
+| POST | `/api/memory/lifecycle/check` | 687-698 | 手动触发生命周期检查 |
+| POST | `/api/memory/lifecycle/consolidate` | 719-772 | 完整流转 |
+| GET | `/api/memory/lifecycle/settings` | 701-716 | 阈值只读 |
+| GET | `/api/memory/short-term` / `/mid-term` | 775-799 | 短/中期记忆列表 |
+| GET | `/api/memory/events` | 807-823 | 全量事件（分页） |
+| GET | `/api/memory/safety/audit-logs[?limit/offset]` | 831-849 | 安全审计日志 |
+| GET | `/api/memory/safety/audit-logs/verify` | 852-861 | HMAC 哈希链验链 |
+| GET/DELETE/POST | `/api/memory/safety/quarantine[/{review_id}[/release]]` | 864-964 | REVIEW 隔离区 |
+| GET | `/api/memory/forget/history/{record_id}` | 972-1022 | 遗忘详情（含被删记忆快照） |
+| GET | `/api/memory/system/status` | 1042-1162 | 子系统状态 + 各表计数 + 向量/检索/安全概况 |
+| GET | `/api/memory/system/config` | 1165-1252 | 只读配置（不泄露 api_key） |
+| PUT | `/api/memory/system/llm` | 434-454 | 运行时更新 LLM 连接（api_key 写不读） |
+
+#### `/api/memory/v2`（`memoryhub/adapter/memory_v2_api.py`）— 谱系 / 证据 / 投影只读
+
+| 方法 | 路径 | 行号 | 用途 |
+|---|---|---|---|
+| GET | `/api/memory/v2/memories/{memory_id}/lineage` | 69-90 | 谱系（parent / root） |
+| GET | `/api/memory/v2/memories/{memory_id}/evidence` | 93-137 | 证据列表（fact 走内存，其他走 `MemoryEvidenceRepository`；脱敏摘要） |
+| GET | `/api/memory/v2/memories/{memory_id}/audit` | 140-174 | 该记忆关联的 `SafetyAuditRecord` |
+| GET | `/api/memory/v2/projections?status=pending\|failed` | 177-207 | 当前用户拥有的失败 / pending 投影 |
+| POST | `/api/memory/v2/projections/replay` | 210-224 | 重放（仅 caller-owned） |
+| GET | `/api/memory/v2/search?include_provenance=true` | 227-271 | 谱系感知检索 |
 
 ### 5.5 用户自定义敏感规则
 
@@ -1460,8 +1611,8 @@ Content-Type: application/json
 该示例要求受信任部署显式设置 `allow_advanced_regex: true`；默认配置会拒绝高级正则。
 响应只返回规则 ID、版本、状态等安全元数据，不返回 matcher 或其确定性指纹。若希望只要
 出现字面量 `C++` 就跳过整条记忆事件，可使用 `kind: "literal"`、
-`effect: "drop_event"`、`matcher: "C++"`。当前没有自然语言分类器，“C++ 的版本
-信息”不会自动推导全部表达形式。`label` 会正常回显，前端不得把 matcher 或其他秘密
+`effect: "drop_event"`、`matcher: "C++"`。当前没有自然语言分类器，"C++ 的版本
+信息"不会自动推导全部表达形式。`label` 会正常回显，前端不得把 matcher 或其他秘密
 复制到 label。
 
 规则只影响创建或启用后的新写入，不追溯处理既有记忆。错误响应仅包含稳定
@@ -1472,9 +1623,11 @@ Content-Type: application/json
 
 ## 6. 存储层映射
 
+> **代码事实（v0.1.0）**：SQLite 通过 `memoryhub/storage/database.py:Database.init_schema()` 创建 **12 张表**（`models.py:24-308`）；事实三元组已并入 `knowledge` 表（通过 `subject / predicate / object_value` 字段，无独立 `facts` 表）。ORM 与 Repository 集中在 `database.py` 内 8 个 Repository。
+
 ### 6.1 SQLite 表结构
 
-#### events 表
+#### events 表（`models.py:EventRow:28`）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -1491,93 +1644,74 @@ Content-Type: application/json
 | payload | JSON | 来源特有结构化内容 |
 | tool_calls | JSON | 按 `sequence` 排序的 `ToolCallResult` 列表 |
 | schema_version | VARCHAR(16) | canonical schema 版本 |
-| source_hash | VARCHAR(64) INDEX | 清洗后事件哈希，用于审计和去重 |
+| source_hash | VARCHAR(64) INDEX | canonical SHA-256（normalizer 计算） |
 | redactions | JSON | 脱敏类型列表 |
 | quality | JSON | `EventQuality` 完整对象 |
 
-旧版 `task_id/source/content/timestamp/quality_score/sensitive_level/metadata` 列不再用于新事件。已有数据库升级时必须执行显式迁移，不能把旧列和新列并列当作两个可选契约。
+旧版 `task_id / source / content / timestamp / quality_score / sensitive_level / metadata` 列不再用于新事件。已有数据库升级时必须执行显式迁移（`scripts/migrate_memory_provenance.py`），不能把旧列和新列并列当作两个可选契约。
 
-#### preferences 表
-
-基于前面对 `MemoryEvent` `PreferenceMemory` 及 `Evidence` 数据结构的定义与扩展，对 `preferences` 数据库表结构列表完成的对应更新修改如下：
+#### preferences 表（`models.py:PreferenceRow:50`）
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | memory_id | VARCHAR(32) PK | 记忆 ID |
 | user_id | VARCHAR(64) INDEX | 用户 ID |
 | memory_type | VARCHAR(16) | 固定 "preference" |
-| preference_type | VARCHAR(32) | 偏好类型 |
-| text | TEXT | 偏好描述（自然语言描述，对齐 MemoryEvent.text）|
-| payload | JSON | 结构化表达（如 `{"action": "set_format", "value": "markdown"}`）|
+| preference_type | VARCHAR(32) | 偏好类型（7 类 PreferenceType） |
+| text | TEXT | 偏好描述（对齐 MemoryEvent.text） |
+| payload | JSON | 结构化表达（对齐 MemoryEvent.payload） |
 | scope_scene | VARCHAR(64) INDEX | 场景 |
 | scope_task_type | VARCHAR(128) INDEX | 任务类型 |
 | scope_app | VARCHAR(64) | 来源应用 |
-| is_global | BOOLEAN INDEX | 是否为全局通用偏好（用于跨场景兜底）|
-| confidence | FLOAT | 综合置信度 [0, 1]|
-| quality_score | FLOAT | 质量评分（来源于 MemoryEvent）|
-| extract_source | VARCHAR(32) | 提取来源（explicit_feedback / implicit_inference）|
-| status | VARCHAR(16) INDEX | 状态 (ACTIVE / ARCHIVED / PENDING / DELETED)|
-| level | VARCHAR(16) | 记忆层级 (SHORT / MID / LONG)|
-| version | INT | 版本号|
-| parent_id | VARCHAR(32) | 前一版本 ID（版本链指针）|
-| root_id | VARCHAR(32) INDEX | 初代版本 ID（版本树根节点）|
-| evidences | JSON | 证据链（含 event_id、weight、decision 等）|
-| tags | JSON | 偏好标签/关键词列表（辅助检索）|
-| extra_payload | JSON | 偏好提取/交互过程中的元数据扩展|
-| created_at | DATETIME | 创建时间|
-| updated_at | DATETIME | 更新时间|
+| is_global | BOOLEAN INDEX | 是否为全局通用偏好（跨场景兜底） |
+| confidence | FLOAT | 综合置信度 [0, 1] |
+| quality_score | FLOAT | 来源 MemoryEvent 质量评分 |
+| extract_source | VARCHAR(32) | 显式反馈 / 隐式推断 |
+| status | VARCHAR(16) INDEX | ACTIVE / ARCHIVED / PENDING / DELETED |
+| level | VARCHAR(16) | SHORT / MID / LONG |
+| version | INT | 版本号 |
+| parent_id | VARCHAR(32) | 前一版本 ID |
+| root_id | VARCHAR(32) INDEX | 初代版本 ID（版本树根节点） |
+| evidences | JSON | 证据链（含 event_id、weight、decision 等） |
+| tags | JSON | 偏好标签 |
+| extra_payload | JSON | 元数据扩展 |
+| health_score / stability / last_accessed_at / access_count_30d | 数值 / DATETIME / INT | 健康度（驱动自动遗忘） |
+| created_at / updated_at | DATETIME | 时间戳 |
 
----
+#### knowledge 表（`models.py:KnowledgeRow:89`）+ `knowledge_versions`（`:139`）
 
-### 主要更新说明：
-
-1. **字段演进与核心存储扩展**：
-* 原 `content` 字段更名为 **`text`**（对齐 `MemoryEvent.text`）。
-* 新增 **`payload`**（JSON 类型），存储结构化的键值偏好映射，（对齐 `MemoryEvent.payload`）。
-* 新增 **`is_global`** 字段，用于全局及跨场景偏好检索与兜底匹配。
-
-2. **评估与追踪字段补全**：
-* 新增 **`quality_score`** 与 **`extract_source`**，便于区分显式反馈/隐式推断并记录来源质量。
-
-3. **版本树结构扩展**：
-* 新增 **`root_id`** 索引字段，与 `parent_id` 配合实现从当前版本到初代版本树的溯源追踪。
-
-4. **检索与扩展支持**：
-* 新增 **`tags`** 标签列表与 **`extra_payload`** 扩展字段，增强多维向量/混合检索能力。
-
-
-#### knowledge 表
-
-与 preferences 表类似，额外字段:
+与 preferences 表类似，**额外字段**:
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| knowledge_type | VARCHAR(32) | 知识类型 |
+| knowledge_type | VARCHAR(32) | workflow / case / template / **fact** |
 | name | VARCHAR(256) | 知识名称 |
-| steps | JSON | 工作流步骤 |
-| tools | JSON | 工具链 |
-| template_body | TEXT | 模板正文 |
+| steps | JSON | 工作流步骤（WORKFLOW 必填） |
+| tools | JSON | 工具链（WORKFLOW 必填） |
+| template_body | TEXT | 模板正文（TEMPLATE 必填） |
+| subject / predicate / object_value / object_type | 文本字段 | 事实三元组（FACT 必填，并入知识链） |
 | success_count | INT | 成功复用次数 |
 | total_count | INT | 总调用次数 |
 
-#### conflicts 表
+`knowledge_versions` 表按 `knowledge_id + version` 追加不可变快照（`KnowledgeVersionRow`）。
+
+#### conflicts 表（`models.py:ConflictRow:154`）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | conflict_id | VARCHAR(32) PK | 冲突 ID |
 | old_memory_id | VARCHAR(32) | 旧记忆 ID |
 | new_memory_id | VARCHAR(32) | 新记忆 ID |
-| memory_type | VARCHAR(16) | 记忆类型 |
+| memory_type | VARCHAR(16) | preference / knowledge / fact |
 | old_content | TEXT | 旧内容 |
 | new_content | TEXT | 新内容 |
 | conflict_field | VARCHAR(64) | 冲突字段 |
-| decision | VARCHAR(16) | 处理决策 |
+| decision | VARCHAR(32) | ConflictDecision / KnowledgeConflictResolution |
 | reason | TEXT | 处理原因 |
 | result_memory_id | VARCHAR(32) | 结果记忆 ID |
-| created_at | DATETIME | 创建时间 |
-| resolved_at | DATETIME | 解决时间 |
+| created_at / resolved_at | DATETIME | 时间戳 |
 
-#### forget_history 表
+#### forget_history 表（`models.py:ForgetRow:173`）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -1585,8 +1719,21 @@ Content-Type: application/json
 | user_id | VARCHAR(64) INDEX | 用户 ID |
 | instruction | TEXT | 遗忘指令 |
 | target_memory_ids | JSON | 目标记忆 ID |
+| target_scope | JSON | 范围（SceneScope） |
 | deleted_count | INT | 删除数量 |
+| deleted_snapshot | JSON | 被删记忆快照（v0.1.0 详情接口返回） |
 | created_at | DATETIME | 创建时间 |
+
+#### memory_lineage / memory_evidence / memory_projection_outbox / extraction_tasks / short_term_memory / mid_term_memory（v0.1.0 新增 6 张）
+
+| 表 | ORM 行 | 关键字段 | 用途 |
+|---|---|---|---|
+| `memory_lineage` | `MemoryLineageRow:185` | lineage_id, memory_id, parent_memory_id, root_memory_id, semantic_version, evidence_revision, transition_action | 谱系持久化（v2 API 返回） |
+| `memory_evidence` | `MemoryEvidenceRow:210` | evidence_id, memory_id, event_id, source_hash, source_type, quality_score, safety_audit_id, occurred_at | 证据链权威存储（`MemoryEvidenceRepository`） |
+| `memory_projection_outbox` | `MemoryProjectionOutboxRow:242` | outbox_id, memory_id, user_id, payload, status (pending/succeeded/failed), retry_count, last_error | 可靠投影；`ProjectionOutboxWorker.run_once` |
+| `extraction_tasks` | `ExtractionTaskRow:268` | task_id, event_ids, extractor_type, status (pending/running/succeeded/failed/dead_letter), retry_count, next_run_at | 失败重试 / 死信队列 |
+| `short_term_memory` | `ShortTermMemoryRow:291` | memory_id, user_id, session_id, payload, ttl_expires_at | 工作记忆（TTL 24h） |
+| `mid_term_memory` | `MidTermMemoryRow:308` | memory_id, user_id, source_kind, payload, ttl_expires_at | 中期情景 / `epi_*` / `epi_dg_*` |
 
 #### user_sensitive_rules / user_sensitive_rule_versions 表
 
@@ -1595,24 +1742,143 @@ Content-Type: application/json
 元数据、AES-256-GCM nonce/密文、带密钥 matcher 指纹和 key ID；不保存原始用户 ID
 或明文 matcher。删除是带新 revision 的软删除，历史表不覆盖旧版本。
 
-### 6.2 FAISS 索引
+### 6.2 向量索引（生产栈 Milvus）
 
-- 索引文件: `data/vector_index/faiss.index`
-- ID 映射文件: `data/vector_index/id_map.json`
-- 向量维度: 1024（与麒麟 embedding SDK 一致）
-- 索引类型: 默认 `IndexFlatL2`（小数据量），可选 `IndexIVFFlat` 或 `IndexHNSWFlat`
+- **Milvus gRPC Server**：`127.0.0.1:19530`（`vector_engine.host / port`）
+- collection 名：`memoryhub`（默认）
+- 向量维度：**768**（生产硬约束；`milvus.schema_dimension_mismatch` 错误码）
+- 索引类型：稠密 `FLOAT_VECTOR` + 稀疏 `SPARSE_FLOAT_VECTOR`，引擎内部 RRF 融合
 
-### 6.3 证据链存储
+`faiss` 引擎（`storage/vector_engine/faiss_engine.py`）仅在 development/test 模式作为降级路径：
 
-- 目录: `data/evidence/`
-- 文件格式: `{memory_id}.jsonl`
-- 每行一个 Evidence JSON 对象
+- 索引文件：`data/vector_index/faiss.index` + `id_map.json` + `texts.json`
+- ID 映射：`reverse_map: dict[str, int]`（memory_id → FAISS 内部 ID）
+- 索引类型：`flat`（默认 IndexFlatIP）/ `ivf` / `hnsw`
+
+### 6.3 证据链存储（双轨）
+
+- **新**：通过 `MemoryEvidenceRepository`（`storage/memory_metadata.py:136`）持久化到 `memory_evidence` 表（业务权威）
+- **旧（兼容）**：`EvidenceStore.save/load/delete`（`storage/evidence_store.py:14-119`）JSONL；`{memory_id}.jsonl` 每行一个 Evidence
+
+### 6.4 检索缓存（生产栈）
+
+- `SearchCache`（`memoryhub/retrieval/cache.py:13-126`）：LRU + TTL；缓存键 `f"{index_version}:{canonical_json}"`；按 `index_version` 自动失效
+- `query_vector_cache`（`milvus_hybrid.py`）：1000 条查询向量 LRU，重复查询几乎 0 SDK 调用
 
 ---
 
+## 7. 谱系 / 证据 / Outbox 辅助表
+
+### 7.1 MemoryLineageRepository（`storage/memory_metadata.py:51`）
+
+返回视图（`MemoryLineageView:21`）：
+
+```python
+{
+    "lineage_id": str,
+    "memory_id": str,
+    "parent_memory_id": str | None,
+    "root_memory_id": str,
+    "semantic_version": int,
+    "evidence_revision": int,
+    "transition_action": MemoryDecision,  # NEW | REINFORCE | REVISE | SUPERSEDE | COEXIST | DUPLICATE | REVIEW | REJECT
+    "created_at": datetime
+}
+```
+
+### 7.2 MemoryEvidenceRepository（`storage/memory_metadata.py:136`）
+
+返回视图（`MemoryEvidenceView:36`）：
+
+```python
+{
+    "evidence_id": str,
+    "memory_id": str,
+    "event_id": str,
+    "source_hash": str,
+    "source_type": SourceType,
+    "quality_score": float,
+    "safety_audit_id": str | None,
+    "occurred_at": datetime
+}
+```
+
+### 7.3 MemoryProjectionOutboxRepository（`storage/memory_metadata.py:274`）
+
+`ProjectionOutboxItem`（`:246`）字段：`outbox_id / memory_id / user_id / payload / status (pending / running / succeeded / failed) / retry_count / last_error`。
+
+`claim_ready() / mark_failed() / mark_succeeded() / replay() / list_by_status()` 是后台 worker 与 v2 replay API 的接口。
+
+### 7.4 可靠投影流（`storage/projection_outbox.py:ProjectionOutboxWorker`）
+
+```text
+MemoryWriteService.upsert_memory
+        │
+        ▼
+DomainMemoryWriter（单事务：memory + lineage + evidence + outbox）
+        │
+        ▼
+ProjectionOutboxWorker.run_once
+        ├── engine.hybrid_search.insert (Milvus)
+        ├── VectorSearcher.add (FAISS / dev)
+        ├── KeywordSearcher.add_document (BM25)
+        └── SearchCache.clear (按 index_version)
+```
+
+失败重试 + `PendingIndexCompensationTask`（`compensation_task.py:34-164`）每 30s 补偿 `pending_index`；`MemorySyncService.reconcile`（`sync_service.py:48-`）漂移对账。
+
+---
+
+## 8. 错误模型
+
+### 8.1 统一错误码（稳定字符串，跨 SDK → 引擎 → API → UI）
+
+| 错误码前缀 | 类别 | HTTP 响应 | 说明 |
+|---|---|---|---|
+| `safety.review_required` | 安全门禁 REVIEW | 409 | 必须人工放行 |
+| `safety.rejected` | 安全门禁 REJECT | 403 | 拒绝写入 |
+| `embedding.unavailable` | Embedding 服务不可用 | 503 | 麒麟 Embedding 未注册 / SDK 缺失 |
+| `embedding.timeout` | Embedding 调用超时（>250ms） | 504 | KylinEmbeddingClient 串行线程池超时 |
+| `embedding.call_failed` | Embedding 调用失败 | 503 | ctypes 调用返回非零 |
+| `embedding.dimension_mismatch` | 维度不匹配（非 768） | 503 | 生产模式硬约束 |
+| `embedding.backend_error` / `embedding.sdk_error` | 后端 / SDK 错误 | 503 | 见 KylinEmbeddingClient 错误体系 |
+| `embedding.invalid_text` | 输入文本不合法（空 / 超长） | 422 | 触发 MAX_QUERY_CHARS=512 |
+| `milvus.timeout` | Milvus 调用超时（>120ms） | 504 | MilvusVectorEngine search_timeout_ms |
+| `milvus.call_failed` | Milvus C API 调用失败 | 503 | `_MilvusCAPI` 错误 |
+| `milvus.schema_dimension_mismatch` | Milvus collection 维度不匹配 | 503 | 启动时校验 |
+| `milvus.app_id_missing` | Milvus app_id 缺失 | 503 | 部署平台未下发 |
+| `projection.embedding_failed` / `projection.vector_failed` | Outbox worker 投影失败 | 异步 | 标记 `outbox.status=failed` |
+| `user_rule.identity_unavailable` | 用户规则身份 resolver 缺失 | 503 | 未安装 `user_rule_identity_resolver` |
+| `user_rule.identity_mismatch` | 请求头与认证主体不一致 | 403 | 安全反越权 |
+| `user_rule.invalid_matcher` | matcher 非法 | 422 | ReDoS 风险或长度超限 |
+| `safety.audit_disabled` | 审计未开启 | 503 | `config.safety.audit.enabled=false` |
+| `safety.quarantine_disabled` | 隔离区未开启 | 503 | `config.safety.quarantine.enabled=false` |
+| `retrieval.production_no_fallback` | 生产模式禁止 fallback | 503 | MilvusHybridRetriever 不允许走 FAISS |
+
+### 8.2 业务规则
+
+- **422 校验错误**：FastAPI 默认校验错误响应**只投影白名单化的错误类型和字段位置**（`type / loc`），**不回显 `input / msg / ctx / 请求正文`**（FastAPI 422 envelope 经项目定制）
+- **业务安全门禁**：`403` + `{code, status, safety_action, audit_id}`
+- **REVIEW 隔离**：`409` + `{code, status, safety_action, audit_id}`
+- **Embedding / Milvus 后端超时**：`504`
+- **Embedding / Milvus 后端不可用**：`503`
+- **审计 / 隔离未开启**：返回稳定错误码（见上），UI 据此展示「待开启」提示
+
+### 8.3 401 / 403 / 404 / 409 速查
+
+| HTTP | 场景 | 错误响应 |
+|---|---|---|
+| 401 | 用户规则接口缺失 `X-MemoryHub-User` | `{"detail": {"code": "user_rule.identity_unavailable"}}` |
+| 403 | `X-MemoryHub-User` 与 resolver 不一致 | `{"detail": {"code": "user_rule.identity_mismatch"}}` |
+| 403 | 安全门禁 REJECT | `{"detail": {"code": "safety.rejected", "safety_action": "reject", "audit_id": "..."}}` |
+| 404 | 用户规则 / 记忆 / 隔离项不存在 | `{"detail": {"code": "...not_found"}}` |
+| 409 | 安全门禁 REVIEW | `{"detail": {"code": "safety.review_required", "safety_action": "review", "audit_id": "..."}}` |
+| 409 | 用户规则乐观并发 revision 冲突 | `{"detail": {"code": "user_rule.revision_conflict"}}` |
+| 422 | 入参非法（matcher ReDoS / 长度超限） | `{"detail": {"code": "user_rule.invalid_matcher"}}` |
+
 ## 附录: 检索请求/响应模型
 
-### SearchRequest
+### SearchRequest（`schemas.py:1584`）
 
 ```python
 class SearchRequest(BaseModel):
@@ -1620,29 +1886,36 @@ class SearchRequest(BaseModel):
     query: str = ""                        # 查询文本
     context: SceneScope                    # 场景上下文
     top_k: int = 5                         # 返回数量
-    memory_types: list[str] = []           # 过滤: ["preference", "knowledge"]
+    memory_types: list[str] = []           # 过滤: ["preference", "knowledge", "fact"]
     min_confidence: float = 0.0            # 最低置信度阈值
+    level: str | None = None               # v0.1.0 新增：short / mid / long
+    session_id: str | None = None          # v0.1.0 新增：命中时注入短期记忆
+    project: str | None = None             # v0.1.0 新增：项目隔离
 ```
 
-### SearchResult
+### SearchResult（`schemas.py:1598`）
 
 ```python
 class SearchResult(BaseModel):
     memory_id: str         # 记忆 ID
-    memory_type: str       # "preference" | "knowledge"
+    memory_type: str       # "preference" | "knowledge" | "fact"
     content: str           # 内容摘要
     score: float           # 综合得分
-    source: str            # 来源: "vector" | "keyword" | "metadata"
-    metadata: dict         # 附加信息
+    source: str            # 来源: "vector" | "keyword" | "hybrid"
+    metadata: dict         # 附加信息（含 rerank 子分）
 ```
 
-### SearchResponse
+### SearchResponse（`schemas.py:1610`）
 
 ```python
 class SearchResponse(BaseModel):
     results: list[SearchResult]         # 原始检索结果
     preferences: list[PreferenceMemory] # 匹配的偏好记忆
     knowledge: list[KnowledgeMemory]    # 匹配的知识记忆
+    facts: list[FactMemory] = []        # v0.1.0 新增：FACT 类型命中
+    short_term: list = []               # v0.1.0 新增：短期工作记忆命中
+    mid_term: list = []                 # v0.1.0 新增：中期情景命中
     latency_ms: float                   # 检索耗时
     total_count: int                    # 总结果数
+    index_version: int                  # v0.1.0 新增：缓存键隔离
 ```

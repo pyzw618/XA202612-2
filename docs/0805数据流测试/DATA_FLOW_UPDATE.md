@@ -1,6 +1,6 @@
 # MemoryHub 数据流修复更新记录
 
-> 文件位置：`docs/tests/0805数据流测试/DATA_FLOW_UPDATE.md`  
+> 文件位置：`docs/0805数据流测试/DATA_FLOW_UPDATE.md`  
 > 更新日期：2026-08-03  
 > 说明：记录本轮针对数据流审查问题实施的代码修改和验证结果。
 
@@ -232,7 +232,7 @@ python -m compileall -q memoryhub: passed
 
 ### 保留边界
 
-本轮补齐的是 preference/knowledge 运行时投影的 owner 隔离、状态分流和最终一致性补偿；facts、Evidence、审计以及跨事件库/多索引的全局事务补偿协议仍未统一，抽取 retry 仍主要由显式 API 驱动。这些项目已在 `docs/tests/0805数据流测试/DATA_FLOW_REVIEW.md` 的后续优先级中保留。
+本轮补齐的是 preference/knowledge 运行时投影的 owner 隔离、状态分流和最终一致性补偿；facts、Evidence、审计以及跨事件库/多索引的全局事务补偿协议仍未统一，抽取 retry 仍主要由显式 API 驱动。这些项目已在 `docs/0805数据流测试/DATA_FLOW_REVIEW.md` 的后续优先级中保留。
 
 ## 2026-08-04 16:10 +08:00：剩余数据流问题集中修复
 

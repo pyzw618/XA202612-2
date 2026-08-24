@@ -1,7 +1,7 @@
 # Phase F 规划：评测闭环（偏好/冲突评测器 + 数据集 + API）
 
 > 状态：**已规划，暂缓实施**（2026-08-18 决策：先跳过 F，记录规划供后续拾起）
-> 依据：`docs/refactor/REFACTOR_PLAN_V2.md` §4.7（量化评测机制，赛题要求 7）
+> 依据：`docs/REFACTOR_PLAN_V2.md` §4.7（量化评测机制，赛题要求 7）
 > 关联：`evaluation/metrics/preference_eval.py`、`conflict_eval.py`（当前均为 `NotImplementedError` 空壳）
 
 ## 背景与目标

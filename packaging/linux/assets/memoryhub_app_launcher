@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+python_bin=/opt/memoryhub/venv/bin/python
+health_url=http://127.0.0.1:8099/api/health
+
+is_healthy() {
+    "$python_bin" -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=1).read()' "$health_url" \
+        >/dev/null 2>&1
+}
+
+if ! is_healthy; then
+    state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
+    log_dir="$state_home/MemoryHub"
+    mkdir -p "$log_dir"
+    /usr/bin/memoryhub_session_launcher >>"$log_dir/service.log" 2>&1 &
+
+    attempts=0
+    while [ "$attempts" -lt 20 ] && ! is_healthy; do
+        attempts=$((attempts + 1))
+        sleep 0.25
+    done
+fi
+
+exec /usr/bin/memoryhub-client

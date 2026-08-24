@@ -9,7 +9,7 @@
 >   `md/` 下 opencode 开发者文档的 `plugins / skills / commands / mcp-servers / custom-tools /
 >   tools / config / agents` 八篇校准）；所有能力映射到真实代码/接口；两条链路共享同一份记忆与同一套配置。
 > - **代码基线**：`main` @ `8c04b4d`（opencode MCP 实际已 14 工具，文档仍写 12，见 §1 诊断）。
-> - **与核心重构同步（2026-08-18 更新）**：核心记忆模块重构（`docs/refactor/REFACTOR_PLAN_V2.md`）
+> - **与核心重构同步（2026-08-18 更新）**：核心记忆模块重构（`docs/REFACTOR_PLAN_V2.md`）
 >   对本接入设计产生以下影响——**统一 API 契约**取代旧工具/方法表（§14）；**事实记忆并入知识**
 >   （`KnowledgeType.FACT`，`propose_facts/decide_facts` 并入知识面）；**记忆分层**（short/mid/long）
 >   暴露为检索/上下文可过滤维度；**自反馈闭环**与**艾宾浩斯遗忘曲线**成为"记忆越用越懂"的引擎
@@ -51,7 +51,7 @@ list_conflicts / resolve_conflict`）。每个工具名 + 中英双语 descripti
 - `memoryhub_health`（连通性探测）占一个工具位，却是纯运维行为，LLM 几乎不该碰；
 - `list_memories / get_memory / feedback / list_conflicts / resolve_conflict /
   write_event / decide_facts` 都是低频管理操作，schema 却和其它工具一样昂贵；
-- 文档（`docs/design/产品形态与使用方案.md`、`opencode-integration/docs/INTEGRATION.md`）仍写 **12 工具**，
+- 文档（`docs/产品形态与使用方案.md`、`opencode-integration/docs/INTEGRATION.md`）仍写 **12 工具**，
   与代码事实漂移（8c04b4d 新增 propose/decide 两个事实工具后为 14）。
 - **官方文档自己都警告**："MCP servers add to your context, so you want to be careful
   with which ones you enable"（`md/mcp-servers.md`）——验证了"常驻 MCP 工具"是 token 大头。
@@ -100,7 +100,7 @@ opencode 有 **commands**（`.opencode/commands/*.md`，用户 `/` 可触发）�
 
 ### 1.7 无 CLI；无导出/导入；无服务管理入口
 
-`docs/design/产品形态与使用方案.md` P1 清单里有 `memoryhub-cli`（start/stop/status/reset/inspect），
+`docs/产品形态与使用方案.md` P1 清单里有 `memoryhub-cli`（start/stop/status/reset/inspect），
 但仓库 `pyproject.toml` 无 `console_scripts`，`integrations/memoryhub_client.py` 只覆盖 3 个方法。
 Agent 之外（运维脚本、跨机迁移、无插件环境）没有统一入口。
 
@@ -614,7 +614,7 @@ token 敏感项目把 `tools.memoryhub_*` 关掉并靠 CLI/command 读取。**�
 ### 11.1 一个前提修正：不是"二选一"，而是"一套引擎上的开关组合"
 
 > 设想的合理处：**默认 plugin、前端可切换、配置可指定**——这三条都成立，且与产品形态一致
-> （Qt 控制台本就是"运维/调参"入口，见 `docs/design/产品形态与使用方案.md` §5.3）。
+> （Qt 控制台本就是"运维/调参"入口，见 `docs/产品形态与使用方案.md` §5.3）。
 > 需要修正的只有前提本身："两套模式，实现必须选一套"。
 
 - **CLI 是引擎，Plugin 的 custom tools / commands / hooks 底层全在调 CLI**（§6）。二者不是两条
@@ -706,7 +706,7 @@ token 敏感项目把 `tools.memoryhub_*` 关掉并靠 CLI/command 读取。**�
    三事件 hooks + compacting 注入；安装器改为一次复制全套；
 5. **标记 deprecated** `opencode-integration/`、`claudecode-integration/` 内重复的
    `mcp-server/` 为 wrapper 指向新包；验证后删除副本；
-6. **同步文档**：`docs/design/产品形态与使用方案.md`、`opencode-integration/docs/INTEGRATION.md`
+6. **同步文档**：`docs/产品形态与使用方案.md`、`opencode-integration/docs/INTEGRATION.md`
    的工具数量/映射表更新到新契约（`agent-integration/docs/CONTRACT.md` 为准）。
 
 ### 12.3 需要落地的 REST 增强（最小集）
@@ -742,7 +742,7 @@ token 敏感项目把 `tools.memoryhub_*` 关掉并靠 CLI/command 读取。**�
 
 ## 14. 与核心重构 V2 的同步：统一 API 契约（取代旧工具/方法表）
 
-> 依据：`docs/refactor/REFACTOR_PLAN_V2.md` §4.9（Agent 接入与统一 API 面）、§4.5.3（艾宾浩斯遗忘曲线）。
+> 依据：`docs/REFACTOR_PLAN_V2.md` §4.9（Agent 接入与统一 API 面）、§4.5.3（艾宾浩斯遗忘曲线）。
 > 本节是接入层与核心层**双向优化**后的统一契约；**凡 §5.2、§7.2、§13 与本节冲突处，以本节为准**。
 
 ### 14.1 统一 API 契约（CLI / MCP / Agent 共用一套 REST 面）
@@ -798,5 +798,5 @@ token 敏感项目把 `tools.memoryhub_*` 关掉并靠 CLI/command 读取。**�
 
 *本文档为接入重构设计稿；落地状态、接口映射与已知问题将随开发更新。*
 *依据：`md/`（opencode 官方文档 plugins/skills/commands/mcp-servers/custom-tools/tools/config/agents）。*
-*关联：`docs/design/产品形态与使用方案.md`、`opencode-integration/docs/INTEGRATION.md`（旧）、
-`docs/refactor/REFACTOR_PLAN_V2.md`（核心重构 V2）、`docs/spec/ARCHITECTURE.md`、`docs/spec/INTERFACE.md`。*
+*关联：`docs/产品形态与使用方案.md`、`opencode-integration/docs/INTEGRATION.md`（旧）、
+`docs/REFACTOR_PLAN_V2.md`（核心重构 V2）、`docs/ARCHITECTURE.md`、`docs/INTERFACE.md`。*

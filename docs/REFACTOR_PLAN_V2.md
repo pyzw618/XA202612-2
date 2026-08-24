@@ -11,7 +11,7 @@
 
 - **赛题 7 项要求中**：①多源接入 ②偏好版本化 ⑤安全与遗忘 ④麒麟 embedding 已具备骨架但各有缺口；⑥记忆分层流转**基本是假分层**（只有一个 level 元数据字段）；⑦评测中检索/延迟有链路、**偏好与冲突评测是空壳**。
 - **5 项硬指标**（评分表 25 分）：检索延迟 **已达标**（P99≈152ms）；知识检索召回 **R@5=0.555，距 0.85 差距很大**；偏好提取准确率、冲突处理正确率 **无评测入口、无基线**。
-- **五大改革方向**：① 记忆分层落地为真实存储与流转引擎（赛题 6）；② 工具结果结构化 + 工具选择偏好确定性提取（赛题 1/2 的核心痛点）；③ 评测闭环 + 检索召回攻坚（赛题 7）；④ **事实记忆并入知识记忆**——不独立成类，降格为 `KnowledgeType.FACT` 子类型（§4.8）；⑤ **Agent 接入与统一 API 面**——CLI/Plugin/MCP 共用一套契约，含自反馈闭环、项目隔离与"艾宾浩斯遗忘曲线"创新点（§4.5.3、§4.9，对齐 `docs/design/Agent接入设计.md`）。
+- **五大改革方向**：① 记忆分层落地为真实存储与流转引擎（赛题 6）；② 工具结果结构化 + 工具选择偏好确定性提取（赛题 1/2 的核心痛点）；③ 评测闭环 + 检索召回攻坚（赛题 7）；④ **事实记忆并入知识记忆**——不独立成类，降格为 `KnowledgeType.FACT` 子类型（§4.8）；⑤ **Agent 接入与统一 API 面**——CLI/Plugin/MCP 共用一套契约，含自反馈闭环、项目隔离与"艾宾浩斯遗忘曲线"创新点（§4.5.3、§4.9，对齐 `Agent接入设计.md`）。
 - **一个贯穿原则**：所有写入仍收敛到 V1 交付的 **DomainWriter 单事务边界**；分层流转、工具挖掘、评测都挂在这条边界之上，不另起写路径。
 
 ---
@@ -271,7 +271,7 @@ F(hits) = min(1, hits/5)                         # 近30天使用频率
 - **补齐**：
   1. 在真实银河麒麟 + 真实 Milvus + 生产配置下执行 `run_kylin_http_retrieval_evaluation.py` 端到端验收，产出 `latency ≥ p99 500ms` 与 QPS 报告（现有 152ms 是 FAISS+ollama 环境数据，不可作为交付证据）；
   2. 建立 CPU/内存占用基线（进程 RSS、embedding 批大小、向量引擎内存），写入技术文档的"轻量化论证"；
-  3. 量化取舍文档：768 维固定契约、embedding_profile_id、模型升级重建索引与回滚（沿用 ROADMAP §7，补齐 `docs/kylin/KYLIN_EMBEDDING_RUNTIME_CONTRACT.md` 与 `scripts/check_kylin_embedding_runtime.py`）。
+  3. 量化取舍文档：768 维固定契约、embedding_profile_id、模型升级重建索引与回滚（沿用 ROADMAP §7，补齐 `docs/KYLIN_EMBEDDING_RUNTIME_CONTRACT.md` 与 `scripts/check_kylin_embedding_runtime.py`）。
 - 分层对延迟的影响：短期/中期检索走各自索引与缓存，设计上**不得**让分层增加长期检索的 p95 预算；分桶查询控制在长期检索的候选倍数之内。
 
 ### 4.7 量化评测机制（赛题 7）★ 补齐空壳
@@ -339,7 +339,7 @@ F(hits) = min(1, hits/5)                         # 近30天使用频率
 
 #### 4.8.4 共指与归一修复（针对第一版"两个小孩"病根）
 
-第一版测试证实的问题（`docs/tests/0811功能性测试/仍然存在的问题.md`）："隔壁老王家有两个小孩，大的是哥哥，小的是妹妹"——**哥哥/妹妹被归一为老王实体的别名，或老二被并入老大**，导致性别等事实被判冲突、写不进去。修复四件事：
+第一版测试证实的问题（`docs/0811功能性测试/仍然存在的问题.md`）："隔壁老王家有两个小孩，大的是哥哥，小的是妹妹"——**哥哥/妹妹被归一为老王实体的别名，或老二被并入老大**，导致性别等事实被判冲突、写不进去。修复四件事：
 
 1. **关系词不做实体别名**：维护 `RELATION_WORDS` 黑名单（哥哥/妹妹/爸爸/负责人/CEO/成员…），这些词**不得**被 `EntityNormalizer`（`normalizer.py:88-349`）并入实体别名；它们只作为谓词/关系标签参与抽取。
 2. **实体合并门槛收紧**：仅 `alias` 精确匹配或 LLM 高置信才合并；bigram/向量相似**单独不足以**合并（降低自动错误合并概率）。
@@ -396,31 +396,31 @@ F(hits) = min(1, hits/5)                         # 近30天使用频率
 
 ---
 
-### 4.9 Agent 接入与统一 API 面（双向优化，对齐 `docs/design/Agent接入设计.md`）
+### 4.9 Agent 接入与统一 API 面（双向优化，对齐 `docs/Agent接入设计.md`）
 
-> 本节承接 `docs/design/Agent接入设计.md`（opencode Plugin+CLI 双模式、CLI 为"母语"、Plugin 为薄壳），并做**双向同步**：核心重构决定接入层契约；接入层（Agent 消费记忆的真实场景）反推核心模块的补充要求。
+> 本节承接 `Agent接入设计.md`（opencode Plugin+CLI 双模式、CLI 为"母语"、Plugin 为薄壳），并做**双向同步**：核心重构决定接入层契约；接入层（Agent 消费记忆的真实场景）反推核心模块的补充要求。
 
 #### 4.9.1 双向优化的边界
 
 | 方向 | 内容 | 落点 |
 |---|---|---|
 | **Agent 视角 → 核心** | ①Agent 自动沉淀的工具轨迹是偏好/知识挖掘的**第一数据源**；②"记忆越用越懂"要求核心有**自反馈闭环**；③多项目/多 Agent 场景要求检索按 `user + project` 隔离；④上下文注入要按记忆分层级联 | §4.9.2~4.9.5 |
-| **核心视角 → 接入** | 重构后的核心暴露**统一 API 契约**（§4.9.4），`docs/design/Agent接入设计.md` 的 client/CLI/MCP 全部映射到这一套契约，消灭"接入层接口与核心分叉" | §4.9.4 |
+| **核心视角 → 接入** | 重构后的核心暴露**统一 API 契约**（§4.9.4），`Agent接入设计.md` 的 client/CLI/MCP 全部映射到这一套契约，消灭"接入层接口与核心分叉" | §4.9.4 |
 
 #### 4.9.2 自反馈闭环（feedback → confidence + health 打通）
 
-- **现状缺口**：`POST /api/memory/feedback`（update/confirm/reject）存在，但"检索命中 → LLM 使用 → feedback confirm"链路未闭环（`docs/design/Agent接入设计.md` §1.6）；偏好"检索命中不更新置信度"的问题（`docs/tests/0811功能性测试/仍然存在的问题.md`）与之同根。
+- **现状缺口**：`POST /api/memory/feedback`（update/confirm/reject）存在，但"检索命中 → LLM 使用 → feedback confirm"链路未闭环（`Agent接入设计.md` §1.6）；偏好"检索命中不更新置信度"的问题（`仍然存在的问题.md`）与之同根。
 - **目标**：`feedback confirm/reject` 直接驱动——① `access_count_30d+1`、`stability` 提升（**艾宾浩斯复习强化**，§4.5.3）；② 统一置信度更新（confirm 增强证据、reject 下调）；③ 健康度重算（`AutoForgetEngine` 下一轮感知）；④ 幂等 + 可审计（reject 不静默删除，走 review/冲突记录）。
-- 接入侧已就绪：`memory-awareness` skill 引导模型"使用某条记忆后 `feedback confirm`"（`docs/design/Agent接入设计.md` §6.3），核心只需提供承载接口。
+- 接入侧已就绪：`memory-awareness` skill 引导模型"使用某条记忆后 `feedback confirm`"（`Agent接入设计.md` §6.3），核心只需提供承载接口。
 
 #### 4.9.3 上下文注入与检索的 project 隔离
 
-- `POST /api/memory/context` 与 `POST /api/memory/search` 增加可选 `project` 过滤（`docs/design/Agent接入设计.md` §12.3 原为【规划】，本计划升级为必做）；
+- `POST /api/memory/context` 与 `POST /api/memory/search` 增加可选 `project` 过滤（`Agent接入设计.md` §12.3 原为【规划】，本计划升级为必做）；
 - 上下文注入按**分层级联**（§4.4.3）：会话短期（工作记忆）→ 近期中期（情景）→ 长期（全局），响应标注 `memory_level`，让 Agent 知道"这是本会话刚发生的，还是历史沉淀的"。
 
 #### 4.9.4 统一 API 契约（CLI / MCP / Agent 共用一套 REST 面）
 
-> 原则：**CLI 是接入"母语"**（`docs/design/Agent接入设计.md` §3），所有能力先落 CLI，Plugin 的 custom tools/commands 与 MCP 工具都是 CLI 薄壳，杜绝"接入层第三套实现"。
+> 原则：**CLI 是接入"母语"**（`Agent接入设计.md` §3），所有能力先落 CLI，Plugin 的 custom tools/commands 与 MCP 工具都是 CLI 薄壳，杜绝"接入层第三套实现"。
 
 | 核心能力 | REST 统一面 | CLI（母语） | MCP/工具（跨 Agent 标准，低频走 CLI） |
 |---|---|---|---|
@@ -435,7 +435,7 @@ F(hits) = min(1, hits/5)                         # 近30天使用频率
 | 投影恢复 | `GET/POST /api/memory/v2/projections` | `projection list/replay` | （管理 → CLI） |
 | 健康/状态 | `GET /api/memory/system/status` | `status` | （运维 → CLI） |
 
-同步动作：`docs/design/Agent接入设计.md` §5.2 的 client 方法表、§7.2 的 CLI 命令面、§13 对照表按上表收敛；FACT 并入知识后，`propose_facts`/`decide_facts` 合并为"知识候选提交/裁决"（`knowledge` 类型），不再有独立 `facts` 工具。
+同步动作：`Agent接入设计.md` §5.2 的 client 方法表、§7.2 的 CLI 命令面、§13 对照表按上表收敛；FACT 并入知识后，`propose_facts`/`decide_facts` 合并为"知识候选提交/裁决"（`knowledge` 类型），不再有独立 `facts` 工具。
 
 #### 4.9.5 接入设计反推的核心模块补充要求
 
@@ -456,7 +456,7 @@ F(hits) = min(1, hits/5)                         # 近30天使用频率
 4. **freshness/参数统一（R4）**：`UnifiedConfidenceCalculator.freshness_from_age_days` 删除，统一调用 `core/memory/freshness.py:freshness_score`（半衰期式）；半衰期改回 90/180/120；support 分档与阈值对齐设计或**明确写入新决策**（注意：阈值改变会影响现有测试与已存记忆的 confidence，需跑回归）。
 5. **旁路封堵（R6）**：`adapter/service.py` 的 `write_events` 兜底改为优先构造 writer（`upsert_memory`），仅当 writer 也不可建时才允许直存；`test_no_production_write_bypass.py` 扫描范围扩展到 `updater/lifecycle/auto_forget/sync_service/adapter/service/preference/__init__`。
 6. **门禁回执（R8）**：`guard_memory_write` 通过后返回 writer receipt，`upsert_memory` 在门禁路径不再 `return None`。
-7. **KYLIN 契约（冲刺收尾）**：交付 `docs/kylin/KYLIN_EMBEDDING_RUNTIME_CONTRACT.md`（版本/架构/SDK 路径/DBus 服务名/模型名/768 维契约）、`scripts/check_kylin_embedding_runtime.py`、`/health` 暴露 SDK load/session/model/timeout/dimension 指标、`embedding_profile_id` 写入 outbox/collection metadata。
+7. **KYLIN 契约（冲刺收尾）**：交付 `docs/KYLIN_EMBEDDING_RUNTIME_CONTRACT.md`（版本/架构/SDK 路径/DBus 服务名/模型名/768 维契约）、`scripts/check_kylin_embedding_runtime.py`、`/health` 暴露 SDK load/session/model/timeout/dimension 指标、`embedding_profile_id` 写入 outbox/collection metadata。
 8. **评测空壳填实（§4.7）**：这是评分表 25 分的直接来源，优先级不低于任何功能开发。
 
 ---
@@ -474,7 +474,7 @@ F(hits) = min(1, hits/5)                         # 近30天使用频率
 | **E. 记忆分层落地**（最大工作量） | 09-15~09-26 | short_term/mid_term 两张新表、SessionConsolidator、MemoryConsolidator、MemoryDegrader、LifecycleScheduler、检索按 level 级联 | 一次"事件→短期→中期→长期"端到端流转可观测（lineage 记录 transition）；短期/中期不污染跨任务检索 |
 | **F. 评测闭环 + 召回攻坚** | 09-08~09-26（与 B~E 并行） | preference/conflict 数据集与评测器（含 FACT 类目）、embedding 升级 + 精排 + 改写、真实麒麟+Milvus 延迟复验、Bootstrap CI | 偏好准确率≥85%；召回 R@5≥85%；冲突正确率≥88%；真实环境延迟 P99≤500ms |
 | **G. 语义遗忘 + 材料交付** | 09-22~09-30 | NL 语义遗忘（LLM 解析 + 向量定位 + forget 规则）、遗忘精准度评测、技术文档/用户手册/应用案例/麒麟适配报告/演示视频 | 遗忘语义解析 demo；评测报告含 4 项硬指标；材料齐全 |
-| **H. Agent 接入统一 API 面**（对齐 `docs/design/Agent接入设计.md`，双向同步） | 09-08~09-19（与 D~G 并行） | 统一 API 契约（§4.9.4）：`memoryhub` CLI 补全（provenance/projection/update/feedback/remember --type）、client 方法表收敛、MCP/Plugin 工具映射更新；**自反馈闭环**（feedback→confidence/health，§4.9.2）；**project 隔离检索**（§4.9.3）；`docs/design/Agent接入设计.md` 同步 | CLI/MCP/Plugin 三面共用同一套 REST 契约；`feedback confirm` 后健康度/置信度可观测变化；检索/上下文支持 project 过滤；`docs/design/Agent接入设计.md` 与代码零漂移 |
+| **H. Agent 接入统一 API 面**（对齐 `Agent接入设计.md`，双向同步） | 09-08~09-19（与 D~G 并行） | 统一 API 契约（§4.9.4）：`memoryhub` CLI 补全（provenance/projection/update/feedback/remember --type）、client 方法表收敛、MCP/Plugin 工具映射更新；**自反馈闭环**（feedback→confidence/health，§4.9.2）；**project 隔离检索**（§4.9.3）；`Agent接入设计.md` 同步 | CLI/MCP/Plugin 三面共用同一套 REST 契约；`feedback confirm` 后健康度/置信度可观测变化；检索/上下文支持 project 过滤；`Agent接入设计.md` 与代码零漂移 |
 
 **依赖关系**：B（FACT）是 C（迁移清理）的前置，B/C 是 F 冲突评测的数据基础；D 的工具轨迹是 E 中期记忆的输入（可先行）；E 的 consolidation 消费 D 的挖掘结果；F 的冲突评测依赖 A 的决策集合补全；G 的语义遗忘依赖 F 的 embedding 向量定位；**H 依赖 B（FACT 并入知识后工具面收敛）与 D（源适配层）的接口稳定，且其 `feedback`/`project` 能力依赖核心侧 §4.9.2/4.9.3 落地**。
 

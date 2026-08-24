@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=MemoryHub session service
+Name[zh_CN]=MemoryHub 会话服务
+Exec=/usr/bin/memoryhub_session_launcher
+NoDisplay=true
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel

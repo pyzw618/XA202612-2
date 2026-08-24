@@ -527,7 +527,7 @@ rg -n "vector_engine_connect\([^\n]*host[^\n]*port\)" .
 - 阅读阶段 4 真实构建/烟测记录：真实 SDK 构建与真实服务连接烟测仍因缺少 CMake/C++/gRPC 等完整工具链、真实 app_id、服务地址和授权网络环境未执行；阶段 4 的 mock 构建、28 项 mock 验证和相关回归已通过。
 - 修改范围：
   - 统一更新 `docs/retrieval/` 中 C API、SDK 签名、集成计划、环境交接清单和检索改造方案的 `app_id` 配置与 API 示例；
-  - 更新 `config.example.yaml`、`.env.example`、`docs/spec/CONFIGURATION.md`，明确 `MEMORYHUB_VECTOR_ENGINE_APP_ID` 与部署平台占位符；
+  - 更新 `config.example.yaml`、`.env.example`、`docs/CONFIGURATION.md`，明确 `MEMORYHUB_VECTOR_ENGINE_APP_ID` 与部署平台占位符；
   - 更新 `third_party/kylin-mock/README.md`，记录四参数 ABI、非空约束和 `test-app-id` fixture；
   - 更新真实烟测、环境自检和真实基准脚本，使 Milvus 调用显式传递 `--app_id`/`MEMORYHUB_VECTOR_ENGINE_APP_ID`；mock 基准固定使用无敏感 `test-app-id`，不打印 app_id；
   - SDK `ConnectParam` 文档已与仓库实际头文件一致：`ConnectParam(appId)` 或 `ConnectParam(appId, host, port)`，移除旧的无 app_id 构造/示例。
