@@ -87,9 +87,10 @@ class MemoryHubClient:
         *,
         json_body: Any = None,
         query: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> Any:
         path = path if path.startswith("/") else f"/{path}"
-        return self._request_url(f"/api/memory{path}", method, path, json_body=json_body, query=query)
+        return self._request_url(f"/api/memory{path}", method, path, json_body=json_body, query=query, headers=headers)
 
     def _root_request(
         self,
@@ -98,6 +99,7 @@ class MemoryHubClient:
         *,
         json_body: Any = None,
         query: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> Any:
         """Call an API route mounted below ``/api`` rather than ``/api/memory``.
 
@@ -106,7 +108,7 @@ class MemoryHubClient:
         explicit avoids fragile ``..`` path tricks in callers.
         """
         path = path if path.startswith("/") else f"/{path}"
-        return self._request_url(f"/api{path}", method, path, json_body=json_body, query=query)
+        return self._request_url(f"/api{path}", method, path, json_body=json_body, query=query, headers=headers)
 
     def _request_url(
         self,
@@ -116,9 +118,11 @@ class MemoryHubClient:
         *,
         json_body: Any = None,
         query: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> Any:
         try:
-            response = self.client.request(method, url_path, json=json_body, params=query)
+            request_headers = dict(headers) if headers else {}
+            response = self.client.request(method, url_path, json=json_body, params=query, headers=request_headers)
         except httpx.TimeoutException as exc:
             raise MemoryHubError("memoryhub.client.timeout", "MemoryHub request timed out") from exc
         except httpx.ConnectError as exc:
@@ -234,6 +238,68 @@ class MemoryHubClient:
 
     def write_events(self, events: list[dict[str, Any]]) -> dict[str, Any]:
         return self._request("POST", "/events", json_body={"events": events}) or {}
+
+    def write_canonical_events(
+        self,
+        events: list[dict[str, Any]],
+        *,
+        request_id: str | None = None,
+        idempotency_key: str | None = None,
+        tenant_id: str = "default",
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Send events through the vNext canonical write endpoint.
+
+        This is the single production write path; it routes through the
+        CanonicalWriteService and returns durable event/working/episode IDs.
+        """
+        user_id = user_id or self.user_id
+        body: dict[str, Any] = {
+            "api_version": "vnext/v1",
+            "request_id": request_id or f"req_{self._nonce()}",
+            "idempotency_key": idempotency_key or f"idem_{self._nonce()}",
+            "events": events,
+        }
+        return self._request(
+            "POST",
+            "/vnext/events",
+            json_body=body,
+            headers={"X-MemoryHub-Tenant": tenant_id, "X-MemoryHub-User": user_id},
+        ) or {}
+
+    @staticmethod
+    def _nonce() -> str:
+        import secrets
+        import time
+
+        return f"{int(time.time() * 1000)}_{secrets.token_hex(4)}"
+
+    def resume_task(
+        self,
+        task_id: str,
+        *,
+        resume_token: str = "",
+        expected_snapshot_version: int | None = None,
+        tenant_id: str = "default",
+        user_id: str | None = None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Resume a task by task_id using the vNext resume endpoint."""
+        user_id = user_id or self.user_id
+        headers: dict[str, str] = {
+            "X-MemoryHub-Tenant": tenant_id,
+            "X-MemoryHub-User": user_id,
+        }
+        if resume_token:
+            headers["X-MemoryHub-Resume-Token"] = resume_token
+        if expected_snapshot_version is not None:
+            headers["X-MemoryHub-Expected-Version"] = str(expected_snapshot_version)
+        return self._request(
+            "GET",
+            f"/tasks/{task_id}/resume",
+            query={"request_id": request_id or f"req_{self._nonce()}"},
+            headers=headers,
+        ) or {}
 
     def write_preference(self, memory: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/memories/preference", json_body=memory) or {}

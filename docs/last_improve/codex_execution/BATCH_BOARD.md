@@ -11,8 +11,8 @@
 | B03 | DONE | S1-01～S1-03 | `../codex_batches/B03_s1_storage_ingress.md` | `SELF (Batch-ID: B03)` | 11 定向、45 受影响回归通过；敏感正文、租户隔离、事务、并发、幂等证据有效；安全文件系统组合 PARTIAL 已记录 |
 | B04 | DONE | S1-04～S1-06 | `../codex_batches/B04_s1_task_state.md` | `SELF (Batch-ID: B04)` | B04 完成；下一批次 B05 已置为 READY |
 | B05 | DONE | S1-07～S1-08 | `../codex_batches/B05_s1_authority_write.md` | `SELF (Batch-ID: B05)` | S1-07/S1-08 验收通过；下一批次 B06 已置为 READY |
-| B06 | READY | S1-09～S1-11；S1 Gate | `../codex_batches/B06_s1_entrypoints_gate.md` | — | 等待新会话领取 |
-| B07 | TODO | S2-01～S2-03 | `../codex_batches/B07_s2_reflection_candidates.md` | — | |
+| B06 | DONE | S1-09～S1-11；S1 Gate | `../codex_batches/B06_s1_entrypoints_gate.md` | `SELF (Batch-ID: B06)` | S1 Gate PASS；下一批次 B07 已置为 READY |
+| B07 | READY | S2-01～S2-03 | `../codex_batches/B07_s2_reflection_candidates.md` | — | 等待新会话领取 |
 | B08 | TODO | S2-04～S2-07 | `../codex_batches/B08_s2_consolidation_evolution.md` | — | |
 | B09 | TODO | S2-08～S2-10；S2 Gate | `../codex_batches/B09_s2_shadow_eval_gate.md` | — | |
 | B10 | TODO | S3-01～S3-03 | `../codex_batches/B10_s3_request_planning.md` | — | |

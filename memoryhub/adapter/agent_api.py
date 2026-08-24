@@ -19,6 +19,7 @@ from memoryhub.adapter.schemas import (
     SceneScope,
     SearchRequest,
 )
+from memoryhub.application.event_gateway import GatewayStatus
 from memoryhub.core.forget import MemoryForgetter
 
 router = APIRouter(prefix="/api/agent", tags=["agent-adapter"])
@@ -56,10 +57,6 @@ async def clear_preferences(request: Request, user_id: str = "default"):
     from memoryhub.storage.database import PreferenceRow
 
     with db.session() as s:
-        ids = [
-            row.memory_id
-            for row in s.query(PreferenceRow).filter(PreferenceRow.user_id == user_id).all()
-        ]
         deleted = (
             s.query(PreferenceRow)
             .filter(PreferenceRow.user_id == user_id)
@@ -200,7 +197,10 @@ def _normalize_event(raw: dict[str, Any]) -> MemoryEvent:
     except ValidationError as exc:
         raise HTTPException(
             status_code=422,
-            detail=f"event {data.get('event_id', '?')} invalid: {exc.error_count()} validation error(s)",
+            detail=(
+                f"event {data.get('event_id', '?')} invalid: "
+                f"{exc.error_count()} validation error(s)"
+            ),
         ) from exc
 
 
@@ -212,27 +212,67 @@ def _events_from_replay(body: ReplayRequest) -> list[MemoryEvent]:
     return events
 
 
+def _to_memory_event_contract(event: MemoryEvent) -> Any:
+    """Build a vNext canonical event from a sanitized legacy MemoryEvent."""
+    from datetime import datetime
+
+    from memoryhub.domain.contracts import MemoryEventContract
+
+    occurred = event.occurred_at or datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    if isinstance(occurred, str):
+        try:
+            occurred = datetime.fromisoformat(occurred.replace("Z", "+00:00"))
+        except ValueError:
+            occurred = datetime.utcnow()
+
+    payload = dict(event.payload or {})
+    payload["text"] = event.text or payload.get("text", "")
+    if event.tool_calls:
+        payload["tool_calls"] = [tc.model_dump(mode="json") for tc in event.tool_calls]
+
+    return MemoryEventContract(
+        tenant_id="default",
+        user_id=event.user_id or "default",
+        event_id=event.event_id,
+        event_type=event.event_type,
+        source_type=(
+            event.source_type.value
+            if hasattr(event.source_type, "value")
+            else str(event.source_type)
+        ),
+        task_id=event.session_id or payload.get("task_id", "default-task"),
+        session_id=event.session_id or "",
+        occurred_at=occurred,
+        payload=payload,
+        policy_action="ALLOW",
+        source_hash=event.source_hash or "0" * 64,
+        idempotency_key=event.event_id,
+        trace_id=event.event_id,
+    )
+
+
 @router.post("/replay")
 async def replay_conversation(body: ReplayRequest, request: Request):
     if body.schema_version != "conversation-replay/1.0":
         raise HTTPException(status_code=422, detail="unsupported replay schema_version")
     events = _events_from_replay(body)
     processor = getattr(request.app.state, "event_processor", None)
-    if processor is None:
-        raise HTTPException(status_code=503, detail="event processor not initialized")
-    safe_events, warnings = processor.sanitize(events)
+    canonical = getattr(request.app.state, "canonical_write_service", None)
+    if canonical is None:
+        raise HTTPException(status_code=503, detail="canonical write service not initialized")
+    if processor is not None:
+        safe_events, warnings = processor.sanitize(events)
+    else:
+        safe_events = events
+        warnings = []
 
-    processing = None
     written_event_ids: list[str] = []
+    processing = None
     if body.execute:
-        repo = getattr(request.app.state, "event_repo", None)
-        if repo is None:
-            raise HTTPException(status_code=503, detail="event repository not initialized")
-        new_events = [event for event in safe_events if repo.get_by_id(event.event_id) is None]
-        repo.batch_save(safe_events)
-        processing = processor.process(new_events)
-        processing.warnings = [*warnings, *processing.warnings]
-        written_event_ids = [event.event_id for event in new_events]
+        for event in safe_events:
+            result = canonical.write(_to_memory_event_contract(event))
+            if result.status == GatewayStatus.COMMITTED:
+                written_event_ids.append(event.event_id)
 
     session_id = body.session_id or (safe_events[0].session_id if safe_events else "")
     return {
@@ -243,7 +283,7 @@ async def replay_conversation(body: ReplayRequest, request: Request):
         "written_event_ids": written_event_ids,
         "used_memory_ids": body.used_memory_ids,
         "processing": processing.model_dump(mode="json") if processing else None,
-        "warnings": warnings if processing is None else processing.warnings,
+        "warnings": warnings,
     }
 
 
@@ -251,17 +291,25 @@ async def replay_conversation(body: ReplayRequest, request: Request):
 async def execute_agent_step(body: AgentStepRequest, request: Request):
     """Execute one scripted turn against the real event and retrieval pipeline."""
     processor = getattr(request.app.state, "event_processor", None)
-    repo = getattr(request.app.state, "event_repo", None)
+    canonical = getattr(request.app.state, "canonical_write_service", None)
     retriever = getattr(request.app.state, "retriever", None)
-    if processor is None or repo is None or retriever is None:
-        raise HTTPException(status_code=503, detail="agent runtime not initialized")
+    if canonical is None:
+        raise HTTPException(status_code=503, detail="canonical write service not initialized")
+    if retriever is None:
+        raise HTTPException(status_code=503, detail="retrieval service not initialized")
 
     events = [_normalize_event(ev) for ev in body.events]
-    safe_events, warnings = processor.sanitize(events)
-    new_events = [event for event in safe_events if repo.get_by_id(event.event_id) is None]
-    repo.batch_save(safe_events)
-    processing = processor.process(new_events)
-    processing.warnings = [*warnings, *processing.warnings]
+    if processor is not None:
+        safe_events, warnings = processor.sanitize(events)
+    else:
+        safe_events = events
+        warnings = []
+
+    if canonical is None:
+        raise HTTPException(status_code=503, detail="canonical write service not initialized")
+    for event in safe_events:
+        canonical.write(_to_memory_event_contract(event))
+    written_event_ids = [event.event_id for event in safe_events]
 
     user_id = safe_events[0].user_id if safe_events else "demo_user"
     search_response = retriever.search(
@@ -282,7 +330,11 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
         title = getattr(memory, "text", "") if is_preference else getattr(memory, "name", "")
         summary = getattr(memory, "text", "") if is_preference else getattr(memory, "content", "")
         scope = getattr(memory, "scope", SceneScope())
-        scope_json = scope.model_dump(mode="json") if hasattr(scope, "model_dump") else {"scope": str(scope)}
+        scope_json = (
+            scope.model_dump(mode="json")
+            if hasattr(scope, "model_dump")
+            else {"scope": str(scope)}
+        )
         level = getattr(getattr(memory, "level", ""), "value", getattr(memory, "level", ""))
         knowledge_type = getattr(
             getattr(memory, "knowledge_type", ""), "value", getattr(memory, "knowledge_type", "")
@@ -304,10 +356,6 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
     used_ids = [card["memory_id"] for card in cards[:3]]
 
     summary_lines = []
-    if processing.preferences_written:
-        summary_lines.append(f"写入 {len(processing.preferences_written)} 条偏好记忆")
-    if processing.knowledge_written:
-        summary_lines.append(f"写入 {len(processing.knowledge_written)} 条知识记忆")
     summary_lines.append(f"实际检索到 {len(cards)} 条记忆，使用 {len(used_ids)} 条")
 
     fact_proposals = []
@@ -317,39 +365,29 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
             "call_id": f"{body.turn_id}_memory_search",
             "tool_name": "memory_search",
             "arguments": {"query": body.retrieval_query or body.user_message, "top_k": 8},
-            "result": {"candidate_ids": [card["memory_id"] for card in cards], "used_ids": used_ids},
+            "result": {
+                "candidate_ids": [card["memory_id"] for card in cards],
+                "used_ids": used_ids,
+            },
             "status": "success",
             "sequence": 900,
             "latency_ms": int(search_response.latency_ms),
         }
     ]
-    if processing.preferences_written or processing.knowledge_written:
-        generated_tool_calls.insert(0, {
-            "call_id": f"{body.turn_id}_memory_extract",
-            "tool_name": "memory_extract",
-            "arguments": {"event_ids": [event.event_id for event in new_events]},
-            "result": {
-                "preference_ids": processing.preferences_written,
-                "knowledge_ids": processing.knowledge_written,
-            },
-            "status": "success",
-            "sequence": 899,
-            "latency_ms": 0,
-        })
 
     return {
         "session_id": body.session_id,
         "turn_id": body.turn_id,
         "executed": True,
-        "written_event_ids": [event.event_id for event in new_events],
-        "processing": processing.model_dump(mode="json"),
+        "written_event_ids": written_event_ids,
+        "processing": None,
         "candidate_memories": cards,
         "used_memory_ids": used_ids,
         "fact_proposals": fact_proposals,
         "tool_calls": generated_tool_calls,
         "write_summary": summary_lines,
         "retrieval_latency_ms": int(search_response.latency_ms),
-        "warnings": processing.warnings,
+        "warnings": warnings,
     }
 
 

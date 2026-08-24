@@ -14,14 +14,16 @@ from pathlib import Path
 from typing import Any, Sequence
 
 try:  # support running this file directly from agent-integration/
-    from memoryhub_client import MemoryHubClient, MemoryHubError
     from memoryhub_client.config import ClientConfig
+
+    from memoryhub_client import MemoryHubClient, MemoryHubError
 except ModuleNotFoundError:  # pragma: no cover - direct source checkout fallback
     import sys as _sys
 
     _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from memoryhub_client import MemoryHubClient, MemoryHubError
     from memoryhub_client.config import ClientConfig
+
+    from memoryhub_client import MemoryHubClient, MemoryHubError
 
 try:
     from .format import context_text, generic_text, json_text, search_text
@@ -68,6 +70,11 @@ def _parser() -> argparse.ArgumentParser:
 
     event = sub.add_parser("event", aliases=["events"], help="write MemoryEvent JSON/JSONL")
     event.add_argument("input", help="JSON file, JSONL file or - for stdin")
+
+    resume = sub.add_parser("resume", help="resume a task by task_id")
+    resume.add_argument("task_id")
+    resume.add_argument("--resume-token", default="")
+    resume.add_argument("--expected-version", type=int, default=None)
 
     remember = sub.add_parser("remember", help="explicitly write a preference or knowledge")
     remember.add_argument("text")
@@ -228,7 +235,19 @@ def _result_for(args: argparse.Namespace, value: Any) -> str:
 
 def _run_command(args: argparse.Namespace, client: MemoryHubClient, cfg: ClientConfig) -> Any:
     if args.command in {"event", "events"}:
-        return client.write_events(_events(_input_json(args.input)))
+        return client.write_canonical_events(
+            _events(_input_json(args.input)),
+            tenant_id=getattr(cfg, "tenant_id", "default"),
+            user_id=cfg.user_id,
+        )
+    if args.command == "resume":
+        return client.resume_task(
+            args.task_id,
+            tenant_id=getattr(cfg, "tenant_id", "default"),
+            user_id=cfg.user_id,
+            resume_token=args.resume_token,
+            expected_snapshot_version=args.expected_version,
+        )
     if args.command == "search":
         payload = client.build_search_payload(
             user_id=cfg.user_id,

@@ -1,9 +1,50 @@
 # MemoryHub vNext Codex Execution State
 
-> Last updated: 2026-08-22 20:55 +08:00
-> Updated by: Codex session 2026-08-22
+> Last updated: 2026-08-24 05:12 +08:00
+> Updated by: Codex session 2026-08-24
 
-## Objective
+## B06 entrypoints gate position
+
+- Last updated: 2026-08-24 05:12 +08:00; updated by Codex session 2026-08-24 (B06)
+- Current batch: B06 (`S1-09`～`S1-11` and S1 Gate); batch status: DONE
+- Current batch prompt: `docs/last_improve/codex_batches/B06_s1_entrypoints_gate.md`
+- Current task: None; S1-09, S1-10, S1-11 DONE; S1 Gate PASS
+- Dependencies: S1-01～S1-08 DONE with valid evidence
+- Start reconciliation: branch `dev-remem`; HEAD `92804826f37536246d2298eb416d1b7a4fb65103` (B05 commit); tracked worktree diff present for B06 scope; no applicable `AGENTS.md`; BATCH_BOARD was B06 READY and TASK_BOARD had no B06 task in progress
+- Reconciliation: prior STATE text was B05 handoff; B05 commit `9280482` is present and BATCH_BOARD/TASK_BOARD facts authorize B06. B06 work was already present in the working tree but not yet recorded in continuity files.
+- Acceptance: S1-09 entrypoint convergence, S1-10 task recovery/P0 flow, S1-11 Authority→Projection rebuild, affected/risk regressions, safety/contract regressions, static checks, continuity update, and the single B06 commit are complete.
+- Next batch: B07 READY; next prompt is `docs/last_improve/codex_batches/B07_s2_reflection_candidates.md`.
+- Hard stop: do not execute or modify S2-01 or any later batch in this session; stop after read-only verification of the single B06 commit.
+
+### S1 Gate
+
+- Status: PASS; production write has no bypass; task recovery and projection rebuild are verified; S1-09/S1-10/S1-11 evidence is valid.
+- Validation: B06 focused tests 16 passed; affected vNext/working/episode/authority/gateway/write-bypass suite 48 passed; safety/contract/error regressions 77 passed; core B06 modules ruff and compileall passed; `git diff --check` passed.
+- Environment note: agent-integration CLI/MCP/client modules contain pre-existing E501 line-length findings outside the B06-touched lines; these are recorded as PARTIAL style evidence and do not block S1 Gate because the entrypoint logic is covered by tests.
+- Commit: `SELF (Batch-ID: B06)`; no push, amend, rebase, or B07 implementation performed.
+
+### S1-11 checkpoint
+
+- Status: DONE; Authority→Projection rebuild verified.
+- Implementation: `scripts/rebuild_projections.py` scans active Preference/Knowledge rows and enqueues projection upserts into `MemoryProjectionOutboxRepository`; dry-run mode reports without writing; deleted memories are skipped; content_version is preserved.
+- Evidence: `EVIDENCE.md#s1-11-checkpoint`
+- Validation: rebuild tests 3 passed; scoped ruff and compileall passed.
+
+### S1-10 checkpoint
+
+- Status: DONE; task recovery interface and P0 flow verified.
+- Implementation: `memoryhub/adapter/vnext_api.py` exposes `/api/memory/vnext/tasks/{task_id}/resume` using `EpisodeService.resume_by_task`; P0 E2E flow covers start-with-constraints, phase transition, no-immediate-global-promotion, resume-after-restart, projection-rebuild consistency, multi-entrypoint idempotency, duplicate-event suppression, and sensitive-content MASK.
+- Evidence: `EVIDENCE.md#s1-10-checkpoint`
+- Validation: P0 flow tests 8 passed; resume endpoint tests 2 passed; scoped ruff and compileall passed.
+
+### S1-09 checkpoint
+
+- Status: DONE; REST/Agent replay/MCP/CLI/SDK write entrypoints converge on `CanonicalWriteService`.
+- Implementation: `memoryhub/adapter/vnext_api.py` provides the single production `/api/memory/vnext/events` endpoint; `memoryhub/adapter/agent_api.py` replay/step endpoints delegate to `CanonicalWriteService`; SDK `MemoryHubClient.write_canonical_events`/`resume_task` and CLI `event`/`resume` subcommands call the REST endpoint; MCP tools register `memoryhub_write_event` and `memoryhub_resume_task`.
+- Evidence: `EVIDENCE.md#s1-09-checkpoint`
+- Validation: entrypoint tests 5 passed; P0 multi-entrypoint consistency passed; scoped ruff and compileall passed.
+
+## B05 authoritative position
 
 完成 A/B/C/D 一体化执行任务方案中的 S0～S5 必做任务，通过 P0/P1 与发布 Gate。
 

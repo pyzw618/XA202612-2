@@ -105,9 +105,19 @@ class CanonicalWriteService:
         if working_snapshot is not None:
             if not working_state_id:
                 raise ValueError("working_state_id is required for a WorkingSnapshot")
-            self.working_service.create(
+            created = self.working_service.create(
                 working_snapshot,
                 working_state_id=working_state_id,
+            )
+            working_result = WorkingPatchResult(
+                working_state=created,
+                applied_paths=(),
+                skipped_paths=(),
+                compressed_state=self.working_service.compressed_snapshot(
+                    tenant_id=created.tenant_id,
+                    user_id=created.user_id,
+                    task_id=created.task_id,
+                ),
             )
         if working_patch is not None:
             working_result = self.working_service.apply_patch(
@@ -117,9 +127,11 @@ class CanonicalWriteService:
         snapshot = episode_snapshot or checkpoint
         episode_event_result = None
         if episode_event is not None:
+            self._ensure_episode_exists(episode_event)
             episode_event_result = self.episode_service.append(episode_event)
         snapshot_result = None
         if snapshot is not None:
+            self._ensure_episode_exists(snapshot)
             snapshot_result = self.episode_service.snapshot(snapshot)
 
         task = self.extraction_tasks.enqueue(
@@ -147,6 +159,30 @@ class CanonicalWriteService:
 
     submit = write
     write_event = write
+
+    def _ensure_episode_exists(
+        self,
+        reference: EpisodeEventContract | EpisodeSnapshot,
+    ) -> None:
+        existing = self.episode_service.repository.get(
+            tenant_id=reference.tenant_id,
+            user_id=reference.user_id,
+            episode_id=reference.episode_id,
+        )
+        if existing is not None:
+            return
+        goal = ""
+        if isinstance(reference, EpisodeSnapshot):
+            goal = reference.goal
+        session_id = getattr(reference, "session_id", "")
+        self.episode_service.create(
+            episode_id=reference.episode_id,
+            tenant_id=reference.tenant_id,
+            user_id=reference.user_id,
+            task_id=reference.task_id,
+            session_id=session_id,
+            goal=goal,
+        )
 
     def _write_long_term(
         self,

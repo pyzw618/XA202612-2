@@ -7,7 +7,7 @@
 | Gate | Status | Evidence |
 |---|---|---|
 | S0 | PASS | EVIDENCE.md#s0-gate |
-| S1 | TODO | |
+| S1 | PASS | EVIDENCE.md#s1-gate |
 | S2 | TODO | |
 | S3 | TODO | |
 | S4 | TODO | |
@@ -36,9 +36,9 @@
 | S1-06 | DONE | S1-02 | Codex 2026-08-22 (B04) | EVIDENCE.md#s1-06-and-b04-final-validation | Candidate Repository 与检索隔离 |
 | S1-07 | DONE | S0-03, S1-02 | Codex 2026-08-22 (B05) | EVIDENCE.md#s1-07-checkpoint | Long-Term Authority Facade |
 | S1-08 | DONE | S1-03, S1-04, S1-05, S1-06, S1-07 | Codex 2026-08-22 (B05) | EVIDENCE.md#s1-08-final-validation-and-b05-acceptance | Canonical Write Service |
-| S1-09 | TODO | S1-08 | | | REST/MCP/CLI/SDK 写入口收敛 |
-| S1-10 | TODO | S1-05, S1-08 | | | 任务恢复接口与 P0 贯通 |
-| S1-11 | TODO | S1-07 | | | Authority 到 Projection 重建 |
+| S1-09 | DONE | S1-08 | Codex 2026-08-24 (B06) | EVIDENCE.md#s1-09-checkpoint | REST/MCP/CLI/SDK 写入口收敛 |
+| S1-10 | DONE | S1-05, S1-08 | Codex 2026-08-24 (B06) | EVIDENCE.md#s1-10-checkpoint | 任务恢复接口与 P0 贯通 |
+| S1-11 | DONE | S1-07 | Codex 2026-08-24 (B06) | EVIDENCE.md#s1-11-checkpoint | Authority 到 Projection 重建 |
 | S2-01 | TODO | S1-04, S1-05 | | | Boundary Detector |
 | S2-02 | TODO | S1-06, S2-01 | | | Reflection Schema 与候选输出 |
 | S2-03 | TODO | S2-02 | | | Candidate 归一、Scope、证据组 |
@@ -83,4 +83,4 @@
 - IN_PROGRESS count: 0
 - Dependency violations: None
 - DONE without evidence: None
-- Last checked: 2026-08-22 17:10 +08:00
+- Last checked: 2026-08-24 05:12 +08:00

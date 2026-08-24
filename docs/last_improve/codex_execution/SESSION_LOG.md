@@ -315,3 +315,23 @@
 - Task status changes: S1-08 IN_PROGRESS → DONE; B05 IN_PROGRESS → DONE; B06 TODO → READY.
 - Commit policy: stage only B05 production/spec/test/continuity artifacts; create exactly one local commit with `Batch-ID: B05`; do not push, amend, rebase, or begin B06.
 - Hard stop: after read-only verification of the B05 commit, end the session and hand off `docs/last_improve/codex_batches/B06_s1_entrypoints_gate.md`.
+
+## Checkpoint 2026-08-24-01 — B06 start reconciliation
+
+- Started: 2026-08-24 05:12 +08:00
+- Ended: in progress
+- Branch/HEAD: `dev-remem` / `92804826f37536246d2298eb416d1b7a4fb65103`
+- Restored batch/task: B06 READY with no in-progress task; claimed S1-09, S1-10, and S1-11 simultaneously because the working tree already contained implementation across all three tasks.
+- Initial reconciliation: B05 commit is present; B06-scope changes are present in the working tree but not yet recorded in continuity files; no applicable `AGENTS.md`; S1-01～S1-08 are DONE with evidence.
+- Boundary: only S1-09, S1-10, S1-11 and S1 Gate; no S2-01 or later work.
+- Completed changes: reconciled continuity files to B06 facts; verified existing B06 implementation; fixed new-file/core-modified lint issues; ran targeted, affected, and safety regressions.
+- Files changed: `memoryhub/adapter/vnext_api.py`, `memoryhub/adapter/agent_api.py`, `memoryhub/app.py`, `memoryhub/application/canonical_write.py`, `memoryhub/application/episode_service.py`, `memoryhub/application/safety_policy_adapter.py`, `memoryhub/storage/vnext_repositories.py`, `agent-integration/memoryhub_cli/cli.py`, `agent-integration/memoryhub_client/client.py`, `agent-integration/memoryhub_client/config.py`, `agent-integration/memoryhub_mcp/config.py`, `agent-integration/memoryhub_mcp/tools.py`, `scripts/rebuild_projections.py`, `tests/test_vnext_entrypoints.py`, `tests/test_vnext_p0_flow.py`, `tests/test_rebuild_projections.py`, `tests/test_no_production_write_bypass.py`, plus continuity files.
+- Validation run:
+  - B06 focused: `tests/test_vnext_entrypoints.py`, `tests/test_vnext_p0_flow.py`, `tests/test_rebuild_projections.py` → 16 passed.
+  - Affected vNext regression: plus `tests/test_vnext_event_gateway.py`, `tests/test_vnext_repositories.py`, `tests/test_vnext_storage_schema.py`, `tests/test_vnext_task_state.py`, `tests/test_vnext_authority_write.py`, `tests/test_no_production_write_bypass.py` → 48 passed.
+  - Safety/contract regression: `tests/test_safety_pipeline.py`, `tests/test_safety_contract.py`, `tests/test_safe_errors.py` → 77 passed.
+  - Static: core B06 modules ruff passed; `compileall` passed; `git diff --check` passed.
+- Task status changes: S1-09 TODO → DONE; S1-10 TODO → DONE; S1-11 TODO → DONE; S1 Gate TODO → PASS; B06 READY → DONE; B07 TODO → READY.
+- Blockers: None for B06. Agent-integration CLI/MCP/client modules retain pre-existing E501 line-length findings outside the B06-touched lines; recorded as PARTIAL style evidence.
+- Commit plan: stage only B06 source/tests/spec/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B06 s1 entrypoints gate` with trailer `Batch-ID: B06`; do not push, amend, rebase, or begin B07.
+- Hard stop: after read-only verification of the B06 commit, end the session and hand off `docs/last_improve/codex_batches/B07_s2_reflection_candidates.md`.

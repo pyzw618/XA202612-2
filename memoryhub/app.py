@@ -27,6 +27,7 @@ from memoryhub.adapter.management_api import router as management_router
 from memoryhub.adapter.memory_v2_api import router as memory_v2_router
 from memoryhub.adapter.schemas import SearchResult
 from memoryhub.adapter.service import MemoryService
+from memoryhub.adapter.vnext_api import router as memory_vnext_router
 from memoryhub.config import AppConfig, load_config, validate_production_runtime
 from memoryhub.core.safety.user_rules import (
     UserRuleError,
@@ -267,6 +268,7 @@ def create_app(
     app.include_router(agent_root_router)
     app.include_router(management_router)
     app.include_router(memory_v2_router)
+    app.include_router(memory_vnext_router)
 
     # 注册生命周期
     async def startup():
@@ -576,6 +578,41 @@ def create_app(
         )
         pref_repo.write_service = app.state.memory_write_service
         know_repo.write_service = app.state.memory_write_service
+
+        # vNext canonical write service: all production write paths must delegate here.
+        from memoryhub.application.canonical_write import CanonicalWriteService
+        from memoryhub.application.episode_service import EpisodeService
+        from memoryhub.application.event_gateway import EventGateway
+        from memoryhub.application.safety_policy_adapter import build_safety_policy
+        from memoryhub.application.working_service import WorkingService
+        from memoryhub.domain.long_term import LongTermAuthorityFacade
+        from memoryhub.storage.authority_repository import AuthorityRepository
+        from memoryhub.storage.vnext_repositories import (
+            EpisodeRepository,
+            WorkingStateRepository,
+        )
+
+        authority_repository = AuthorityRepository(
+            db=db,
+            preference_repository=pref_repo,
+            knowledge_repository=know_repo,
+        )
+        authority_facade = LongTermAuthorityFacade(authority_repository)
+        event_gateway = EventGateway(
+            db=db,
+            policy=build_safety_policy(app.state.safety_gate),
+        )
+        app.state.canonical_write_service = CanonicalWriteService(
+            db=db,
+            event_gateway=event_gateway,
+            working_service=WorkingService(WorkingStateRepository(db)),
+            episode_service=EpisodeService(EpisodeRepository(db)),
+            extraction_tasks=extraction_task_repo,
+            authority_facade=authority_facade,
+            memory_write_service=app.state.memory_write_service,
+        )
+        app.state.episode_service = app.state.canonical_write_service.episode_service
+
         # 前端 agent 演示适配层：事件处理协调器（依赖 memory_write_service 同步检索索引）
         from memoryhub.core.processing import EventProcessingCoordinator
 
@@ -660,12 +697,12 @@ def create_app(
 
         # 记忆分层流转调度（REFACTOR_PLAN_V2 §4.4）：session→mid→long + 降级 + 生命周期检查
         if config.memory_tier.enabled:
+            from memoryhub.core.knowledge.workflow_miner import WorkflowMiner
             from memoryhub.core.lifecycle.degrader import MemoryDegrader
             from memoryhub.core.lifecycle.manager import LifecycleManager
             from memoryhub.core.lifecycle.memory_consolidator import MemoryConsolidator
             from memoryhub.core.lifecycle.scheduler import LifecycleScheduler
             from memoryhub.core.lifecycle.session_consolidator import SessionConsolidator
-            from memoryhub.core.knowledge.workflow_miner import WorkflowMiner
             from memoryhub.core.preference.tool_miner import ToolPreferenceMiner
 
             st_repo = ShortTermMemoryRepository(db)
@@ -678,7 +715,9 @@ def create_app(
                 short_term_repo=st_repo, mid_term_repo=mt_repo, event_repo=event_repo
             )
             memory_consolidator = MemoryConsolidator(
-                mid_term_repo=mt_repo, event_repo=event_repo, extraction_executor=extraction_executor,
+                mid_term_repo=mt_repo,
+                event_repo=event_repo,
+                extraction_executor=extraction_executor,
                 preference_updater=preference_updater,
                 tool_miner=ToolPreferenceMiner(),
                 workflow_miner=WorkflowMiner(),

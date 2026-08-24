@@ -258,6 +258,27 @@ class EpisodeRepository:
             )
             return self._snapshot_view(row) if row is not None else None
 
+    def get_by_task_id(
+        self, *, tenant_id: str, user_id: str, task_id: str, status: str | None = "ACTIVE"
+    ) -> EpisodeSnapshotView | None:
+        """Resolve a task to its active episode for the resume endpoint.
+
+        The (tenant_id, user_id, task_id) tuple is the user-facing task key.
+        When multiple rows exist, the most recently updated active episode wins.
+        """
+        with self.db.session() as session:
+            query = session.query(TaskEpisodeRow).filter_by(
+                tenant_id=tenant_id, user_id=user_id, task_id=task_id
+            )
+            if status is not None:
+                query = query.filter_by(status=status)
+            row = (
+                query.order_by(
+                    TaskEpisodeRow.status.desc(), TaskEpisodeRow.updated_at.desc()
+                ).first()
+            )
+            return self._snapshot_view(row) if row is not None else None
+
     def append_event(
         self,
         *,

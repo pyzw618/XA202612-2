@@ -184,6 +184,31 @@ class EpisodeStateService:
         )
         return replay_episode(current.snapshot, [self._event_data(event) for event in events])
 
+    def resume_by_task(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        task_id: str,
+        resume_token: str,
+        expected_snapshot_version: int | None = None,
+        current_resource_versions: dict[str, str] | None = None,
+    ) -> EpisodeResumeResult:
+        """Resolve task_id → episode and resume; exposes version conflicts to the adapter."""
+        current = self.repository.get_by_task_id(
+            tenant_id=tenant_id, user_id=user_id, task_id=task_id
+        )
+        if current is None:
+            raise KeyError("task not found")
+        return self.resume(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            episode_id=current.episode_id,
+            resume_token=resume_token,
+            expected_snapshot_version=expected_snapshot_version,
+            current_resource_versions=current_resource_versions,
+        )
+
     @staticmethod
     def _snapshot_data(snapshot: EpisodeSnapshot) -> dict[str, Any]:
         return {

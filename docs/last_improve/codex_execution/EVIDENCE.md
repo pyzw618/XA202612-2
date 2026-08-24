@@ -1,5 +1,91 @@
 # MemoryHub vNext Execution Evidence
 
+## B06 start reconciliation
+
+- Date/time: 2026-08-24 05:12 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; branch `dev-remem`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  git branch --show-current
+  git rev-parse HEAD
+  git status --short --untracked-files=all
+  git diff --stat
+  git diff --name-only
+  rg --files -g 'AGENTS.md'
+  ```
+- Result: PASS for repository reconciliation. HEAD=`92804826f37536246d2298eb416d1b7a4fb65103`, B05 commit is present, B06-scope worktree changes are present but not yet recorded in continuity files, no applicable `AGENTS.md` found.
+- Continuity: `BATCH_BOARD.md` had B06 READY and no IN_PROGRESS batch; `TASK_BOARD.md` had no B06 task in progress; S1-01～S1-08 are DONE with evidence.
+- Decision: claim B06 and the smallest dependency-satisfied tasks S1-09, S1-10, S1-11; do not touch S2-01 or later batches.
+
+## S1-09 checkpoint
+
+- Date/time: 2026-08-24 05:12 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: REST/Agent replay/MCP/CLI/SDK write entrypoints all delegate to the single `CanonicalWriteService` production path.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_entrypoints.py -q
+  .venv/Scripts/python -m ruff check memoryhub/adapter/vnext_api.py memoryhub/adapter/agent_api.py agent-integration/memoryhub_client/client.py agent-integration/memoryhub_cli/cli.py agent-integration/memoryhub_mcp/tools.py
+  .venv/Scripts/python -m compileall -q memoryhub/adapter agent-integration
+  ```
+- Result: PASS; 5 entrypoint tests passed; core modified files ruff/compileall passed.
+- Summary: `/api/memory/vnext/events` is the single production write endpoint; agent replay and step endpoints route through `CanonicalWriteService`; SDK exposes `write_canonical_events` and `resume_task`; CLI adds `event` and `resume` subcommands; MCP registers `memoryhub_write_event` and `memoryhub_resume_task`.
+- Artifact/report/trace: `memoryhub/adapter/vnext_api.py`, `memoryhub/adapter/agent_api.py`, `memoryhub/app.py`, `agent-integration/memoryhub_client/client.py`, `agent-integration/memoryhub_cli/cli.py`, `agent-integration/memoryhub_mcp/tools.py`
+- Acceptance: S1-09 DONE.
+- Follow-up: run S1-10 task recovery/P0 flow tests and S1-11 projection rebuild tests.
+
+## S1-10 checkpoint
+
+- Date/time: 2026-08-24 05:12 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: task recovery interface and the eight mandatory P0 scenarios flow through canonical write and episode resume.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_entrypoints.py::test_resume_task_endpoint_replays_events_and_surface_stale_resources tests/test_vnext_entrypoints.py::test_resume_task_endpoint_fails_on_wrong_token tests/test_vnext_p0_flow.py -q
+  .venv/Scripts/python -m ruff check memoryhub/adapter/vnext_api.py memoryhub/application/episode_service.py tests/test_vnext_p0_flow.py
+  .venv/Scripts/python -m compileall -q memoryhub/adapter memoryhub/application tests/test_vnext_p0_flow.py
+  ```
+- Result: PASS; 2 resume endpoint tests and 8 P0 flow tests passed; ruff/compileall passed.
+- Summary: `/api/memory/vnext/tasks/{task_id}/resume` replays events newer than the snapshot and surfaces stale resources/revalidation; service restart restores state via the same database; single instructions do not immediately promote to global long-term; sensitive tokens are MASKed before persistence.
+- Artifact/report/trace: `memoryhub/adapter/vnext_api.py`, `memoryhub/application/episode_service.py`, `memoryhub/application/canonical_write.py`, `tests/test_vnext_p0_flow.py`
+- Acceptance: S1-10 DONE.
+- Follow-up: run S1-11 Authority→Projection rebuild tests.
+
+## S1-11 checkpoint
+
+- Date/time: 2026-08-24 05:12 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: Authority (Preference/Knowledge) is the source of truth; projection outbox can be rebuilt from active Authority rows with correct memory_id/content_version.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_rebuild_projections.py -q
+  .venv/Scripts/python -m ruff check scripts/rebuild_projections.py memoryhub/application/safety_policy_adapter.py
+  .venv/Scripts/python -m compileall -q scripts memoryhub/application
+  ```
+- Result: PASS; 3 rebuild tests passed; ruff/compileall passed.
+- Summary: `scripts/rebuild_projections.py` scans active Preference/Knowledge, enqueues `upsert` projection operations, preserves content_version, skips deleted rows, supports dry-run and report output.
+- Artifact/report/trace: `scripts/rebuild_projections.py`, `memoryhub/application/safety_policy_adapter.py`, `tests/test_rebuild_projections.py`
+- Acceptance: S1-11 DONE.
+- Follow-up: run affected vNext regressions, safety/contract risk tests, and S1 Gate verification.
+
+## S1 Gate
+
+- Date/time: 2026-08-24 05:12 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_entrypoints.py tests/test_vnext_p0_flow.py tests/test_rebuild_projections.py tests/test_vnext_event_gateway.py tests/test_vnext_repositories.py tests/test_vnext_storage_schema.py tests/test_vnext_task_state.py tests/test_vnext_authority_write.py tests/test_no_production_write_bypass.py -q
+  .venv/Scripts/python -m pytest tests/test_safety_pipeline.py tests/test_safety_contract.py tests/test_safe_errors.py -q
+  .venv/Scripts/python -m ruff check memoryhub/adapter/vnext_api.py memoryhub/adapter/agent_api.py memoryhub/app.py memoryhub/application/canonical_write.py memoryhub/application/episode_service.py memoryhub/application/safety_policy_adapter.py memoryhub/storage/vnext_repositories.py scripts/rebuild_projections.py tests/test_vnext_entrypoints.py tests/test_vnext_p0_flow.py tests/test_rebuild_projections.py tests/test_no_production_write_bypass.py
+  .venv/Scripts/python -m compileall -q memoryhub/adapter memoryhub/application memoryhub/storage agent-integration scripts tests/test_vnext_entrypoints.py tests/test_vnext_p0_flow.py tests/test_rebuild_projections.py tests/test_no_production_write_bypass.py
+  git diff --check
+  ```
+- Result: PASS; B06 focused tests 16 passed; affected vNext/working/episode/authority/gateway/write-bypass suite 48 passed; safety/contract/error regressions 77 passed; core B06 modules ruff and compileall passed; `git diff --check` passed.
+- Environment PARTIAL: agent-integration CLI/MCP/client modules contain pre-existing E501 line-length findings outside the B06-touched lines. The B06 entrypoint logic is verified by tests; these style findings are not treated as S1 Gate blockers.
+- Summary: production write has no bypass; all entrypoints converge on canonical write; task recovery replays episodes and rejects bad tokens; Authority→Projection rebuild preserves identity and version; S1 Gate evidence is complete.
+- Artifact/report/trace: B06 source/tests/specs plus required continuity files.
+- Acceptance: S1 Gate PASS; S1-09, S1-10, S1-11 DONE.
+
 ## B05 start reconciliation
 
 - Date/time: 2026-08-22 18:30 +08:00

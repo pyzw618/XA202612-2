@@ -36,6 +36,7 @@ def _read_json(path: Path) -> dict:
 class ClientConfig:
     api_url: str = "http://127.0.0.1:8099"
     user_id: str = "opencode"
+    tenant_id: str = "default"
     project: str = ""
     scene: str = "code"
     task_type: str = "coding_task"
@@ -66,6 +67,7 @@ class ClientConfig:
         env_map = {
             "api_url": os.getenv("MEMORYHUB_API_URL"),
             "user_id": os.getenv("MEMORYHUB_USER_ID"),
+            "tenant_id": os.getenv("MEMORYHUB_TENANT_ID"),
             "project": os.getenv("MEMORYHUB_PROJECT"),
             "scene": os.getenv("MEMORYHUB_SCENE"),
             "task_type": os.getenv("MEMORYHUB_TASK_TYPE"),
@@ -88,6 +90,7 @@ class ClientConfig:
         return cls(
             api_url=str(values.get("api_url") or cls.api_url).rstrip("/"),
             user_id=str(values.get("user_id") or cls.user_id),
+            tenant_id=str(values.get("tenant_id") or cls.tenant_id),
             project=str(values.get("project") or project_root),
             scene=str(values.get("scene") or cls.scene),
             task_type=str(values.get("task_type") or cls.task_type),
