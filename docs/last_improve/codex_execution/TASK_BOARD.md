@@ -39,9 +39,9 @@
 | S1-09 | DONE | S1-08 | Codex 2026-08-24 (B06) | EVIDENCE.md#s1-09-checkpoint | REST/MCP/CLI/SDK 写入口收敛 |
 | S1-10 | DONE | S1-05, S1-08 | Codex 2026-08-24 (B06) | EVIDENCE.md#s1-10-checkpoint | 任务恢复接口与 P0 贯通 |
 | S1-11 | DONE | S1-07 | Codex 2026-08-24 (B06) | EVIDENCE.md#s1-11-checkpoint | Authority 到 Projection 重建 |
-| S2-01 | TODO | S1-04, S1-05 | | | Boundary Detector |
-| S2-02 | TODO | S1-06, S2-01 | | | Reflection Schema 与候选输出 |
-| S2-03 | TODO | S2-02 | | | Candidate 归一、Scope、证据组 |
+| S2-01 | DONE | S1-04, S1-05 | Codex 2026-08-24 (B07) | EVIDENCE.md#s2-01-checkpoint | Boundary Detector 硬/规则触发、去抖、三类 Checkpoint |
+| S2-02 | DONE | S1-06, S2-01 | Codex 2026-08-24 (B07) | EVIDENCE.md#s2-02-checkpoint | Reflection Schema/Prompt/重试，只产 Candidate |
+| S2-03 | DONE | S2-02 | Codex 2026-08-24 (B07) | EVIDENCE.md#s2-03-checkpoint | Candidate 归一键、Scope、近重复合并、独立证据组 |
 | S2-04 | TODO | S2-03 | | | Promotion Score 与 reason codes |
 | S2-05 | TODO | S2-04 | | | Fast Path 治理 |
 | S2-06 | TODO | S1-07, S2-04 | | | Evolution 状态变化 |
@@ -83,4 +83,4 @@
 - IN_PROGRESS count: 0
 - Dependency violations: None
 - DONE without evidence: None
-- Last checked: 2026-08-24 05:12 +08:00
+- Last checked: 2026-08-24 08:00 +08:00

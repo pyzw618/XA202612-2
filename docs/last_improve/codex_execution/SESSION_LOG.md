@@ -335,3 +335,38 @@
 - Blockers: None for B06. Agent-integration CLI/MCP/client modules retain pre-existing E501 line-length findings outside the B06-touched lines; recorded as PARTIAL style evidence.
 - Commit plan: stage only B06 source/tests/spec/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B06 s1 entrypoints gate` with trailer `Batch-ID: B06`; do not push, amend, rebase, or begin B07.
 - Hard stop: after read-only verification of the B06 commit, end the session and hand off `docs/last_improve/codex_batches/B07_s2_reflection_candidates.md`.
+
+## Checkpoint 2026-08-24-02 — B07 start reconciliation
+
+- Started: 2026-08-24 07:05 +08:00
+- Ended: in progress
+- Branch/HEAD: `dev-remem` / `fdf9bae6d3cd4c3d2627fa0257bdb1f4dfbd52d1`
+- Restored batch/task: B07 READY with no in-progress task; claimed S2-01.
+- Initial reconciliation: B06 commit `b9432ab` is present in history; working tree clean; no applicable `AGENTS.md`; S1-01～S1-11 and S1 Gate are DONE with evidence. Prior continuity files listed HEAD `9280482`; reconciled to the upstream merge HEAD `fdf9bae`.
+- Boundary: only S2-01, S2-02, S2-03; no S2-04 or later batches.
+- Completed changes: updated `STATE.md`, `BATCH_BOARD.md`, `TASK_BOARD.md`, `EVIDENCE.md`; initialized TODO list.
+- Files changed: `docs/last_improve/codex_execution/STATE.md`, `docs/last_improve/codex_execution/BATCH_BOARD.md`, `docs/last_improve/codex_execution/TASK_BOARD.md`, `docs/last_improve/codex_execution/EVIDENCE.md`, `docs/last_improve/codex_execution/SESSION_LOG.md`
+- Validation run: repository reconciliation passed.
+- Task status changes: B07 TODO → IN_PROGRESS; S2-01 TODO → IN_PROGRESS.
+- Blockers: None.
+- Exact next step: implement S2-01 Task Boundary Detector and run targeted tests.
+## Checkpoint 2026-08-24-03 — B07 completion
+
+- Started: 2026-08-24 07:05 +08:00
+- Ended: 2026-08-24 08:00 +08:00
+- Branch/HEAD: `dev-remem` / `fdf9bae6d3cd4c3d2627fa0257bdb1f4dfbd52d1`
+- Restored batch/task: B07 IN_PROGRESS with S2-01 IN_PROGRESS; completed S2-01, S2-02, S2-03.
+- Completed changes:
+  - S2-01: `memoryhub/application/boundary_detector.py`, `memoryhub/domain/episode.py`, boundary enums in `memoryhub/domain/contracts.py`, `tests/test_vnext_boundary_detector.py`.
+  - S2-02: `memoryhub/core/reflection/schema.py`, `memoryhub/core/reflection/prompts.py`, `memoryhub/core/reflection/__init__.py`, `memoryhub/application/reflection_service.py`, `tests/test_vnext_reflection.py`.
+  - S2-03: `memoryhub/application/candidate_service.py`, `memoryhub/domain/candidate.py`, `memoryhub/storage/vnext_repositories.py` extensions, `tests/test_vnext_candidate_service.py`.
+- Files changed: `memoryhub/domain/contracts.py`, `memoryhub/domain/episode.py`, `memoryhub/domain/candidate.py`, `memoryhub/storage/vnext_repositories.py`, `memoryhub/application/__init__.py`, `memoryhub/application/boundary_detector.py`, `memoryhub/application/reflection_service.py`, `memoryhub/application/candidate_service.py`, `memoryhub/core/reflection/schema.py`, `memoryhub/core/reflection/prompts.py`, `memoryhub/core/reflection/__init__.py`, `tests/test_vnext_boundary_detector.py`, `tests/test_vnext_reflection.py`, `tests/test_vnext_candidate_service.py`, plus continuity files.
+- Validation run:
+  - B07 focused: 20 passed.
+  - Affected vNext regression: 62 passed.
+  - Safety/contract/error: 77 passed.
+  - Static: ruff/compileall passed; `git diff --check` passed.
+- Task status changes: S2-01 IN_PROGRESS → DONE; S2-02 TODO → DONE; S2-03 TODO → DONE; B07 IN_PROGRESS → DONE; B08 TODO → READY.
+- Blockers: None for B07.
+- Commit plan: stage only B07 source/tests/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B07 s2 reflection candidates` with trailer `Batch-ID: B07`; do not push, amend, rebase, or begin B08.
+- Hard stop: after read-only verification of the B07 commit, end the session and hand off `docs/last_improve/codex_batches/B08_s2_consolidation_evolution.md`.

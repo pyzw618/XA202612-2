@@ -116,6 +116,24 @@ class EpisodeStatus(_ContractEnum):
     ARCHIVED = "ARCHIVED"
 
 
+class BoundaryCheckpointType(_ContractEnum):
+    """Kinds of task boundary checkpoint emitted by the detector."""
+
+    COMPLETE = "COMPLETE"
+    FAILED = "FAILED"
+    EXPLICIT = "EXPLICIT"
+    PHASE = "PHASE"
+    CONTEXT_PRESSURE = "CONTEXT_PRESSURE"
+
+
+class BoundaryTriggerKind(_ContractEnum):
+    """What caused a boundary decision."""
+
+    HARD = "HARD"
+    RULE = "RULE"
+    MODEL = "MODEL"
+
+
 class LineageRelation(_ContractEnum):
     """Allowed evidence/version relationships."""
 
@@ -373,6 +391,8 @@ def map_legacy_memory_status(value: object) -> EvolutionStatus:
 __all__ = [
     "ActivationStatus",
     "Activation",
+    "BoundaryCheckpointType",
+    "BoundaryTriggerKind",
     "Candidate",
     "CandidateStatus",
     "EpisodeEventContract",

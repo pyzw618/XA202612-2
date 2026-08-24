@@ -95,11 +95,18 @@ def stale_resource_ids(
     )
 
 
+def is_terminal_boundary(checkpoint_type: str) -> bool:
+    """Return whether a checkpoint closes the episode."""
+
+    return checkpoint_type in {"COMPLETE", "FAILED"}
+
+
 __all__ = [
     "EpisodeLifecycleError",
     "EpisodeResumeConflict",
     "allowed_close_status",
     "hash_resume_token",
+    "is_terminal_boundary",
     "new_resume_token",
     "replay_episode",
     "resume_token_matches",

@@ -1,5 +1,74 @@
 # MemoryHub vNext Execution Evidence
 
+## B07 start reconciliation
+
+- Date/time: 2026-08-24 07:05 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; branch `dev-remem`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  git branch --show-current
+  git rev-parse HEAD
+  git status --short --untracked-files=all
+  git diff --stat
+  git diff --name-only
+  rg --files -g 'AGENTS.md'
+  ```
+- Result: PASS for repository reconciliation. HEAD=`fdf9bae6d3cd4c3d2627fa0257bdb1f4dfbd52d1`, B06 commit `b9432ab` is present in history, working tree clean, no applicable `AGENTS.md` found.
+- Continuity: `BATCH_BOARD.md` had B07 READY and no IN_PROGRESS batch; `TASK_BOARD.md` had no B07 task in progress; S1-01～S1-11 and S1 Gate are DONE with evidence.
+- Decision: claim B07 and the smallest dependency-satisfied task S2-01; do not touch S2-04 or later batches.
+
+## S2-01 checkpoint
+
+- Date/time: 2026-08-24 07:15 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: Task Boundary Detector with hard triggers, rule scoring, model suggestion placeholder, debounce, and three checkpoint classes.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_boundary_detector.py -q
+  .venv/Scripts/python -m ruff check memoryhub/domain/contracts.py memoryhub/domain/episode.py memoryhub/application/boundary_detector.py memoryhub/application/__init__.py tests/test_vnext_boundary_detector.py
+  .venv/Scripts/python -m compileall -q memoryhub/domain memoryhub/application tests/test_vnext_boundary_detector.py
+  ```
+- Result: PASS; 9 boundary tests passed; ruff/compileall passed.
+- Summary: `BoundaryDetector.detect` returns HARD triggers for explicit `boundary=complete/failed/explicit` and for writes into terminal episodes; RULE triggers for phase changes (PHASE) and context-pressure threshold (CONTEXT_PRESSURE); debounce suppresses the same checkpoint type within the configured window; terminal boundaries are distinguishable via `domain.episode.is_terminal_boundary`.
+- Artifact/report/trace: `memoryhub/application/boundary_detector.py`, `memoryhub/domain/episode.py`, `memoryhub/domain/contracts.py`, `memoryhub/application/__init__.py`, `tests/test_vnext_boundary_detector.py`
+- Acceptance: S2-01 DONE; S2-02 is now the single IN_PROGRESS task in B07.
+- Follow-up: implement Reflection Schema/Prompt/Retry and Candidate-only output.
+
+## S2-02 checkpoint
+
+- Date/time: 2026-08-24 07:30 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: Reflection input/output schema, prompt version, retries, and Candidate-only output; model must not directly write Authority.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_reflection.py -q
+  .venv/Scripts/python -m ruff check memoryhub/core/reflection memoryhub/application/reflection_service.py tests/test_vnext_reflection.py
+  .venv/Scripts/python -m compileall -q memoryhub/core/reflection memoryhub/application tests/test_vnext_reflection.py
+  ```
+- Result: PASS; 4 reflection tests passed; ruff/compileall passed.
+- Summary: `ReflectionInput`/`ReflectionOutput` Pydantic schemas freeze the reflection contract; `render_reflection_prompt` enforces the Candidate-only rule in the prompt text; `ReflectionService.run` computes `input_hash`, validates output schema, records `model_id`/`prompt_version`/`input_hash`, retries on failure, and raises `ReflectionRunError` after exhaustion. The service returns a `Candidate` object and has no code path to `LongTermEnvelope`/Authority.
+- Artifact/report/trace: `memoryhub/core/reflection/schema.py`, `memoryhub/core/reflection/prompts.py`, `memoryhub/core/reflection/__init__.py`, `memoryhub/application/reflection_service.py`, `tests/test_vnext_reflection.py`
+- Acceptance: S2-02 DONE; S2-03 is now the single IN_PROGRESS task in B07.
+- Follow-up: implement Candidate normalization key, Scope, near-duplicate merge and independent evidence groups.
+
+## S2-03 checkpoint
+
+- Date/time: 2026-08-24 08:00 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: Candidate normalization key, Scope resolution, near-duplicate merge and independent evidence groups.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_candidate_service.py -q
+  .venv/Scripts/python -m pytest tests/test_vnext_task_state.py tests/test_vnext_repositories.py tests/test_vnext_storage_schema.py tests/test_vnext_event_gateway.py tests/test_vnext_authority_write.py tests/test_vnext_entrypoints.py tests/test_vnext_p0_flow.py tests/test_no_production_write_bypass.py -q
+  .venv/Scripts/python -m ruff check memoryhub/domain/candidate.py memoryhub/storage/vnext_repositories.py memoryhub/application/candidate_service.py memoryhub/application/boundary_detector.py memoryhub/application/reflection_service.py memoryhub/core/reflection memoryhub/domain/contracts.py memoryhub/application/__init__.py tests/test_vnext_candidate_service.py tests/test_vnext_boundary_detector.py tests/test_vnext_reflection.py
+  .venv/Scripts/python -m compileall -q memoryhub/domain memoryhub/storage memoryhub/application memoryhub/core/reflection tests/test_vnext_candidate_service.py tests/test_vnext_boundary_detector.py tests/test_vnext_reflection.py
+  ```
+- Result: PASS; candidate service 7 tests passed; affected vNext/working/episode/authority/gateway/entrypoint/P0/write-bypass suite 45 passed; ruff/compileall passed.
+- Summary: `CandidateService.stage` normalizes claim keys via `domain.candidate.normalize_claim_key`, resolves scope from explicit payload/candidate/default without auto-promotion to GLOBAL, merges near-duplicates by `(normalized_key, scope)`, and uses an independent evidence group check based on existing `evidence_refs`/`supporting_episode_ids` so the same event/episode does not fabricate independent support. Repository `CandidateView` exposes scope_level, frequency and evidence lists for stateless decisions.
+- Artifact/report/trace: `memoryhub/application/candidate_service.py`, `memoryhub/domain/candidate.py`, `memoryhub/storage/vnext_repositories.py`, `tests/test_vnext_candidate_service.py`
+- Acceptance: S2-03 DONE; B07 ready for batch-wide regression and risk validation.
+- Follow-up: run B07 affected regressions, safety/contract risk tests, and static checks.
+
 ## B06 start reconciliation
 
 - Date/time: 2026-08-24 05:12 +08:00
@@ -522,3 +591,26 @@
 - Summary: 修复 SQLite 并发跨表读偏差：同租户同幂等键的已存在 Event 不再直接报 Event ID 冲突，而是在当前 Session 结束后重读 IdempotencyRecord；并发重复提交维持 1 个 COMMITTED、其余 IDEMPOTENT。Evidence/Frequency 不由 Gateway 触碰，重复提交回归保持既有 Evidence=1、Candidate frequency=3。
 - Acceptance: Policy 在 Event/幂等提交前生效；敏感 REVIEW/DROP/未净化 MASK 不写 Event、队列或幂等记录；tenant-scoped idempotency、全局 Event ID、事务回滚和并发竞争均有证据；没有生产写旁路变更。
 - Follow-up: 只读审查 Git diff/暂存清单；将 S1-01/S1-02/S1-03 置 DONE、B03 置 DONE、B04 置 READY，写入 `SELF (Batch-ID: B03)`，然后只创建一次本地提交。
+
+## B07 final validation and acceptance
+
+- Date/time: 2026-08-24 08:00 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: S2-01/S2-02/S2-03 implemented, B07 exit criteria met, affected/risk regressions pass, static checks pass.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_boundary_detector.py tests/test_vnext_reflection.py tests/test_vnext_candidate_service.py -q
+  .venv/Scripts/python -m pytest tests/test_vnext_task_state.py tests/test_vnext_repositories.py tests/test_vnext_storage_schema.py tests/test_vnext_event_gateway.py tests/test_vnext_authority_write.py tests/test_vnext_entrypoints.py tests/test_vnext_p0_flow.py tests/test_no_production_write_bypass.py tests/test_vnext_contracts.py tests/test_vnext_interface.py -q
+  .venv/Scripts/python -m pytest tests/test_safety_pipeline.py tests/test_safety_contract.py tests/test_safe_errors.py -q
+  .venv/Scripts/python -m ruff check memoryhub/domain/candidate.py memoryhub/storage/vnext_repositories.py memoryhub/application/candidate_service.py memoryhub/application/boundary_detector.py memoryhub/application/reflection_service.py memoryhub/core/reflection memoryhub/domain/contracts.py memoryhub/application/__init__.py memoryhub/domain/episode.py tests/test_vnext_candidate_service.py tests/test_vnext_boundary_detector.py tests/test_vnext_reflection.py
+  .venv/Scripts/python -m compileall -q memoryhub/domain memoryhub/storage memoryhub/application memoryhub/core/reflection tests/test_vnext_candidate_service.py tests/test_vnext_boundary_detector.py tests/test_vnext_reflection.py
+  git diff --check
+  ```
+- Result: PASS; B07 focused 20 passed; affected vNext regression 62 passed; safety/contract/error 77 passed; ruff/compileall passed; `git diff --check` passed (line-ending warnings are Windows CRLF normalization, not whitespace errors).
+- Environment note: the deterministic reflection model is a local stub; it validates schema/prompt version/input hash and does not call remote LLMs.
+- Exit criteria:
+  - Boundary behavior is verifiable: hard Complete/Failed/Explicit, PHASE and CONTEXT_PRESSURE checkpoints, debounce.
+  - Model cannot directly write Authority: ReflectionService returns Candidate only; no LongTermEnvelope/Authority path exists.
+  - Repeated statements do not forge independent evidence: same event/episode does not increment frequency; different episodes do.
+- Acceptance: B07 DONE; S2-01, S2-02, S2-03 DONE.
+

@@ -91,7 +91,15 @@ class CandidateView:
     status: str
     formation_status: str
     normalized_key: str
+    scope_level: str
     scope: str
+    claim: dict[str, Any]
+    confidence: float
+    utility: float
+    stability: float
+    frequency: int
+    evidence_refs: list[str]
+    supporting_episode_ids: list[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -520,6 +528,9 @@ class CandidateRepository:
         scope_level: str,
         scope: str,
         status: str = "ACCUMULATING",
+        evidence_refs: list[str] | None = None,
+        supporting_episode_ids: list[str] | None = None,
+        frequency: int = 1,
     ) -> CandidateView:
         if status not in CandidateRepository._TRANSITIONS:
             raise InvalidCandidateTransitionError(f"unknown candidate status: {status}")
@@ -533,6 +544,9 @@ class CandidateRepository:
             scope_level=scope_level,
             scope=scope,
             status=status,
+            evidence_refs=list(evidence_refs or []),
+            supporting_episode_ids=list(supporting_episode_ids or []),
+            frequency=frequency,
         )
         with self.db.session() as session:
             session.add(row)
@@ -587,6 +601,26 @@ class CandidateRepository:
                 query = query.filter_by(status=status)
             return [self._view(row) for row in query.order_by(MemoryCandidateRow.created_at).all()]
 
+    def find_by_key(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        normalized_key: str,
+    ) -> CandidateView | None:
+        """Return the most recent candidate with the same normalized key."""
+
+        with self.db.session() as session:
+            row = (
+                session.query(MemoryCandidateRow)
+                .filter_by(
+                    tenant_id=tenant_id, user_id=user_id, normalized_key=normalized_key
+                )
+                .order_by(MemoryCandidateRow.created_at.desc())
+                .first()
+            )
+            return self._view(row) if row is not None else None
+
     def search(
         self,
         *,
@@ -614,6 +648,43 @@ class CandidateRepository:
 
     list_for_retrieval = search
 
+    def add_evidence(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        candidate_id: str,
+        event_id: str,
+        episode_id: str,
+        is_independent: bool = True,
+    ) -> CandidateView:
+        """Append an evidence reference to a candidate and optionally bump frequency.
+
+        Independent evidence increments frequency; repeated statements from the
+        same event/episode do not fabricate independent support.
+        """
+
+        with self.db.session() as session:
+            row = (
+                session.query(MemoryCandidateRow)
+                .filter_by(
+                    tenant_id=tenant_id, user_id=user_id, candidate_id=candidate_id
+                )
+                .one_or_none()
+            )
+            if row is None:
+                raise KeyError("candidate not found")
+            refs = set(row.evidence_refs or [])
+            refs.add(event_id)
+            row.evidence_refs = sorted(refs)
+            episodes = set(row.supporting_episode_ids or [])
+            episodes.add(episode_id)
+            row.supporting_episode_ids = sorted(episodes)
+            if is_independent:
+                row.frequency = (row.frequency or 0) + 1
+            session.flush()
+            return self._view(row)
+
     @staticmethod
     def _view(row: MemoryCandidateRow) -> CandidateView:
         return CandidateView(
@@ -623,7 +694,15 @@ class CandidateRepository:
             status=row.status,
             formation_status=row.formation_status,
             normalized_key=row.normalized_key,
+            scope_level=row.scope_level,
             scope=row.scope,
+            claim=dict(row.claim or {}),
+            confidence=row.confidence,
+            utility=row.utility,
+            stability=row.stability,
+            frequency=row.frequency or 0,
+            evidence_refs=list(row.evidence_refs or []),
+            supporting_episode_ids=list(row.supporting_episode_ids or []),
         )
 
 

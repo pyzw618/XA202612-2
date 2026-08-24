@@ -1,7 +1,33 @@
 # MemoryHub vNext Codex Execution State
 
-> Last updated: 2026-08-24 05:12 +08:00
-> Updated by: Codex session 2026-08-24
+> Last updated: 2026-08-24 07:05 +08:00
+> Updated by: Codex session 2026-08-24 (B07)
+
+## B07 final validation and acceptance
+
+- Last updated: 2026-08-24 08:00 +08:00; updated by Codex session 2026-08-24 (B07)
+- Current batch: B07 (`S2-01`～`S2-03`); batch status: DONE
+- Current batch prompt: `docs/last_improve/codex_batches/B07_s2_reflection_candidates.md`
+- Current task: None; S2-01, S2-02, S2-03 DONE
+- Dependencies: S1-01～S1-11 DONE with valid evidence; S1 Gate PASS
+- Start reconciliation: branch `dev-remem`; HEAD `fdf9bae6d3cd4c3d2627fa0257bdb1f4dfbd52d1` (merge of B06 commit `b9432ab` and upstream docs); working tree clean; no applicable `AGENTS.md`; BATCH_BOARD was B07 READY and TASK_BOARD had no B07 task in progress
+- Reconciliation: prior STATE text listed HEAD `9280482` because it was written before the upstream merge; B06 commit `b9432ab` is present in history and BATCH_BOARD/TASK_BOARD facts authorize B07. B07 work is now complete and pending the single local commit.
+- Acceptance: S2-01 boundary behavior verified (hard/phase/context-pressure/debounce); S2-02 reflection schema/prompt/retry verified and Candidate-only; S2-03 normalization/scope/near-duplicate/independent evidence verified; affected vNext regressions, safety/contract risk tests, and static checks passed.
+- Validation: B07 focused tests 20 passed; affected vNext regression 62 passed; safety/contract/error regressions 77 passed; core B07 modules ruff/compileall passed; `git diff --check` passed.
+- Next batch: B08 READY; next prompt is `docs/last_improve/codex_batches/B08_s2_consolidation_evolution.md`.
+- Hard stop: do not execute or modify S2-04 or any later batch in this session; stop after read-only verification of the single B07 commit.
+
+## B07 start reconciliation
+
+- Last updated: 2026-08-24 07:05 +08:00; updated by Codex session 2026-08-24 (B07)
+- Current batch: B07 (`S2-01`～`S2-03`); batch status: IN_PROGRESS
+- Current batch prompt: `docs/last_improve/codex_batches/B07_s2_reflection_candidates.md`
+- Current task: S2-01 IN_PROGRESS; S2-02 and S2-03 TODO
+- Dependencies: S1-01～S1-11 DONE with valid evidence; S1 Gate PASS
+- Start reconciliation: branch `dev-remem`; HEAD `fdf9bae6d3cd4c3d2627fa0257bdb1f4dfbd52d1` (merge of B06 commit `b9432ab` and upstream docs); working tree clean; no applicable `AGENTS.md`; BATCH_BOARD was B07 READY and TASK_BOARD had no B07 task in progress
+- Reconciliation: prior STATE text listed HEAD `9280482` because it was written before the upstream merge; B06 commit `b9432ab` is present in history and BATCH_BOARD/TASK_BOARD facts authorize B07. Working tree contains no uncommitted B07 work yet.
+- Boundary: only S2-01, S2-02, S2-03; no S2-04 or later batches.
+- Exact next action: implement S2-01 Task Boundary Detector, then update continuity and claim S2-02.
 
 ## B06 entrypoints gate position
 
