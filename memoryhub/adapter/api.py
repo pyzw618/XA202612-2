@@ -44,6 +44,7 @@ from memoryhub.adapter.user_rule_schemas import (
     UserRuleErrorResponse,
     UserRuleResponse,
 )
+from memoryhub.adapter.vnext_schemas import MemoryRetrievalRequest
 from memoryhub.core.forget import MemoryForgetter
 from memoryhub.core.forget.health import HealthCalculator
 from memoryhub.core.safety.gate import SafetyGateError
@@ -798,6 +799,20 @@ async def retry_dead_extraction_task(
 # ============================================================
 
 
+def _search_request_to_vnext(
+    req: SearchRequest,
+    *,
+    tenant_id: str = "default",
+    request_id: str = "",
+) -> MemoryRetrievalRequest:
+    """Convert a legacy SearchRequest to the vNext retrieval contract."""
+    return MemoryRetrievalRequest.from_legacy_search_request(
+        req,
+        tenant_id=tenant_id,
+        request_id=request_id,
+    )
+
+
 def _record_search_access(request: Request, response: SearchResponse) -> None:
     """Feed successful retrievals back into lifecycle access statistics."""
     state = request.app.state
@@ -914,9 +929,9 @@ async def search_memory(req: SearchRequest, request: Request):
     """
     混合检索偏好与知识记忆
 
-    数据流: OS Agent → search_memory → HybridRetriever.search
-            → (vector_recall + keyword_recall + metadata_filter)
-            → rerank → 返回 Top-K
+    数据流: OS Agent → search_memory → vNext RetrievalService
+            → (intent router → planner → channels → fusion → rerank → scope → budget)
+            → 返回 Top-K
 
     参数:
         req.query: 检索查询文本
@@ -930,6 +945,27 @@ async def search_memory(req: SearchRequest, request: Request):
         knowledge: 匹配的知识记忆列表
         latency_ms: 检索耗时
     """
+    # vNext convergence: prefer the unified RetrievalService when available.
+    retrieval_service = getattr(request.app.state, "retrieval_service", None)
+    if retrieval_service is not None:
+        try:
+            vnext_req = _search_request_to_vnext(
+                req,
+                request_id=f"legacy-search-{req.user_id}-{hash(req.query) & 0xFFFFFFFF:08x}",
+            )
+            vnext_response = retrieval_service.search(vnext_req)
+            response = vnext_response.to_legacy_search_response(
+                latency_ms=getattr(vnext_response, "latency_ms", 0.0)
+            )
+            response = _apply_tiered_cascade(request, req, response)
+            _record_search_access(request, response)
+            return response
+        except HTTPException:
+            raise
+        except Exception:
+            # Fall back to the legacy retriever if vNext retrieval fails.
+            pass
+
     retriever = getattr(request.app.state, "retriever", None)
     if retriever is None:
         memory = getattr(request.app.state, "memory_service", None)
@@ -977,9 +1013,25 @@ async def get_memory_context(req: SearchRequest, request: Request):
 
     与 search_memory 类似，但返回格式为可直接注入 prompt 的文本。
 
-    数据流: OS Agent → get_memory_context → search_memory
-            → 格式化为上下文文本 → 返回
+    数据流: OS Agent → get_memory_context → vNext RetrievalService.context
+            → 返回结构化 ContextPayload 的文本渲染
     """
+    # vNext convergence: prefer the unified RetrievalService when available.
+    retrieval_service = getattr(request.app.state, "retrieval_service", None)
+    if retrieval_service is not None:
+        try:
+            vnext_req = _search_request_to_vnext(
+                req,
+                request_id=f"legacy-context-{req.user_id}-{hash(req.query) & 0xFFFFFFFF:08x}",
+            )
+            payload = retrieval_service.context(vnext_req)
+            return {"context": payload.rendered_context, "context_text": payload.rendered_context}
+        except HTTPException:
+            raise
+        except Exception:
+            # Fall back to the legacy retriever if vNext retrieval fails.
+            pass
+
     retriever = getattr(request.app.state, "retriever", None)
     memory = getattr(request.app.state, "memory_service", None)
 

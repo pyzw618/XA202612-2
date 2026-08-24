@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class TraceSpanKind(str):
-    """Named formation/evolution stages used as ``kind`` values."""
+    """Named formation/evolution/retrieval stages used as ``kind`` values."""
 
     EVENT = "EVENT"
     WORKING = "WORKING"
@@ -21,6 +21,7 @@ class TraceSpanKind(str):
     CANDIDATE = "CANDIDATE"
     CONSOLIDATION = "CONSOLIDATION"
     EVOLUTION = "EVOLUTION"
+    RETRIEVAL = "RETRIEVAL"
     LEGACY = "LEGACY"
 
 
@@ -44,6 +45,7 @@ class TraceSpan(BaseModel):
         "CANDIDATE",
         "CONSOLIDATION",
         "EVOLUTION",
+        "RETRIEVAL",
         "LEGACY",
     ]
     layer: str = Field(default="")

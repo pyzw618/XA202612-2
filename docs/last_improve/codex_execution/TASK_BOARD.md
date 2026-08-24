@@ -9,7 +9,7 @@
 | S0 | PASS | EVIDENCE.md#s0-gate |
 | S1 | PASS | EVIDENCE.md#s1-gate |
 | S2 | PASS | EVIDENCE.md#b09-final-validation-and-acceptance |
-| S3 | TODO | |
+| S3 | PASS | EVIDENCE.md#b12-final-validation-and-s3-gate-acceptance |
 | S4 | TODO | |
 | S5 | TODO | |
 | P0 | TODO | |
@@ -56,9 +56,9 @@
 | S3-05 | DONE | S3-04, S2-06 | Codex 2026-08-24 (B11) | EVIDENCE.md#s3-05-checkpoint | Authority 校验与 Scope Resolver |
 | S3-06 | DONE | S3-05 | Codex 2026-08-24 (B11) | EVIDENCE.md#s3-06-checkpoint | Context Budget Manager |
 | S3-07 | DONE | S3-06 | Codex 2026-08-24 (B11) | EVIDENCE.md#s3-07-checkpoint | Context Builder |
-| S3-08 | TODO | S3-03, S3-04, S3-05, S3-06, S3-07 | | | Activation、Log、Trace |
-| S3-09 | TODO | S3-08 | | | REST/MCP/CLI/SDK 检索收敛 |
-| S3-10 | TODO | S3-09 | | | Retrieval/Context 评测 |
+| S3-08 | DONE | S3-03, S3-04, S3-05, S3-06, S3-07 | Codex 2026-08-24 (B12) | EVIDENCE.md#s3-08-checkpoint | Activation、Log、Trace |
+| S3-09 | DONE | S3-08 | Codex 2026-08-24 (B12) | EVIDENCE.md#s3-09-checkpoint | REST/MCP/CLI/SDK 检索收敛 |
+| S3-10 | DONE | S3-09 | Codex 2026-08-24 (B12) | EVIDENCE.md#s3-10-checkpoint | Retrieval/Context 评测 |
 | S4-01 | TODO | S1-01, S1-07 | | | Outbox 升级 |
 | S4-02 | TODO | S4-01, S3-08 | | | Projection Version 与 Authority Checked |
 | S4-03 | TODO | S4-01, S4-02 | | | Repair Worker |
@@ -83,4 +83,4 @@
 - IN_PROGRESS count: 0
 - Dependency violations: None
 - DONE without evidence: None
-- Last checked: 2026-08-24 13:25 +08:00
+- Last checked: 2026-08-24 14:00 +08:00

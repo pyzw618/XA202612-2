@@ -460,3 +460,43 @@
 - Blockers: None for B11.
 - Commit plan: stage only B11 source/tests/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B11 s3 fusion context` with trailer `Batch-ID: B11`; do not push, amend, rebase, or begin B12.
 - Hard stop: after read-only verification of the single B11 commit, end the session and hand off `docs/last_improve/codex_batches/B12_s3_entrypoints_eval_gate.md`.
+
+
+## Checkpoint 2026-08-24-08 — B12 start reconciliation
+
+- Started: 2026-08-24 13:15 UTC
+- Ended: in progress
+- Branch/HEAD: `dev-remem` / `29ec946a83d10372a2e8fc3fed98254de9b15726`
+- Restored batch/task: B12 READY with no in-progress task; claimed S3-08.
+- Initial reconciliation: B11 commit is present; working tree has untracked test DB artifacts in `evaluation/results/`; no applicable `AGENTS.md`; S3-01～S3-07 and prior gates are DONE with evidence.
+- Completed changes: updated `STATE.md`, `BATCH_BOARD.md`, `TASK_BOARD.md`, `SESSION_LOG.md`, `EVIDENCE.md`; initialized TODO list.
+- Files changed: `docs/last_improve/codex_execution/STATE.md`, `docs/last_improve/codex_execution/BATCH_BOARD.md`, `docs/last_improve/codex_execution/TASK_BOARD.md`, `docs/last_improve/codex_execution/SESSION_LOG.md`, `docs/last_improve/codex_execution/EVIDENCE.md`
+- Validation run: repository reconciliation passed.
+- Task status changes: B12 TODO → IN_PROGRESS; S3-08 TODO → IN_PROGRESS.
+- Blockers: None.
+- Exact next action: implement S3-08 Activation/Retrieval Log/Trace in `memoryhub/application/retrieval_service.py`.
+
+## Checkpoint 2026-08-24-09 — B12 final validation and acceptance
+
+- Started: 2026-08-24 13:15 UTC
+- Ended: 2026-08-24 14:00 +08:00
+- Branch/HEAD: `dev-remem` / `29ec946a83d10372a2e8fc3fed98254de9b15726`
+- Restored batch/task: B12 IN_PROGRESS; S3-08 IN_PROGRESS, S3-09/S3-10 TODO.
+- Initial reconciliation: B11 commit is present; S3-01～S3-07 DONE with evidence; no applicable `AGENTS.md`.
+- Completed changes:
+  - S3-08: `memoryhub/application/retrieval_service.py`, `memoryhub/observability/trace_models.py`, `memoryhub/storage/vnext_repositories.py`, `memoryhub/application/__init__.py`, `tests/test_vnext_retrieval_service.py`.
+  - S3-09: `memoryhub/adapter/retrieval_executor.py`, `memoryhub/adapter/vnext_api.py`, `memoryhub/adapter/api.py`, `memoryhub/app.py`, `agent-integration/memoryhub_client/client.py`, `tests/test_vnext_entrypoints.py`.
+  - S3-10: `evaluation/metrics/vnext_retrieval_eval.py`, `evaluation/datasets/vnext_retrieval_eval.json`, `tests/test_vnext_retrieval_eval.py`.
+  - Updated `STATE.md`, `TASK_BOARD.md`, `BATCH_BOARD.md`, `EVIDENCE.md`, `SESSION_LOG.md`.
+- Files changed: `memoryhub/application/retrieval_service.py`, `memoryhub/observability/trace_models.py`, `memoryhub/storage/vnext_repositories.py`, `memoryhub/application/__init__.py`, `memoryhub/adapter/retrieval_executor.py`, `memoryhub/adapter/vnext_api.py`, `memoryhub/adapter/api.py`, `memoryhub/app.py`, `agent-integration/memoryhub_client/client.py`, `evaluation/metrics/vnext_retrieval_eval.py`, `evaluation/datasets/vnext_retrieval_eval.json`, `tests/test_vnext_retrieval_service.py`, `tests/test_vnext_entrypoints.py`, `tests/test_vnext_retrieval_eval.py`, `docs/last_improve/codex_execution/STATE.md`, `docs/last_improve/codex_execution/TASK_BOARD.md`, `docs/last_improve/codex_execution/BATCH_BOARD.md`, `docs/last_improve/codex_execution/EVIDENCE.md`, `docs/last_improve/codex_execution/SESSION_LOG.md`
+- Validation run:
+  - B12 focused: `tests/test_vnext_retrieval_service.py` (6), `tests/test_vnext_entrypoints.py` (8), `tests/test_vnext_context_service.py` (5), `tests/test_vnext_fusion_reranker.py` (17), `tests/test_vnext_scope_resolver.py` (10), `tests/test_vnext_intent_router.py` (14), `tests/test_vnext_retrieval_planner.py` (12), `tests/test_vnext_retrieval_eval.py` (10) → 77 passed.
+  - Affected vNext regression: `tests/test_vnext_*.py` → 245 passed.
+  - Safety/contract/error regression: `tests/test_safety_pipeline.py`, `tests/test_safety_contract.py`, `tests/test_safe_errors.py` → 77 passed.
+  - Write-bypass regression: `tests/test_no_production_write_bypass.py` → 6 passed.
+  - Static: compileall passed; `git diff --check` passed (CRLF warnings only). Pre-existing E501 in `agent-integration/memoryhub_client/client.py` and `memoryhub/adapter/api.py` on unchanged lines recorded as PARTIAL style evidence.
+- S3 Gate: PASS. Checklist verified: 7 intents annotated; exact/paraphrase/semantic unified pool/ranking; Candidate/DELETED/SUPERSEDED/other-tenant blocked; budget protects constraints/current step; no per-entrypoint Context assembly.
+- Task status changes: S3-08 IN_PROGRESS → DONE; S3-09 TODO → DONE; S3-10 TODO → DONE; S3 Gate TODO → PASS; B12 IN_PROGRESS → DONE; B13 TODO → READY.
+- Blockers: None.
+- Commit plan: stage only B12 source/tests/dataset/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B12 s3 entrypoints eval gate` with trailer `Batch-ID: B12`; do not push, amend, rebase, or begin B13.
+- Hard stop: after read-only verification of the single B12 commit, end the session and hand off `docs/last_improve/codex_batches/B13_s4_projection_repair.md`.

@@ -1,5 +1,43 @@
 # MemoryHub vNext Codex Execution State
 
+> Last updated: 2026-08-24 14:00 +08:00
+> Updated by: Codex session 2026-08-24 (B12)
+
+## B12 final validation and acceptance
+
+- Last updated: 2026-08-24 14:00 +08:00; updated by Codex session 2026-08-24 (B12)
+- Current batch: B12 (`S3-08`～`S3-10` and S3 Gate); batch status: DONE
+- Current task: none; S3-08, S3-09, S3-10 DONE; S3 Gate PASS
+- Dependencies: S3-01, S3-02, S3-03 DONE with valid evidence; S2-06 DONE with valid evidence
+- Final validation: branch `dev-remem`; HEAD `29ec946a83d10372a2e8fc3fed98254de9b15726` (B11 commit `feat(vnext): complete B11 s3 fusion context`); B12-scope changes staged; untracked test DB artifacts in `evaluation/results/`; no applicable `AGENTS.md`
+- Acceptance:
+  - S3-08 Activation/Retrieval Log/Trace: `memoryhub/application/retrieval_service.py` orchestrates the full pipeline and records Activation, Retrieval Log and Retrieval Trace.
+  - S3-09 Entrypoint convergence: `memoryhub/adapter/vnext_api.py`, `memoryhub/adapter/api.py`, `agent-integration/memoryhub_client/client.py` and `memoryhub/app.py` route `/search`, `/context`, SDK and legacy reads through the single `RetrievalService`.
+  - S3-10 Segmented evaluation: `evaluation/metrics/vnext_retrieval_eval.py`, `evaluation/datasets/vnext_retrieval_eval.json`, `tests/test_vnext_retrieval_eval.py` provide Router/Recall/Ranking/Scope/Context metrics and reproducible regression.
+  - B12 focused tests 77 passed; affected vNext regression 245 passed; safety/contract/error 77 passed; write-bypass 6 passed; static checks passed; `git diff --check` passed.
+  - S3 Gate checklist verified: 7 intents annotated; exact/paraphrase/semantic unified pool/ranking; Candidate/DELETED/SUPERSEDED/other-tenant blocked; budget protects constraints/current step; no per-entrypoint Context assembly.
+- Next batch: B13 READY; next prompt is `docs/last_improve/codex_batches/B13_s4_projection_repair.md`.
+- Boundary: only S3-08, S3-09, S3-10 and S3 Gate; no S4-01 or later batches.
+- Commit plan: create exactly one local commit titled `feat(vnext): complete B12 s3 entrypoints eval gate` with trailer `Batch-ID: B12`; do not push, amend, rebase, or enter B13.
+
+> Last updated: 2026-08-24 13:15 UTC
+> Updated by: Codex session 2026-08-24 (B12)
+
+## B12 start reconciliation
+
+- Last updated: 2026-08-24 13:15 UTC; updated by Codex session 2026-08-24 (B12)
+- Current batch: B12 (`S3-08`～`S3-10` and S3 Gate); batch status: IN_PROGRESS
+- Current batch prompt: `docs/last_improve/codex_batches/B12_s3_entrypoints_eval_gate.md`
+- Current task: S3-08 IN_PROGRESS; S3-09, S3-10 TODO; S3 Gate TODO
+- Dependencies: S3-01, S3-02, S3-03, S3-04, S3-05, S3-06, S3-07 DONE with valid evidence
+- Start reconciliation: branch `dev-remem`; HEAD `29ec946a83d10372a2e8fc3fed98254de9b15726` (B11 commit `feat(vnext): complete B11 s3 fusion context`); working tree has untracked test DB artifacts in `evaluation/results/`; no applicable `AGENTS.md`; BATCH_BOARD was B12 READY and TASK_BOARD had no B12 task in progress
+- Reconciliation: B11 commit is present and BATCH_BOARD/TASK_BOARD facts authorize B12. Untracked DB artifacts are test outputs, not user-owned business changes; they will not be staged.
+- Acceptance: prior B11 acceptance remains valid.
+- Boundary: only S3-08, S3-09, S3-10 and S3 Gate; no S4-01 or later batches.
+- Exact next action: implement S3-08 Activation/Retrieval Log/Trace in `memoryhub/application/retrieval_service.py` and supporting observability/repository modules.
+
+# MemoryHub vNext Codex Execution State
+
 > Last updated: 2026-08-24 13:25 +08:00
 > Updated by: Codex session 2026-08-24 (B11)
 

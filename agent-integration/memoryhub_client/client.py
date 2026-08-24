@@ -236,6 +236,46 @@ class MemoryHubClient:
         body = dict(payload or kwargs)
         return self._request("POST", "/context", json_body=body) or {}
 
+    def vnext_search(
+        self,
+        payload: dict[str, Any],
+        *,
+        tenant_id: str = "default",
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Call the unified vNext /search endpoint.
+
+        This is the preferred read path for S3 convergence; it returns the
+        full MemoryRetrievalResponse with trace_id and selected memories.
+        """
+        user_id = user_id or self.user_id
+        body = dict(payload)
+        body.setdefault("api_version", "vnext/v1")
+        return self._request(
+            "POST",
+            "/vnext/search",
+            json_body=body,
+            headers={"X-MemoryHub-Tenant": tenant_id, "X-MemoryHub-User": user_id},
+        ) or {}
+
+    def vnext_context(
+        self,
+        payload: dict[str, Any],
+        *,
+        tenant_id: str = "default",
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Call the unified vNext /context endpoint."""
+        user_id = user_id or self.user_id
+        body = dict(payload)
+        body.setdefault("api_version", "vnext/v1")
+        return self._request(
+            "POST",
+            "/vnext/context",
+            json_body=body,
+            headers={"X-MemoryHub-Tenant": tenant_id, "X-MemoryHub-User": user_id},
+        ) or {}
+
     def write_events(self, events: list[dict[str, Any]]) -> dict[str, Any]:
         return self._request("POST", "/events", json_body={"events": events}) or {}
 

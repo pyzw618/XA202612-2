@@ -19,6 +19,7 @@ from memoryhub.storage.models import (
     MemoryActivationRow,
     MemoryCandidateRow,
     MemoryEvidenceRow,
+    RetrievalLogRow,
     TaskEpisodeRow,
     WorkingStateRow,
 )
@@ -826,6 +827,81 @@ class ActivationRepository:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class RetrievalLogView:
+    retrieval_log_id: str
+    tenant_id: str
+    user_id: str
+    query_id: str
+    trace_id: str
+    intent: str
+    consistency: str
+    plan: dict[str, Any]
+    candidate_count: int
+    selected_count: int
+    degraded_channels: list[str]
+    latency_ms: float
+
+
+class RetrievalLogRepository:
+    """Tenant-scoped retrieval log writes with no raw query/content."""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    def record(
+        self,
+        *,
+        retrieval_log_id: str,
+        tenant_id: str,
+        user_id: str,
+        query_id: str,
+        trace_id: str,
+        intent: str,
+        consistency: str,
+        plan: dict[str, Any],
+        candidate_count: int,
+        selected_count: int,
+        degraded_channels: list[str],
+        latency_ms: float,
+    ) -> RetrievalLogView:
+        row = RetrievalLogRow(
+            retrieval_log_id=retrieval_log_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            query_id=query_id,
+            trace_id=trace_id,
+            intent=intent,
+            consistency=consistency,
+            plan=dict(plan),
+            candidate_count=candidate_count,
+            selected_count=selected_count,
+            degraded_channels=list(degraded_channels),
+            latency_ms=latency_ms,
+        )
+        with self.db.session() as session:
+            session.add(row)
+            session.flush()
+            return self._view(row)
+
+    @staticmethod
+    def _view(row: RetrievalLogRow) -> RetrievalLogView:
+        return RetrievalLogView(
+            retrieval_log_id=row.retrieval_log_id,
+            tenant_id=row.tenant_id,
+            user_id=row.user_id,
+            query_id=row.query_id,
+            trace_id=row.trace_id,
+            intent=row.intent,
+            consistency=row.consistency,
+            plan=dict(row.plan or {}),
+            candidate_count=row.candidate_count,
+            selected_count=row.selected_count,
+            degraded_channels=list(row.degraded_channels or []),
+            latency_ms=row.latency_ms,
+        )
+
+
 __all__ = [
     "ActivationRepository",
     "ActivationView",
@@ -839,6 +915,8 @@ __all__ = [
     "EvidenceRepository",
     "EvidenceView",
     "InvalidCandidateTransitionError",
+    "RetrievalLogRepository",
+    "RetrievalLogView",
     "VersionConflictError",
     "WorkingStateRepository",
     "WorkingStateView",

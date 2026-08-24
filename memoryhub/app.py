@@ -613,6 +613,20 @@ def create_app(
         )
         app.state.episode_service = app.state.canonical_write_service.episode_service
 
+        # vNext unified retrieval service: all read entrypoints delegate here.
+        from memoryhub.adapter.retrieval_executor import build_channel_executors
+        from memoryhub.application.retrieval_service import RetrievalService
+        from memoryhub.storage.vnext_repositories import (
+            ActivationRepository,
+            RetrievalLogRepository,
+        )
+
+        app.state.retrieval_service = RetrievalService(
+            channel_executors=build_channel_executors(app.state),
+            activation_repository=ActivationRepository(db),
+            retrieval_log_repository=RetrievalLogRepository(db),
+        )
+
         # 前端 agent 演示适配层：事件处理协调器（依赖 memory_write_service 同步检索索引）
         from memoryhub.core.processing import EventProcessingCoordinator
 

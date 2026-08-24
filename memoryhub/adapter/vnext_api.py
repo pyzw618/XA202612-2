@@ -16,11 +16,15 @@ from pydantic import ValidationError
 from memoryhub.adapter.vnext_schemas import (
     APIError,
     APIErrorCode,
+    ContextPayload,
+    MemoryRetrievalRequest,
+    MemoryRetrievalResponse,
     ResumeTaskResponse,
     WriteEventRequest,
     WriteEventResponse,
 )
 from memoryhub.application.canonical_write import CanonicalWriteService
+from memoryhub.application.retrieval_service import RetrievalService
 from memoryhub.domain.contracts import (
     EpisodeEventContract,
     EpisodeSnapshot,
@@ -365,6 +369,47 @@ def _pop_long_term(event_data: dict[str, Any]) -> LongTermEnvelope | None:
         return LongTermEnvelope.model_validate(raw)
     except ValidationError:
         return None
+
+
+def _retrieval_service(request: Request) -> RetrievalService:
+    service = getattr(request.app.state, "retrieval_service", None)
+    if service is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "retrieval.service_unavailable"},
+        )
+    return service
+
+
+@router.post("/search", response_model=MemoryRetrievalResponse)
+async def vnext_search(
+    req: MemoryRetrievalRequest,
+    request: Request,
+    identity: tuple[str, str] = Depends(_tenant_user),
+) -> MemoryRetrievalResponse:
+    """Unified vNext search endpoint.
+
+    All search entrypoints (legacy /search, /context, v2 search, MCP, CLI, SDK)
+    eventually delegate to the same ``RetrievalService`` so results are identical.
+    """
+    tenant_id, user_id = identity
+    service = _retrieval_service(request)
+    vnext_request = req.model_copy(update={"tenant_id": tenant_id, "user_id": user_id})
+    result = service.search(vnext_request)
+    return result
+
+
+@router.post("/context", response_model=ContextPayload)
+async def vnext_context(
+    req: MemoryRetrievalRequest,
+    request: Request,
+    identity: tuple[str, str] = Depends(_tenant_user),
+) -> ContextPayload:
+    """Unified vNext context endpoint returning the structured prompt payload."""
+    tenant_id, user_id = identity
+    service = _retrieval_service(request)
+    vnext_request = req.model_copy(update={"tenant_id": tenant_id, "user_id": user_id})
+    return service.context(vnext_request)
 
 
 __all__ = ["router"]

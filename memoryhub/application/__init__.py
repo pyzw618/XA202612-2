@@ -22,6 +22,7 @@ from .episode_service import (
 )
 from .event_gateway import EventGateway, EventGatewayResult, GatewayStatus
 from .evolution_service import EvolutionResult, EvolutionService, EvolutionServiceError
+from .retrieval_service import RetrievalResult, RetrievalService
 from .working_service import WorkingPatchResult, WorkingService, WorkingStateService
 
 __all__ = [
@@ -50,6 +51,8 @@ __all__ = [
     "EvolutionResult",
     "EvolutionService",
     "EvolutionServiceError",
+    "RetrievalResult",
+    "RetrievalService",
     "WorkingPatchResult",
     "WorkingService",
     "WorkingStateService",

@@ -359,3 +359,154 @@ def test_agent_replay_delegates_to_canonical_write_service() -> None:
     with db.session() as session:
         assert session.query(EventRow).filter_by(event_id="agent-replay-event").count() == 1
     db.close()
+
+
+
+def _retrieved_memory(memory_id: str, score: float = 0.9) -> Any:
+    from memoryhub.adapter.vnext_schemas import RetrievedMemory
+    from memoryhub.domain.contracts import (
+        LifecycleLayer,
+        MemoryScope,
+        MemoryType,
+    )
+
+    return RetrievedMemory(
+        tenant_id="tenant-entry",
+        user_id="user-entry",
+        memory_id=memory_id,
+        memory_type=MemoryType.PREFERENCE,
+        layer=LifecycleLayer.LONG_TERM,
+        scope_level=MemoryScope.GLOBAL,
+        scope="GLOBAL",
+        content_version=1,
+        evolution_status="ACTIVE",
+        content={"text": f"content of {memory_id}"},
+        score=score,
+        score_breakdown={},
+        source_ids=["src:entry"],
+    )
+
+
+def _channel_executor(candidates: list[Any]):
+    def executor(request, plan, channel):
+        return candidates
+    return executor
+
+
+def _retrieval_service(db: Database) -> Any:
+    from memoryhub.application.retrieval_service import RetrievalService
+    from memoryhub.storage.vnext_repositories import (
+        ActivationRepository,
+        RetrievalLogRepository,
+    )
+
+    candidates = [_retrieved_memory("m-entry-1"), _retrieved_memory("m-entry-2", score=0.7)]
+    return RetrievalService(
+        channel_executors={"vector": _channel_executor(candidates)},
+        activation_repository=ActivationRepository(db),
+        retrieval_log_repository=RetrievalLogRepository(db),
+    )
+
+
+def _test_app_with_retrieval(
+    write_service: CanonicalWriteService, retrieval_service: Any
+) -> FastAPI:
+    app = _test_app(write_service)
+    app.state.retrieval_service = retrieval_service
+    return app
+
+
+def test_vnext_search_returns_consistent_ids_and_trace() -> None:
+    db = _db()
+    write_service = _canonical_service(db)
+    retrieval_service = _retrieval_service(db)
+    app = _test_app_with_retrieval(write_service, retrieval_service)
+    client = _client(app)
+
+    payload = {
+        "api_version": "vnext/v1",
+        "request_id": "req-search-1",
+        "tenant_id": "tenant-entry",
+        "user_id": "user-entry",
+        "query": "report format",
+        "task_id": "task-entry",
+        "intent_hint": "PREFERENCE",
+        "token_budget": 1000,
+    }
+    response = client.post(
+        "/api/memory/vnext/search",
+        json=payload,
+        headers={"X-MemoryHub-Tenant": "tenant-entry", "X-MemoryHub-User": "user-entry"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["request_id"] == "req-search-1"
+    assert body["trace_id"] == "req-search-1"
+    assert body["intent"] == "PREFERENCE"
+    assert body["total_count"] == 2
+    ids = [m["memory_id"] for m in body["selected_memories"]]
+    assert "m-entry-1" in ids
+    assert "m-entry-2" in ids
+    assert "vector" in body["retrieval_plan"]["enabled_channels"]
+    assert len(body["activations"]) == 2
+    db.close()
+
+
+def test_vnext_context_returns_same_memories_as_search() -> None:
+    db = _db()
+    write_service = _canonical_service(db)
+    retrieval_service = _retrieval_service(db)
+    app = _test_app_with_retrieval(write_service, retrieval_service)
+    client = _client(app)
+
+    payload = {
+        "api_version": "vnext/v1",
+        "request_id": "req-context-1",
+        "tenant_id": "tenant-entry",
+        "user_id": "user-entry",
+        "query": "report format",
+        "task_id": "task-entry",
+        "intent_hint": "PREFERENCE",
+        "token_budget": 1000,
+    }
+    search_response = client.post(
+        "/api/memory/vnext/search",
+        json=payload,
+        headers={"X-MemoryHub-Tenant": "tenant-entry", "X-MemoryHub-User": "user-entry"},
+    ).json()
+    context_response = client.post(
+        "/api/memory/vnext/context",
+        json=payload,
+        headers={"X-MemoryHub-Tenant": "tenant-entry", "X-MemoryHub-User": "user-entry"},
+    )
+    assert context_response.status_code == 200, context_response.text
+    ctx = context_response.json()
+    assert ctx["relevant_memory_ids"] == search_response["context"]["relevant_memory_ids"]
+    assert ctx["rendered_context"]
+    db.close()
+
+
+def test_legacy_search_delegates_to_vnext_retrieval_service() -> None:
+    db = _db()
+    write_service = _canonical_service(db)
+    retrieval_service = _retrieval_service(db)
+    app = _test_app_with_retrieval(write_service, retrieval_service)
+
+    # Also mount the legacy memory router so /search is available.
+    from memoryhub.adapter.api import router as memory_router
+
+    app.include_router(memory_router)
+    client = _client(app)
+
+    response = client.post(
+        "/api/memory/search",
+        json={"user_id": "user-entry", "query": "report format", "top_k": 5},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    # The legacy response is produced by the vNext retrieval service.
+    assert body["total_count"] == 2
+    legacy_ids = {r["memory_id"] for r in body["results"]}
+    assert "m-entry-1" in legacy_ids
+    assert "m-entry-2" in legacy_ids
+    db.close()

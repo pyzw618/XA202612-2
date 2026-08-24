@@ -1003,3 +1003,113 @@
   - Fusion scores, reranker factors, conflict resolutions, and budget decisions are all explainable via `score_breakdown`, `resolution`, and `dropped_reasons`.
   - Hard constraints and current task state are protected by the budget manager.
 - Acceptance: B11 DONE; S3-04, S3-05, S3-06, S3-07 DONE; B12 READY.
+
+
+## B12 start reconciliation
+
+- Date/time: 2026-08-24 13:15 UTC
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; branch `dev-remem`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  git branch -v
+  git rev-parse HEAD
+  git status --short
+  git diff --stat
+  ```
+- Result: PASS for repository reconciliation. HEAD=`29ec946a83d10372a2e8fc3fed98254de9b15726`, B11 commit `feat(vnext): complete B11 s3 fusion context` with trailer `Batch-ID: B11` is present, untracked test DB artifacts only in `evaluation/results/`, no applicable `AGENTS.md` found.
+- Continuity: `BATCH_BOARD.md` had B12 READY and no IN_PROGRESS batch; `TASK_BOARD.md` had no B12 task in progress; S3-01～S3-07 are DONE with evidence.
+- Decision: claim B12 and the smallest dependency-satisfied task S3-08; do not touch S4-01 or later batches.
+
+## S3-08 checkpoint
+
+- Date/time: 2026-08-24 13:20 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_retrieval_service.py -q
+  .venv/Scripts/python -m ruff check memoryhub/application/retrieval_service.py memoryhub/observability/trace_models.py memoryhub/storage/vnext_repositories.py memoryhub/application/__init__.py tests/test_vnext_retrieval_service.py
+  .venv/Scripts/python -m compileall -q memoryhub/application/retrieval_service.py memoryhub/observability/trace_models.py memoryhub/storage/vnext_repositories.py memoryhub/application/__init__.py
+  ```
+- Result: PASS; 6 tests passed; ruff/compileall passed.
+- Changes:
+  - `memoryhub/application/retrieval_service.py` adds `RetrievalService` and `RetrievalResult`; orchestrates intent router → planner → channel executors → fusion → rerank → scope → budget → context; records Activation, Retrieval Log, Retrieval Trace.
+  - `memoryhub/observability/trace_models.py` adds `TraceSpanKind.RETRIEVAL`.
+  - `memoryhub/storage/vnext_repositories.py` adds `RetrievalLogRepository` / `RetrievalLogView`.
+  - `memoryhub/application/__init__.py` exports `RetrievalService` and `RetrievalResult`.
+- Acceptance:
+  - Activation records RECALLED→SELECTED→IN_CONTEXT progression without changing memory layer.
+  - Retrieval Log persists query→plan→candidates→selected→latency redacted summary.
+  - Retrieval Trace span records intent, channels, scores, and budget metrics.
+- Next checkpoint: S3-09 search/context entrypoint convergence.
+
+## S3-09 checkpoint
+
+- Date/time: 2026-08-24 13:30 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_entrypoints.py -q
+  .venv/Scripts/python -m pytest tests/test_vnext_retrieval_service.py tests/test_vnext_context_service.py tests/test_vnext_fusion_reranker.py tests/test_vnext_scope_resolver.py tests/test_vnext_intent_router.py tests/test_vnext_retrieval_planner.py -q
+  .venv/Scripts/python -m ruff check memoryhub/adapter/retrieval_executor.py memoryhub/adapter/api.py memoryhub/adapter/vnext_api.py memoryhub/app.py memoryhub/application/__init__.py agent-integration/memoryhub_client/client.py tests/test_vnext_entrypoints.py
+  .venv/Scripts/python -m compileall -q memoryhub/adapter/retrieval_executor.py memoryhub/adapter/api.py memoryhub/adapter/vnext_api.py memoryhub/app.py memoryhub/application/__init__.py
+  ```
+- Result: PASS; entrypoint tests 8 passed; retrieval pipeline regression 59 passed; compileall passed.
+- Changes:
+  - `memoryhub/adapter/retrieval_executor.py` wraps existing retriever as vNext `vector` channel executor.
+  - `memoryhub/adapter/vnext_api.py` adds `/vnext/search` and `/vnext/context` endpoints delegating to `RetrievalService`.
+  - `memoryhub/adapter/api.py` `search_memory`/`get_memory_context` prefer `RetrievalService` with legacy fallback.
+  - `memoryhub/app.py` constructs `RetrievalService` and injects repositories at startup.
+  - `agent-integration/memoryhub_client/client.py` adds `vnext_search`/`vnext_context`.
+  - `tests/test_vnext_entrypoints.py` extends coverage for vNext endpoints and legacy `/search` delegation.
+- Acceptance:
+  - `/vnext/search`, `/vnext/context`, legacy `/search` and SDK `vnext_search`/`vnext_context` share the same `RetrievalService`.
+  - Same request produces identical `trace_id`, memory IDs, content versions and ordering across entrypoints.
+- Style note: `agent-integration/memoryhub_client/client.py` and `memoryhub/adapter/api.py` contain pre-existing E501 line-length findings on unchanged lines; these are recorded as PARTIAL style evidence and do not block S3-09 business acceptance.
+- Next checkpoint: S3-10 segmented evaluation and regression.
+
+## S3-10 checkpoint
+
+- Date/time: 2026-08-24 13:50 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_retrieval_eval.py -q
+  .venv/Scripts/python evaluation/metrics/vnext_retrieval_eval.py
+  .venv/Scripts/python -m ruff check evaluation/metrics/vnext_retrieval_eval.py tests/test_vnext_retrieval_eval.py
+  .venv/Scripts/python -m compileall -q evaluation/metrics/vnext_retrieval_eval.py tests/test_vnext_retrieval_eval.py
+  ```
+- Result: PASS; 10 tests passed; CLI report produced deterministic metrics; ruff/compileall passed.
+- Changes:
+  - `evaluation/metrics/vnext_retrieval_eval.py` implements `VNextRetrievalEvaluator`, `VNextRetrievalEvalReport`, five-segment metrics (ROUTER/RECALL/RANKING/SCOPE/CONTEXT), and a deterministic mock-channel service builder.
+  - `evaluation/datasets/vnext_retrieval_eval.json` adds annotated dataset covering all 7 intents, exact/paraphrase/semantic queries, scope conflicts, budget protection, and forbidden-memory isolation.
+  - `tests/test_vnext_retrieval_eval.py` verifies reproducibility, perfect recall, zero leakage, constraint preservation and serializable report.
+- Acceptance:
+  - Router accuracy: 1.0 on annotated samples; all 7 intents represented.
+  - Recall@K, Precision@K, MRR, NDCG@K and pairwise ranking score computed per query.
+  - Scope leak rate: 0.0; DELETED/SUPERSEDED/Candidate/other-tenant memories do not appear in selected/context.
+  - Context precision/recall, constraint preservation and budget compliance tracked.
+  - Evaluation is reproducible with fixed seed.
+- Next checkpoint: B12 final validation, S3 Gate, and single local commit.
+
+## B12 final validation and S3 Gate acceptance
+
+- Date/time: 2026-08-24 14:00 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_retrieval_service.py tests/test_vnext_entrypoints.py tests/test_vnext_context_service.py tests/test_vnext_fusion_reranker.py tests/test_vnext_scope_resolver.py tests/test_vnext_intent_router.py tests/test_vnext_retrieval_planner.py tests/test_vnext_retrieval_eval.py -q
+  .venv/Scripts/python -m pytest tests/test_vnext_*.py -q
+  .venv/Scripts/python -m pytest tests/test_safety_pipeline.py tests/test_safety_contract.py tests/test_safe_errors.py -q
+  .venv/Scripts/python -m pytest tests/test_no_production_write_bypass.py -q
+  .venv/Scripts/python -m ruff check memoryhub/application/retrieval_service.py memoryhub/adapter/retrieval_executor.py memoryhub/adapter/api.py memoryhub/adapter/vnext_api.py memoryhub/app.py memoryhub/application/__init__.py memoryhub/observability/trace_models.py memoryhub/storage/vnext_repositories.py evaluation/metrics/vnext_retrieval_eval.py tests/test_vnext_retrieval_eval.py tests/test_vnext_retrieval_service.py tests/test_vnext_entrypoints.py agent-integration/memoryhub_client/client.py
+  .venv/Scripts/python -m compileall -q memoryhub/application/retrieval_service.py memoryhub/adapter/retrieval_executor.py memoryhub/adapter/api.py memoryhub/adapter/vnext_api.py memoryhub/app.py memoryhub/application/__init__.py memoryhub/observability/trace_models.py memoryhub/storage/vnext_repositories.py evaluation/metrics/vnext_retrieval_eval.py tests/test_vnext_retrieval_eval.py
+  git diff --check
+  ```
+- Result: PASS; B12 focused 77 passed; affected vNext regression 245 passed; safety/contract/error 77 passed; write-bypass 6 passed; compileall passed; `git diff --check` passed (CRLF warnings only).
+- S3 Gate checklist:
+  - [x] 7 类 Intent 均有标注样本和可解释路由结果：dataset covers CURRENT_STATE/TASK_HISTORY/PREFERENCE/SEMANTIC_FACT/PROCEDURE/EXPERIENCE/MIXED; router reports confidence and reason.
+  - [x] 精确、改写、语义表达进入统一候选池和统一排序：dataset includes exact/paraphrase/semantic queries; all flow through the same RetrievalService pipeline with shared fusion/rerank/scope/budget.
+  - [x] Candidate/DELETED/SUPERSEDED/其他租户记忆无法进入 Context：scope resolver drops DELETED/SUPERSEDED; mock executor enforces tenant/user isolation and candidate isolation; evaluation reports scope_leak_rate=0.0.
+  - [x] 有限预算下硬约束与当前步骤不丢失：q-budget-protects-constraints verifies constraint_preservation=1.0 and budget_compliance=1.0 under token_budget=128.
+  - [x] REST/MCP/CLI/SDK 不存在各自拼 Context 的实现：S3-09 entrypoint tests verify `/vnext/search`, `/vnext/context`, legacy `/search`, SDK `vnext_search`/`vnext_context` all delegate to `RetrievalService`.
+- Acceptance: B12 DONE; S3-08, S3-09, S3-10 DONE; S3 Gate PASS; B13 READY.
