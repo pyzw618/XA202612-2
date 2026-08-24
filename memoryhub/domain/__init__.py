@@ -44,12 +44,26 @@ from .episode import (
     resume_token_matches,
     stale_resource_ids,
 )
+from .evolution import (
+    ALLOWED_EVOLUTION_TRANSITIONS,
+    TERMINAL_EVOLUTION_STATUSES,
+    EvolutionError,
+    EvolutionTransitionError,
+    action_to_lineage_relation,
+    can_evolve,
+    decide_evolution_action,
+    validate_evolution,
+)
 from .long_term import (
     AuthorityError,
     AuthorityStatusConflictError,
     AuthorityValidation,
     AuthorityVersionConflictError,
+    ContentValidationIssue,
+    ContentValidationResult,
     LongTermAuthorityFacade,
+    LongTermContentValidator,
+    LongTermValidationError,
 )
 from .working import (
     DEFAULT_SOURCE_PRIORITIES,
@@ -109,9 +123,21 @@ __all__ = [
     "AuthorityStatusConflictError",
     "AuthorityValidation",
     "AuthorityVersionConflictError",
+    "ContentValidationIssue",
+    "ContentValidationResult",
     "LongTermAuthorityFacade",
+    "LongTermContentValidator",
+    "LongTermValidationError",
     "ALLOWED_CANDIDATE_TRANSITIONS",
     "can_transition",
     "is_candidate_retrievable",
     "validate_transition",
+    "ALLOWED_EVOLUTION_TRANSITIONS",
+    "TERMINAL_EVOLUTION_STATUSES",
+    "EvolutionError",
+    "EvolutionTransitionError",
+    "action_to_lineage_relation",
+    "can_evolve",
+    "decide_evolution_action",
+    "validate_evolution",
 ]

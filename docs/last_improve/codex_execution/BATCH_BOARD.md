@@ -12,9 +12,9 @@
 | B04 | DONE | S1-04～S1-06 | `../codex_batches/B04_s1_task_state.md` | `SELF (Batch-ID: B04)` | B04 完成；下一批次 B05 已置为 READY |
 | B05 | DONE | S1-07～S1-08 | `../codex_batches/B05_s1_authority_write.md` | `SELF (Batch-ID: B05)` | S1-07/S1-08 验收通过；下一批次 B06 已置为 READY |
 | B06 | DONE | S1-09～S1-11；S1 Gate | `../codex_batches/B06_s1_entrypoints_gate.md` | `b9432ab` | S1 Gate PASS；下一批次 B07 已置为 READY |
-| B07 | DONE | S2-01～S2-03 | `../codex_batches/B07_s2_reflection_candidates.md` | `SELF (Batch-ID: B07)` | 边界、Reflection、Candidate 归一完成；B08 已置 READY |
-| B08 | READY | S2-04～S2-07 | `../codex_batches/B08_s2_consolidation_evolution.md` | — | 等待新会话领取 |
-| B09 | TODO | S2-08～S2-10；S2 Gate | `../codex_batches/B09_s2_shadow_eval_gate.md` | — | |
+| B07 | DONE | S2-01～S2-03 | `../codex_batches/B07_s2_reflection_candidates.md` | `e8c55d3` | 边界、Reflection、Candidate 归一完成；B08 已置 READY |
+| B08 | DONE | S2-04～S2-07 | `../codex_batches/B08_s2_consolidation_evolution.md` | `SELF (Batch-ID: B08)` | 固化与演化可解释、Fast Path 受约束、Procedure 来源受约束；B09 已置 READY |
+| B09 | READY | S2-08～S2-10；S2 Gate | `../codex_batches/B09_s2_shadow_eval_gate.md` | — | 等待新会话领取 |
 | B10 | TODO | S3-01～S3-03 | `../codex_batches/B10_s3_request_planning.md` | — | |
 | B11 | TODO | S3-04～S3-07 | `../codex_batches/B11_s3_fusion_context.md` | — | |
 | B12 | TODO | S3-08～S3-10；S3 Gate | `../codex_batches/B12_s3_entrypoints_eval_gate.md` | — | |
@@ -28,9 +28,9 @@
 ## Invariant check
 
 - IN_PROGRESS count: 0
-- READY count: 1（B08）
+- READY count: 1（B09）
 - Overlapping formal task IDs: None
 - Missing formal task IDs: None
-- Current prompt: `../codex_batches/B07_s2_reflection_candidates.md` completed；next prompt is B08 only in a new session
-- Hard stop after current batch: create the single B07 commit, read-only verify, then end the session；不得进入 B08
-- Commit invariant: B01/B02/B06/B07 已独立提交；B03～B18 各要求唯一 `Batch-ID` 提交
+- Current prompt: `../codex_batches/B08_s2_consolidation_evolution.md` completed；next prompt is B09 only in a new session
+- Hard stop after current batch: create the single B08 commit, read-only verify, then end the session；不得进入 B09
+- Commit invariant: B01/B02/B06/B07/B08 已独立提交；B03～B18 各要求唯一 `Batch-ID` 提交

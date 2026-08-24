@@ -370,3 +370,25 @@
 - Blockers: None for B07.
 - Commit plan: stage only B07 source/tests/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B07 s2 reflection candidates` with trailer `Batch-ID: B07`; do not push, amend, rebase, or begin B08.
 - Hard stop: after read-only verification of the B07 commit, end the session and hand off `docs/last_improve/codex_batches/B08_s2_consolidation_evolution.md`.
+
+## Checkpoint 2026-08-24-04 — B08 completion
+
+- Started: 2026-08-24 08:00 +08:00
+- Ended: 2026-08-24 08:35 +08:00
+- Branch/HEAD: `dev-remem` / `e8c55d31f2c2e48330c8eae460d2084f6d8a26b7`
+- Restored batch/task: B08 READY with no in-progress task; claimed S2-04, then progressed S2-05, S2-06 and S2-07 after each checkpoint.
+- Completed changes:
+  - S2-04: `memoryhub/application/consolidation_service.py` with type-specific promotion scoring, thresholds and reason codes.
+  - S2-05: Fast Path whitelist and governance constraints within the consolidation service.
+  - S2-06: `memoryhub/domain/evolution.py` and `memoryhub/application/evolution_service.py` with REINFORCE/REVISE/SUPERSEDE/COEXIST/REVIEW actions and restricted status transitions.
+  - S2-07: `memoryhub/domain/long_term.py` type-specific content validation including Procedure trigger/preconditions/steps/verification/failure_recovery.
+- Files changed: `memoryhub/application/consolidation_service.py`, `memoryhub/application/evolution_service.py`, `memoryhub/application/__init__.py`, `memoryhub/domain/evolution.py`, `memoryhub/domain/long_term.py`, `memoryhub/domain/__init__.py`, `memoryhub/storage/vnext_repositories.py`, `tests/test_vnext_consolidation_service.py`, `tests/test_vnext_evolution.py`, `tests/test_vnext_long_term_validation.py`, plus continuity files.
+- Validation run:
+  - B08 focused: `tests/test_vnext_consolidation_service.py`, `tests/test_vnext_evolution.py`, `tests/test_vnext_long_term_validation.py`, `tests/test_vnext_candidate_service.py` → 38 passed.
+  - Affected vNext regression: plus boundary/reflection/task-state/repositories/storage-schema/event-gateway/authority-write/entrypoints/P0-flow/write-bypass/contracts/interface → 82 passed.
+  - Safety/contract/error regression: 77 passed.
+  - Static: core B08 modules ruff passed; `compileall` passed; `git diff --check` passed (line-ending warnings only).
+- Task status changes: S2-04 DONE; S2-05 DONE; S2-06 DONE; S2-07 DONE; B08 IN_PROGRESS → DONE; B09 TODO → READY.
+- Blockers: None for B08.
+- Commit plan: stage only B08 source/tests/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B08 s2 consolidation evolution` with trailer `Batch-ID: B08`; do not push, amend, rebase, or begin B09.
+- Hard stop: after read-only verification of the B08 commit, end the session and hand off `docs/last_improve/codex_batches/B09_s2_shadow_eval_gate.md`.

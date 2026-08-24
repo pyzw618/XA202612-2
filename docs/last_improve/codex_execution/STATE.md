@@ -3,19 +3,31 @@
 > Last updated: 2026-08-24 07:05 +08:00
 > Updated by: Codex session 2026-08-24 (B07)
 
-## B07 final validation and acceptance
+## B08 final validation and acceptance
 
-- Last updated: 2026-08-24 08:00 +08:00; updated by Codex session 2026-08-24 (B07)
-- Current batch: B07 (`S2-01`～`S2-03`); batch status: DONE
-- Current batch prompt: `docs/last_improve/codex_batches/B07_s2_reflection_candidates.md`
-- Current task: None; S2-01, S2-02, S2-03 DONE
-- Dependencies: S1-01～S1-11 DONE with valid evidence; S1 Gate PASS
-- Start reconciliation: branch `dev-remem`; HEAD `fdf9bae6d3cd4c3d2627fa0257bdb1f4dfbd52d1` (merge of B06 commit `b9432ab` and upstream docs); working tree clean; no applicable `AGENTS.md`; BATCH_BOARD was B07 READY and TASK_BOARD had no B07 task in progress
-- Reconciliation: prior STATE text listed HEAD `9280482` because it was written before the upstream merge; B06 commit `b9432ab` is present in history and BATCH_BOARD/TASK_BOARD facts authorize B07. B07 work is now complete and pending the single local commit.
-- Acceptance: S2-01 boundary behavior verified (hard/phase/context-pressure/debounce); S2-02 reflection schema/prompt/retry verified and Candidate-only; S2-03 normalization/scope/near-duplicate/independent evidence verified; affected vNext regressions, safety/contract risk tests, and static checks passed.
-- Validation: B07 focused tests 20 passed; affected vNext regression 62 passed; safety/contract/error regressions 77 passed; core B07 modules ruff/compileall passed; `git diff --check` passed.
-- Next batch: B08 READY; next prompt is `docs/last_improve/codex_batches/B08_s2_consolidation_evolution.md`.
-- Hard stop: do not execute or modify S2-04 or any later batch in this session; stop after read-only verification of the single B07 commit.
+- Last updated: 2026-08-24 08:35 +08:00; updated by Codex session 2026-08-24 (B08)
+- Current batch: B08 (`S2-04`～`S2-07`); batch status: DONE
+- Current batch prompt: `docs/last_improve/codex_batches/B08_s2_consolidation_evolution.md`
+- Current task: None; S2-04, S2-05, S2-06, S2-07 DONE
+- Dependencies: S1-01～S1-11 DONE with valid evidence; S1 Gate PASS; S2-01, S2-02, S2-03 DONE with valid evidence
+- Start reconciliation: branch `dev-remem`; HEAD `e8c55d31f2c2e48330c8eae460d2084f6d8a26b7` (B07 commit); working tree clean; no applicable `AGENTS.md`; BATCH_BOARD was B08 READY and TASK_BOARD had no B08 task in progress
+- Acceptance: S2-04 promotion scoring/thresholds/reason codes, S2-05 Fast Path governance, S2-06 evolution actions/state changes and S2-07 type-specific long-term validation are implemented and verified. Affected vNext regressions, safety/contract/error regressions and static checks pass.
+- Validation: B08 focused tests 38 passed; affected vNext regression 82 passed; safety/contract/error regressions 77 passed; core B08 modules ruff/compileall passed; `git diff --check` passed (line-ending warnings only).
+- Next batch: B09 READY; next prompt is `docs/last_improve/codex_batches/B09_s2_shadow_eval_gate.md`.
+- Hard stop: do not execute or modify S2-08 or any later batch in this session; stop after read-only verification of the single B08 commit.
+
+## B08 start reconciliation
+
+- Last updated: 2026-08-24 08:00 +08:00; updated by Codex session 2026-08-24 (B08)
+- Current batch: B08 (`S2-04`～`S2-07`); batch status: IN_PROGRESS
+- Current batch prompt: `docs/last_improve/codex_batches/B08_s2_consolidation_evolution.md`
+- Current task: S2-04 IN_PROGRESS; S2-05, S2-06, S2-07 TODO
+- Dependencies: S1-01～S1-11 DONE with valid evidence; S1 Gate PASS; S2-01, S2-02, S2-03 DONE with valid evidence
+- Start reconciliation: branch `dev-remem`; HEAD `e8c55d31f2c2e48330c8eae460d2084f6d8a26b7` (B07 commit `feat(vnext): complete B07 s2 reflection candidates`); working tree clean; no applicable `AGENTS.md`; BATCH_BOARD was B08 READY and TASK_BOARD had no B08 task in progress
+- Reconciliation: B07 commit is present and BATCH_BOARD/TASK_BOARD facts authorize B08. No user-owned unrelated changes observed.
+- Acceptance: prior B07 acceptance remains valid.
+- Boundary: only S2-04, S2-05, S2-06, S2-07; no S2-08 or later batches.
+- Exact next action: implement S2-04 Promotion Score/阈值/reason codes in `application/consolidation_service.py`.
 
 ## B07 start reconciliation
 

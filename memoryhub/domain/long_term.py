@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Iterable, Protocol
+from dataclasses import dataclass, field
+from typing import Any, Iterable, Protocol
 
-from memoryhub.domain.contracts import EvolutionStatus, LongTermEnvelope
+from memoryhub.domain.contracts import EvolutionStatus, LongTermEnvelope, MemoryType
 
 
 class AuthorityError(ValueError):
@@ -141,11 +141,205 @@ class LongTermAuthorityFacade:
         )
 
 
+class LongTermValidationError(AuthorityError):
+    """A long-term envelope fails type-specific content validation."""
+
+
+@dataclass(frozen=True, slots=True)
+class ContentValidationIssue:
+    """One validation issue for a long-term envelope."""
+
+    code: str
+    message: str
+    field: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ContentValidationResult:
+    """Result of validating a long-term envelope's content."""
+
+    ok: bool
+    issues: list[ContentValidationIssue] = field(default_factory=list)
+
+
+class LongTermContentValidator:
+    """Type-specific content validation for Long-Term memories.
+
+    The validator enforces the minimum shape required for each memory type.
+    Procedure memories are held to the highest bar because they drive action:
+    they must contain trigger, preconditions, steps, verification and failure
+    recovery, and they must be supported by enough independent evidence.
+    """
+
+    MIN_PROCEDURE_FREQUENCY: int = 2
+
+    def validate(self, envelope: LongTermEnvelope) -> ContentValidationResult:
+        if envelope.memory_type is MemoryType.PREFERENCE:
+            return self._validate_preference(envelope)
+        if envelope.memory_type is MemoryType.SEMANTIC:
+            return self._validate_semantic(envelope)
+        if envelope.memory_type is MemoryType.PROCEDURAL:
+            return self._validate_procedural(envelope)
+        if envelope.memory_type is MemoryType.EPISODIC:
+            return self._validate_episodic(envelope)
+        return ContentValidationResult(
+            ok=False,
+            issues=[
+                ContentValidationIssue(
+                    code="UNKNOWN_MEMORY_TYPE",
+                    message=f"unsupported memory type: {envelope.memory_type}",
+                )
+            ],
+        )
+
+    @staticmethod
+    def _has_non_empty(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (list, tuple)):
+            return len(value) > 0
+        if isinstance(value, dict):
+            return bool(value)
+        return True
+
+    def _validate_preference(self, envelope: LongTermEnvelope) -> ContentValidationResult:
+        content = envelope.content
+        issues: list[ContentValidationIssue] = []
+        value = content.get("value") or content.get("text") or content.get("payload")
+        if not self._has_non_empty(value):
+            issues.append(
+                ContentValidationIssue(
+                    code="PREFERENCE_VALUE_MISSING",
+                    message="preference must contain a non-empty value, text or payload",
+                    field="content.value/text/payload",
+                )
+            )
+        return ContentValidationResult(ok=not issues, issues=issues)
+
+    def _validate_semantic(self, envelope: LongTermEnvelope) -> ContentValidationResult:
+        content = envelope.content
+        issues: list[ContentValidationIssue] = []
+        has_statement = self._has_non_empty(content.get("statement"))
+        has_triple = (
+            self._has_non_empty(content.get("subject"))
+            and self._has_non_empty(content.get("predicate"))
+            and self._has_non_empty(content.get("object_value"))
+        )
+        if not (has_statement or has_triple):
+            issues.append(
+                ContentValidationIssue(
+                    code="SEMANTIC_FACT_INCOMPLETE",
+                    message=(
+                        "semantic fact must contain a statement or a "
+                        "subject-predicate-object triple"
+                    ),
+                    field="content.statement or content.subject/predicate/object_value",
+                )
+            )
+        return ContentValidationResult(ok=not issues, issues=issues)
+
+    def _validate_procedural(self, envelope: LongTermEnvelope) -> ContentValidationResult:
+        content = envelope.content
+        issues: list[ContentValidationIssue] = []
+
+        required_fields = {
+            "trigger": "PROCEDURE_TRIGGER_MISSING",
+            "preconditions": "PROCEDURE_PRECONDITIONS_MISSING",
+            "steps": "PROCEDURE_STEPS_MISSING",
+            "verification": "PROCEDURE_VERIFICATION_MISSING",
+            "failure_recovery": "PROCEDURE_FAILURE_RECOVERY_MISSING",
+        }
+
+        for field_name, code in required_fields.items():
+            value = content.get(field_name)
+            if not self._has_non_empty(value):
+                issues.append(
+                    ContentValidationIssue(
+                        code=code,
+                        message=f"procedure must contain a non-empty {field_name}",
+                        field=f"content.{field_name}",
+                    )
+                )
+
+        steps = content.get("steps", [])
+        failures = content.get("failure_recovery", [])
+        if isinstance(steps, list) and isinstance(failures, list):
+            has_conditional = any(
+                isinstance(item, dict) and item.get("condition")
+                for item in failures
+            )
+            if failures and not has_conditional:
+                issues.append(
+                    ContentValidationIssue(
+                        code="PROCEDURE_FAILURE_RECOVERY_INCOMPLETE",
+                        message=(
+                            "failure recovery must include at least one "
+                            "conditional recovery step"
+                        ),
+                        field="content.failure_recovery",
+                    )
+                )
+
+        frequency = len(envelope.evidence_refs) if envelope.evidence_refs else 0
+        if frequency < self.MIN_PROCEDURE_FREQUENCY:
+            issues.append(
+                ContentValidationIssue(
+                    code="PROCEDURE_INSUFFICIENT_EVIDENCE",
+                    message=(
+                        f"procedure must be derived from at least "
+                        f"{self.MIN_PROCEDURE_FREQUENCY} independent episodes"
+                    ),
+                    field="evidence_refs",
+                )
+            )
+
+        outcome_field = content.get("outcome")
+        if outcome_field is not None and str(outcome_field).lower() == "failed":
+            issues.append(
+                ContentValidationIssue(
+                    code="PROCEDURE_FROM_FAILED_EPISODE",
+                    message=(
+                        "failed episodes may only contribute to failure recovery "
+                        "or constraints, not to the main procedure"
+                    ),
+                    field="content.outcome",
+                )
+            )
+
+        return ContentValidationResult(ok=not issues, issues=issues)
+
+    def _validate_episodic(self, envelope: LongTermEnvelope) -> ContentValidationResult:
+        content = envelope.content
+        issues: list[ContentValidationIssue] = []
+        has_content = self._has_non_empty(content.get("content")) or self._has_non_empty(
+            content.get("text")
+        )
+        has_refs = self._has_non_empty(content.get("episode_refs"))
+        if not (has_content or has_refs):
+            issues.append(
+                ContentValidationIssue(
+                    code="EPISODIC_CONTENT_MISSING",
+                    message=(
+                        "episodic memory must contain content or reference "
+                        "at least one episode"
+                    ),
+                    field="content.content/text or content.episode_refs",
+                )
+            )
+        return ContentValidationResult(ok=not issues, issues=issues)
+
+
 __all__ = [
     "AuthorityError",
     "AuthorityRepositoryPort",
     "AuthorityStatusConflictError",
     "AuthorityValidation",
     "AuthorityVersionConflictError",
+    "ContentValidationIssue",
+    "ContentValidationResult",
     "LongTermAuthorityFacade",
+    "LongTermContentValidator",
+    "LongTermValidationError",
 ]

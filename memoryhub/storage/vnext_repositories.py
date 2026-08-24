@@ -88,6 +88,7 @@ class CandidateView:
     candidate_id: str
     tenant_id: str
     user_id: str
+    memory_type: str
     status: str
     formation_status: str
     normalized_key: str
@@ -691,6 +692,7 @@ class CandidateRepository:
             candidate_id=row.candidate_id,
             tenant_id=row.tenant_id,
             user_id=row.user_id,
+            memory_type=row.memory_type,
             status=row.status,
             formation_status=row.formation_status,
             normalized_key=row.normalized_key,

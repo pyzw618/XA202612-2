@@ -42,10 +42,10 @@
 | S2-01 | DONE | S1-04, S1-05 | Codex 2026-08-24 (B07) | EVIDENCE.md#s2-01-checkpoint | Boundary Detector 硬/规则触发、去抖、三类 Checkpoint |
 | S2-02 | DONE | S1-06, S2-01 | Codex 2026-08-24 (B07) | EVIDENCE.md#s2-02-checkpoint | Reflection Schema/Prompt/重试，只产 Candidate |
 | S2-03 | DONE | S2-02 | Codex 2026-08-24 (B07) | EVIDENCE.md#s2-03-checkpoint | Candidate 归一键、Scope、近重复合并、独立证据组 |
-| S2-04 | TODO | S2-03 | | | Promotion Score 与 reason codes |
-| S2-05 | TODO | S2-04 | | | Fast Path 治理 |
-| S2-06 | TODO | S1-07, S2-04 | | | Evolution 状态变化 |
-| S2-07 | TODO | S2-04, S2-06 | | | Long-Term 内容校验与 Procedure |
+| S2-04 | DONE | S2-03 | Codex 2026-08-24 (B08) | EVIDENCE.md#s2-04-checkpoint | Promotion Score 与 reason codes |
+| S2-05 | DONE | S2-04 | Codex 2026-08-24 (B08) | EVIDENCE.md#s2-05-checkpoint | Fast Path 治理 |
+| S2-06 | DONE | S1-07, S2-04 | Codex 2026-08-24 (B08) | EVIDENCE.md#s2-06-checkpoint | Evolution 状态变化 |
+| S2-07 | DONE | S2-04, S2-06 | Codex 2026-08-24 (B08) | EVIDENCE.md#s2-07-checkpoint | Long-Term 内容校验与 Procedure |
 | S2-08 | TODO | S0-06, S2-02, S2-03, S2-04, S2-05, S2-06, S2-07 | | | Formation Shadow |
 | S2-09 | TODO | S2-02, S2-03, S2-04, S2-05, S2-06, S2-07 | | | Formation/Evolution Trace |
 | S2-10 | TODO | S2-08, S2-09 | | | Formation 与恢复评测 |

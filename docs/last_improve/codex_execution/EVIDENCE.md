@@ -614,3 +614,94 @@
   - Repeated statements do not forge independent evidence: same event/episode does not increment frequency; different episodes do.
 - Acceptance: B07 DONE; S2-01, S2-02, S2-03 DONE.
 
+
+## S2-04 checkpoint
+
+- Date/time: 2026-08-24 08:15 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: Promotion Score, type-specific thresholds, decision intervals and reason codes.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_consolidation_service.py -q
+  .venv/Scripts/python -m ruff check memoryhub/application/consolidation_service.py tests/test_vnext_consolidation_service.py
+  .venv/Scripts/python -m compileall -q memoryhub/application tests/test_vnext_consolidation_service.py
+  ```
+- Result: PASS; 12 consolidation tests passed; ruff/compileall passed.
+- Summary: `ConsolidationService.consolidate` returns a scored decision (PROMOTE/REVIEW/REJECT) with reason codes. Weights and thresholds are type-specific (PREFERENCE/SEMANTIC/PROCEDURAL/EPISODIC). Promotion requires sufficient confidence, utility, stability and independent evidence; one implicit behavior with low frequency is not promoted.
+
+## S2-05 checkpoint
+
+- Date/time: 2026-08-24 08:20 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: Fast Path whitelist and governance constraints.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_consolidation_service.py -q
+  ```
+- Result: PASS; Fast Path tests pass.
+- Summary: Fast Path is only allowed for PREFERENCE/SEMANTIC, confidence >= 0.9, sufficient independent evidence, explicit user instruction or high-trust tool source, clear non-SESSION scope, non-sensitive content and no conflicting ACTIVE memory. PROCEDURAL/EPISODIC, low confidence, sensitive/ambiguous scope and conflicts are blocked.
+
+## S2-06 checkpoint
+
+- Date/time: 2026-08-24 08:25 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: Evolution actions (REINFORCE/REVISE/SUPERSEDE/COEXIST/REVIEW) and EvolutionStatus state transitions.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_evolution.py -q
+  .venv/Scripts/python -m ruff check memoryhub/domain/evolution.py memoryhub/application/evolution_service.py tests/test_vnext_evolution.py
+  .venv/Scripts/python -m compileall -q memoryhub/domain memoryhub/application tests/test_vnext_evolution.py
+  ```
+- Result: PASS; 9 evolution tests passed; ruff/compileall passed.
+- Summary: `decide_evolution_action` separates action from status. `EvolutionService` persists REINFORCE/REVISE/SUPERSEDE by superseding the old chain head and creating a strictly newer version; COEXIST creates a new ACTIVE memory in a different scope chain; REVIEW is not persisted. Status transitions are restricted (DELETED/SUPERSEDED are terminal).
+
+## S2-07 checkpoint
+
+- Date/time: 2026-08-24 08:30 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Acceptance item: Type-specific Long-Term content validation with Procedure requirements.
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_long_term_validation.py -q
+  .venv/Scripts/python -m ruff check memoryhub/domain/long_term.py tests/test_vnext_long_term_validation.py
+  .venv/Scripts/python -m compileall -q memoryhub/domain tests/test_vnext_long_term_validation.py
+  ```
+- Result: PASS; 10 validation tests passed; ruff/compileall passed.
+- Summary: `LongTermContentValidator` enforces per-type shapes: PREFERENCE needs value/text/payload, SEMANTIC needs statement or triple, PROCEDURAL needs trigger/preconditions/steps/verification/failure_recovery, sufficient evidence and no failed-episode main steps, EPISODIC needs content or episode_refs.
+
+## B08 final validation and acceptance
+
+- Date/time: 2026-08-24 08:35 +08:00
+- Environment: Windows PowerShell; `.venv` Python/pytest/ruff; branch `dev-remem`
+- Commands:
+  ```text
+  .venv/Scripts/python -m pytest tests/test_vnext_consolidation_service.py tests/test_vnext_evolution.py tests/test_vnext_long_term_validation.py tests/test_vnext_candidate_service.py -q
+  .venv/Scripts/python -m pytest tests/test_vnext_candidate_service.py tests/test_vnext_reflection.py tests/test_vnext_boundary_detector.py tests/test_vnext_task_state.py tests/test_vnext_repositories.py tests/test_vnext_storage_schema.py tests/test_vnext_event_gateway.py tests/test_vnext_authority_write.py tests/test_vnext_entrypoints.py tests/test_vnext_p0_flow.py tests/test_no_production_write_bypass.py tests/test_vnext_contracts.py tests/test_vnext_interface.py -q
+  .venv/Scripts/python -m pytest tests/test_safety_pipeline.py tests/test_safety_contract.py tests/test_safe_errors.py -q
+  .venv/Scripts/python -m ruff check memoryhub/application/consolidation_service.py memoryhub/application/evolution_service.py memoryhub/application/__init__.py memoryhub/domain/evolution.py memoryhub/domain/long_term.py memoryhub/domain/__init__.py memoryhub/storage/vnext_repositories.py tests/test_vnext_consolidation_service.py tests/test_vnext_evolution.py tests/test_vnext_long_term_validation.py tests/test_vnext_candidate_service.py
+  .venv/Scripts/python -m compileall -q memoryhub/domain memoryhub/application memoryhub/storage tests/test_vnext_consolidation_service.py tests/test_vnext_evolution.py tests/test_vnext_long_term_validation.py tests/test_vnext_candidate_service.py
+  git diff --check
+  ```
+- Result: PASS; B08 focused 38 passed; affected vNext regression 82 passed; safety/contract/error 77 passed; ruff/compileall passed; `git diff --check` line-ending warnings only.
+- Exit criteria:
+  - Promotion scores, thresholds and reason codes are type-specific and explainable.
+  - Fast Path is gated by type, confidence, evidence, source, scope, sensitivity and conflict checks.
+  - Evolution actions and status transitions are separate; version chain direction is safe.
+  - Procedure memories require trigger/preconditions/steps/verification/failure_recovery and sufficient successful episodes.
+- Acceptance: B08 DONE; S2-04, S2-05, S2-06, S2-07 DONE.
+
+## B08 start reconciliation
+
+- Date/time: 2026-08-24 08:00 +08:00
+- Environment: Windows PowerShell; `D:\project\XA202612-2`; branch `dev-remem`; `.venv` Python/pytest/ruff
+- Commands:
+  ```text
+  git branch --show-current
+  git rev-parse HEAD
+  git status --short --untracked-files=all
+  git diff --stat
+  rg --files -g 'AGENTS.md'
+  ```
+- Result: PASS for repository reconciliation. HEAD=`e8c55d31f2c2e48330c8eae460d2084f6d8a26b7` (B07 commit), working tree clean, no applicable `AGENTS.md` found.
+- Continuity: `BATCH_BOARD.md` had B08 READY and no IN_PROGRESS batch; `TASK_BOARD.md` had no B08 task in progress; S1-01～S1-11, S1 Gate, S2-01～S2-03 DONE with evidence.
+- Decision: claim B08 and the smallest dependency-satisfied task S2-04; do not touch S2-08 or later batches.
