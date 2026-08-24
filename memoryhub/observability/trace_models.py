@@ -9,7 +9,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from memoryhub.observability.trace_policy import TraceCategory, assert_redacted
 
 
 class TraceSpanKind(str):
@@ -65,6 +67,19 @@ class TraceSpan(BaseModel):
     # Whether the span was created in redacted mode (always true for vNext).
     redacted: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    category: Literal["FORMATION", "EVOLUTION", "RETRIEVAL", "FORGET", "INFRASTRUCTURE"] = (
+        TraceCategory.FORMATION
+    )
+    sampled: bool = True
+    retention_class: Literal["NORMAL", "ELEVATED"] = "NORMAL"
+    expires_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _reject_raw_trace_data(self) -> "TraceSpan":
+        assert_redacted(self.ids)
+        assert_redacted(self.hashes)
+        assert_redacted(self.classification)
+        return self
 
     @property
     def event_id(self) -> str | None:
@@ -77,6 +92,14 @@ class TraceSpan(BaseModel):
     @property
     def memory_id(self) -> str | None:
         return self.ids.get("memory_id")
+
+    @property
+    def query_id(self) -> str | None:
+        return self.ids.get("query_id")
+
+    @property
+    def task_id(self) -> str | None:
+        return self.ids.get("task_id")
 
 
 __all__ = ["TraceSpan", "TraceSpanKind"]

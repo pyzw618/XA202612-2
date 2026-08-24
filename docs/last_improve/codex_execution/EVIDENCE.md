@@ -1,5 +1,43 @@
 # MemoryHub vNext Execution Evidence
 
+## B16 start reconciliation
+
+- Date/time: 2026-08-25 +08:00; environment: Windows PowerShell, `D:\project\XA202612-2`, `.venv` Python/pytest/ruff.
+- Commands: `git branch --show-current`, `git rev-parse HEAD`, `git status --short`, `git diff --stat`, `git log --oneline -8`, and read-only inspection of the B16 prompt, execution manual/plan, all continuity files, trace/metrics/evaluation sources and directly related tests.
+- Result: branch `dev-remem`; HEAD `5841161ef9acf2457e26f619db61c0fc2a5e52e5` contains the B15 commit and `Batch-ID: B15`. Existing untracked database reports are preserved. No applicable `AGENTS.md` exists. B16 was READY with no in-progress task; S5-01 dependencies are evidenced DONE, so S5-01 is claimed.
+- Reconciliation: the continuity files still contained B15's pre-commit plan. Repository history is authoritative; this fact is recorded before B16 implementation.
+
+## S5-01 checkpoint
+
+- Deliverables: `memoryhub/observability/trace_policy.py`, upgraded `trace_models.py`/`trace_store.py`, app/Retrieval/Forget wiring, `docs/spec/VNEXT_TRACE.md`, and extended `tests/test_vnext_formation_trace.py`.
+- Command: `.venv\\Scripts\\python.exe -m pytest tests/test_vnext_formation_trace.py tests/test_vnext_formation_shadow.py tests/test_vnext_retrieval_service.py tests/test_vnext_forget_diagnostics.py tests/test_vnext_reliability.py -q` → `38 passed`.
+- Static: `.venv\\Scripts\\python.exe -m ruff check memoryhub/observability memoryhub/application/retrieval_service.py memoryhub/application/forget_service.py memoryhub/app.py tests/test_vnext_formation_trace.py` → passed; compileall and `git diff --check` passed.
+- Acceptance: five typed chains are queryable by trace/task/event/memory/query identifiers; normal production sampling is deterministic at 10%, while high-risk/error/denied/Forget paths are 100%; raw body/query/payload/claim/excerpt/embedding fields are rejected recursively; expiration purge only removes Trace projection records.
+
+## S5-02 checkpoint
+
+- Deliverables: `evaluation/run_vnext_eval.py`, `tests/test_vnext_benchmark_runner.py`, and reproducible artifact `evaluation/results/vnext_benchmark.json`.
+- Focused command: `.venv\\Scripts\\python.exe -m pytest tests/test_vnext_benchmark_runner.py tests/test_vnext_formation_eval.py tests/test_vnext_retrieval_eval.py tests/test_vnext_reliability.py tests/test_full_chain_benchmark.py -q` → `29 passed`.
+- Reproduction command: `.venv\\Scripts\\python.exe evaluation/run_vnext_eval.py --output evaluation/results/vnext_benchmark.json` → all four layers emitted. Report verification: Formation samples=4; Retrieval queries=10 and scope leak rate=0.0; Infrastructure passed=true; E2E uses mock Milvus + mock embedding with fixed seed=42.
+- Static: ruff, compileall and `git diff --check` passed. The report records immutable dataset SHA-256, annotation/model/prompt/weight versions, seed and environment; latency remains a measured (not asserted-identical) runtime value.
+
+## S5-03 checkpoint
+
+- Deliverables: `evaluation/run_vnext_comparison.py`, `tests/test_vnext_comparison.py`, and `evaluation/results/vnext_final/comparison.json`.
+- Focused command: `.venv\\Scripts\\python.exe -m pytest tests/test_vnext_comparison.py tests/test_vnext_retrieval_eval.py -q` → `11 passed`.
+- Reproduction command: `.venv\\Scripts\\python.exe evaluation/run_vnext_comparison.py --output evaluation/results/vnext_final/comparison.json --repeats 5` → four systems and four one-mechanism ablations.
+- Controlled report facts: all systems share `mock-embedding/768`, offline deterministic mock channels and each query's declared token budget; vNext task success=1.0, policy leak=0.0, MRR=1.0. Flat RAG and Original each have policy leak=0.1. Each metric carries mean, variance and normal-approximation 95% CI. The persisted report is redacted and holds no raw query text.
+- Static: ruff, compileall and `git diff --check` passed.
+
+## S5-04 and B16 final validation and acceptance
+
+- Deliverables: `memoryhub/application/dashboard_service.py`; management-gated `/api/memory/vnext/dashboard/{view}` contract; Desktop Explorer/Evolution/Retrieval Debugger/Benchmark pages; `tests/test_vnext_dashboard.py`.
+- Focused Dashboard/affected command: `.venv\\Scripts\\python.exe -m pytest tests/test_vnext_dashboard.py tests/test_vnext_forget_diagnostics.py tests/test_vnext_formation_trace.py tests/test_vnext_benchmark_runner.py tests/test_vnext_comparison.py -q` → `14 passed`.
+- Risk command: `.venv\\Scripts\\python.exe -m pytest tests/test_safety_pipeline.py tests/test_safety_contract.py tests/test_safe_errors.py tests/test_no_production_write_bypass.py -q` → `83 passed`.
+- Static command: ruff over all B16 Python sources/tests, compileall and `git diff --check` → passed. Desktop source/CMake registration was checked with `rg`; `cmake -S desktop-client ...` is PARTIAL because `cmake` is absent from this host PATH.
+- Acceptance: Dashboard endpoint rejects no-admin access with 403, returns `redacted=true` after authorization and appends an audit record. Explorer/Evolution/Retrieval Debugger are tenant/user scoped Trace projections; Benchmark suppresses per-query samples to avoid raw-query display. The Qt pages link to all four views and display the redaction/authorization notice.
+- Broader affected attempt: the PowerShell-expanded `pytest test_vnext_*.py` command ran beyond the 30-second host tool window; no completion result was available and it is deliberately not counted as PASS.
+
 ## B15 start reconciliation
 
 - Repository facts: branch `dev-remem`, HEAD `d0ffff4745c3094a8437006fb2e7a5c38e5fd0e1`; existing untracked evaluation DB artifacts preserved.

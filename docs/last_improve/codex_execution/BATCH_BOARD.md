@@ -1,5 +1,17 @@
 # MemoryHub vNext Batch Board
 
+## B16 start reconciliation — 2026-08-25
+
+- Repository truth is `dev-remem` at `5841161ef9acf2457e26f619db61c0fc2a5e52e5`; the B15 commit with `Batch-ID: B15` is present. The prior board text that described a pending B15 commit was stale.
+- B16 is the sole active batch. S5-01 is the smallest dependency-satisfied task and is now `IN_PROGRESS`; B17 remains untouched.
+- Pre-existing untracked `evaluation/results/*.db` files and inaccessible pytest temporary directories are preserved and excluded from B16.
+
+## B16 final validation and acceptance — 2026-08-25
+
+- S5-01 through S5-04 are DONE. Trace chains are safe and correlatable; `evaluation/run_vnext_eval.py` produces the four-layer reproducible benchmark in one command; four-system comparison/ablations use a shared measurement contract; four Dashboard views default to redacted and require management authorization with audit records.
+- B16 artifacts have focused, affected and safety regression evidence in `EVIDENCE.md#b16-final-validation-and-acceptance`. The combined `test_vnext_*.py` invocation exceeded the host's 30-second tool window and was not counted as PASS; direct affected suites and risk suite passed.
+- B17 is READY only. No B17 source, test, research, task claim or modification was performed.
+
 ## B15 live reconciliation — 2026-08-25
 
 - B15 was the sole active batch for this session; S4-07 and S4-08 are DONE and S4 Gate is PASS.
@@ -27,16 +39,16 @@
 | B13 | DONE | S4-01～S4-03 | `../codex_batches/B13_s4_projection_repair.md` | SELF (Batch-ID: B13) | Outbox lease/backoff/Dead Letter/delete priority; Projection Version; Repair Worker |
 | B14 | DONE | S4-04～S4-06 | `../codex_batches/B14_s4_forget_diagnostics.md` | SELF (Batch-ID: B14) | Forget tombstone/read block, managed authorization, redacted diagnostics; full suite has unrelated API acceptance failure |
 | B15 | DONE | S4-07～S4-08；S4 Gate | `../codex_batches/B15_s4_reliability_gate.md` | SELF (Batch-ID: B15) | Fault matrix automated; Infrastructure Trace/metrics; S4 Gate PASS |
-| B16 | READY | S5-01～S5-04 | `../codex_batches/B16_s5_benchmark_dashboard.md` | — | Next batch only; not executed in B15 |
-| B17 | TODO | S5-05～S5-08 | `../codex_batches/B17_s5_migration_cutover.md` | — | |
+| B16 | DONE | S5-01～S5-04 | `../codex_batches/B16_s5_benchmark_dashboard.md` | SELF (Batch-ID: B16) | Trace/Benchmark/Comparison/Dashboard accepted |
+| B17 | READY | S5-05～S5-08 | `../codex_batches/B17_s5_migration_cutover.md` | — | Next batch only; not executed in B16 |
 | B18 | TODO | S5-09～S5-10；S5/P0/P1/Release Gate | `../codex_batches/B18_release.md` | — | |
 
 ## Invariant check
 
 - IN_PROGRESS count: 0
-- READY count: 1（B16）
+- READY count: 1（B17）
 - Overlapping formal task IDs: None
 - Missing formal task IDs: None
-- Current prompt: `../codex_batches/B15_s4_reliability_gate.md` completed; next prompt is `../codex_batches/B16_s5_benchmark_dashboard.md` only in a new session
-- Hard stop after current batch: create the single B15 commit, read-only verify, then end the session; do not enter B16
-- Commit invariant: B01～B14 已独立提交；B15 requires exactly one `Batch-ID: B15` commit; B16～B18 remain unexecuted
+- Current prompt: `../codex_batches/B16_s5_benchmark_dashboard.md` completed; next prompt is `../codex_batches/B17_s5_migration_cutover.md` only in a new session.
+- Hard stop after current batch: create the single B16 commit, read-only verify, then end the session; do not enter B17.
+- Commit invariant: B01～B15 已独立提交；B16 is represented by this single `SELF (Batch-ID: B16)` commit; B17～B18 remain unexecuted.

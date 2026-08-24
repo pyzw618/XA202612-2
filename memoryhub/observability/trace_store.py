@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from memoryhub.observability.trace_models import TraceSpan, TraceSpanKind
+from memoryhub.observability.trace_policy import TraceCategory, TraceSamplingPolicy
 
 
 class TraceStore:
@@ -21,8 +23,16 @@ class TraceStore:
     It does not keep raw event or memory content.
     """
 
-    def __init__(self, records: list[TraceSpan] | None = None) -> None:
+    def __init__(
+        self,
+        records: list[TraceSpan] | None = None,
+        *,
+        sampling_policy: TraceSamplingPolicy | None = None,
+    ) -> None:
         self._records: list[TraceSpan] = list(records or [])
+        # Keep direct/test callers backward compatible; production wiring
+        # supplies the S5 10% normal sampling policy explicitly.
+        self.sampling_policy = sampling_policy or TraceSamplingPolicy(normal_sample_rate=1.0)
 
     @property
     def records(self) -> list[TraceSpan]:
@@ -31,6 +41,29 @@ class TraceStore:
     def record(self, span: TraceSpan) -> TraceSpan:
         if not isinstance(span, TraceSpan):
             raise TypeError("trace store requires TraceSpan")
+        risk_level = str(span.classification.get("risk_level", "NORMAL"))
+        outcome = str(span.classification.get("outcome", "SUCCEEDED"))
+        if not self.sampling_policy.should_sample(
+            trace_id=span.trace_id,
+            category=span.category,
+            risk_level=risk_level,
+            outcome=outcome,
+        ):
+            span.sampled = False
+            return span
+        elevated = (
+            span.category == TraceCategory.FORGET
+            or outcome.upper() in {"ERROR", "FAILED", "DENIED"}
+            or risk_level.upper() in {"HIGH", "CRITICAL"}
+        )
+        span.sampled = True
+        span.retention_class = "ELEVATED" if elevated else "NORMAL"
+        span.expires_at = self.sampling_policy.expires_at(
+            created_at=span.created_at,
+            category=span.category,
+            risk_level=risk_level,
+            outcome=outcome,
+        )
         self._records.append(span)
         return span
 
@@ -53,6 +86,20 @@ class TraceStore:
 
     def list_by_memory(self, memory_id: str) -> list[TraceSpan]:
         return [span for span in self._records if span.ids.get("memory_id") == memory_id]
+
+    def list_by_query(self, query_id: str) -> list[TraceSpan]:
+        return [span for span in self._records if span.ids.get("query_id") == query_id]
+
+    def list_by_task(self, task_id: str) -> list[TraceSpan]:
+        return [span for span in self._records if span.ids.get("task_id") == task_id]
+
+    def purge_expired(self, *, now=None) -> int:
+        now = now or datetime.now(timezone.utc)
+        before = len(self._records)
+        self._records = [
+            span for span in self._records if span.expires_at is None or span.expires_at > now
+        ]
+        return before - len(self._records)
 
     def formation_chain(self, event_id: str) -> list[TraceSpan]:
         """Return all spans for one event in chronological order."""
@@ -99,6 +146,7 @@ class TraceStore:
             trace_id=trace_id,
             parent_id=parent_id,
             kind=TraceSpanKind.EVENT,
+            category=TraceCategory.FORMATION,
             layer="RAW_EVENT",
             tenant_id=tenant_id,
             user_id=user_id,
@@ -129,6 +177,7 @@ class TraceStore:
             trace_id=trace_id,
             parent_id=parent_id,
             kind=TraceSpanKind.WORKING,
+            category=TraceCategory.FORMATION,
             layer="WORKING_STATE",
             tenant_id=tenant_id,
             user_id=user_id,
@@ -157,6 +206,7 @@ class TraceStore:
             trace_id=trace_id,
             parent_id=parent_id,
             kind=TraceSpanKind.EPISODE,
+            category=TraceCategory.FORMATION,
             layer="EPISODE_CHECKPOINT",
             tenant_id=tenant_id,
             user_id=user_id,
@@ -194,6 +244,7 @@ class TraceStore:
             trace_id=trace_id,
             parent_id=parent_id,
             kind=TraceSpanKind.CANDIDATE,
+            category=TraceCategory.FORMATION,
             layer="CANDIDATE",
             tenant_id=tenant_id,
             user_id=user_id,
@@ -233,6 +284,7 @@ class TraceStore:
             trace_id=trace_id,
             parent_id=parent_id,
             kind=TraceSpanKind.CONSOLIDATION,
+            category=TraceCategory.FORMATION,
             layer="CONSOLIDATED_MEMORY",
             tenant_id=tenant_id,
             user_id=user_id,
@@ -264,6 +316,7 @@ class TraceStore:
             trace_id=trace_id,
             parent_id=parent_id,
             kind=TraceSpanKind.EVOLUTION,
+            category=TraceCategory.EVOLUTION,
             layer="LONG_TERM",
             tenant_id=tenant_id,
             user_id=user_id,
@@ -298,6 +351,7 @@ class TraceStore:
             trace_id=trace_id,
             parent_id=parent_id,
             kind=TraceSpanKind.LEGACY,
+            category=TraceCategory.EVOLUTION,
             layer="LONG_TERM",
             tenant_id=tenant_id,
             user_id=user_id,
@@ -330,6 +384,7 @@ class TraceStore:
             trace_id=trace_id,
             parent_id=parent_id,
             kind=TraceSpanKind.INFRASTRUCTURE,
+            category=TraceCategory.INFRASTRUCTURE,
             layer="INFRASTRUCTURE",
             tenant_id=tenant_id,
             user_id=user_id,
@@ -337,6 +392,36 @@ class TraceStore:
             classification={"operation": operation, "outcome": outcome},
             scores={"duration_ms": float(duration_ms)},
             reason_codes=list(reason_codes or []),
+        )
+        return self.record(span)
+
+    def record_forget(
+        self,
+        *,
+        trace_id: str,
+        tenant_id: str,
+        user_id: str,
+        request_id: str,
+        memory_ids: list[str],
+        outcome: str,
+        high_risk: bool,
+    ) -> TraceSpan:
+        """Record a mandatory, redacted Forget outcome with ID-only associations."""
+        span = TraceSpan(
+            span_id=f"span-forget-{request_id}",
+            trace_id=trace_id,
+            kind=TraceSpanKind.EVOLUTION,
+            category=TraceCategory.FORGET,
+            layer="FORGET",
+            tenant_id=tenant_id,
+            user_id=user_id,
+            ids={"request_id": request_id, "memory_ids_hash": self._content_hash(memory_ids)},
+            hashes={"memory_ids_hash": self._content_hash(memory_ids)},
+            classification={
+                "outcome": outcome,
+                "risk_level": "HIGH" if high_risk else "NORMAL",
+                "affected_count": len(memory_ids),
+            },
         )
         return self.record(span)
 

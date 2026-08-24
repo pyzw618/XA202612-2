@@ -362,11 +362,13 @@ class RetrievalService:
             return
         try:
             from memoryhub.observability.trace_models import TraceSpan, TraceSpanKind
+            from memoryhub.observability.trace_policy import TraceCategory
 
             span = TraceSpan(
                 span_id=f"span-retrieval-{query_id}",
                 trace_id=trace_id,
                 kind=TraceSpanKind.RETRIEVAL,
+                category=TraceCategory.RETRIEVAL,
                 layer="RETRIEVAL",
                 tenant_id=request.tenant_id,
                 user_id=request.user_id,

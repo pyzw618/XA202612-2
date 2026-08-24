@@ -1,0 +1,279 @@
+{
+  "schema_version": "vnext/v1",
+  "comparison_version": "vnext-comparison/v1",
+  "methodology": {
+    "systems": [
+      "NO_MEMORY",
+      "FLAT_RAG",
+      "ORIGINAL",
+      "VNEXT"
+    ],
+    "shared_model": "mock-embedding/768",
+    "shared_tool_permissions": "offline deterministic mock channels only",
+    "shared_token_budget": "dataset token_budget per query",
+    "repeats": 5,
+    "confidence_interval": "normal approximation, two-sided 95%",
+    "dataset_sha256": "0d5c213905c647074e2f316d874cbf0748396ffb3332ffa737005968b9c6a8b5",
+    "redacted": true
+  },
+  "systems": {
+    "NO_MEMORY": {
+      "task_success": {
+        "mean": 0.0,
+        "variance": 0.0,
+        "ci95_low": 0.0,
+        "ci95_high": 0.0
+      },
+      "policy_leak_rate": {
+        "mean": 0.0,
+        "variance": 0.0,
+        "ci95_low": 0.0,
+        "ci95_high": 0.0
+      },
+      "mrr": {
+        "mean": 0.0,
+        "variance": 0.0,
+        "ci95_low": 0.0,
+        "ci95_high": 0.0
+      },
+      "context_tokens": {
+        "mean": 0.0,
+        "variance": 0.0,
+        "ci95_low": 0.0,
+        "ci95_high": 0.0
+      },
+      "latency_ms": {
+        "mean": 0.000108,
+        "variance": 0.0,
+        "ci95_low": 8.6e-05,
+        "ci95_high": 0.00013
+      }
+    },
+    "FLAT_RAG": {
+      "task_success": {
+        "mean": 1.0,
+        "variance": 0.0,
+        "ci95_low": 1.0,
+        "ci95_high": 1.0
+      },
+      "policy_leak_rate": {
+        "mean": 0.1,
+        "variance": 0.091837,
+        "ci95_low": 0.016,
+        "ci95_high": 0.184
+      },
+      "mrr": {
+        "mean": 0.875,
+        "variance": 0.066964,
+        "ci95_low": 0.803271,
+        "ci95_high": 0.946729
+      },
+      "context_tokens": {
+        "mean": 60.8,
+        "variance": 1974.857143,
+        "ci95_low": 48.482037,
+        "ci95_high": 73.117963
+      },
+      "latency_ms": {
+        "mean": 0.000866,
+        "variance": 0.0,
+        "ci95_low": 0.000738,
+        "ci95_high": 0.000994
+      }
+    },
+    "ORIGINAL": {
+      "task_success": {
+        "mean": 1.0,
+        "variance": 0.0,
+        "ci95_low": 1.0,
+        "ci95_high": 1.0
+      },
+      "policy_leak_rate": {
+        "mean": 0.1,
+        "variance": 0.091837,
+        "ci95_low": 0.016,
+        "ci95_high": 0.184
+      },
+      "mrr": {
+        "mean": 0.925,
+        "variance": 0.051658,
+        "ci95_low": 0.862,
+        "ci95_high": 0.988
+      },
+      "context_tokens": {
+        "mean": 57.6,
+        "variance": 1630.040816,
+        "ci95_low": 46.408964,
+        "ci95_high": 68.791036
+      },
+      "latency_ms": {
+        "mean": 0.00046,
+        "variance": 1e-06,
+        "ci95_low": 0.000234,
+        "ci95_high": 0.000686
+      }
+    },
+    "VNEXT": {
+      "task_success": {
+        "mean": 1.0,
+        "variance": 0.0,
+        "ci95_low": 1.0,
+        "ci95_high": 1.0
+      },
+      "policy_leak_rate": {
+        "mean": 0.0,
+        "variance": 0.0,
+        "ci95_low": 0.0,
+        "ci95_high": 0.0
+      },
+      "mrr": {
+        "mean": 1.0,
+        "variance": 0.0,
+        "ci95_low": 1.0,
+        "ci95_high": 1.0
+      },
+      "context_tokens": {
+        "mean": 48.0,
+        "variance": 888.163265,
+        "ci95_low": 39.739288,
+        "ci95_high": 56.260712
+      },
+      "latency_ms": {
+        "mean": 0.000186,
+        "variance": 0.0,
+        "ci95_low": 0.000146,
+        "ci95_high": 0.000226
+      }
+    }
+  },
+  "ablations": {
+    "NO_ROUTER": {
+      "task_success": {
+        "mean": 1.0,
+        "variance": 0.0,
+        "ci95_low": 1.0,
+        "ci95_high": 1.0
+      },
+      "policy_leak_rate": {
+        "mean": 0.1,
+        "variance": 0.091837,
+        "ci95_low": 0.016,
+        "ci95_high": 0.184
+      },
+      "mrr": {
+        "mean": 0.925,
+        "variance": 0.051658,
+        "ci95_low": 0.862,
+        "ci95_high": 0.988
+      },
+      "context_tokens": {
+        "mean": 57.6,
+        "variance": 1630.040816,
+        "ci95_low": 46.408964,
+        "ci95_high": 68.791036
+      },
+      "latency_ms": {
+        "mean": 0.000238,
+        "variance": 0.0,
+        "ci95_low": 0.000202,
+        "ci95_high": 0.000274
+      }
+    },
+    "NO_SCOPE_RESOLVER": {
+      "task_success": {
+        "mean": 1.0,
+        "variance": 0.0,
+        "ci95_low": 1.0,
+        "ci95_high": 1.0
+      },
+      "policy_leak_rate": {
+        "mean": 0.1,
+        "variance": 0.091837,
+        "ci95_low": 0.016,
+        "ci95_high": 0.184
+      },
+      "mrr": {
+        "mean": 0.875,
+        "variance": 0.066964,
+        "ci95_low": 0.803271,
+        "ci95_high": 0.946729
+      },
+      "context_tokens": {
+        "mean": 60.8,
+        "variance": 1974.857143,
+        "ci95_low": 48.482037,
+        "ci95_high": 73.117963
+      },
+      "latency_ms": {
+        "mean": 0.00125,
+        "variance": 1e-06,
+        "ci95_low": 0.00101,
+        "ci95_high": 0.00149
+      }
+    },
+    "NO_RERANKER": {
+      "task_success": {
+        "mean": 1.0,
+        "variance": 0.0,
+        "ci95_low": 1.0,
+        "ci95_high": 1.0
+      },
+      "policy_leak_rate": {
+        "mean": 0.0,
+        "variance": 0.0,
+        "ci95_low": 0.0,
+        "ci95_high": 0.0
+      },
+      "mrr": {
+        "mean": 1.0,
+        "variance": 0.0,
+        "ci95_low": 1.0,
+        "ci95_high": 1.0
+      },
+      "context_tokens": {
+        "mean": 48.0,
+        "variance": 888.163265,
+        "ci95_low": 39.739288,
+        "ci95_high": 56.260712
+      },
+      "latency_ms": {
+        "mean": 0.000502,
+        "variance": 0.0,
+        "ci95_low": 0.000398,
+        "ci95_high": 0.000606
+      }
+    },
+    "NO_CONTEXT_BUDGET": {
+      "task_success": {
+        "mean": 1.0,
+        "variance": 0.0,
+        "ci95_low": 1.0,
+        "ci95_high": 1.0
+      },
+      "policy_leak_rate": {
+        "mean": 0.1,
+        "variance": 0.091837,
+        "ci95_low": 0.016,
+        "ci95_high": 0.184
+      },
+      "mrr": {
+        "mean": 0.875,
+        "variance": 0.066964,
+        "ci95_low": 0.803271,
+        "ci95_high": 0.946729
+      },
+      "context_tokens": {
+        "mean": 60.8,
+        "variance": 1974.857143,
+        "ci95_low": 48.482037,
+        "ci95_high": 73.117963
+      },
+      "latency_ms": {
+        "mean": 0.00113,
+        "variance": 0.0,
+        "ci95_low": 0.001025,
+        "ci95_high": 0.001235
+      }
+    }
+  }
+}

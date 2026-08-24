@@ -28,6 +28,7 @@
 #include "pages/BasePage.h"
 #include "pages/ConflictPage.h"
 #include "pages/DashboardPage.h"
+#include "pages/VNextDashboardPages.h"
 #include "pages/FactPage.h"
 #include "pages/ForgetPages.h"
 #include "pages/KnowledgePage.h"
@@ -335,6 +336,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
     // ---------------- 注册所有页面 ----------------
     registerPage("dashboard", "总览", "Dashboard", new DashboardPage(m_stack));
+    registerPage("dashboard/explorer", "vNext Dashboard", "Memory Explorer",
+                 new VNextDashboardPage(VNextDashboardPage::View::Explorer, m_stack));
+    registerPage("dashboard/evolution", "vNext Dashboard", "Evolution",
+                 new VNextDashboardPage(VNextDashboardPage::View::Evolution, m_stack));
+    registerPage("dashboard/retrieval", "vNext Dashboard", "Retrieval Debugger",
+                 new VNextDashboardPage(VNextDashboardPage::View::RetrievalDebugger, m_stack));
+    registerPage("dashboard/benchmark", "vNext Dashboard", "Benchmark",
+                 new VNextDashboardPage(VNextDashboardPage::View::Benchmark, m_stack));
     registerPage("terminal", "内置终端", "opencode 终端", new TerminalPage(m_stack));
 
     registerPage("mem/preference", "记忆管理", "偏好记忆", new PreferencePage(m_stack));
@@ -445,6 +454,10 @@ void MainWindow::buildSidebar() {
 
     QTreeWidgetItem *g1 = addGroup("工作台");
     addLeaf(g1, "总览", "dashboard", ":/icons/dashboard.svg");
+    addLeaf(g1, "Memory Explorer", "dashboard/explorer", ":/icons/database.svg");
+    addLeaf(g1, "Evolution", "dashboard/evolution", ":/icons/history.svg");
+    addLeaf(g1, "Retrieval Debugger", "dashboard/retrieval", ":/icons/search.svg");
+    addLeaf(g1, "Benchmark", "dashboard/benchmark", ":/icons/activity.svg");
     addLeaf(g1, "内置终端", "terminal", ":/icons/terminal.svg");
 
     QTreeWidgetItem *g2 = addGroup("记忆");

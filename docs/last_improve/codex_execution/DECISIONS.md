@@ -2,6 +2,19 @@
 
 只追加会影响后续任务的决策，不删除历史；废弃决策用新条目明确 supersede。
 
+## DEC-20260825-016
+
+- Date: 2026-08-25
+- Task: S5-01～S5-04
+- Status: ACTIVE
+- Decision: Trace is an independently expiring, redacted diagnostic projection with five categories (FORMATION, EVOLUTION, RETRIEVAL, FORGET, INFRASTRUCTURE); normal production sampling is deterministic at 10%, while high-risk/error/denied/Forget is mandatory. Dashboard is management-authorized, tenant/user scoped and aggregates Benchmark data without per-query samples.
+- Evidence/reason: S5 focused association, redaction, retention, Forget and Dashboard authorization tests passed. This preserves traceability without making observability a second Authority store or exposing raw body/query text.
+- Affected files/contracts: `memoryhub/observability/`, `docs/spec/VNEXT_TRACE.md`, `DashboardService`, vNext dashboard route, B17 feedback/usage trace consumers.
+- Alternatives considered: always persist all normal spans; expose raw diagnostic/benchmark samples in Dashboard; both rejected for retention/privacy reasons.
+- Compatibility/migration impact: direct/test `TraceStore` defaults to 100% sampling for legacy diagnostic expectations; application wiring explicitly supplies the production policy. No Authority/Evidence/Lineage data is migrated or changed.
+- Rollback: remove the app-level TraceStore/Dashboard route wiring while retaining historical Authority data; no diagnostic purge affects business data.
+- Supersedes: None
+
 ## DEC-20260822-001
 
 - Date: 2026-08-22

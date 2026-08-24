@@ -1,0 +1,651 @@
+{
+  "schema_version": "vnext/v1",
+  "runner_version": "vnext-benchmark/v1",
+  "reproducibility": {
+    "seed": 42,
+    "model_version": "mock-embedding/768",
+    "prompt_version": "formation-shadow/vnext-v1",
+    "weight_version": "retrieval-eval/vnext-v1",
+    "annotation_version": "vnext-eval-annotations/v1",
+    "dataset_sha256": {
+      "formation_samples": "057b13806c7093bec0706a2b148fbeda08f6dbc8bd63e313955b4e5f075a7bd3",
+      "formation_pairs": "7a0e17ff381ff35b93dc743feb4f58f23393466223c4d48cfba3f8c45ff3a2d1",
+      "retrieval": "0d5c213905c647074e2f316d874cbf0748396ffb3332ffa737005968b9c6a8b5"
+    },
+    "environment": {
+      "python": "3.11.6",
+      "platform": "Windows-10-10.0.26200-SP0"
+    }
+  },
+  "layers": {
+    "formation": {
+      "schema_version": "vnext/v1",
+      "sample_count": 4,
+      "pair_count": 3,
+      "precision": 1.0,
+      "recall": 0.0,
+      "premature_promotion_rate": 0.75,
+      "missed_promotion_rate": 0.0,
+      "scope_accuracy": 0.25,
+      "type_accuracy": 1.0,
+      "resume_constraint_preservation": 1.0,
+      "safe_rate": 0.25,
+      "sample_results": [
+        {
+          "sample_id": "S2-10-SINGLE-DOCX",
+          "event_id": "event-docx-1",
+          "predicted_decision": "REVIEW",
+          "predicted_scope_level": "PROJECT",
+          "expected_decision": "REVIEW",
+          "expected_scope_level": "PROJECT",
+          "premature": true,
+          "missed": false,
+          "scope_mismatch": true,
+          "type_mismatch": false,
+          "safe": false
+        },
+        {
+          "sample_id": "S2-10-SINGLE-MARKDOWN",
+          "event_id": "event-md-1",
+          "predicted_decision": "REVIEW",
+          "predicted_scope_level": "TASK",
+          "expected_decision": "REVIEW",
+          "expected_scope_level": "TASK",
+          "premature": true,
+          "missed": false,
+          "scope_mismatch": true,
+          "type_mismatch": false,
+          "safe": false
+        },
+        {
+          "sample_id": "S2-10-PROCEDURE-REVIEW",
+          "event_id": "event-proc-1",
+          "predicted_decision": "REVIEW",
+          "predicted_scope_level": "TASK",
+          "expected_decision": "REVIEW",
+          "expected_scope_level": "TASK",
+          "premature": true,
+          "missed": false,
+          "scope_mismatch": true,
+          "type_mismatch": false,
+          "safe": false
+        },
+        {
+          "sample_id": "S2-10-FACT-REVIEW",
+          "event_id": "event-fact-1",
+          "predicted_decision": "REVIEW",
+          "predicted_scope_level": "TASK",
+          "expected_decision": "REVIEW",
+          "expected_scope_level": "TASK",
+          "premature": false,
+          "missed": false,
+          "scope_mismatch": false,
+          "type_mismatch": false,
+          "safe": true
+        }
+      ],
+      "pair_results": [
+        {
+          "pair_id": "E2E-P1-01",
+          "predicted_final_decision": "PROMOTE",
+          "predicted_final_scope_level": "PROJECT",
+          "expected_final_decision": "PROMOTE",
+          "expected_final_scope_level": "PROJECT",
+          "premature_count": 0,
+          "missed_count": 0,
+          "scope_mismatch_count": 1,
+          "type_mismatch_count": 0,
+          "safe": true
+        },
+        {
+          "pair_id": "E2E-P1-03",
+          "predicted_final_decision": "REVIEW",
+          "predicted_final_scope_level": "TASK",
+          "expected_final_decision": "REVIEW",
+          "expected_final_scope_level": "TASK",
+          "premature_count": 1,
+          "missed_count": 0,
+          "scope_mismatch_count": 1,
+          "type_mismatch_count": 0,
+          "safe": false
+        },
+        {
+          "pair_id": "E2E-P1-06",
+          "predicted_final_decision": "PROMOTE",
+          "predicted_final_scope_level": "PROJECT",
+          "expected_final_decision": "PROMOTE",
+          "expected_final_scope_level": "PROJECT",
+          "premature_count": 0,
+          "missed_count": 0,
+          "scope_mismatch_count": 1,
+          "type_mismatch_count": 0,
+          "safe": true
+        }
+      ]
+    },
+    "retrieval": {
+      "schema_version": "vnext/v1",
+      "total_queries": 10,
+      "router_accuracy": 1.0,
+      "router_intent_counts": {
+        "CURRENT_STATE": 1,
+        "TASK_HISTORY": 1,
+        "PREFERENCE": 1,
+        "SEMANTIC_FACT": 2,
+        "PROCEDURE": 1,
+        "EXPERIENCE": 1,
+        "MIXED": 3
+      },
+      "recall_at_k": 1.0,
+      "precision_at_k": 0.975,
+      "mrr": 1.0,
+      "ndcg_at_k": 0.9906025435534682,
+      "ranking_score": 0.9666666666666666,
+      "scope_leak_rate": 0.0,
+      "scope_accuracy": 1.0,
+      "context_precision": 0.825,
+      "context_recall": 1.0,
+      "constraint_preservation": 1.0,
+      "budget_compliance": 1.0,
+      "sample_results": [
+        {
+          "query_id": "q-current-state-exact",
+          "query": "what is the current step",
+          "expected_intent": "CURRENT_STATE",
+          "predicted_intent": "CURRENT_STATE",
+          "router_correct": true,
+          "recall_at_k": 1.0,
+          "precision_at_k": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_k": 1.0,
+          "ranking_score": 1.0,
+          "scope_leak_count": 0,
+          "scope_leak_rate": 0.0,
+          "scope_correct": true,
+          "context_precision": 1.0,
+          "context_recall": 1.0,
+          "constraint_preservation": 1.0,
+          "budget_compliant": true,
+          "details": {
+            "selected_memory_ids": [
+              "working-current-step"
+            ],
+            "context_memory_ids": [
+              "working-current-step"
+            ],
+            "forbidden_ids": [
+              "deleted-memory",
+              "superseded-memory",
+              "candidate-memory",
+              "other-tenant-memory"
+            ],
+            "leaked_ids": [],
+            "intent_confidence": 1.0,
+            "enabled_channels": [
+              "working",
+              "metadata",
+              "authority"
+            ],
+            "degraded_channels": [],
+            "completeness": "FULL",
+            "latency_ms": 0.0
+          }
+        },
+        {
+          "query_id": "q-task-history-paraphrase",
+          "query": "did anything go wrong before",
+          "expected_intent": "TASK_HISTORY",
+          "predicted_intent": "TASK_HISTORY",
+          "router_correct": true,
+          "recall_at_k": 1.0,
+          "precision_at_k": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_k": 1.0,
+          "ranking_score": 1.0,
+          "scope_leak_count": 0,
+          "scope_leak_rate": 0.0,
+          "scope_correct": true,
+          "context_precision": 1.0,
+          "context_recall": 1.0,
+          "constraint_preservation": 1.0,
+          "budget_compliant": true,
+          "details": {
+            "selected_memory_ids": [
+              "episode-previous-attempt"
+            ],
+            "context_memory_ids": [
+              "episode-previous-attempt"
+            ],
+            "forbidden_ids": [
+              "deleted-memory",
+              "superseded-memory",
+              "candidate-memory",
+              "other-tenant-memory"
+            ],
+            "leaked_ids": [],
+            "intent_confidence": 1.0,
+            "enabled_channels": [
+              "episode",
+              "metadata",
+              "authority"
+            ],
+            "degraded_channels": [],
+            "completeness": "FULL",
+            "latency_ms": 0.0
+          }
+        },
+        {
+          "query_id": "q-preference-semantic",
+          "query": "how should I format the answer",
+          "expected_intent": "PREFERENCE",
+          "predicted_intent": "PREFERENCE",
+          "router_correct": true,
+          "recall_at_k": 1.0,
+          "precision_at_k": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_k": 1.0,
+          "ranking_score": 1.0,
+          "scope_leak_count": 0,
+          "scope_leak_rate": 0.0,
+          "scope_correct": true,
+          "context_precision": 1.0,
+          "context_recall": 1.0,
+          "constraint_preservation": 1.0,
+          "budget_compliant": true,
+          "details": {
+            "selected_memory_ids": [
+              "pref-output-format"
+            ],
+            "context_memory_ids": [
+              "pref-output-format"
+            ],
+            "forbidden_ids": [
+              "deleted-memory",
+              "superseded-memory",
+              "candidate-memory",
+              "other-tenant-memory"
+            ],
+            "leaked_ids": [],
+            "intent_confidence": 1.0,
+            "enabled_channels": [
+              "vector",
+              "keyword",
+              "metadata",
+              "authority"
+            ],
+            "degraded_channels": [],
+            "completeness": "FULL",
+            "latency_ms": 0.0
+          }
+        },
+        {
+          "query_id": "q-fact-lookup-exact",
+          "query": "what Python version does the project use",
+          "expected_intent": "SEMANTIC_FACT",
+          "predicted_intent": "SEMANTIC_FACT",
+          "router_correct": true,
+          "recall_at_k": 1.0,
+          "precision_at_k": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_k": 1.0,
+          "ranking_score": 1.0,
+          "scope_leak_count": 0,
+          "scope_leak_rate": 0.0,
+          "scope_correct": true,
+          "context_precision": 1.0,
+          "context_recall": 1.0,
+          "constraint_preservation": 1.0,
+          "budget_compliant": true,
+          "details": {
+            "selected_memory_ids": [
+              "fact-python-version"
+            ],
+            "context_memory_ids": [
+              "fact-python-version"
+            ],
+            "forbidden_ids": [
+              "deleted-memory",
+              "superseded-memory",
+              "candidate-memory",
+              "other-tenant-memory"
+            ],
+            "leaked_ids": [],
+            "intent_confidence": 1.0,
+            "enabled_channels": [
+              "vector",
+              "keyword",
+              "metadata",
+              "authority"
+            ],
+            "degraded_channels": [],
+            "completeness": "FULL",
+            "latency_ms": 0.0
+          }
+        },
+        {
+          "query_id": "q-procedure-paraphrase",
+          "query": "how do I deploy the service",
+          "expected_intent": "PROCEDURE",
+          "predicted_intent": "PROCEDURE",
+          "router_correct": true,
+          "recall_at_k": 1.0,
+          "precision_at_k": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_k": 1.0,
+          "ranking_score": 1.0,
+          "scope_leak_count": 0,
+          "scope_leak_rate": 0.0,
+          "scope_correct": true,
+          "context_precision": 1.0,
+          "context_recall": 1.0,
+          "constraint_preservation": 1.0,
+          "budget_compliant": true,
+          "details": {
+            "selected_memory_ids": [
+              "proc-deploy-checklist"
+            ],
+            "context_memory_ids": [
+              "proc-deploy-checklist"
+            ],
+            "forbidden_ids": [
+              "deleted-memory",
+              "superseded-memory",
+              "candidate-memory",
+              "other-tenant-memory"
+            ],
+            "leaked_ids": [],
+            "intent_confidence": 1.0,
+            "enabled_channels": [
+              "vector",
+              "keyword",
+              "metadata",
+              "authority"
+            ],
+            "degraded_channels": [],
+            "completeness": "FULL",
+            "latency_ms": 0.0
+          }
+        },
+        {
+          "query_id": "q-experience-semantic",
+          "query": "tell me about past on-call issues",
+          "expected_intent": "EXPERIENCE",
+          "predicted_intent": "EXPERIENCE",
+          "router_correct": true,
+          "recall_at_k": 1.0,
+          "precision_at_k": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_k": 1.0,
+          "ranking_score": 1.0,
+          "scope_leak_count": 0,
+          "scope_leak_rate": 0.0,
+          "scope_correct": true,
+          "context_precision": 1.0,
+          "context_recall": 1.0,
+          "constraint_preservation": 1.0,
+          "budget_compliant": true,
+          "details": {
+            "selected_memory_ids": [
+              "exp-oncall-2025"
+            ],
+            "context_memory_ids": [
+              "exp-oncall-2025"
+            ],
+            "forbidden_ids": [
+              "deleted-memory",
+              "superseded-memory",
+              "candidate-memory",
+              "other-tenant-memory"
+            ],
+            "leaked_ids": [],
+            "intent_confidence": 1.0,
+            "enabled_channels": [
+              "vector",
+              "keyword",
+              "metadata",
+              "authority",
+              "episode"
+            ],
+            "degraded_channels": [],
+            "completeness": "FULL",
+            "latency_ms": 0.0
+          }
+        },
+        {
+          "query_id": "q-mixed-unified-pool",
+          "query": "deployment checklist for this task",
+          "expected_intent": "MIXED",
+          "predicted_intent": "MIXED",
+          "router_correct": true,
+          "recall_at_k": 1.0,
+          "precision_at_k": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_k": 1.0,
+          "ranking_score": 1.0,
+          "scope_leak_count": 0,
+          "scope_leak_rate": 0.0,
+          "scope_correct": true,
+          "context_precision": 0.5,
+          "context_recall": 1.0,
+          "constraint_preservation": 1.0,
+          "budget_compliant": true,
+          "details": {
+            "selected_memory_ids": [
+              "mixed-scope-task",
+              "mixed-scope-project"
+            ],
+            "context_memory_ids": [
+              "mixed-scope-task",
+              "mixed-scope-project"
+            ],
+            "forbidden_ids": [
+              "deleted-memory",
+              "superseded-memory",
+              "candidate-memory",
+              "other-tenant-memory"
+            ],
+            "leaked_ids": [],
+            "intent_confidence": 0.0,
+            "enabled_channels": [
+              "vector",
+              "keyword",
+              "metadata",
+              "working",
+              "episode",
+              "authority"
+            ],
+            "degraded_channels": [],
+            "completeness": "FULL",
+            "latency_ms": 0.0
+          }
+        },
+        {
+          "query_id": "q-scope-conflict-narrow-wins",
+          "query": "deployment checklist",
+          "expected_intent": "MIXED",
+          "predicted_intent": "MIXED",
+          "router_correct": true,
+          "recall_at_k": 1.0,
+          "precision_at_k": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_k": 1.0,
+          "ranking_score": 1.0,
+          "scope_leak_count": 0,
+          "scope_leak_rate": 0.0,
+          "scope_correct": true,
+          "context_precision": 0.5,
+          "context_recall": 1.0,
+          "constraint_preservation": 1.0,
+          "budget_compliant": true,
+          "details": {
+            "selected_memory_ids": [
+              "mixed-scope-task",
+              "mixed-scope-project"
+            ],
+            "context_memory_ids": [
+              "mixed-scope-task",
+              "mixed-scope-project"
+            ],
+            "forbidden_ids": [
+              "deleted-memory",
+              "superseded-memory",
+              "candidate-memory",
+              "other-tenant-memory"
+            ],
+            "leaked_ids": [],
+            "intent_confidence": 0.0,
+            "enabled_channels": [
+              "vector",
+              "keyword",
+              "metadata",
+              "working",
+              "episode",
+              "authority"
+            ],
+            "degraded_channels": [],
+            "completeness": "FULL",
+            "latency_ms": 0.0
+          }
+        },
+        {
+          "query_id": "q-budget-protects-constraints",
+          "query": "deployment checklist and constraints",
+          "expected_intent": "MIXED",
+          "predicted_intent": "MIXED",
+          "router_correct": true,
+          "recall_at_k": 1.0,
+          "precision_at_k": 0.75,
+          "mrr": 1.0,
+          "ndcg_at_k": 0.9060254355346823,
+          "ranking_score": 0.6666666666666666,
+          "scope_leak_count": 0,
+          "scope_leak_rate": 0.0,
+          "scope_correct": true,
+          "context_precision": 0.25,
+          "context_recall": 1.0,
+          "constraint_preservation": 1.0,
+          "budget_compliant": true,
+          "details": {
+            "selected_memory_ids": [
+              "mixed-scope-task",
+              "working-current-step",
+              "mixed-scope-project",
+              "proc-deploy-checklist"
+            ],
+            "context_memory_ids": [
+              "mixed-scope-task",
+              "working-current-step",
+              "mixed-scope-project",
+              "proc-deploy-checklist"
+            ],
+            "forbidden_ids": [
+              "deleted-memory",
+              "superseded-memory",
+              "candidate-memory",
+              "other-tenant-memory"
+            ],
+            "leaked_ids": [],
+            "intent_confidence": 0.0,
+            "enabled_channels": [
+              "vector",
+              "keyword",
+              "metadata",
+              "working",
+              "episode",
+              "authority"
+            ],
+            "degraded_channels": [],
+            "completeness": "FULL",
+            "latency_ms": 0.0
+          }
+        },
+        {
+          "query_id": "q-deleted-superseded-candidate-blocked",
+          "query": "Python version history",
+          "expected_intent": "SEMANTIC_FACT",
+          "predicted_intent": "SEMANTIC_FACT",
+          "router_correct": true,
+          "recall_at_k": 1.0,
+          "precision_at_k": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_k": 1.0,
+          "ranking_score": 1.0,
+          "scope_leak_count": 0,
+          "scope_leak_rate": 0.0,
+          "scope_correct": true,
+          "context_precision": 1.0,
+          "context_recall": 1.0,
+          "constraint_preservation": 1.0,
+          "budget_compliant": true,
+          "details": {
+            "selected_memory_ids": [
+              "fact-python-version"
+            ],
+            "context_memory_ids": [
+              "fact-python-version"
+            ],
+            "forbidden_ids": [
+              "deleted-memory",
+              "superseded-memory",
+              "candidate-memory",
+              "other-tenant-memory"
+            ],
+            "leaked_ids": [],
+            "intent_confidence": 1.0,
+            "enabled_channels": [
+              "vector",
+              "keyword",
+              "metadata",
+              "authority"
+            ],
+            "degraded_channels": [],
+            "completeness": "FULL",
+            "latency_ms": 0.0
+          }
+        }
+      ]
+    },
+    "infrastructure": {
+      "suite": "S4 reliability fault injection",
+      "command": "D:\\project\\XA202612-2\\.venv\\Scripts\\python.exe -m pytest tests/test_vnext_reliability.py -q",
+      "returncode": 0,
+      "passed": true,
+      "matrix": [
+        "vector_timeout",
+        "duplicate_delivery",
+        "worker_crash",
+        "pre_commit_crash",
+        "post_commit_crash",
+        "stale_cache",
+        "index_corruption",
+        "duplicate_event"
+      ]
+    },
+    "e2e": {
+      "total_queries": 20,
+      "latency": {
+        "operation": "search",
+        "count": 20,
+        "mean_ms": 0.012710001465165988,
+        "p50_ms": 0.010849995305761695,
+        "p95_ms": 0.017630009097047167,
+        "p99_ms": 0.034806007170118364,
+        "min_ms": 0.010000003385357559,
+        "max_ms": 0.0391000066883862,
+        "qps": 76982.29431388671
+      },
+      "recall_at_5": 0.44000000000000006,
+      "ndcg_at_10": 0.51903954356943,
+      "result_cache_hit_rate": 0.5,
+      "vector_cache_hit_rate": 0.25,
+      "embedding_error_rate": 0.0,
+      "milvus_error_rate": 0.0,
+      "pending_backlog_count": 0,
+      "total_indexed": 50,
+      "budget_p95_ms": 350.0,
+      "budget_p99_ms": 500.0,
+      "p95_within_budget": true,
+      "p99_within_budget": true
+    }
+  }
+}

@@ -562,3 +562,19 @@
 - S4 Gate PASS. Forget residual retrieval count is 0; Projection recovery is covered by repair/rebuild and Outbox replay evidence.
 - Continuity: B15 DONE, B16 READY only; next prompt `docs/last_improve/codex_batches/B16_s5_benchmark_dashboard.md`.
 - Commit plan: stage only B15 source/tests/evaluation/continuity artifacts, create exactly one local commit titled `feat(vnext): complete B15 s4 reliability gate` with trailer `Batch-ID: B15`; then read-only verify SHA and stop.
+
+## Checkpoint 2026-08-25 — B16 start reconciliation
+
+- Started: 2026-08-25 +08:00; branch/HEAD: `dev-remem` / `5841161ef9acf2457e26f619db61c0fc2a5e52e5`.
+- Reconciled the stale B15 commit-plan text against the actual B15 commit and trailer; untracked `evaluation/results/*.db` artifacts remain preserved and unstaged.
+- B16 changed `READY → IN_PROGRESS`; S5-01 changed `TODO → IN_PROGRESS` after S2-09/S3-08/S4-08 evidence verification. No B17 content was touched.
+- Exact next action: implement S5-01 five-chain Trace association, deterministic sampling, redaction and retention policy with focused tests.
+
+## Checkpoint 2026-08-25 — B16 final validation and acceptance
+
+- Completed: S5-01 five-chain Trace correlation/sampling/redaction/retention; S5-02 one-command four-layer benchmark; S5-03 four-system comparison and individual ablations; S5-04 four redacted, management-gated Dashboard views with audit logging.
+- Files: observability policy/models/store, Retrieval/Forget/app wiring, Trace spec, evaluation runners/reports/tests, dashboard service/API schemas/route/tests, desktop Dashboard page registration/CMake, and continuity files.
+- Validation: Trace focused regression 38 passed; benchmark/evaluator/E2E focused regression 29 passed; comparison regression 11 passed; dashboard/affected regression 14 passed; safety/write-bypass risk regression 83 passed; ruff/compileall/diff-check passed.
+- Partial environment evidence: Qt `cmake` is absent from PATH; desktop native build was not runnable. The all-file vNext pytest command exceeded the host 30-second tool window and was not counted as passing.
+- Task status: S5-01～S5-04 DONE; B16 DONE; B17 TODO → READY only. No B17 content was executed or modified.
+- Exact next action: audit B16-only staged paths, create exactly one local commit `feat(vnext): complete B16 s5 benchmark dashboard` with `Batch-ID: B16`, read-only verify HEAD and stop. Next-session prompt: `docs/last_improve/codex_batches/B17_s5_migration_cutover.md`.

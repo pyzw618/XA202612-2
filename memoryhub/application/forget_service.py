@@ -45,10 +45,12 @@ class ForgetService:
         db: Database,
         authority: AuthorityRepository | None = None,
         outbox: MemoryProjectionOutboxRepository | None = None,
+        trace_store: Any | None = None,
     ) -> None:
         self.db = db
         self.authority = authority or AuthorityRepository(db)
         self.outbox = outbox or MemoryProjectionOutboxRepository(db)
+        self.trace_store = trace_store
 
     def execute(
         self,
@@ -57,14 +59,20 @@ class ForgetService:
         actor_id: str | None = None,
         high_risk_authorized: bool = False,
     ) -> ForgetExecution:
-        if not request.dry_run and self._is_high_risk(request) and not high_risk_authorized:
+        high_risk = self._is_high_risk(request)
+        if not request.dry_run and high_risk and not high_risk_authorized:
+            self._record_trace(request, (), "DENIED", high_risk)
             raise PermissionError("forget.high_risk_authorization_required")
         existing = self._idempotent(request)
         if existing is not None:
+            self._record_trace(
+                request, existing.response.affected_memory_ids, "IDEMPOTENT", high_risk
+            )
             return existing
         target_ids = self._resolve_targets(request)
         if request.dry_run:
             response = self._response(request, "ACCEPTED", "ACCEPTED", "ACCEPTED", target_ids)
+            self._record_trace(request, target_ids, "DRY_RUN", high_risk)
             return ForgetExecution(response, ForgetState.ACCEPTED)
 
         record_id = "forget_" + uuid.uuid4().hex
@@ -146,7 +154,27 @@ class ForgetService:
             residual=0,
             warnings=[] if len(outbox_ids) == len(target_ids) else ["some targets were not active"],
         )
+        self._record_trace(request, target_ids, "SUCCEEDED", high_risk)
         return ForgetExecution(response, ForgetState.READ_BLOCKED, tuple(outbox_ids))
+
+    def _record_trace(
+        self,
+        request: ForgetRequest,
+        memory_ids: list[str] | tuple[str, ...],
+        outcome: str,
+        high_risk: bool,
+    ) -> None:
+        if self.trace_store is None:
+            return
+        self.trace_store.record_forget(
+            trace_id=request.request_id,
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+            request_id=request.request_id,
+            memory_ids=list(memory_ids),
+            outcome=outcome,
+            high_risk=high_risk,
+        )
 
     def get(self, record_id: str, *, tenant_id: str, user_id: str) -> ForgetExecution | None:
         with self.db.session() as session:

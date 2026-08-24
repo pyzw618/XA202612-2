@@ -323,6 +323,22 @@ class DiagnosticResponse(APIModel):
     redacted: bool = True
 
 
+class DashboardRequest(APIModel):
+    api_version: Literal["vnext/v1"] = "vnext/v1"
+    request_id: str = Field(min_length=1)
+    tenant_id: str = Field(min_length=1)
+    user_id: str = Field(min_length=1)
+
+
+class DashboardResponse(APIModel):
+    api_version: Literal["vnext/v1"] = "vnext/v1"
+    request_id: str = Field(min_length=1)
+    trace_id: str = Field(min_length=1)
+    view: str = Field(min_length=1)
+    redacted: bool = True
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
 class LegacySearchCompatibilityResponse(APIModel):
     """Stable old response shape; it contains no retrieval algorithm.
 
@@ -540,6 +556,8 @@ __all__ = [
     "Activation",
     "ConsistencyMode",
     "ContextPayload",
+    "DashboardRequest",
+    "DashboardResponse",
     "DiagnosticRequest",
     "DiagnosticResponse",
     "ForgetRequest",

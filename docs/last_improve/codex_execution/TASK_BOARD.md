@@ -1,5 +1,10 @@
 # MemoryHub vNext Task Board
 
+## B16 start reconciliation — 2026-08-25
+
+- Repository fact: B15 is committed at `5841161` with `Batch-ID: B15`; prior B15 commit-plan text was stale and has no bearing on S5 evidence.
+- B16 is `IN_PROGRESS`; S5-01 is claimed after verifying S2-09, S3-08 and S4-08 evidence. B17/S5-05 and later remain out of scope.
+
 ## B15 live reconciliation — 2026-08-25
 
 - S4-07 and S4-08 are DONE after validation; S4 Gate is PASS.
@@ -77,10 +82,10 @@
 | S4-06 | DONE | S2-09, S3-08, S4-03 | Codex 2026-08-24 (B14) | EVIDENCE.md#s4-06-checkpoint | 诊断 API |
 | S4-07 | DONE | S4-01, S4-02, S4-03, S4-04, S4-05 | Codex 2026-08-25 (B15) | EVIDENCE.md#s4-07-checkpoint | 故障注入矩阵 |
 | S4-08 | DONE | S4-01, S4-02, S4-03, S4-04, S4-05, S4-07 | Codex 2026-08-25 (B15) | EVIDENCE.md#s4-08-and-s4-gate | 基础设施 Trace/指标 |
-| S5-01 | TODO | S2-09, S3-08, S4-08 | | | 五类 Trace 关联、采样、脱敏 |
-| S5-02 | TODO | S2-10, S3-10, S4-07 | | | 四层 Benchmark Runner |
-| S5-03 | TODO | S5-02 | | | 四系统对照与消融 |
-| S5-04 | TODO | S4-06, S5-01, S5-02 | | | 四页 Dashboard |
+| S5-01 | DONE | S2-09, S3-08, S4-08 | Codex 2026-08-25 (B16) | EVIDENCE.md#s5-01-checkpoint | 五类 Trace、确定性采样、分级保留与默认脱敏 |
+| S5-02 | DONE | S2-10, S3-10, S4-07 | Codex 2026-08-25 (B16) | EVIDENCE.md#s5-02-checkpoint | 固定版本/种子/环境的一命令四层 Runner |
+| S5-03 | DONE | S5-02 | Codex 2026-08-25 (B16) | EVIDENCE.md#s5-03-checkpoint | 同口径四系统与单机制消融，均值/方差/95% CI |
+| S5-04 | DONE | S4-06, S5-01, S5-02 | Codex 2026-08-25 (B16) | EVIDENCE.md#s5-04-and-b16-acceptance | 四视图、默认脱敏、管理授权与访问审计 |
 | S5-05 | TODO | S3-08, S5-01 | | | Agent Usage/Feedback Shadow |
 | S5-06 | TODO | S0-05, S1-01, S1-07 | | | 旧数据迁移与校验 |
 | S5-07 | TODO | S2-08, S3-09, S5-06 | | | Shadow 与双读报告 |
@@ -93,4 +98,4 @@
 - IN_PROGRESS count: 0
 - Dependency violations: None
 - DONE without evidence: None
-- Last checked: 2026-08-25; B15 S4-07/S4-08 DONE and S4 Gate PASS with evidence.
+- Last checked: 2026-08-25; B16 S5-01～S5-04 DONE; B17 READY only.

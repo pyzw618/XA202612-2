@@ -557,6 +557,13 @@ def create_app(
         app.state.vector_store = vector_store
         app.state.vector_engine = vector_engine
         app.state.evidence_store = EvidenceStore(config.storage.evidence_path)
+        from memoryhub.observability import InfrastructureMetrics, TraceSamplingPolicy, TraceStore
+
+        # A single redacted trace store associates S5 diagnostics across write,
+        # retrieval, Forget and infrastructure paths. It is observability only,
+        # never an Authority data store.
+        app.state.trace_store = TraceStore(sampling_policy=TraceSamplingPolicy())
+        app.state.infrastructure_metrics = InfrastructureMetrics()
 
         app.state.memory_write_service = MemoryWriteService(
             pref_repo=pref_repo,
@@ -625,11 +632,19 @@ def create_app(
             channel_executors=build_channel_executors(app.state),
             activation_repository=ActivationRepository(db),
             retrieval_log_repository=RetrievalLogRepository(db),
+            trace_store=app.state.trace_store,
         )
+        from memoryhub.application.dashboard_service import DashboardService
         from memoryhub.application.diagnostic_service import DiagnosticService
         from memoryhub.application.forget_service import ForgetService
-        app.state.forget_service = ForgetService(db, authority_repository)
-        app.state.diagnostic_service = DiagnosticService(db)
+        app.state.forget_service = ForgetService(
+            db, authority_repository, trace_store=app.state.trace_store
+        )
+        app.state.diagnostic_service = DiagnosticService(db, trace_store=app.state.trace_store)
+        app.state.dashboard_service = DashboardService(
+            trace_store=app.state.trace_store,
+            metrics=app.state.infrastructure_metrics,
+        )
 
         # 前端 agent 演示适配层：事件处理协调器（依赖 memory_write_service 同步检索索引）
         from memoryhub.core.processing import EventProcessingCoordinator
@@ -816,6 +831,8 @@ def create_app(
             pref_repo=pref_repo,
             know_repo=know_repo,
             memory_write_service=app.state.memory_write_service,
+            metrics=app.state.infrastructure_metrics,
+            trace_store=app.state.trace_store,
         )
         projection_outbox_worker.run_once()
 

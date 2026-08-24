@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
+import pytest
+
 from memoryhub.observability.trace_models import TraceSpan, TraceSpanKind
+from memoryhub.observability.trace_policy import TraceCategory, TraceSamplingPolicy
 from memoryhub.observability.trace_store import TraceStore
 
 
@@ -113,3 +118,82 @@ def test_trace_dump_and_load_preserves_redaction() -> None:
     import os
 
     os.unlink(path)
+
+
+def test_five_trace_chains_are_associated_by_safe_ids() -> None:
+    store = TraceStore(sampling_policy=TraceSamplingPolicy(normal_sample_rate=1.0))
+    formation = store.record_event(
+        trace_id="chain-1", tenant_id="tenant-a", user_id="user-a", event_id="event-1",
+        event_type="instruction", source_type="user", policy_action="ALLOW", source_hash="hash",
+    )
+    evolution = store.record_evolution(
+        trace_id="chain-1", tenant_id="tenant-a", user_id="user-a", event_id="event-1",
+        candidate_id="candidate-1", memory_id="memory-1", action="PROMOTE",
+        previous_memory_id=None, parent_id=formation.span_id,
+    )
+    retrieval = store.record(
+        TraceSpan(
+            span_id="retrieval-1", trace_id="chain-1", kind=TraceSpanKind.RETRIEVAL,
+            category=TraceCategory.RETRIEVAL, tenant_id="tenant-a", user_id="user-a",
+            ids={"query_id": "query-1", "task_id": "task-1", "memory_id": "memory-1"},
+        )
+    )
+    forget = store.record_forget(
+        trace_id="chain-1", tenant_id="tenant-a", user_id="user-a", request_id="forget-1",
+        memory_ids=["memory-1"], outcome="SUCCEEDED", high_risk=True,
+    )
+    infrastructure = store.record_infrastructure(
+        trace_id="chain-1", tenant_id="tenant-a", user_id="user-a", operation="projection",
+        outcome="succeeded", ids={"memory_id": "memory-1"}, parent_id=evolution.span_id,
+    )
+
+    assert {span.category for span in store.list_by_trace("chain-1")} == {
+        TraceCategory.FORMATION, TraceCategory.EVOLUTION, TraceCategory.RETRIEVAL,
+        TraceCategory.FORGET, TraceCategory.INFRASTRUCTURE,
+    }
+    assert store.list_by_task("task-1") == [retrieval]
+    assert store.list_by_query("query-1") == [retrieval]
+    assert formation.event_id == "event-1"
+    assert evolution.memory_id == infrastructure.memory_id == "memory-1"
+    assert forget.retention_class == "ELEVATED"
+
+
+def test_sampling_is_deterministic_and_critical_paths_are_mandatory() -> None:
+    policy = TraceSamplingPolicy(normal_sample_rate=0.0)
+    store = TraceStore(sampling_policy=policy)
+    normal = store.record(
+        TraceSpan(
+            span_id="normal", trace_id="normal-1", kind=TraceSpanKind.RETRIEVAL,
+            category=TraceCategory.RETRIEVAL, tenant_id="tenant-a", user_id="user-a",
+        )
+    )
+    failed = store.record(
+        TraceSpan(
+            span_id="failed", trace_id="failed-1", kind=TraceSpanKind.INFRASTRUCTURE,
+            category=TraceCategory.INFRASTRUCTURE, tenant_id="tenant-a", user_id="user-a",
+            classification={"outcome": "FAILED"},
+        )
+    )
+    assert normal.sampled is False
+    assert store.list_by_trace("normal-1") == []
+    assert failed.sampled is True
+    assert failed.retention_class == "ELEVATED"
+    assert failed.expires_at is not None
+
+
+def test_trace_rejects_raw_content_and_purges_only_expired() -> None:
+    with pytest.raises(ValueError, match="trace_raw_field_forbidden:query"):
+        TraceSpan(
+            span_id="unsafe", trace_id="unsafe", kind=TraceSpanKind.RETRIEVAL,
+            tenant_id="tenant-a", user_id="user-a", classification={"query": "secret"},
+        )
+    store = TraceStore(sampling_policy=TraceSamplingPolicy(normal_sample_rate=1.0))
+    recorded = store.record(
+        TraceSpan(
+            span_id="old", trace_id="old", kind=TraceSpanKind.EVENT,
+            tenant_id="tenant-a", user_id="user-a",
+        )
+    )
+    assert recorded.expires_at is not None
+    assert store.purge_expired(now=recorded.expires_at + timedelta(seconds=1)) == 1
+    assert store.records == []

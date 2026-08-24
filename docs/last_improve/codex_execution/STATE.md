@@ -1,5 +1,45 @@
 # MemoryHub vNext Codex Execution State
 
+## B16 start reconciliation — 2026-08-25
+
+- Current batch: B16 (`S5-01` through `S5-04`), status `IN_PROGRESS`; current task: S5-01 `IN_PROGRESS`.
+- Repository truth: branch `dev-remem`, HEAD `5841161ef9acf2457e26f619db61c0fc2a5e52e5` (`feat(vnext): complete B15 s4 reliability gate`, trailer `Batch-ID: B15`). BATCH_BOARD's old B15 commit-plan text was stale; no source change from B15 is pending.
+- Existing untracked SQLite reports in `evaluation/results/` are test artifacts and are preserved. Host-denied pytest temporary directories are also preserved and excluded.
+- Dependencies S2-09, S3-08 and S4-08 are DONE with valid Trace/metrics evidence. No B16 task was already in progress, so the smallest authorized task S5-01 is claimed.
+- Boundary: only S5-01 through S5-04 and required continuity/spec/test artifacts. B17/S5-05 or later must not be read for implementation, claimed, tested, or modified.
+- Exact next action: extend the redacted Trace model/store with the five typed chains, deterministic sampling and retention policy, then add focused safety/association tests.
+
+## S5-01 checkpoint — 2026-08-25
+
+- Status: DONE. `TraceSpan`/`TraceStore` now support the FORMATION, EVOLUTION, RETRIEVAL, FORGET and INFRASTRUCTURE chains, with trace/task/event/memory/query association indexes.
+- Normal application traces use deterministic SHA-256 10% sampling and seven-day retention; high/critical, failure/denial and Forget traces are mandatory with 30-day retention. Direct/test stores keep 100% sampling for backward-compatible diagnostics.
+- Recursive Trace validation rejects raw content-bearing fields; Forget stores only a hash of affected IDs. App wiring shares the redacted TraceStore across Retrieval, Forget, Diagnostics and Projection Outbox.
+- Evidence: `EVIDENCE.md#s5-01-checkpoint`; focused trace/formation/retrieval/Forget/reliability suite: 38 passed; ruff, compileall and diff check passed.
+- Next task: S5-02 `IN_PROGRESS`; implement the four-layer reproducible Benchmark runner.
+
+## S5-02 checkpoint — 2026-08-25
+
+- Status: DONE. Added `evaluation/run_vnext_eval.py`, the single-command four-layer runner for Formation, Retrieval, Infrastructure and E2E evaluation; emitted `evaluation/results/vnext_benchmark.json`.
+- Report pins vNext dataset SHA-256 values, seed 42, mock embedding/model version, formation prompt version, retrieval weight version and runtime environment. The E2E path uses a fixed mock Milvus/embedding setup without hidden external fallback.
+- Evidence: `EVIDENCE.md#s5-02-checkpoint`; focused benchmark/evaluator/reliability/E2E suite: 29 passed; the runner command produced all four layers with infrastructure pass and retrieval scope leak rate 0.0; ruff, compileall and diff check passed.
+- Next task: S5-03 `IN_PROGRESS`; execute four-system comparison and one-mechanism-at-a-time ablations using the same benchmark manifest.
+
+## S5-03 checkpoint — 2026-08-25
+
+- Status: DONE. Added `evaluation/run_vnext_comparison.py` and `evaluation/results/vnext_final/comparison.json` for No Memory, Flat RAG, Original and vNext under the same fixed mock model, offline tools, dataset budgets and five repeated measurements.
+- The report provides mean, variance and two-sided 95% confidence intervals for task success, policy-leak rate, MRR, Context tokens and latency; it contains aggregate/query IDs only and is explicitly redacted.
+- Controlled outcome: Flat RAG and Original each have policy leak rate 0.1; vNext is 0.0 at task success 1.0 and MRR 1.0. The ablation section independently removes router, scope resolver, reranker and Context budget without combining removals.
+- Evidence: `EVIDENCE.md#s5-03-checkpoint`; comparison/retrieval focused suite: 11 passed; comparison command completed; ruff, compileall and diff check passed.
+- Next task: S5-04 `IN_PROGRESS`; deliver the four controlled, default-redacted dashboard pages wired to the diagnostics/benchmark data.
+
+## S5-04 and B16 final acceptance — 2026-08-25
+
+- S5-04 DONE: `DashboardService` serves Explorer, Evolution, Retrieval Debugger and Benchmark projections only after management authorization; every result is redacted and every access is audited. The Benchmark view strips per-query samples before presentation.
+- Desktop client registers four cross-navigable vNext Dashboard pages and CMake sources. All views visibly state default redaction and management authorization; the local environment lacks `cmake`, so native Qt build verification is PARTIAL, not a source/test failure.
+- B16 acceptance: S5-01 Trace safety/correlation, S5-02 one-command four-layer benchmark, S5-03 controlled four-system comparison/ablation, and S5-04 redacted permission-controlled Dashboard all meet their exit criteria. B17 is READY only; do not start it in this session.
+- Validation: focused Dashboard/Trace/Benchmark/Comparison tests passed; safety/write-bypass suite 83 passed; ruff, compileall and diff check passed. The attempted all-file `test_vnext_*.py` invocation exceeded the host command window and remains PARTIAL.
+- Exact next action: stage only B16 code/tests/docs/reports/continuity artifacts, make the one local `Batch-ID: B16` commit, read-only verify HEAD, then stop and hand off B17.
+
 ## B15 start reconciliation — 2026-08-25
 
 - Current batch: B15 (`S4-07` to `S4-08` plus S4 Gate), status `IN_PROGRESS`.

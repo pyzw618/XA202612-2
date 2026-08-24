@@ -17,6 +17,8 @@ from memoryhub.adapter.vnext_schemas import (
     APIError,
     APIErrorCode,
     ContextPayload,
+    DashboardRequest,
+    DashboardResponse,
     DiagnosticRequest,
     DiagnosticResponse,
     ForgetRequest,
@@ -473,6 +475,33 @@ async def vnext_diagnostics(
         target_id=req.target_id,
         items=items,
         redacted=not req.include_sensitive,
+    )
+
+
+@router.post("/dashboard/{view}", response_model=DashboardResponse)
+async def vnext_dashboard(
+    view: str,
+    req: DashboardRequest,
+    request: Request,
+    x_memoryhub_admin: str | None = Header(default=None, alias="X-MemoryHub-Admin"),
+) -> DashboardResponse:
+    """Return a management-audited, default-redacted dashboard projection."""
+    if not _admin_authorized(request, x_memoryhub_admin):
+        raise HTTPException(status_code=403, detail={"code": APIErrorCode.UNAUTHORIZED.value})
+    tenant_id, user_id = _tenant_user(request, tenant_id=req.tenant_id, user_id=req.user_id)
+    if (tenant_id, user_id) != (req.tenant_id, req.user_id):
+        raise HTTPException(status_code=401, detail={"code": APIErrorCode.UNAUTHORIZED.value})
+    service = getattr(request.app.state, "dashboard_service", None)
+    if service is None:
+        raise HTTPException(
+            status_code=503, detail={"code": APIErrorCode.SERVICE_UNAVAILABLE.value}
+        )
+    try:
+        data = service.view(view, tenant_id=tenant_id, user_id=user_id, actor_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail={"code": str(exc)}) from exc
+    return DashboardResponse(
+        request_id=req.request_id, trace_id=req.request_id, view=view, data=data, redacted=True
     )
 
 
