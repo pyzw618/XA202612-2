@@ -17,6 +17,7 @@ from memoryhub.application.formation_shadow import (
     FormationShadowService,
     ShadowComparisonReport,
 )
+from memoryhub.application.rollout_service import RolloutController
 from memoryhub.observability.trace_models import TraceSpan, TraceSpanKind
 from memoryhub.observability.trace_policy import TraceCategory
 from memoryhub.observability.trace_store import TraceStore
@@ -41,6 +42,7 @@ class DualReadComparisonReport:
     vnext_ids_hash: str
     differences: tuple[DualReadDifference, ...] = ()
     policy_leak_count: int = 0
+    cross_tenant_count: int = 0
     forget_leak_count: int = 0
     vnext_error: str = ""
     legacy_result_returned: bool = True
@@ -51,6 +53,7 @@ class DualReadComparisonReport:
         return (
             not self.vnext_error
             and self.policy_leak_count == 0
+            and self.cross_tenant_count == 0
             and self.forget_leak_count == 0
         )
 
@@ -59,6 +62,17 @@ class DualReadComparisonReport:
 class DualReadResult:
     legacy_response: Any
     report: DualReadComparisonReport
+    vnext_response: Any = None
+
+
+@dataclass(frozen=True, slots=True)
+class RolloutReadResult:
+    """The one result-selection boundary shared by every read adapter."""
+
+    response: Any
+    mode: str
+    served_by: str
+    report: DualReadComparisonReport | None = None
 
 
 @dataclass
@@ -172,6 +186,11 @@ class ShadowReadService:
             or str(item.get("status", item.get("evolution_status", ""))).upper()
             in {"DELETED", "SUPERSEDED"}
         )
+        cross_tenant = sum(
+            1
+            for item in vnext_items
+            if item.get("tenant_id") not in {None, "", tenant_id}
+        )
         forget_leaks = sum(
             1
             for item in vnext_items
@@ -181,6 +200,10 @@ class ShadowReadService:
         if policy_leaks:
             differences.append(
                 DualReadDifference("POLICY_LEAK", policy_leaks, "TENANT_OR_STATUS")
+            )
+        if cross_tenant:
+            differences.append(
+                DualReadDifference("CROSS_TENANT", cross_tenant, "TENANT_MISMATCH")
             )
         if forget_leaks:
             differences.append(
@@ -198,6 +221,7 @@ class ShadowReadService:
             vnext_ids_hash=self._hash_ids(vnext_ids),
             differences=tuple(differences),
             policy_leak_count=policy_leaks,
+            cross_tenant_count=cross_tenant,
             forget_leak_count=forget_leaks,
             vnext_error=vnext_error,
         )
@@ -221,7 +245,11 @@ class ShadowReadService:
                 scores={"latency_ms": (time.perf_counter() - started) * 1000},
             )
         )
-        return DualReadResult(legacy_response=legacy_response, report=report)
+        return DualReadResult(
+            legacy_response=legacy_response,
+            report=report,
+            vnext_response=vnext_response,
+        )
 
     @staticmethod
     def _items(response: Any) -> list[dict[str, Any]]:
@@ -240,7 +268,10 @@ class ShadowReadService:
             if hasattr(value, "model_dump"):
                 value = value.model_dump(mode="json")
             elif not isinstance(value, dict):
-                value = vars(value)
+                try:
+                    value = vars(value)
+                except TypeError:
+                    value = {}
             normalized.append(
                 {
                     key: value.get(key)
@@ -265,10 +296,62 @@ class ShadowReadService:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+class RolloutReadService:
+    """Apply the shared controller decision to one real read request."""
+
+    def __init__(
+        self,
+        *,
+        controller: RolloutController,
+        shadow_read: ShadowReadService,
+    ) -> None:
+        self.controller = controller
+        self.shadow_read = shadow_read
+
+    def read(
+        self,
+        request: Any,
+        *,
+        legacy_reader: Callable[[Any], Any],
+        vnext_reader: Callable[[Any], Any],
+    ) -> RolloutReadResult:
+        mode = self.controller.current_mode
+        if mode == "legacy":
+            return RolloutReadResult(
+                response=legacy_reader(request), mode=mode, served_by="legacy"
+            )
+        if mode == "vnext":
+            return RolloutReadResult(
+                response=vnext_reader(request), mode=mode, served_by="vnext"
+            )
+
+        comparison = self.shadow_read.dual_read(
+            request, legacy_reader=legacy_reader, vnext_reader=vnext_reader
+        )
+        selected_vnext = mode == "canary" and self.controller.choose_vnext(request)
+        # A failed canary read is fail-closed to legacy.  The controller remains
+        # the only mode/traffic decision maker; this is its safety result.
+        serve_vnext = selected_vnext and not comparison.report.vnext_error
+        response = (
+            comparison.vnext_response
+            if serve_vnext and mode == "canary"
+            else comparison.legacy_response
+        )
+        self.controller.record_read_observation(comparison.report)
+        return RolloutReadResult(
+            response=response,
+            mode=mode,
+            served_by="vnext" if serve_vnext else "legacy",
+            report=comparison.report,
+        )
+
+
 __all__ = [
     "DualReadComparisonReport",
     "DualReadDifference",
     "DualReadResult",
+    "RolloutReadResult",
+    "RolloutReadService",
     "ShadowReadService",
     "VNextShadowReport",
 ]

@@ -22,7 +22,6 @@ from .episode_service import (
 )
 from .event_gateway import EventGateway, EventGatewayResult, GatewayStatus
 from .evolution_service import EvolutionResult, EvolutionService, EvolutionServiceError
-from .formation_worker import FormationProcessResult, FormationWorker
 from .feedback_service import (
     AgentUsageTrace,
     UsageKind,
@@ -31,6 +30,7 @@ from .feedback_service import (
     UtilityFeedbackShadowReport,
     UtilityUpdateProposal,
 )
+from .formation_worker import FormationProcessResult, FormationWorker
 from .retrieval_service import RetrievalResult, RetrievalService
 from .rollout_service import (
     LEVELS,
@@ -38,11 +38,14 @@ from .rollout_service import (
     RolloutController,
     RolloutGateError,
     RolloutObservation,
+    RolloutRepository,
 )
 from .shadow_read_service import (
     DualReadComparisonReport,
     DualReadDifference,
     DualReadResult,
+    RolloutReadResult,
+    RolloutReadService,
     ShadowReadService,
     VNextShadowReport,
 )
@@ -78,6 +81,9 @@ __all__ = [
     "RolloutController",
     "RolloutGateError",
     "RolloutObservation",
+    "RolloutRepository",
+    "RolloutReadResult",
+    "RolloutReadService",
     "EventGateway",
     "EventGatewayResult",
     "GatewayStatus",

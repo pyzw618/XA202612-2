@@ -238,6 +238,9 @@ def create_app(
     app.state.memory_write_service = None
     app.state.memory_service = memory_service
     app.state.owns_memory_service = False
+    app.state.rollout_controller = None
+    app.state.shadow_read_service = None
+    app.state.rollout_read_service = None
 
     @app.exception_handler(RequestValidationError)
     async def safe_request_validation_error(
@@ -635,6 +638,23 @@ def create_app(
             activation_repository=ActivationRepository(db),
             retrieval_log_repository=RetrievalLogRepository(db),
             trace_store=app.state.trace_store,
+        )
+        # One application-scoped controller and one shadow service own every
+        # production read decision.  Their state is rollout-only and durable;
+        # Authority records are never changed by rollback.
+        from memoryhub.application.rollout_service import RolloutController
+        from memoryhub.application.shadow_read_service import (
+            RolloutReadService,
+            ShadowReadService,
+        )
+
+        app.state.rollout_controller = RolloutController(config.vnext, db=db)
+        app.state.shadow_read_service = ShadowReadService(
+            trace_store=app.state.trace_store
+        )
+        app.state.rollout_read_service = RolloutReadService(
+            controller=app.state.rollout_controller,
+            shadow_read=app.state.shadow_read_service,
         )
         from memoryhub.application.dashboard_service import DashboardService
         from memoryhub.application.diagnostic_service import DiagnosticService

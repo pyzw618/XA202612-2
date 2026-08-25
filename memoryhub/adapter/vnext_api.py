@@ -8,10 +8,11 @@ repositories or indexes directly.
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from memoryhub.adapter.schemas import ExtractionTask
 from memoryhub.adapter.vnext_schemas import (
@@ -34,6 +35,7 @@ from memoryhub.adapter.vnext_schemas import (
 from memoryhub.application.canonical_write import CanonicalWriteService
 from memoryhub.application.forget_service import ForgetService
 from memoryhub.application.retrieval_service import RetrievalService
+from memoryhub.application.rollout_service import RolloutGateError
 from memoryhub.domain.contracts import (
     EpisodeEventContract,
     EpisodeSnapshot,
@@ -47,6 +49,25 @@ router = APIRouter(prefix="/api/memory/vnext", tags=["memory-vnext"])
 
 
 MemoryHubTenantHeader = ...  # placeholder removed; use Header(...) inline
+
+
+class RolloutAdvanceRequest(BaseModel):
+    level: int = Field(ge=0, le=100)
+
+
+class RolloutObserveRequest(BaseModel):
+    level: int = Field(ge=1, le=100)
+    request_count: int = Field(ge=0)
+    policy_leak_count: int = Field(default=0, ge=0)
+    cross_tenant_count: int = Field(default=0, ge=0)
+    forget_residual_count: int = Field(default=0, ge=0)
+    error_count: int = Field(default=0, ge=0)
+    window_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class RolloutRollbackRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=256)
+    target_level: int = Field(default=0, ge=0, le=100)
 
 
 def _canonical_write_service(request: Request) -> CanonicalWriteService:
@@ -537,6 +558,91 @@ async def vnext_dashboard(
     )
 
 
+@router.get("/rollout")
+async def rollout_status(
+    request: Request,
+    x_memoryhub_admin: str | None = Header(default=None, alias="X-MemoryHub-Admin"),
+):
+    if not _admin_authorized(request, x_memoryhub_admin):
+        raise HTTPException(status_code=403, detail={"code": APIErrorCode.UNAUTHORIZED.value})
+    controller = getattr(request.app.state, "rollout_controller", None)
+    if controller is None:
+        raise HTTPException(status_code=503, detail={"code": "rollout.service_unavailable"})
+    return controller.snapshot()
+
+
+@router.post("/rollout/advance")
+async def advance_rollout(
+    body: RolloutAdvanceRequest,
+    request: Request,
+    x_memoryhub_admin: str | None = Header(default=None, alias="X-MemoryHub-Admin"),
+):
+    if not _admin_authorized(request, x_memoryhub_admin):
+        raise HTTPException(status_code=403, detail={"code": APIErrorCode.UNAUTHORIZED.value})
+    controller = getattr(request.app.state, "rollout_controller", None)
+    if controller is None:
+        raise HTTPException(status_code=503, detail={"code": "rollout.service_unavailable"})
+    try:
+        return asdict(controller.advance(body.level))
+    except RolloutGateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "rollout.gate_failed", "message": str(exc)},
+        ) from exc
+
+
+@router.post("/rollout/observe")
+async def observe_rollout(
+    body: RolloutObserveRequest,
+    request: Request,
+    x_memoryhub_admin: str | None = Header(default=None, alias="X-MemoryHub-Admin"),
+):
+    if not _admin_authorized(request, x_memoryhub_admin):
+        raise HTTPException(status_code=403, detail={"code": APIErrorCode.UNAUTHORIZED.value})
+    controller = getattr(request.app.state, "rollout_controller", None)
+    if controller is None:
+        raise HTTPException(status_code=503, detail={"code": "rollout.service_unavailable"})
+    try:
+        return asdict(
+            controller.observe(
+                body.level,
+                request_count=body.request_count,
+                policy_leak_count=body.policy_leak_count,
+                cross_tenant_count=body.cross_tenant_count,
+                forget_residual_count=body.forget_residual_count,
+                error_count=body.error_count,
+                window_id=body.window_id,
+            )
+        )
+    except RolloutGateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "rollout.observation_rejected", "message": str(exc)},
+        ) from exc
+
+
+@router.post("/rollout/rollback")
+async def rollback_rollout(
+    body: RolloutRollbackRequest,
+    request: Request,
+    x_memoryhub_admin: str | None = Header(default=None, alias="X-MemoryHub-Admin"),
+):
+    if not _admin_authorized(request, x_memoryhub_admin):
+        raise HTTPException(status_code=403, detail={"code": APIErrorCode.UNAUTHORIZED.value})
+    controller = getattr(request.app.state, "rollout_controller", None)
+    if controller is None:
+        raise HTTPException(status_code=503, detail={"code": "rollout.service_unavailable"})
+    try:
+        return asdict(
+            controller.rollback(reason=body.reason, target_level=body.target_level)
+        )
+    except RolloutGateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "rollout.rollback_failed", "message": str(exc)},
+        ) from exc
+
+
 @router.post("/search", response_model=MemoryRetrievalResponse)
 async def vnext_search(
     req: MemoryRetrievalRequest,
@@ -550,9 +656,25 @@ async def vnext_search(
     """
     tenant_id, user_id = identity
     service = _retrieval_service(request)
+    rollout = getattr(request.app.state, "rollout_read_service", None)
+    if rollout is None:
+        raise HTTPException(status_code=503, detail={"code": "rollout.service_unavailable"})
     vnext_request = req.model_copy(update={"tenant_id": tenant_id, "user_id": user_id})
-    result = service.search(vnext_request)
-    return result
+    from memoryhub.adapter.api import _legacy_search_response
+
+    selected = rollout.read(
+        vnext_request,
+        legacy_reader=lambda _request: _legacy_search_response(
+            _legacy_request(vnext_request), request
+        ),
+        vnext_reader=lambda value: service.search(value),
+    )
+    if isinstance(selected.response, MemoryRetrievalResponse):
+        return selected.response
+    return MemoryRetrievalResponse.from_legacy_search_response(
+        selected.response, request_id=vnext_request.request_id,
+        tenant_id=tenant_id, user_id=user_id,
+    )
 
 
 @router.post("/context", response_model=ContextPayload)
@@ -564,8 +686,29 @@ async def vnext_context(
     """Unified vNext context endpoint returning the structured prompt payload."""
     tenant_id, user_id = identity
     service = _retrieval_service(request)
+    rollout = getattr(request.app.state, "rollout_read_service", None)
+    if rollout is None:
+        raise HTTPException(status_code=503, detail={"code": "rollout.service_unavailable"})
     vnext_request = req.model_copy(update={"tenant_id": tenant_id, "user_id": user_id})
-    return service.context(vnext_request)
+    from memoryhub.adapter.api import _legacy_context_response
+
+    selected = rollout.read(
+        vnext_request,
+        legacy_reader=lambda _request: _legacy_context_response(
+            _legacy_request(vnext_request), request
+        ),
+        vnext_reader=lambda value: service.context(value),
+    )
+    if isinstance(selected.response, ContextPayload):
+        return selected.response
+    context_text, _search = selected.response
+    return ContextPayload(rendered_context=context_text)
+
+
+def _legacy_request(request: MemoryRetrievalRequest):
+    from memoryhub.adapter.schemas import SearchRequest
+
+    return SearchRequest(user_id=request.user_id, query=request.query, top_k=request.page_size)
 
 
 __all__ = ["router"]

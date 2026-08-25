@@ -205,6 +205,48 @@ class MemoryRetrievalResponse(APIModel):
     next_cursor: str = ""
     total_count: int = Field(default=0, ge=0)
 
+    @classmethod
+    def from_legacy_search_response(
+        cls,
+        response: SearchResponse,
+        *,
+        request_id: str,
+        tenant_id: str,
+        user_id: str,
+    ) -> "MemoryRetrievalResponse":
+        """Adapt a legacy result for versioned adapters without re-reading."""
+        items: list[RetrievedMemory] = []
+        for result in response.results:
+            kind = {
+                "preference": MemoryType.PREFERENCE,
+                "knowledge": MemoryType.SEMANTIC,
+                "fact": MemoryType.SEMANTIC,
+            }.get((result.memory_type or "").lower(), MemoryType.SEMANTIC)
+            items.append(
+                RetrievedMemory(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    memory_id=result.memory_id,
+                    memory_type=kind,
+                    layer=LifecycleLayer.LONG_TERM,
+                    scope_level=MemoryScope.GLOBAL,
+                    scope="GLOBAL",
+                    content_version=int((result.metadata or {}).get("content_version", 1)),
+                    evolution_status="ACTIVE",
+                    content={"text": result.content or ""},
+                    score=max(0.0, float(result.score)),
+                    source_ids=[result.source or "legacy"],
+                )
+            )
+        return cls(
+            request_id=request_id,
+            trace_id=request_id,
+            intent=RetrievalIntent.MIXED,
+            selected_memories=items,
+            context=ContextPayload(relevant_memory_ids=[item.memory_id for item in items]),
+            total_count=len(items),
+        )
+
     def to_legacy_search_response(self, *, latency_ms: float = 0.0) -> SearchResponse:
         """Downgrade a vNext response to the legacy SearchResponse shape.
 

@@ -19,6 +19,7 @@ from memoryhub.adapter.schemas import (
     SceneScope,
     SearchRequest,
 )
+from memoryhub.adapter.vnext_schemas import MemoryRetrievalRequest
 from memoryhub.application.event_gateway import GatewayStatus
 from memoryhub.core.forget import MemoryForgetter
 
@@ -293,9 +294,11 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
     processor = getattr(request.app.state, "event_processor", None)
     canonical = getattr(request.app.state, "canonical_write_service", None)
     retriever = getattr(request.app.state, "retriever", None)
+    retrieval_service = getattr(request.app.state, "retrieval_service", None)
+    rollout = getattr(request.app.state, "rollout_read_service", None)
     if canonical is None:
         raise HTTPException(status_code=503, detail="canonical write service not initialized")
-    if retriever is None:
+    if retriever is None or retrieval_service is None or rollout is None:
         raise HTTPException(status_code=503, detail="retrieval service not initialized")
 
     events = [_normalize_event(ev) for ev in body.events]
@@ -312,15 +315,28 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
     written_event_ids = [event.event_id for event in safe_events]
 
     user_id = safe_events[0].user_id if safe_events else "demo_user"
-    search_response = retriever.search(
-        SearchRequest(
-            user_id=user_id,
-            query=body.retrieval_query or body.user_message,
-            context=SceneScope(scene=body.scene, task_type=body.task_type),
-            top_k=8,
-            memory_types=["preference", "knowledge"],
-        )
+    legacy_request = SearchRequest(
+        user_id=user_id,
+        query=body.retrieval_query or body.user_message,
+        context=SceneScope(scene=body.scene, task_type=body.task_type),
+        top_k=8,
+        memory_types=["preference", "knowledge"],
     )
+    vnext_request = MemoryRetrievalRequest(
+        request_id=f"agent-step-{user_id}-{hash(legacy_request.query) & 0xFFFFFFFF:08x}",
+        tenant_id=request.headers.get("X-MemoryHub-Tenant", user_id or "default"),
+        user_id=user_id,
+        query=legacy_request.query,
+        page_size=legacy_request.top_k,
+    )
+    selected = rollout.read(
+        vnext_request,
+        legacy_reader=lambda _request: retriever.search(legacy_request),
+        vnext_reader=lambda value: retrieval_service.search(value),
+    )
+    search_response = selected.response
+    if hasattr(search_response, "to_legacy_search_response"):
+        search_response = search_response.to_legacy_search_response()
     cards = []
     for result in search_response.results:
         memory = getattr(retriever, "memory_lookup", {}).get(result.memory_id)

@@ -670,7 +670,12 @@ def _fact_knowledge_lookup(request: Request, fact_id: str, user_id: str):
 
 
 @router.get("/facts")
-async def list_facts(request: Request, user_id: str = "default", status: str | None = "active", limit: int = Query(default=100, ge=1, le=500)):
+async def list_facts(
+    request: Request,
+    user_id: str = "default",
+    status: str | None = "active",
+    limit: int = Query(default=100, ge=1, le=500),
+):
     """FACT 列表：纯 knowledge(FACT) 单一来源（legacy facts 已并入知识，§4.8.8）。"""
     know_repo = getattr(request.app.state, "know_repo", None)
     if know_repo is None:
@@ -681,7 +686,11 @@ async def list_facts(request: Request, user_id: str = "default", status: str | N
     ][:limit]
 
 @router.get("/facts/conflicts")
-async def list_fact_conflicts(request: Request, user_id: str = "default", limit: int = Query(default=100, ge=1, le=500)):
+async def list_fact_conflicts(
+    request: Request,
+    user_id: str = "default",
+    limit: int = Query(default=100, ge=1, le=500),
+):
     """FACT 冲突：knowledge 冲突（legacy fact 冲突已并入知识冲突链，§4.8.5）。"""
     out: list[dict] = []
     conflict_repo = getattr(request.app.state, "conflict_repo", None)
@@ -924,6 +933,44 @@ def _apply_tiered_cascade(
     return response
 
 
+def _legacy_search_response(req: SearchRequest, request: Request) -> SearchResponse:
+    """Execute the pre-vNext reader; rollout code decides if it is returned."""
+    retriever = getattr(request.app.state, "retriever", None)
+    memory = getattr(request.app.state, "memory_service", None)
+    if retriever is None:
+        if memory is None:
+            raise HTTPException(status_code=503, detail="retrieval service not initialized")
+        return memory.search(req)
+    response = retriever.search(req)
+    if response.total_count == 0 and memory is not None:
+        fallback = memory.search(req)
+        if fallback.total_count:
+            response = fallback
+    return response
+
+
+def _legacy_context_response(req: SearchRequest, request: Request) -> tuple[str, SearchResponse]:
+    """Render context from the same legacy search result used by dual-read."""
+    memory = getattr(request.app.state, "memory_service", None)
+    retriever = getattr(request.app.state, "retriever", None)
+    if retriever is None and memory is not None:
+        return memory.context(req)
+    response = _legacy_search_response(req, request)
+    if not response.preferences and not response.knowledge:
+        return "", response
+    lines: list[str] = []
+    if response.preferences:
+        lines.append("## 用户偏好")
+        lines.extend(
+            f"- {item.text} (置信度: {item.confidence:.2f})"
+            for item in response.preferences
+        )
+    if response.knowledge:
+        lines.append("## 相关知识")
+        lines.extend(f"- {item.name}: {item.content}" for item in response.knowledge)
+    return "\n".join(lines), response
+
+
 @router.post("/search", response_model=SearchResponse)
 async def search_memory(req: SearchRequest, request: Request):
     """
@@ -945,53 +992,24 @@ async def search_memory(req: SearchRequest, request: Request):
         knowledge: 匹配的知识记忆列表
         latency_ms: 检索耗时
     """
-    # vNext convergence: prefer the unified RetrievalService when available.
     retrieval_service = getattr(request.app.state, "retrieval_service", None)
-    if retrieval_service is not None:
-        try:
-            vnext_req = _search_request_to_vnext(
-                req,
-                request_id=f"legacy-search-{req.user_id}-{hash(req.query) & 0xFFFFFFFF:08x}",
-            )
-            vnext_response = retrieval_service.search(vnext_req)
-            response = vnext_response.to_legacy_search_response(
-                latency_ms=getattr(vnext_response, "latency_ms", 0.0)
-            )
-            response = _apply_tiered_cascade(request, req, response)
-            _record_search_access(request, response)
-            return response
-        except HTTPException:
-            raise
-        except Exception:
-            # Fall back to the legacy retriever if vNext retrieval fails.
-            pass
-
-    retriever = getattr(request.app.state, "retriever", None)
-    if retriever is None:
-        memory = getattr(request.app.state, "memory_service", None)
-        if memory is None:
-            raise HTTPException(
-                status_code=503, detail="retrieval service not initialized"
-            )
-        try:
-            response = memory.search(req)
-            response = _apply_tiered_cascade(request, req, response)
-            _record_search_access(request, response)
-            return response
-        except HTTPException:
-            raise
-        except Exception:
-            raise HTTPException(
-                status_code=500, detail="internal retrieval error"
-            ) from None
+    rollout = getattr(request.app.state, "rollout_read_service", None)
+    if retrieval_service is None or rollout is None:
+        raise HTTPException(status_code=503, detail="retrieval service not initialized")
     try:
-        response = retriever.search(req)
-        if response.total_count == 0:
-            memory = getattr(request.app.state, "memory_service", None)
-            if memory is not None:
-                fallback = memory.search(req)
-                if fallback.total_count:
-                    response = fallback
+        vnext_req = _search_request_to_vnext(
+            req,
+            tenant_id=request.headers.get("X-MemoryHub-Tenant", req.user_id or "default"),
+            request_id=f"legacy-search-{req.user_id}-{hash(req.query) & 0xFFFFFFFF:08x}",
+        )
+        selected = rollout.read(
+            vnext_req,
+            legacy_reader=lambda _request: _legacy_search_response(req, request),
+            vnext_reader=lambda vnext_request: retrieval_service.search(vnext_request),
+        )
+        response = selected.response
+        if hasattr(response, "to_legacy_search_response"):
+            response = response.to_legacy_search_response()
         response = _apply_tiered_cascade(request, req, response)
         _record_search_access(request, response)
         return response
@@ -1016,50 +1034,31 @@ async def get_memory_context(req: SearchRequest, request: Request):
     数据流: OS Agent → get_memory_context → vNext RetrievalService.context
             → 返回结构化 ContextPayload 的文本渲染
     """
-    # vNext convergence: prefer the unified RetrievalService when available.
     retrieval_service = getattr(request.app.state, "retrieval_service", None)
-    if retrieval_service is not None:
-        try:
-            vnext_req = _search_request_to_vnext(
-                req,
-                request_id=f"legacy-context-{req.user_id}-{hash(req.query) & 0xFFFFFFFF:08x}",
-            )
-            payload = retrieval_service.context(vnext_req)
-            return {"context": payload.rendered_context, "context_text": payload.rendered_context}
-        except HTTPException:
-            raise
-        except Exception:
-            # Fall back to the legacy retriever if vNext retrieval fails.
-            pass
-
-    retriever = getattr(request.app.state, "retriever", None)
-    memory = getattr(request.app.state, "memory_service", None)
+    rollout = getattr(request.app.state, "rollout_read_service", None)
+    if retrieval_service is None or rollout is None:
+        raise HTTPException(status_code=503, detail="retrieval service not initialized")
 
     def _format_context(context_text: str) -> dict[str, str]:
         # 同时兼容本地集成（context）与 MCP 集成（context_text）两种消费方
         return {"context": context_text, "context_text": context_text}
 
-    if retriever is None:
-        if memory is None:
-            raise HTTPException(
-                status_code=503, detail="retrieval service not initialized"
-            )
-        try:
-            context_text, search = memory.context(req)
-            _record_search_access(request, search)
-            return _format_context(context_text)
-        except HTTPException:
-            raise
-        except Exception:
-            raise HTTPException(
-                status_code=500, detail="internal retrieval error"
-            ) from None
     try:
-        response = retriever.search(req)
-        if response.total_count == 0 and memory is not None:
-            context_text, search = memory.context(req)
-            _record_search_access(request, search)
-            return _format_context(context_text)
+        vnext_req = _search_request_to_vnext(
+            req,
+            tenant_id=request.headers.get("X-MemoryHub-Tenant", req.user_id or "default"),
+            request_id=f"legacy-context-{req.user_id}-{hash(req.query) & 0xFFFFFFFF:08x}",
+        )
+        selected = rollout.read(
+            vnext_req,
+            legacy_reader=lambda _request: _legacy_context_response(req, request),
+            vnext_reader=lambda vnext_request: retrieval_service.context(vnext_request),
+        )
+        if hasattr(selected.response, "rendered_context"):
+            return _format_context(selected.response.rendered_context)
+        context_text, search = selected.response
+        _record_search_access(request, search)
+        return _format_context(context_text)
     except (KylinEmbeddingError, MilvusEngineError) as exc:
         raise _retrieval_http_error(exc) from None
     except HTTPException:
@@ -1068,21 +1067,6 @@ async def get_memory_context(req: SearchRequest, request: Request):
         raise HTTPException(status_code=400, detail="invalid search request") from None
     except Exception:
         raise HTTPException(status_code=500, detail="internal retrieval error") from None
-
-    _record_search_access(request, response)
-
-    # 格式化为可注入 prompt 的文本
-    lines = []
-    if response.preferences:
-        lines.append("## 用户偏好")
-        for p in response.preferences:
-            lines.append(f"- {p.text} (置信度: {p.confidence:.2f})")
-    if response.knowledge:
-        lines.append("## 相关知识")
-        for k in response.knowledge:
-            lines.append(f"- {k.name}: {k.content}")
-    return _format_context("\n".join(lines))
-
 
 # ============================================================
 # 偏好管理
@@ -1549,7 +1533,9 @@ async def propose_facts(req: FactProposeRequest, request: Request):
     for raw in req.triples:
         triple_data = dict(raw)
         subject = str(triple_data.get("subject_text") or triple_data.get("subject") or "").strip()
-        predicate = str(triple_data.get("predicate_text") or triple_data.get("predicate") or "").strip()
+        predicate = str(
+            triple_data.get("predicate_text") or triple_data.get("predicate") or ""
+        ).strip()
         obj = str(triple_data.get("object_text") or triple_data.get("object") or "").strip()
         if not subject or not predicate or not obj:
             continue
@@ -1697,7 +1683,10 @@ async def run_evaluation(task_name: str, dataset_path: str = "", request: Reques
 
     if task == "retrieval":
         if not dataset_path:
-            raise HTTPException(status_code=400, detail="dataset_path is required for retrieval evaluation")
+            raise HTTPException(
+                status_code=400,
+                detail="dataset_path is required for retrieval evaluation",
+            )
         if retriever is None:
             raise HTTPException(status_code=503, detail="retriever not initialized")
         try:
@@ -1714,7 +1703,10 @@ async def run_evaluation(task_name: str, dataset_path: str = "", request: Reques
 
     if task == "latency":
         if not dataset_path:
-            raise HTTPException(status_code=400, detail="dataset_path is required for latency benchmark")
+            raise HTTPException(
+                status_code=400,
+                detail="dataset_path is required for latency benchmark",
+            )
         if retriever is None:
             raise HTTPException(status_code=503, detail="retriever not initialized")
         try:

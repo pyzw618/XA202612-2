@@ -568,6 +568,51 @@ class RetrievalLogRow(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
 
 
+class RolloutStateRow(Base):
+    """Durable read-path rollout pointer; it never mutates Authority data."""
+
+    __tablename__ = "vnext_rollout_state"
+
+    state_id = Column(String(32), primary_key=True)
+    current_level = Column(Integer, nullable=False, default=0)
+    current_mode = Column(String(16), nullable=False, default="legacy")
+    rollback_window_minutes = Column(Integer, nullable=False, default=60)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+
+class RolloutObservationRow(Base):
+    """Redacted, durable safety window counters for one rollout level."""
+
+    __tablename__ = "vnext_rollout_observations"
+
+    window_id = Column(String(128), primary_key=True)
+    level = Column(Integer, nullable=False, index=True)
+    request_count = Column(Integer, nullable=False, default=0)
+    policy_leak_count = Column(Integer, nullable=False, default=0)
+    cross_tenant_count = Column(Integer, nullable=False, default=0)
+    forget_residual_count = Column(Integer, nullable=False, default=0)
+    error_count = Column(Integer, nullable=False, default=0)
+    observed_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+
+
+class RolloutAuditRow(Base):
+    """Durable redacted CUTOVER/ROLLBACK audit record."""
+
+    __tablename__ = "vnext_rollout_audits"
+
+    audit_id = Column(String(128), primary_key=True)
+    action = Column(String(16), nullable=False, index=True)
+    previous_level = Column(Integer, nullable=False)
+    next_level = Column(Integer, nullable=False)
+    previous_mode = Column(String(16), nullable=False)
+    next_mode = Column(String(16), nullable=False)
+    window_id = Column(String(128), nullable=False, index=True)
+    reason = Column(String(256), nullable=False, default="")
+    rollback_window_minutes = Column(Integer, nullable=False, default=60)
+    metrics = Column(JSON, nullable=False, default=dict)
+    recorded_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+
+
 class IdempotencyRecordRow(Base):
     """Tenant-scoped request deduplication record without raw request body."""
 
