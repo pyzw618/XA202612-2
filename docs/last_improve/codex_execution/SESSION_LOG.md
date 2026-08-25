@@ -629,3 +629,34 @@
 - Task status changes: S5-08 IN_PROGRESS → DONE; B17 IN_PROGRESS → DONE; B18 TODO → READY.
 - Commit rule: create exactly one local commit containing only B17 artifacts and required continuity files, with title `feat(vnext): complete B17 s5 migration cutover` and trailer `Batch-ID: B17`; use `SELF (Batch-ID: B17)` in continuity files; do not push/amend/rebase.
 - Hard stop: after read-only HEAD SHA/file/status verification, stop immediately and hand off `docs/last_improve/codex_batches/B18_release.md`; do not execute, claim, research or modify B18.
+
+## Checkpoint 2026-08-25-B18-01 — B18 start reconciliation
+
+- Started: 2026-08-25 +08:00; Ended: in progress.
+- Branch/HEAD: `dev-remem` / `5e5f3cb3a1a3147bab8b2bd722780b56f74fdcd6` (B17 commit, `Batch-ID: B17`).
+- Restored batch/task: B18 READY with no in-progress task; claimed S5-09 as the smallest dependency-satisfied task.
+- Initial reconciliation: tracked worktree diff is empty; no applicable `AGENTS.md`; existing untracked evaluation DBs/reports and denied pytest temp directories are preserved and excluded.
+- Boundary: only S5-09/S5-10 and required continuity/spec/test/report/demo artifacts; no batch beyond B18.
+- Task status changes: B18 READY → IN_PROGRESS; S5-09 TODO → IN_PROGRESS.
+- Exact next step: create/update REST/CLI/MCP/SDK docs and ops runbooks, then verify documented commands execute in a clean environment.
+
+## Checkpoint 2026-08-25-B18-02 — S5-09 complete; S5-10 claimed
+
+- Started: 2026-08-25 +08:00; Ended: in progress.
+- Restored task: `S5-09 IN_PROGRESS`; completed documentation and executable verification, then claimed `S5-10`.
+- Completed changes: added `docs/spec/VNEXT_DEPLOYMENT.md`, `VNEXT_BACKUP_RECOVERY.md`, `VNEXT_FAULT_HANDLING.md`, `VNEXT_ACCEPTANCE.md`; updated `agent-integration/README.md`; added `tests/test_vnext_docs.py`.
+- Validation: `pytest tests/test_vnext_docs.py tests/test_vnext_demo.py -q` → `16 passed`; CLI/MCP/SDK import commands exit 0; scoped ruff/compileall passed.
+- Task status changes: S5-09 IN_PROGRESS → DONE; S5-10 TODO → IN_PROGRESS.
+- Boundary: S5-09 docs finalized; no work outside B18.
+- Exact next step: create fixed, redacted, replayable demo and final acceptance package.
+
+## Checkpoint 2026-08-25-B18-03 — B18 final validation and acceptance
+
+- Started: 2026-08-25 +08:00; Ended: pending single local commit and read-only verification.
+- Restored task: `S5-10 IN_PROGRESS`; completed demo package and final acceptance.
+- Completed changes: added `examples/vnext_demo/` fixtures, `run_demo.py`, `tests/test_vnext_demo.py`, `docs/spec/VNEXT_ACCEPTANCE.md`; updated all continuity files to mark S5/P0/P1/Release Gate PASS.
+- Validation: B18 focused/affected suite 341 passed; safety/contract/error suite passed; scoped ruff/compileall passed; demo runner exited 0; output redacted.
+- Task status changes: S5-10 IN_PROGRESS → DONE; B18 IN_PROGRESS → DONE.
+- Gate status changes: S5/P0/P1/Release Gate TODO → PASS.
+- Commit rule: create exactly one local commit containing only B18 artifacts and required continuity files, with title `feat(vnext): complete B18 release` and trailer `Batch-ID: B18`; use `SELF (Batch-ID: B18)` in continuity files; do not push/amend/rebase.
+- Hard stop: after read-only HEAD SHA/file/status verification, stop immediately; this is the final batch.

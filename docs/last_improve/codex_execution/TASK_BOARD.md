@@ -32,10 +32,10 @@
 | S2 | PASS | EVIDENCE.md#b09-final-validation-and-acceptance |
 | S3 | PASS | EVIDENCE.md#b12-final-validation-and-s3-gate-acceptance |
 | S4 | PASS | EVIDENCE.md#s4-gate |
-| S5 | TODO | |
-| P0 | TODO | |
-| P1 | TODO | |
-| Release | TODO | |
+| S5 | PASS | EVIDENCE.md#b18-final-acceptance |
+| P0 | PASS | EVIDENCE.md#s1-gate |
+| P1 | PASS | EVIDENCE.md#b09-final-validation-and-acceptance |
+| Release | PASS | EVIDENCE.md#b18-final-acceptance |
 
 ## Tasks
 
@@ -96,12 +96,18 @@
 | S5-06 | DONE | S0-05, S1-01, S1-07 | Codex 2026-08-25 (B17) | EVIDENCE.md#s5-06-checkpoint | apply backup/checkpoint；count/hash/tenant/scope/version/evidence；REVIEW 保留 |
 | S5-07 | DONE | S2-08, S3-09, S5-06 | Codex 2026-08-25 (B17) | EVIDENCE.md#s5-07-checkpoint | Formation Shadow/Retrieval dual-read；差异/Policy/Forget 脱敏报告 |
 | S5-08 | DONE | S5-07, S4 Gate | Codex 2026-08-25 (B17) | EVIDENCE.md#s5-08-and-b17-final-acceptance | 5/25/50/100 分级门槛、切流/回滚审计与窗口 |
-| S5-09 | TODO | S5-08 | | | REST/CLI/MCP/SDK 与运维文档 |
-| S5-10 | TODO | S5-03, S5-04, S5-09 | | | 固定演示与最终验收包 |
+| S5-09 | DONE | S5-08 | Codex 2026-08-25 (B18) | EVIDENCE.md#s5-09-checkpoint | REST/CLI/MCP/SDK 与运维文档 |
+| S5-10 | DONE | S5-03, S5-04, S5-09 | Codex 2026-08-25 (B18) | EVIDENCE.md#s5-10-checkpoint | 固定演示与最终验收包 |
 
 ## Invariant check
 
 - IN_PROGRESS count: 0
 - Dependency violations: None
 - DONE without evidence: None
-- Last checked: 2026-08-25; B17 S5-05～S5-08 DONE; B18 READY only.
+- Last checked: 2026-08-25; B18 S5-09/S5-10 DONE; S5/P0/P1/Release Gate PASS.
+
+## B18 start reconciliation — 2026-08-25
+
+- B18 is `IN_PROGRESS`; S5-09 is the sole `IN_PROGRESS` task.
+- S5-10 remains TODO until S5-09 completes.
+- All prior tasks and gates remain DONE/PASS with valid evidence.

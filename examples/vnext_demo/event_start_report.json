@@ -1,0 +1,12 @@
+[
+  {
+    "event_type": "user_goal",
+    "session_id": "demo_session_001",
+    "turn_id": "turn_001",
+    "payload": {
+      "text": "I need to prepare a weekly report",
+      "goal": "prepare weekly report",
+      "constraints": ["formal tone", "include metrics"]
+    }
+  }
+]

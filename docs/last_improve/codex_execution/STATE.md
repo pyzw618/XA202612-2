@@ -501,3 +501,29 @@
 - Status: DONE; end-to-end Context Service wires fusion→rerank→scope→budget→rendered ContextPayload with trace/dropped diagnostics.
 - Implementation: `memoryhub/application/context_service.py`, `memoryhub/application/__init__.py`.
 - Evidence: `tests/test_vnext_context_service.py` 5 passed; ruff/compileall passed.
+
+## B18 start reconciliation — 2026-08-25
+
+- Current batch: B18 (`S5-09` through `S5-10` plus S5/P0/P1/Release Gate), status `IN_PROGRESS`; current task: S5-09 `IN_PROGRESS`.
+- Repository truth: branch `dev-remem`, HEAD `5e5f3cb3a1a3147bab8b2bd722780b56f74fdcd6` (`feat(vnext): complete B17 s5 migration cutover`, trailer `Batch-ID: B17`). Tracked worktree diff is empty.
+- B17 is DONE; B18 is the sole READY batch. No B18 task was previously in progress, so S5-09 is claimed.
+- No applicable `AGENTS.md` was found. Boundary: only S5-09/S5-10, required continuity/spec/test/report artifacts, and final Gate review; do not execute or modify any batch beyond B18.
+- Exact next action: update REST/CLI/MCP/SDK, deployment, migration, backup/recovery and fault-handling docs; verify documented commands execute in a clean environment.
+
+## S5-09 checkpoint — 2026-08-25
+
+- Status: DONE. Added `docs/spec/VNEXT_DEPLOYMENT.md`, `docs/spec/VNEXT_BACKUP_RECOVERY.md`, `docs/spec/VNEXT_FAULT_HANDLING.md`, `docs/spec/VNEXT_ACCEPTANCE.md` and updated `agent-integration/README.md`.
+- REST/CLI/MCP/SDK commands documented and verified executable in clean environment: `memoryhub --help`, `python -m memoryhub_mcp`, `from memoryhub_client import MemoryHubClient`.
+- Deployment, migration, backup/recovery and fault-handling runbooks include executable commands, rollback steps and hard-stop conditions.
+- Evidence: `EVIDENCE.md#s5-09-checkpoint`; focused docs/demo tests 16 passed; ruff/compileall passed.
+- Next task: S5-10 `IN_PROGRESS`; create fixed, redacted, replayable demo and final acceptance package.
+
+## S5-10 and B18 final acceptance — 2026-08-25
+
+- S5-10 DONE. Added `examples/vnext_demo/` with redacted fixtures, deterministic `run_demo.py`, and `tests/test_vnext_demo.py` replayable scenarios.
+- Demo output contains only IDs, hashes, counts and audit metadata; no raw content or sensitive Evidence.
+- `docs/spec/VNEXT_ACCEPTANCE.md` records all 57 tasks, 18 batches and S0/S1/S2/S3/S4/S5/P0/P1/Release Gate PASS.
+- B18 acceptance: S5-09 documentation and S5-10 demo/acceptance package meet exit criteria. All tasks and Gates have valid evidence.
+- Final validation: B18 focused tests 16 passed; affected vNext regression 341 passed; safety/contract/error suite passed; ruff, compileall, `git diff --check` passed; demo CLI exited 0.
+- Batch status: B18 DONE; there is no next batch.
+- Commit reference must be `SELF (Batch-ID: B18)` in the single B18 commit. Do not push, amend, rebase or enter another batch.

@@ -1,0 +1,11 @@
+[
+  {
+    "event_type": "user_preference",
+    "session_id": "demo_session_004",
+    "turn_id": "turn_001",
+    "payload": {
+      "text": "I prefer Markdown for notes",
+      "scope_level": "global"
+    }
+  }
+]

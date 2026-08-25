@@ -50,14 +50,25 @@
 | B15 | DONE | S4-07～S4-08；S4 Gate | `../codex_batches/B15_s4_reliability_gate.md` | SELF (Batch-ID: B15) | Fault matrix automated; Infrastructure Trace/metrics; S4 Gate PASS |
 | B16 | DONE | S5-01～S5-04 | `../codex_batches/B16_s5_benchmark_dashboard.md` | SELF (Batch-ID: B16) | Trace/Benchmark/Comparison/Dashboard accepted |
 | B17 | DONE | S5-05～S5-08 | `../codex_batches/B17_s5_migration_cutover.md` | SELF (Batch-ID: B17) | Feedback/migration/Shadow dual-read/灰度回滚验收通过 |
-| B18 | READY | S5-09～S5-10；S5/P0/P1/Release Gate | `../codex_batches/B18_release.md` | — | Next batch only; do not enter in this session |
+| B18 | DONE | S5-09～S5-10；S5/P0/P1/Release Gate | `../codex_batches/B18_release.md` | SELF (Batch-ID: B18) | Docs, demo and final acceptance package accepted |
+
+## B18 final validation and acceptance — 2026-08-25
+
+- S5-09 DONE: `docs/spec/VNEXT_DEPLOYMENT.md`, `VNEXT_BACKUP_RECOVERY.md`, `VNEXT_FAULT_HANDLING.md`, `VNEXT_ACCEPTANCE.md`, and updated `agent-integration/README.md` provide executable CLI/MCP/SDK commands and ops runbooks.
+- S5-10 DONE: `examples/vnext_demo/` provides fixed, redacted, replayable demo scenarios with deterministic output; `docs/spec/VNEXT_ACCEPTANCE.md` records final Gate PASS.
+- S5 Gate / P0 / P1 / Release Gate PASS: all 57 tasks, 18 batches and all Gates have valid evidence; no unresolved security, tenant, data consistency, Forget or rollback blockers.
 
 ## Invariant check
 
 - IN_PROGRESS count: 0
-- READY count: 1（B18）
+- READY count: 0
 - Overlapping formal task IDs: None
 - Missing formal task IDs: None
-- Current prompt: `../codex_batches/B17_s5_migration_cutover.md` completed; next prompt is `../codex_batches/B18_release.md` only in a new session.
-- Hard stop after current batch: create the single B17 commit, read-only verify, then end the session; do not enter B18.
-- Commit invariant: B01～B16 已独立提交；B17 is represented by this single `SELF (Batch-ID: B17)` commit; B18 remains unexecuted.
+- Current prompt: `../codex_batches/B18_release.md` complete; this is the final batch.
+- Hard stop after current batch: create the single B18 commit, read-only verify, then end the session; there is no next batch.
+- Commit invariant: B01～B18 已独立提交；B18 is represented by this single `SELF (Batch-ID: B18)` commit.
+
+## B18 start reconciliation — 2026-08-25
+
+- B18 is the sole active batch. No B18 task was previously in progress; S5-09 is claimed as the smallest dependency-satisfied task.
+- Pre-existing untracked evaluation reports/databases and inaccessible pytest temp directories are preserved and excluded from this batch commit.

@@ -1,0 +1,12 @@
+[
+  {
+    "event_type": "user_instruction",
+    "session_id": "demo_session_002",
+    "turn_id": "turn_001",
+    "payload": {
+      "text": "This time use DOCX for the report",
+      "scope_level": "project",
+      "scope_id": "project_a"
+    }
+  }
+]

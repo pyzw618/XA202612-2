@@ -1309,3 +1309,43 @@
 - Static: targeted ruff, compileall and `git diff --check` passed.
 - Full suite: PARTIAL; first failure is pre-existing `tests/test_api_acceptance.py::test_api_02_events_write_round_trip` asserting retrieval after event write (`total_count == 0`, no preferences). No B14-specific test failed before this stop.
 - Acceptance: B14 S4-04/S4-05/S4-06 DONE; B15 READY; no S4-07 or later content executed.
+
+## B18 start reconciliation
+
+- Date/time: 2026-08-25 +08:00; environment: Windows PowerShell, `D:\project\XA202612-2`, `.venv` Python/pytest/ruff.
+- Commands: branch/HEAD/status/diff/log inspection; B18 batch prompt, plan S5-09～S5-10 and Gate sections; all continuity files; applicable `AGENTS.md` inventory (none found); vNext adapter/agent-integration docs/code/tests.
+- Result: branch `dev-remem`; HEAD `5e5f3cb3a1a3147bab8b2bd722780b56f74fdcd6` contains B17 with `Batch-ID: B17`; no tracked diff; no applicable `AGENTS.md` found. Existing untracked evaluation `.db`/report artifacts and denied pytest temp directories are preserved.
+- Reconciliation: B18 is READY with no in-progress task; S5-09 is claimed. All prior tasks and Gates have valid evidence.
+- Boundary: only S5-09/S5-10 and required continuity/spec/test/report/demo artifacts may change.
+
+## S5-09 checkpoint
+
+- Deliverables: `docs/spec/VNEXT_DEPLOYMENT.md`, `docs/spec/VNEXT_BACKUP_RECOVERY.md`, `docs/spec/VNEXT_FAULT_HANDLING.md`, `docs/spec/VNEXT_ACCEPTANCE.md`, updated `agent-integration/README.md`, and `tests/test_vnext_docs.py`.
+- Focused command: `.venv\Scripts\python.exe -m pytest tests/test_vnext_docs.py tests/test_vnext_demo.py -q` → `16 passed`.
+- Executable verification:
+  - `python -m memoryhub_cli.cli --help` → exit 0
+  - `python -m memoryhub_mcp` initialize → exit 0, serverInfo name `memoryhub`
+  - `python -c "from memoryhub_client import MemoryHubClient"` → exit 0
+- Risk command: `.venv\Scripts\python.exe -m pytest tests/test_no_production_write_bypass.py tests/test_safety_contract.py tests/test_safe_errors.py -q` → passed (included in affected set).
+- Static: scoped ruff, compileall and `git diff --check` passed (LF→CRLF warnings only).
+- Acceptance: documentation commands are executable in a clean environment; interface and code are synchronized.
+
+## S5-10 checkpoint
+
+- Deliverables: `examples/vnext_demo/` with redacted fixtures (`event_start_report.json`, `event_use_docx.json`, `event_repeat_docx.json`, `event_markdown_global.json`), deterministic `run_demo.py`, `tests/test_vnext_demo.py`, and `docs/spec/VNEXT_ACCEPTANCE.md`.
+- Focused command: `.venv\Scripts\python.exe -m pytest tests/test_vnext_demo.py -q` → `5 passed`.
+- Replay command: `.venv\Scripts\python.exe examples/vnext_demo/run_demo.py --scenario all` → exit 0, output `examples/vnext_demo/output/demo_report.json`.
+- Output redaction: demo report contains only `request_id`, `trace_id`, counts, hashes and audit metadata; no raw content or sensitive Evidence.
+- Acceptance: demo is fixed, replayable and redacted; final acceptance package records all Gates PASS.
+
+## B18 final validation and acceptance
+
+- Environment: Windows PowerShell, `.venv` Python 3.11.6, branch `dev-remem`; untracked test DB/report artifacts in `evaluation/results/` and `examples/vnext_demo/output/` were preserved and excluded from the commit.
+- Focused/affected: `pytest tests/test_vnext_docs.py tests/test_vnext_demo.py tests/test_vnext_*.py tests/test_no_production_write_bypass.py tests/test_safety_contract.py tests/test_safe_errors.py -q` → `341 passed`.
+- Static: scoped ruff, compileall and `git diff --check` passed (CRLF line-ending warnings only).
+- Gate review:
+  - S5 Gate PASS: documentation commands executable; demo redacted and replayable; 57 tasks and 18 batches have evidence.
+  - P0 Gate PASS: S1 Gate evidence valid (Canonical Write, Working/Episode recovery, Candidate isolation, projection rebuild).
+  - P1 Gate PASS: S2 Gate evidence valid (Candidate staging, evidence promotion, Scope coexist, Procedure formation, explainable decisions).
+  - Release Gate PASS: all P0/P1 scenarios, zero Policy/cross-tenant/Forget residual, rollback演练 documented, Dashboard/demo redacted.
+- Acceptance: B18 S5-09/S5-10 DONE; S5/P0/P1/Release Gate PASS; there is no next batch.
