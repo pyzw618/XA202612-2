@@ -55,20 +55,50 @@ class DeterministicReflectionModel:
         claim: dict[str, Any] = {"value": text}
         scope_level = "TASK"
         scope = "TASK:default"
-        confidence = 0.7
+        confidence = 0.85
+        utility = 0.7
+        stability = 0.7
 
         if "docx" in text:
             normalized_key = "format:docx"
-            claim = {"format": "DOCX", "context": text}
+            claim = {"value": "DOCX", "format": "DOCX", "context": text}
             scope_level = "PROJECT"
             scope = "PROJECT:reporting"
         elif "markdown" in text or "md" in text:
             normalized_key = "format:markdown"
-            claim = {"format": "Markdown", "context": text}
+            claim = {"value": "Markdown", "format": "Markdown", "context": text}
         elif "fix" in text or "repair" in text:
             memory_type = "PROCEDURAL"
             normalized_key = "procedure:repair"
-            claim = {"action": "repair", "context": text}
+            confidence = 0.9
+            utility = 0.7
+            stability = 0.7
+            # Procedure claims have a stable shape.  Episode-specific prose is
+            # kept out of the identity key so independent runs can accumulate
+            # evidence for the same repair recipe.
+            raw = input_data.payload_summary if input_data is not None else {}
+            claim = {
+                "trigger": raw.get("trigger") or "repair failure",
+                "preconditions": self._as_list(
+                    raw.get("preconditions")
+                    or raw.get("conditions")
+                    or ["the task is reproducible"]
+                ),
+                "steps": self._as_list(
+                    raw.get("steps")
+                    or raw.get("procedure_steps")
+                    or ["inspect the failure", "apply the repair"]
+                ),
+                "verification": self._as_list(
+                    raw.get("verification") or ["repeat the task and confirm the result"]
+                ),
+                "failure_recovery": self._as_recovery(
+                    raw.get("failure_recovery") or raw.get("recovery") or [
+                        {"condition": "repair fails", "action": "restore the last known good state"}
+                    ]
+                ),
+                "outcome": str(raw.get("outcome") or raw.get("result") or "success").lower(),
+            }
         elif "fact" in text or "is" in text:
             memory_type = "SEMANTIC"
             normalized_key = "fact:extracted"
@@ -88,8 +118,8 @@ class DeterministicReflectionModel:
             "scope_level": scope_level,
             "scope": scope,
             "confidence": confidence,
-            "utility": 0.6,
-            "stability": 0.5,
+            "utility": utility,
+            "stability": stability,
             "model_id": self.model_id,
             "prompt_version": PROMPT_VERSION,
             "input_hash": input_hash,
@@ -98,6 +128,18 @@ class DeterministicReflectionModel:
             "supporting_episode_ids": [episode_id],
             "status": "REVIEW" if confidence < 0.5 else "ACCUMULATING",
         }
+
+    @staticmethod
+    def _as_list(value: Any) -> list[str]:
+        if isinstance(value, (list, tuple)):
+            return [str(item) for item in value if str(item).strip()]
+        return [str(value)] if str(value).strip() else []
+
+    @staticmethod
+    def _as_recovery(value: Any) -> list[Any]:
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        return [value]
 
 
 class ReflectionService:

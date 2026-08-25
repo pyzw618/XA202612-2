@@ -270,8 +270,14 @@ class EventGateway:
 
     @staticmethod
     def _request_hash(event: MemoryEventContract) -> str:
+        # created_at/updated_at are local model metadata and are not persisted
+        # in EventRow.  Excluding them keeps worker rehydration idempotent while
+        # retaining the complete governed payload and identity in the hash.
+        data = event.model_dump(mode="json")
+        data.pop("created_at", None)
+        data.pop("updated_at", None)
         serialized = json.dumps(
-            event.model_dump(mode="json"),
+            data,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),

@@ -336,6 +336,7 @@ class ExtractionTaskRow(Base):
     task_key = Column(String(64), nullable=False)
     event_id = Column(String(32), nullable=False, index=True)
     event_ids = Column(JSON, nullable=False)
+    tenant_id = Column(String(64), nullable=False, default="", index=True)
     user_id = Column(String(64), nullable=False, index=True)
     extractor_type = Column(String(16), nullable=False, index=True)
     status = Column(String(16), nullable=False, default="pending", index=True)
@@ -344,6 +345,9 @@ class ExtractionTaskRow(Base):
     next_retry_at = Column(DateTime, nullable=True, index=True)
     lease_expires_at = Column(DateTime, nullable=True)
     last_error_code = Column(String(128), nullable=False, default="")
+    candidate_ids = Column(JSON, nullable=False, default=list)
+    candidate_statuses = Column(JSON, nullable=False, default=dict)
+    memory_ids = Column(JSON, nullable=False, default=list)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 

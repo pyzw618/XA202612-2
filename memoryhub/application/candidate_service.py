@@ -53,7 +53,14 @@ class CandidateService:
         scope_level, scope = self._resolve_scope(
             candidate, source_event.payload, episode_id
         )
-        normalized_key = normalize_claim_key(candidate.claim, candidate.memory_type.value)
+        # Procedure identity excludes run-specific outcome prose; Reflection
+        # supplies the stable key so success and failed-repair evidence can
+        # accumulate into one governed recipe.
+        normalized_key = (
+            candidate.normalized_key
+            if candidate.memory_type.value == "PROCEDURAL" and candidate.normalized_key
+            else normalize_claim_key(candidate.claim, candidate.memory_type.value)
+        )
 
         existing = self.repository.find_by_key(
             tenant_id=candidate.tenant_id,
@@ -82,6 +89,9 @@ class CandidateService:
             evidence_refs=[source_event.event_id],
             supporting_episode_ids=[episode_id],
             frequency=1,
+            confidence=candidate.confidence,
+            utility=candidate.utility,
+            stability=candidate.stability,
         )
         return CandidateStageResult(
             candidate=created,
@@ -146,6 +156,9 @@ class CandidateService:
             event_id=source_event.event_id,
             episode_id=episode_id,
             is_independent=is_independent,
+            confidence=candidate.confidence,
+            utility=candidate.utility,
+            stability=candidate.stability,
         )
 
         return CandidateStageResult(

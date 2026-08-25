@@ -533,6 +533,9 @@ class CandidateRepository:
         evidence_refs: list[str] | None = None,
         supporting_episode_ids: list[str] | None = None,
         frequency: int = 1,
+        confidence: float = 0.0,
+        utility: float = 0.0,
+        stability: float = 0.0,
     ) -> CandidateView:
         if status not in CandidateRepository._TRANSITIONS:
             raise InvalidCandidateTransitionError(f"unknown candidate status: {status}")
@@ -549,6 +552,9 @@ class CandidateRepository:
             evidence_refs=list(evidence_refs or []),
             supporting_episode_ids=list(supporting_episode_ids or []),
             frequency=frequency,
+            confidence=confidence,
+            utility=utility,
+            stability=stability,
         )
         with self.db.session() as session:
             session.add(row)
@@ -659,6 +665,9 @@ class CandidateRepository:
         event_id: str,
         episode_id: str,
         is_independent: bool = True,
+        confidence: float | None = None,
+        utility: float | None = None,
+        stability: float | None = None,
     ) -> CandidateView:
         """Append an evidence reference to a candidate and optionally bump frequency.
 
@@ -684,6 +693,12 @@ class CandidateRepository:
             row.supporting_episode_ids = sorted(episodes)
             if is_independent:
                 row.frequency = (row.frequency or 0) + 1
+            if confidence is not None:
+                row.confidence = max(float(row.confidence or 0.0), float(confidence))
+            if utility is not None:
+                row.utility = max(float(row.utility or 0.0), float(utility))
+            if stability is not None:
+                row.stability = max(float(row.stability or 0.0), float(stability))
             session.flush()
             return self._view(row)
 

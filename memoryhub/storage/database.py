@@ -27,6 +27,7 @@ from memoryhub.adapter.schemas import (
     PreferenceMemory,
     SceneScope,
 )
+from memoryhub.domain.contracts import MemoryEventContract
 from memoryhub.storage.models import (
     Base,
     ConflictRow,
@@ -183,6 +184,12 @@ class Database:
                 "reason": "TEXT",
                 "affected_memory_ids": "JSON",
                 "warnings": "JSON",
+            },
+            "extraction_tasks": {
+                "tenant_id": "VARCHAR(64) DEFAULT ''",
+                "candidate_ids": "JSON DEFAULT '[]'",
+                "candidate_statuses": "JSON DEFAULT '{}'",
+                "memory_ids": "JSON DEFAULT '[]'",
             },
         }
         with self.engine.begin() as conn:
@@ -414,6 +421,43 @@ class EventRepository:
         with self.db.session() as session:
             row = session.query(EventRow).filter(EventRow.event_id == event_id).first()
             return _event_row_to_pydantic(row) if row is not None else None
+
+    def get_vnext_contract(self, event_id: str) -> MemoryEventContract | None:
+        """Read the policy-approved vNext envelope without exposing event text.
+
+        Legacy extraction still uses ``get_by_id``.  The Formation worker uses
+        this narrow projection so tenant, policy and canonical task identity
+        remain bound to the event that passed EventGateway.
+        """
+
+        with self.db.session() as session:
+            row = session.query(EventRow).filter(EventRow.event_id == event_id).first()
+            if row is None or not row.tenant_id or not row.policy_action:
+                return None
+            occurred_at = row.occurred_at
+            if occurred_at is None:
+                return None
+            if occurred_at.tzinfo is None:
+                occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+            return MemoryEventContract(
+                tenant_id=row.tenant_id,
+                user_id=row.user_id or "",
+                event_id=row.event_id,
+                event_type=row.event_type or "event",
+                source_type=row.source_type or "unknown",
+                task_id=row.task_type or "",
+                session_id=row.session_id or "",
+                occurred_at=occurred_at,
+                payload=dict(row.payload or {}),
+                policy_action=row.policy_action,
+                source_hash=row.source_hash or "",
+                idempotency_key=row.idempotency_key or row.event_id,
+                trace_id=row.trace_id or row.event_id,
+                content_version=row.content_version or 1,
+                policy_version=row.policy_version or "policy/v1",
+                retention_class=row.retention_class or "standard",
+                sensitivity_level=row.sensitivity_level or "NONE",
+            )
 
     def get_by_source_hash(self, source_hash: str) -> Optional[MemoryEvent]:
         """按来源内容指纹去重查询；用于相同 source_hash 不重复进入记忆链路。"""
@@ -1202,6 +1246,7 @@ def _extraction_task_row_to_pydantic(row: ExtractionTaskRow) -> ExtractionTask:
         task_id=row.task_id,
         event_id=row.event_id,
         event_ids=row.event_ids or [row.event_id],
+        tenant_id=row.tenant_id or "",
         user_id=row.user_id,
         extractor_type=row.extractor_type,
         status=row.status,
@@ -1210,6 +1255,9 @@ def _extraction_task_row_to_pydantic(row: ExtractionTaskRow) -> ExtractionTask:
         next_retry_at=row.next_retry_at,
         lease_expires_at=row.lease_expires_at,
         last_error_code=row.last_error_code or "",
+        candidate_ids=list(row.candidate_ids or []),
+        candidate_statuses=dict(row.candidate_statuses or {}),
+        memory_ids=list(row.memory_ids or []),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -1238,6 +1286,7 @@ class ExtractionTaskRepository:
         self,
         *,
         event_ids: list[str],
+        tenant_id: str = "",
         user_id: str,
         extractor_type: str,
         max_attempts: int = 3,
@@ -1261,6 +1310,7 @@ class ExtractionTaskRepository:
                 task_key=task_key,
                 event_id=ordered_ids[0],
                 event_ids=ordered_ids,
+                tenant_id=tenant_id,
                 user_id=user_id,
                 extractor_type=(
                     extractor_type.value
@@ -1374,6 +1424,28 @@ class ExtractionTaskRepository:
             next_retry_at=None,
             now=now,
         )
+
+    def record_formation_result(
+        self,
+        task_id: str,
+        *,
+        candidate_ids: list[str] | None = None,
+        candidate_statuses: dict[str, str] | None = None,
+        memory_ids: list[str] | None = None,
+    ) -> ExtractionTask:
+        """Idempotently publish the durable Formation result on the task."""
+
+        with self.db.session() as session:
+            row = session.get(ExtractionTaskRow, task_id)
+            if row is None:
+                raise KeyError("extraction task not found")
+            row.candidate_ids = sorted(set(row.candidate_ids or []) | set(candidate_ids or []))
+            row.memory_ids = sorted(set(row.memory_ids or []) | set(memory_ids or []))
+            statuses = dict(row.candidate_statuses or {})
+            statuses.update({str(k): str(v) for k, v in (candidate_statuses or {}).items()})
+            row.candidate_statuses = statuses
+            session.flush()
+            return _extraction_task_row_to_pydantic(row)
 
     def mark_failed(
         self,

@@ -12,6 +12,7 @@ from memoryhub.adapter.schemas import (
     MemoryProvenance,
     SourceType,
 )
+from memoryhub.application.boundary_detector import BoundaryDetector
 from memoryhub.application.episode_service import EpisodeService, EpisodeSnapshotResult
 from memoryhub.application.event_gateway import (
     EventGateway,
@@ -20,8 +21,10 @@ from memoryhub.application.event_gateway import (
 )
 from memoryhub.application.working_service import WorkingPatchResult, WorkingService
 from memoryhub.domain.contracts import (
+    BoundaryCheckpointType,
     EpisodeEventContract,
     EpisodeSnapshot,
+    EpisodeStatus,
     EvolutionStatus,
     LongTermEnvelope,
     MemoryEventContract,
@@ -74,6 +77,8 @@ class CanonicalWriteService:
         extraction_tasks: ExtractionTaskRepository | None = None,
         authority_facade: LongTermAuthorityFacade | None = None,
         memory_write_service: Any | None = None,
+        boundary_detector: BoundaryDetector | None = None,
+        formation_mode: str = "candidate-only",
     ) -> None:
         self.db = db
         self.event_gateway = event_gateway
@@ -82,6 +87,10 @@ class CanonicalWriteService:
         self.extraction_tasks = extraction_tasks or ExtractionTaskRepository(db)
         self.authority_facade = authority_facade
         self.memory_write_service = memory_write_service
+        self.boundary_detector = boundary_detector or BoundaryDetector()
+        if formation_mode not in {"shadow", "candidate-only", "authority"}:
+            raise ValueError("unsupported formation mode")
+        self.formation_mode = formation_mode
 
     def write(
         self,
@@ -101,7 +110,48 @@ class CanonicalWriteService:
             raise TypeError("canonical write requires MemoryEventContract")
         gateway = self.event_gateway.submit(event)
         if gateway.status is not GatewayStatus.COMMITTED:
-            return CanonicalWriteResult(gateway=gateway)
+            task = None
+            working_result = None
+            snapshot_result = None
+            if gateway.status is GatewayStatus.IDEMPOTENT:
+                task = self.extraction_tasks.enqueue(
+                    event_ids=[event.event_id],
+                    tenant_id=event.tenant_id,
+                    user_id=event.user_id,
+                    extractor_type=self._reflection_type(event, reflection_type),
+                )[0]
+                current = self.working_service.repository.get(
+                    tenant_id=event.tenant_id,
+                    user_id=event.user_id,
+                    task_id=event.task_id,
+                )
+                if current is not None:
+                    working_result = WorkingPatchResult(
+                        working_state=current,
+                        applied_paths=(),
+                        skipped_paths=(),
+                        compressed_state=self.working_service.compressed_snapshot(
+                            tenant_id=event.tenant_id,
+                            user_id=event.user_id,
+                            task_id=event.task_id,
+                        ),
+                    )
+                episode = self.episode_service.repository.get_by_task_id(
+                    tenant_id=event.tenant_id,
+                    user_id=event.user_id,
+                    task_id=event.task_id,
+                )
+                if episode is not None:
+                    snapshot_result = EpisodeSnapshotResult(
+                        snapshot=self.episode_service._to_contract(episode),
+                        resume_token="",
+                    )
+            return CanonicalWriteResult(
+                gateway=gateway,
+                working=working_result,
+                episode_snapshot=snapshot_result,
+                reflection_task=task,
+            )
 
         working_result: WorkingPatchResult | None = None
         if working_snapshot is not None:
@@ -126,6 +176,13 @@ class CanonicalWriteService:
                 working_patch, event_id=event.event_id
             )
 
+        # When an adapter does not provide explicit state objects, the
+        # canonical service still owns the deterministic task-state update.
+        # This is deliberately conservative: payload fields are only projected
+        # into Working/Episode after EventGateway has accepted the event.
+        if working_result is None:
+            working_result = self._orchestrate_working(event)
+
         snapshot = episode_snapshot or checkpoint
         episode_event_result = None
         if episode_event is not None:
@@ -136,8 +193,15 @@ class CanonicalWriteService:
             self._ensure_episode_exists(snapshot)
             snapshot_result = self.episode_service.snapshot(snapshot)
 
+        if episode_event is None and snapshot is None:
+            episode_event_result, snapshot_result = self._orchestrate_episode(
+                event,
+                working_result=working_result,
+            )
+
         task = self.extraction_tasks.enqueue(
             event_ids=[event.event_id],
+            tenant_id=event.tenant_id,
             user_id=event.user_id,
             extractor_type=self._reflection_type(event, reflection_type),
         )[0]
@@ -158,6 +222,25 @@ class CanonicalWriteService:
             long_term=long_term_result,
             long_term_receipt=receipt,
         )
+
+    def write_authority(
+        self,
+        event: MemoryEventContract,
+        envelope: LongTermEnvelope,
+        *,
+        action: MemoryDecision | str | None = None,
+    ) -> tuple[LongTermEnvelope, Any | None]:
+        """Commit a worker promotion through the canonical Authority writer.
+
+        A worker may retry after the event itself is already idempotent.  This
+        method therefore accepts COMMITTED and IDEMPOTENT gateway results, but
+        never exposes the repository as a write shortcut.
+        """
+
+        gateway = self.event_gateway.submit(event)
+        if gateway.status not in {GatewayStatus.COMMITTED, GatewayStatus.IDEMPOTENT}:
+            raise RuntimeError(f"authority write blocked by gateway: {gateway.reason_code}")
+        return self._write_long_term(event, envelope, action=action)
 
     submit = write
     write_event = write
@@ -185,6 +268,189 @@ class CanonicalWriteService:
             session_id=session_id,
             goal=goal,
         )
+
+    def _orchestrate_working(self, event: MemoryEventContract) -> WorkingPatchResult:
+        current = self.working_service.repository.get(
+            tenant_id=event.tenant_id, user_id=event.user_id, task_id=event.task_id
+        )
+        if current is None:
+            payload = event.payload or {}
+            goal = self._first_text(
+                payload, "current_goal", "goal", "instruction", "text"
+            ) or event.event_type
+            created = self.working_service.create(
+                WorkingSnapshot(
+                    tenant_id=event.tenant_id,
+                    user_id=event.user_id,
+                    task_id=event.task_id,
+                    session_id=event.session_id,
+                    current_goal=goal,
+                    current_step=str(payload.get("current_step", "")),
+                    pending_steps=self._as_strings(payload.get("pending_steps")),
+                    completed_steps=self._as_strings(payload.get("completed_steps")),
+                    constraints=self._as_strings(payload.get("constraints")),
+                    active_entities=self._as_strings(payload.get("active_entities")),
+                ),
+                working_state_id=self._working_state_id(event),
+            )
+            return WorkingPatchResult(
+                working_state=created,
+                applied_paths=(),
+                skipped_paths=(),
+                compressed_state=self.working_service.compressed_snapshot(
+                    tenant_id=event.tenant_id,
+                    user_id=event.user_id,
+                    task_id=event.task_id,
+                ),
+            )
+
+        payload = event.payload or {}
+        operations = []
+        for field in (
+            "current_step",
+            "pending_steps",
+            "completed_steps",
+            "constraints",
+            "active_entities",
+        ):
+            if field in payload:
+                from memoryhub.domain.contracts import WorkingPatchOperation
+
+                operations.append(
+                    WorkingPatchOperation(
+                        op="replace",
+                        path=f"/{field}",
+                        value=(
+                            payload[field]
+                            if field == "current_step"
+                            else self._as_strings(payload[field])
+                        ),
+                        source="event",
+                    )
+                )
+        if not operations:
+            return WorkingPatchResult(
+                working_state=current,
+                applied_paths=(),
+                skipped_paths=(),
+                compressed_state=self.working_service.compressed_snapshot(
+                    tenant_id=event.tenant_id,
+                    user_id=event.user_id,
+                    task_id=event.task_id,
+                ),
+            )
+        return self.working_service.apply_patch(
+            WorkingPatch(
+                tenant_id=event.tenant_id,
+                user_id=event.user_id,
+                task_id=event.task_id,
+                base_version=current.version,
+                operations=operations,
+                event_refs=[event.event_id],
+                reason="canonical_event_projection",
+            ),
+            event_id=event.event_id,
+        )
+
+    def _orchestrate_episode(
+        self,
+        event: MemoryEventContract,
+        *,
+        working_result: WorkingPatchResult,
+    ) -> tuple[Any, EpisodeSnapshotResult | None]:
+        episode = self.episode_service.repository.get_by_task_id(
+            tenant_id=event.tenant_id,
+            user_id=event.user_id,
+            task_id=event.task_id,
+        )
+        if episode is None:
+            episode_id = str(event.payload.get("episode_id") or f"episode-{event.task_id}")
+            self.episode_service.create(
+                episode_id=episode_id,
+                tenant_id=event.tenant_id,
+                user_id=event.user_id,
+                task_id=event.task_id,
+                session_id=event.session_id,
+                goal=str(working_result.state.get("current_goal", event.event_type)),
+            )
+            episode = self.episode_service.repository.get(
+                tenant_id=event.tenant_id, user_id=event.user_id, episode_id=episode_id
+            )
+        if episode is None:
+            raise RuntimeError("episode orchestration failed")
+
+        history = self.episode_service.repository.list_events(
+            tenant_id=event.tenant_id, user_id=event.user_id, episode_id=episode.episode_id
+        )
+        decision = self.boundary_detector.detect(
+            tenant_id=event.tenant_id,
+            user_id=event.user_id,
+            task_id=event.task_id,
+            event_type=event.event_type,
+            event_payload=event.payload,
+            episode_status=episode.status,
+            working_state=working_result.state,
+            episode_history=[{"phase": item.payload.get("phase")} for item in history],
+            timestamp=event.occurred_at.timestamp(),
+        )
+        seq = episode.last_event_seq + 1
+        event_result = self.episode_service.append(
+            EpisodeEventContract(
+                tenant_id=event.tenant_id,
+                user_id=event.user_id,
+                episode_id=episode.episode_id,
+                task_id=event.task_id,
+                seq_no=seq,
+                event_type=(decision.checkpoint_type.value if decision else "CANONICAL_EVENT"),
+                payload={"event_id": event.event_id, "phase": event.payload.get("phase", "")},
+                source_event_id=event.event_id,
+            )
+        )
+        if decision is None:
+            return event_result, None
+        status = {
+            BoundaryCheckpointType.COMPLETE: EpisodeStatus.COMPLETED,
+            BoundaryCheckpointType.FAILED: EpisodeStatus.FAILED,
+        }.get(decision.checkpoint_type, EpisodeStatus.ACTIVE)
+        return event_result, self.episode_service.snapshot(
+            EpisodeSnapshot(
+                tenant_id=event.tenant_id,
+                user_id=event.user_id,
+                episode_id=episode.episode_id,
+                task_id=event.task_id,
+                session_id=event.session_id,
+                status=status,
+                current_phase=str(
+                    event.payload.get("phase") or episode.current_phase or "active"
+                ),
+                goal=str(
+                    working_result.state.get("current_goal", episode.goal or event.event_type)
+                ),
+                pending_steps=self._as_strings(working_result.state.get("pending_steps")),
+                completed_steps=self._as_strings(working_result.state.get("completed_steps")),
+                constraints=self._as_strings(working_result.state.get("constraints")),
+                last_event_seq=event_result.seq_no,
+                snapshot_version=episode.snapshot_version,
+            )
+        )
+
+    @staticmethod
+    def _working_state_id(event: MemoryEventContract) -> str:
+        return f"working-{event.tenant_id}-{event.user_id}-{event.task_id}"[:64]
+
+    @staticmethod
+    def _as_strings(value: Any) -> list[str]:
+        if isinstance(value, (list, tuple)):
+            return [str(item) for item in value if str(item).strip()]
+        return [str(value)] if value not in (None, "") else []
+
+    @staticmethod
+    def _first_text(payload: dict[str, Any], *keys: str) -> str:
+        for key in keys:
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
 
     def _write_long_term(
         self,

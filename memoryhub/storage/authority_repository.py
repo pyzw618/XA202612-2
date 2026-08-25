@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from memoryhub.adapter.schemas import (
+    Evidence,
     KnowledgeMemory,
     KnowledgeType,
     MemoryLevel,
@@ -179,7 +180,13 @@ class AuthorityRepository:
             "status": status,
             "level": MemoryLevel.LONG,
             "version": envelope.content_version,
-            "evidences": [],
+            # Evidence bodies are never copied into the legacy Authority row;
+            # only event references are handed to DomainMemoryWriter, which
+            # stores independent redacted Evidence rows transactionally.
+            "evidences": [
+                Evidence(event_id=event_id, content="")
+                for event_id in envelope.evidence_refs
+            ],
             "extra_payload": metadata,
             "created_at": envelope.created_at,
             "updated_at": envelope.updated_at,

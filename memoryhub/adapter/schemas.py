@@ -1393,9 +1393,9 @@ class PreferenceMemory(BaseModel):
     """
     偏好记忆 — 记录用户的个性化偏好
 
-    数据流：MemoryEvent (仅限制 source_type == 'user_behavior') 
-            → PreferenceExtractor 
-            → PreferenceMemory 
+    数据流：MemoryEvent (仅限制 source_type == 'user_behavior')
+            → PreferenceExtractor
+            → PreferenceMemory
             → Storage
     """
     memory_id: str = Field(default_factory=lambda: f"pref_{uuid.uuid4().hex[:8]}")
@@ -1405,7 +1405,7 @@ class PreferenceMemory(BaseModel):
 
     # --- 偏好核心内容（与 MemoryEvent 对齐） ---
     text: str = ""                         # 自然语言描述，对齐 MemoryEvent.text
-    payload: dict[str, Any] = Field(default_factory=dict) # 结构化表达，如 {"action": "set_format", "target": "weekly_report", "value": "markdown"}
+    payload: dict[str, Any] = Field(default_factory=dict) # 结构化偏好表达
     scope: SceneScope = Field(default_factory=SceneScope)
     is_global: bool = False                # 是否为全局通用偏好（用于跨场景兜底）
 
@@ -1466,7 +1466,7 @@ class KnowledgeMemory(BaseModel):
     predicate: str = ""  # 谓词（归一化后的关系名；无法归一可空 = 自由谓词）
     object_value: str = ""  # 客体值（原始文本）
     object_type: str = ""  # 客体实体类型（复用 EntityType 取值，如 Person/Location）
-    single_value: bool | None = None  # 单值互斥（True 时同 subject+predicate 异 object 触发 supersede）
+    single_value: bool | None = None  # 单值互斥
 
     scope: SceneScope = Field(default_factory=SceneScope)
 
@@ -1655,6 +1655,7 @@ class ExtractionTask(BaseModel):
     task_id: str
     event_id: str
     event_ids: list[str] = Field(default_factory=list)
+    tenant_id: str = ""
     user_id: str
     extractor_type: ExtractionType
     status: ExtractionTaskStatus = ExtractionTaskStatus.PENDING
@@ -1663,6 +1664,9 @@ class ExtractionTask(BaseModel):
     next_retry_at: datetime | None = None
     lease_expires_at: datetime | None = None
     last_error_code: str = ""
+    candidate_ids: list[str] = Field(default_factory=list)
+    candidate_statuses: dict[str, str] = Field(default_factory=dict)
+    memory_ids: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 

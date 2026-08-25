@@ -30,10 +30,11 @@ class ExtractionRetryRunResult:
 class ExtractionRetryService:
     """Claim tasks and replay only already persisted, gate-approved events."""
 
-    def __init__(self, *, task_repo, event_repo, executor) -> None:
+    def __init__(self, *, task_repo, event_repo, executor, vnext_executor=None) -> None:
         self.task_repo = task_repo
         self.event_repo = event_repo
         self.executor = executor
+        self.vnext_executor = vnext_executor
 
     def run_due(
         self,
@@ -71,6 +72,21 @@ class ExtractionRetryService:
         return result
 
     def _execute(self, task: ExtractionTask) -> None:
+        if self.vnext_executor is not None:
+            contracts = []
+            loader = getattr(self.event_repo, "get_vnext_contract", None)
+            if callable(loader):
+                for event_id in task.event_ids or [task.event_id]:
+                    contract = loader(event_id)
+                    if contract is None:
+                        contracts = []
+                        break
+                    if contract.user_id != task.user_id:
+                        raise ExtractionPermanentError("extraction.owner_mismatch")
+                    contracts.append(contract)
+            if contracts:
+                self.vnext_executor.execute(task, contracts)
+                return
         if not self.executor.supports(task.extractor_type):
             raise ExtractionPermanentError("extraction.executor_unavailable")
         events = []

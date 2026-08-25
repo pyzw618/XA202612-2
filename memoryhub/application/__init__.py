@@ -22,6 +22,7 @@ from .episode_service import (
 )
 from .event_gateway import EventGateway, EventGatewayResult, GatewayStatus
 from .evolution_service import EvolutionResult, EvolutionService, EvolutionServiceError
+from .formation_worker import FormationProcessResult, FormationWorker
 from .feedback_service import (
     AgentUsageTrace,
     UsageKind,
@@ -89,6 +90,8 @@ __all__ = [
     "EvolutionResult",
     "EvolutionService",
     "EvolutionServiceError",
+    "FormationProcessResult",
+    "FormationWorker",
     "RetrievalResult",
     "RetrievalService",
     "WorkingPatchResult",

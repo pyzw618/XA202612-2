@@ -87,6 +87,9 @@ class VNextConfig:
     allow_legacy_read_fallback: bool = True
     rollback_window_minutes: int = 60
     observation_window_requests: int = 1
+    # Formation is deliberately fail-closed for Authority.  Candidate-only is
+    # the first production-safe mode; shadow keeps the orchestration read-only.
+    formation_mode: str = "candidate-only"
 
     def __post_init__(self) -> None:
         if self.mode not in _VNEXT_MODES:
@@ -113,6 +116,10 @@ class VNextConfig:
             value = getattr(self, field_name)
             if type(value) is not int or value <= 0:
                 raise ValueError(f"vnext.{field_name} must be a positive integer")
+        if self.formation_mode not in {"shadow", "candidate-only", "authority"}:
+            raise ValueError(
+                "vnext.formation_mode must be shadow, candidate-only or authority"
+            )
 
 
 @dataclass

@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import ValidationError
 
+from memoryhub.adapter.schemas import ExtractionTask
 from memoryhub.adapter.vnext_schemas import (
     APIError,
     APIErrorCode,
@@ -23,6 +24,7 @@ from memoryhub.adapter.vnext_schemas import (
     DiagnosticResponse,
     ForgetRequest,
     ForgetResponse,
+    FormationResponseStatus,
     MemoryRetrievalRequest,
     MemoryRetrievalResponse,
     ResumeTaskResponse,
@@ -196,7 +198,7 @@ async def write_canonical_events(
                 exc,
                 code=APIErrorCode.INTERNAL_ERROR,
                 request_id=req.request_id,
-                trace_id=req.trace_id,
+                trace_id=last_trace_id,
             ) from None
 
         event_ids.append(result.event_id)
@@ -217,6 +219,9 @@ async def write_canonical_events(
             pass
         if result.long_term is not None:
             memory_ids.append(result.long_term.memory_id)
+        if result.reflection_task is not None:
+            candidate_ids.extend(result.reflection_task.candidate_ids)
+            memory_ids.extend(result.reflection_task.memory_ids)
 
     if len(set(event_ids)) != len(event_ids):
         warnings.append("duplicate event ids collapsed by idempotency")
@@ -232,7 +237,34 @@ async def write_canonical_events(
         memory_ids=memory_ids,
         degraded=degraded,
         warnings=warnings,
+        formation_status=(
+            FormationResponseStatus.AUTHORITY_PROMOTED
+            if memory_ids
+            else FormationResponseStatus.CANDIDATE_STAGED
+            if candidate_ids
+            else FormationResponseStatus.REFLECTION_PENDING
+        ),
     )
+
+
+@router.get("/tasks/{task_id}", response_model=ExtractionTask)
+async def formation_task_status(
+    task_id: str,
+    request: Request,
+    identity: tuple[str, str] = Depends(_tenant_user),
+) -> ExtractionTask:
+    """Return the owner-bound Formation result of an extraction task."""
+
+    tenant_id, user_id = identity
+    repository = getattr(request.app.state, "extraction_task_repo", None)
+    if repository is None:
+        raise HTTPException(status_code=503, detail={"code": "formation.task_unavailable"})
+    task = repository.get(task_id, user_id=user_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail={"code": "formation.task_not_found"})
+    if task.tenant_id and task.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail={"code": "formation.task_not_found"})
+    return task
 
 
 @router.get("/tasks/{task_id}/resume", response_model=ResumeTaskResponse)

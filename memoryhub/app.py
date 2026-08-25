@@ -234,6 +234,7 @@ def create_app(
     app.state.extraction_task_repo = None
     app.state.extraction_retry_service = None
     app.state.extraction_retry_task = None
+    app.state.formation_worker = None
     app.state.memory_write_service = None
     app.state.memory_service = memory_service
     app.state.owns_memory_service = False
@@ -617,6 +618,7 @@ def create_app(
             extraction_tasks=extraction_task_repo,
             authority_facade=authority_facade,
             memory_write_service=app.state.memory_write_service,
+            formation_mode=config.vnext.formation_mode,
         )
         app.state.episode_service = app.state.canonical_write_service.episode_service
 
@@ -687,6 +689,15 @@ def create_app(
             preference_handler=preference_handler,
             knowledge_handler=knowledge_handler,
         )
+        from memoryhub.application.formation_worker import FormationWorker
+
+        app.state.formation_worker = FormationWorker(
+            db,
+            task_repository=extraction_task_repo,
+            event_repository=event_repo,
+            canonical_write_service=app.state.canonical_write_service,
+            mode=config.vnext.formation_mode,
+        )
         if (
             app.state.event_ingestion_service is None
             and app.state.safety_gate is not None
@@ -717,6 +728,7 @@ def create_app(
             task_repo=extraction_task_repo,
             event_repo=event_repo,
             executor=retry_executor,
+            vnext_executor=app.state.formation_worker,
         )
         from memoryhub.core.ingestion.retry_task import ExtractionRetryTask
 
