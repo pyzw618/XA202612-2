@@ -209,3 +209,16 @@
 - Compatibility/migration impact: no second Authority store introduced; legacy Preference/Knowledge storage remains the compatibility adapter and existing APIs remain available.
 - Rollback: disable vNext callers/flag and use legacy adapters; retain additive columns and B05 artifacts for diagnosis.
 - Supersedes: None
+
+## DEC-20260825-017
+
+- Date: 2026-08-25
+- Task: S5-05～S5-08
+- Status: ACTIVE
+- Decision: Agent Usage/Utility feedback remains a redacted Shadow projection; migration applies only fully validated legacy rows into the existing Preference/Knowledge Authority adapter and leaves uncertain rows in REVIEW; dual-read always returns legacy output; rollout advances only through observed 5/25/50/100 levels with zero Policy/cross-tenant/Forget/error hard gates and an auditable rollback window.
+- Evidence/reason: B17 focused/affected validation passed; Shadow and rollout artifacts contain IDs, hashes, counts, classifications and audit metadata only. This preserves Authority single-write, prevents feedback from rewriting正文/状态, and makes each cutover reversible.
+- Affected files/contracts: `memoryhub/application/feedback_service.py`, `scripts/migrate_vnext.py`, `memoryhub/application/shadow_read_service.py`, `memoryhub/application/rollout_service.py`, `docs/spec/VNEXT_MIGRATION.md`, `docs/spec/VNEXT_ROLLOUT.md`.
+- Alternatives considered: direct feedback writes, silent promotion of REVIEW data, returning vNext during dual-read, or skipping rollout levels; all rejected because they weaken governance, privacy or rollback evidence.
+- Compatibility/migration impact: legacy reads remain the dual-read business result; migrated rows retain old tables and can be reviewed from checkpoint/hash/backup; rollout changes read/Formation flags only.
+- Rollback: switch the read path to legacy (or a lower observed canary level) and retain Authority data; restore the pre-apply database from the explicit backup if a migration transaction is externally judged invalid.
+- Supersedes: None

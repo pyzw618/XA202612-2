@@ -1,5 +1,14 @@
 # MemoryHub vNext Batch Board
 
+## B17 start reconciliation — 2026-08-25
+
+- Repository truth is `dev-remem` at `330f4d27f04b0729a53a2b63b1ab5747eb6f6dcb`, the B16 commit with `Batch-ID: B16`.
+- B17 is the sole active batch. No B17 task was previously in progress, so S5-05 is claimed as the smallest dependency-satisfied task.
+- Pre-existing untracked evaluation reports/databases and inaccessible pytest temporary directories are preserved and excluded.
+- S5-05 is DONE with focused and safety evidence; S5-06 is the sole in-progress formal task. S5-07/S5-08 remain TODO.
+- S5-06 is DONE with migration apply/review evidence; S5-07 is now the sole in-progress formal task. S5-08 remains TODO.
+- S5-07 is DONE with Formation/Retrieval Shadow and dual-read evidence; S5-08 is now DONE with gated rollout and rollback evidence.
+
 ## B16 start reconciliation — 2026-08-25
 
 - Repository truth is `dev-remem` at `5841161ef9acf2457e26f619db61c0fc2a5e52e5`; the B15 commit with `Batch-ID: B15` is present. The prior board text that described a pending B15 commit was stale.
@@ -40,15 +49,15 @@
 | B14 | DONE | S4-04～S4-06 | `../codex_batches/B14_s4_forget_diagnostics.md` | SELF (Batch-ID: B14) | Forget tombstone/read block, managed authorization, redacted diagnostics; full suite has unrelated API acceptance failure |
 | B15 | DONE | S4-07～S4-08；S4 Gate | `../codex_batches/B15_s4_reliability_gate.md` | SELF (Batch-ID: B15) | Fault matrix automated; Infrastructure Trace/metrics; S4 Gate PASS |
 | B16 | DONE | S5-01～S5-04 | `../codex_batches/B16_s5_benchmark_dashboard.md` | SELF (Batch-ID: B16) | Trace/Benchmark/Comparison/Dashboard accepted |
-| B17 | READY | S5-05～S5-08 | `../codex_batches/B17_s5_migration_cutover.md` | — | Next batch only; not executed in B16 |
-| B18 | TODO | S5-09～S5-10；S5/P0/P1/Release Gate | `../codex_batches/B18_release.md` | — | |
+| B17 | DONE | S5-05～S5-08 | `../codex_batches/B17_s5_migration_cutover.md` | SELF (Batch-ID: B17) | Feedback/migration/Shadow dual-read/灰度回滚验收通过 |
+| B18 | READY | S5-09～S5-10；S5/P0/P1/Release Gate | `../codex_batches/B18_release.md` | — | Next batch only; do not enter in this session |
 
 ## Invariant check
 
 - IN_PROGRESS count: 0
-- READY count: 1（B17）
+- READY count: 1（B18）
 - Overlapping formal task IDs: None
 - Missing formal task IDs: None
-- Current prompt: `../codex_batches/B16_s5_benchmark_dashboard.md` completed; next prompt is `../codex_batches/B17_s5_migration_cutover.md` only in a new session.
-- Hard stop after current batch: create the single B16 commit, read-only verify, then end the session; do not enter B17.
-- Commit invariant: B01～B15 已独立提交；B16 is represented by this single `SELF (Batch-ID: B16)` commit; B17～B18 remain unexecuted.
+- Current prompt: `../codex_batches/B17_s5_migration_cutover.md` completed; next prompt is `../codex_batches/B18_release.md` only in a new session.
+- Hard stop after current batch: create the single B17 commit, read-only verify, then end the session; do not enter B18.
+- Commit invariant: B01～B16 已独立提交；B17 is represented by this single `SELF (Batch-ID: B17)` commit; B18 remains unexecuted.

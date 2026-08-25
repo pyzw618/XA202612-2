@@ -22,7 +22,29 @@ from .episode_service import (
 )
 from .event_gateway import EventGateway, EventGatewayResult, GatewayStatus
 from .evolution_service import EvolutionResult, EvolutionService, EvolutionServiceError
+from .feedback_service import (
+    AgentUsageTrace,
+    UsageKind,
+    UtilityFeedback,
+    UtilityFeedbackShadow,
+    UtilityFeedbackShadowReport,
+    UtilityUpdateProposal,
+)
 from .retrieval_service import RetrievalResult, RetrievalService
+from .rollout_service import (
+    LEVELS,
+    RolloutAudit,
+    RolloutController,
+    RolloutGateError,
+    RolloutObservation,
+)
+from .shadow_read_service import (
+    DualReadComparisonReport,
+    DualReadDifference,
+    DualReadResult,
+    ShadowReadService,
+    VNextShadowReport,
+)
 from .working_service import WorkingPatchResult, WorkingService, WorkingStateService
 
 __all__ = [
@@ -39,6 +61,22 @@ __all__ = [
     "TypeWeights",
     "ContextAssemblyResult",
     "ContextService",
+    "AgentUsageTrace",
+    "UsageKind",
+    "UtilityFeedback",
+    "UtilityFeedbackShadow",
+    "UtilityFeedbackShadowReport",
+    "UtilityUpdateProposal",
+    "DualReadComparisonReport",
+    "DualReadDifference",
+    "DualReadResult",
+    "ShadowReadService",
+    "VNextShadowReport",
+    "LEVELS",
+    "RolloutAudit",
+    "RolloutController",
+    "RolloutGateError",
+    "RolloutObservation",
     "EventGateway",
     "EventGatewayResult",
     "GatewayStatus",

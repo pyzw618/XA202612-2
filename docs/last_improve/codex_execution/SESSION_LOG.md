@@ -2,6 +2,16 @@
 
 历史记录只追加，最新会话写在文件底部。
 
+## Checkpoint 2026-08-25-B17-01 — B17 start reconciliation
+
+- Started: 2026-08-25 +08:00; Ended: in progress.
+- Branch/HEAD: `dev-remem` / `330f4d27f04b0729a53a2b63b1ab5747eb6f6dcb` (B16 commit, `Batch-ID: B16`).
+- Restored batch/task: B17 READY with no in-progress task; claimed S5-05 as the smallest dependency-satisfied task.
+- Initial reconciliation: tracked worktree diff is empty; no applicable `AGENTS.md`; existing untracked evaluation databases/reports and denied pytest temp directories are preserved and excluded.
+- Boundary: only S5-05～S5-08 and required continuity/spec/test/report artifacts; S5-09/S5-10/B18 are hard-stop out of scope.
+- Task status changes: B17 READY → IN_PROGRESS; S5-05 TODO → IN_PROGRESS.
+- Exact next step: implement redacted Agent Usage/Utility Feedback Shadow, then run focused and safety validation before the next checkpoint.
+
 ## Session 2026-08-22-01
 
 - Started: 2026-08-22 13:10 +08:00
@@ -327,6 +337,7 @@
 - Completed changes: reconciled continuity files to B06 facts; verified existing B06 implementation; fixed new-file/core-modified lint issues; ran targeted, affected, and safety regressions.
 - Files changed: `memoryhub/adapter/vnext_api.py`, `memoryhub/adapter/agent_api.py`, `memoryhub/app.py`, `memoryhub/application/canonical_write.py`, `memoryhub/application/episode_service.py`, `memoryhub/application/safety_policy_adapter.py`, `memoryhub/storage/vnext_repositories.py`, `agent-integration/memoryhub_cli/cli.py`, `agent-integration/memoryhub_client/client.py`, `agent-integration/memoryhub_client/config.py`, `agent-integration/memoryhub_mcp/config.py`, `agent-integration/memoryhub_mcp/tools.py`, `scripts/rebuild_projections.py`, `tests/test_vnext_entrypoints.py`, `tests/test_vnext_p0_flow.py`, `tests/test_rebuild_projections.py`, `tests/test_no_production_write_bypass.py`, plus continuity files.
 - Validation run:
+
   - B06 focused: `tests/test_vnext_entrypoints.py`, `tests/test_vnext_p0_flow.py`, `tests/test_rebuild_projections.py` → 16 passed.
   - Affected vNext regression: plus `tests/test_vnext_event_gateway.py`, `tests/test_vnext_repositories.py`, `tests/test_vnext_storage_schema.py`, `tests/test_vnext_task_state.py`, `tests/test_vnext_authority_write.py`, `tests/test_no_production_write_bypass.py` → 48 passed.
   - Safety/contract regression: `tests/test_safety_pipeline.py`, `tests/test_safety_contract.py`, `tests/test_safe_errors.py` → 77 passed.
@@ -578,3 +589,43 @@
 - Partial environment evidence: Qt `cmake` is absent from PATH; desktop native build was not runnable. The all-file vNext pytest command exceeded the host 30-second tool window and was not counted as passing.
 - Task status: S5-01～S5-04 DONE; B16 DONE; B17 TODO → READY only. No B17 content was executed or modified.
 - Exact next action: audit B16-only staged paths, create exactly one local commit `feat(vnext): complete B16 s5 benchmark dashboard` with `Batch-ID: B16`, read-only verify HEAD and stop. Next-session prompt: `docs/last_improve/codex_batches/B17_s5_migration_cutover.md`.
+
+## Checkpoint 2026-08-25-B17-02 — S5-05 complete; S5-06 claimed
+
+- Started: 2026-08-25 +08:00; Ended: in progress.
+- Restored task: `S5-05 IN_PROGRESS`; completed S5-05 and claimed `S5-06` after focused, affected and safety validation.
+- Completed changes: added `memoryhub/application/feedback_service.py`, optional Retrieval usage recording, exports and `tests/test_vnext_feedback_service.py`.
+- Validation: feedback/retrieval/formation Trace tests 16 passed; safety/contract/error/write-bypass set 83 passed; scoped ruff/compileall/diff-check passed.
+- Task status changes: S5-05 IN_PROGRESS → DONE; S5-06 TODO → IN_PROGRESS.
+- Boundary: S5-07/S5-08 remain unmodified; S5-09/S5-10/B18 remain hard-stop out of scope.
+- Exact next step: extend `scripts/migrate_vnext.py` with safe apply/checkpoint/backup validation and REVIEW checklist, then validate against an in-memory legacy database.
+
+## Checkpoint 2026-08-25-B17-03 — S5-06 complete; S5-07 claimed
+
+- Started: 2026-08-25 +08:00; Ended: in progress.
+- Restored task: `S5-06 IN_PROGRESS`; completed migration apply/review validation and claimed `S5-07`.
+- Completed changes: extended `scripts/migrate_vnext.py` with explicit apply, backup, input hash check, Authority envelope metadata, SQLite/external checkpoints and REVIEW preservation; updated migration spec/tests.
+- Validation: migration tests 4 passed; ruff/compileall passed; dry-run CLI exited 0 with read-only/no-delete safeguards.
+- Task status changes: S5-06 IN_PROGRESS → DONE; S5-07 TODO → IN_PROGRESS.
+- Boundary: S5-08 remains TODO; S5-09/S5-10/B18 remain hard-stop out of scope.
+- Exact next step: implement Formation Shadow and Retrieval dual-read comparison/reporting with redacted deltas and legacy-result preservation.
+
+## Checkpoint 2026-08-25-B17-04 — S5-07 complete; S5-08 claimed
+
+- Started: 2026-08-25 +08:00; Ended: in progress.
+- Restored task: `S5-07 IN_PROGRESS`; completed Formation/Retrieval Shadow and dual-read validation, then claimed `S5-08`.
+- Completed changes: added `memoryhub/application/shadow_read_service.py`, `tests/test_vnext_shadow_read.py`, `evaluation/run_vnext_shadow.py`, and redacted `evaluation/results/vnext_shadow/shadow.json`.
+- Validation: Shadow/Formation/Retrieval/entrypoint set 36 passed; safety/contract/error/Forget/write-bypass set 86 passed; scoped ruff/compileall passed; Shadow runner exited 0.
+- Task status changes: S5-07 IN_PROGRESS → DONE; S5-08 TODO → IN_PROGRESS.
+- Boundary: S5-09/S5-10/B18 remain hard-stop out of scope.
+- Exact next step: add rollout controller/config, per-level cutover and rollback audit evidence, then run B17 final gates without committing until all B17 acceptance is complete.
+
+## Checkpoint 2026-08-25-B17-05 — B17 final validation and acceptance
+
+- Started: 2026-08-25 +08:00; Ended: pending single local commit and read-only verification.
+- Restored task: `S5-08 IN_PROGRESS`; completed S5-08 and B17 final acceptance.
+- Completed changes: added rollout controller/config/spec/tests and deterministic rollout evidence; all S5-05～S5-08 implementation and continuity artifacts are complete.
+- Validation: B17 affected suite 101 passed; safety/contract/error/Forget suite 80 passed; focused rollout 16 passed; ruff/compileall/diff-check passed; Shadow/rollout runners exited 0; redacted report scan found no raw query/content/payload.
+- Task status changes: S5-08 IN_PROGRESS → DONE; B17 IN_PROGRESS → DONE; B18 TODO → READY.
+- Commit rule: create exactly one local commit containing only B17 artifacts and required continuity files, with title `feat(vnext): complete B17 s5 migration cutover` and trailer `Batch-ID: B17`; use `SELF (Batch-ID: B17)` in continuity files; do not push/amend/rebase.
+- Hard stop: after read-only HEAD SHA/file/status verification, stop immediately and hand off `docs/last_improve/codex_batches/B18_release.md`; do not execute, claim, research or modify B18.

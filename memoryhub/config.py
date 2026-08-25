@@ -85,6 +85,8 @@ class VNextConfig:
     authority_single_writer: bool = True
     allow_policy_bypass: bool = False
     allow_legacy_read_fallback: bool = True
+    rollback_window_minutes: int = 60
+    observation_window_requests: int = 1
 
     def __post_init__(self) -> None:
         if self.mode not in _VNEXT_MODES:
@@ -107,6 +109,10 @@ class VNextConfig:
         ):
             if type(getattr(self, field_name)) is not bool:
                 raise ValueError(f"vnext.{field_name} must be a boolean")
+        for field_name in ("rollback_window_minutes", "observation_window_requests"):
+            value = getattr(self, field_name)
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"vnext.{field_name} must be a positive integer")
 
 
 @dataclass

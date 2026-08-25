@@ -1,5 +1,50 @@
 # MemoryHub vNext Execution Evidence
 
+## B17 start reconciliation
+
+- Date/time: 2026-08-25 +08:00; environment: Windows PowerShell, `D:\project\XA202612-2`, `.venv` Python/pytest/ruff.
+- Commands: branch/HEAD/status/diff/log inspection; required B17 manual, batch prompt, plan S5-05～S5-08 sections, all continuity files, applicable `AGENTS.md` inventory, and directly related vNext trace/migration/formation/retrieval/config tests and sources.
+- Result: branch `dev-remem`; HEAD `330f4d27f04b0729a53a2b63b1ab5747eb6f6dcb` contains B16 with `Batch-ID: B16`; no tracked diff; no applicable `AGENTS.md` found. Existing untracked evaluation `.db`/report artifacts and denied pytest temp directories are preserved.
+- Reconciliation: B17 is READY with no in-progress task; S5-05 is claimed. S3-08, S5-01, S0-05, S1-01, S1-07, S2-08, S3-09 and S4 Gate dependencies have valid evidence. S5-09/S5-10/B18 are outside this session.
+- Boundary: only S5-05～S5-08 and required continuity/spec/test/report files may change; no Authority正文/状态 mutation is authorized by Shadow paths.
+
+## S5-05 checkpoint
+
+- Deliverables: `memoryhub/application/feedback_service.py`, RetrievalService optional usage integration, and `tests/test_vnext_feedback_service.py`.
+- Focused command: `.venv\Scripts\python.exe -m pytest tests/test_vnext_feedback_service.py tests/test_vnext_retrieval_service.py tests/test_vnext_formation_trace.py -q` → `16 passed`.
+- Risk command: `.venv\Scripts\python.exe -m pytest tests/test_no_production_write_bypass.py tests/test_safety_pipeline.py tests/test_safety_contract.py tests/test_safe_errors.py -q` → `83 passed`.
+- Static: scoped ruff, compileall and `git diff --check` passed after import normalization; line-ending warnings are existing Windows normalization only.
+- Acceptance: all five usage classes are separately represented; feedback only produces bounded utility proposals and redacted spans; `shadow_only=true`, `authority_mutations=0`, no raw query/content fields and no lifecycle/Authority write path.
+- Exit: S5-05 DONE; S5-06 claimed as the sole IN_PROGRESS task.
+
+## S5-06 checkpoint
+
+- Deliverables: extended `scripts/migrate_vnext.py`, migration tests, and `docs/spec/VNEXT_MIGRATION.md` apply/rollback contract.
+- Focused command: `.venv\Scripts\python.exe -m pytest tests/test_vnext_migration.py -q` → `4 passed`.
+- Static/CLI: migration ruff and compileall passed; `.venv\Scripts\python.exe scripts/migrate_vnext.py --dry-run --report evaluation/results/vnext_migration/dry_run.json` exited 0 with `read_only_scan=true`, `no_irreversible_delete=true`, and `uncertain_data_never_promoted_to_active_global=true`.
+- Apply evidence: a controlled legacy SQLite database applied one eligible row, left one tenant/scope/evidence-incomplete row unchanged in REVIEW, created backup and checkpoint, preserved old tables, and produced `APPLIED_WITH_REVIEW`; no delete/revival path exists.
+- Acceptance: count/hash/tenant/scope/content version/evidence validation is part of the plan and apply gate; apply requires additive Authority columns and keeps Projection rebuild deferred.
+- Exit: S5-06 DONE; S5-07 claimed as the sole IN_PROGRESS task.
+
+## S5-07 checkpoint
+
+- Deliverables: `memoryhub/application/shadow_read_service.py`, `evaluation/run_vnext_shadow.py`, `tests/test_vnext_shadow_read.py`, and `evaluation/results/vnext_shadow/shadow.json`.
+- Focused/affected command: `.venv\Scripts\python.exe -m pytest tests/test_vnext_shadow_read.py tests/test_vnext_formation_shadow.py tests/test_vnext_formation_eval.py tests/test_vnext_retrieval_service.py tests/test_vnext_entrypoints.py -q` → `36 passed`.
+- Risk command: `.venv\Scripts\python.exe -m pytest tests/test_no_production_write_bypass.py tests/test_safety_pipeline.py tests/test_safety_contract.py tests/test_safe_errors.py tests/test_vnext_forget_diagnostics.py -q` → `86 passed`.
+- Static/runner: scoped ruff and compileall passed; `evaluation/run_vnext_shadow.py --output evaluation/results/vnext_shadow/shadow.json` exited 0.
+- Acceptance: Formation Shadow remains Candidate/in-memory only; Retrieval dual-read returns legacy output even when vNext errors; report contains only counts, hashes, classifications and leak counters; raw query/content is absent; Policy Leakage and Forget residual conditions are explicit hard-gate counters.
+- Exit: S5-07 DONE; S5-08 claimed as the sole IN_PROGRESS task.
+
+## S5-08 and B17 final acceptance
+
+- Deliverables: `memoryhub/application/rollout_service.py`, `memoryhub/config.py`, `config.example.yaml`, `evaluation/run_vnext_rollout.py`, `evaluation/results/vnext_shadow/rollout.json`, `docs/spec/VNEXT_ROLLOUT.md`, and `tests/test_vnext_rollout.py`.
+- Focused command: `.venv\Scripts\python.exe -m pytest tests/test_vnext_rollout.py tests/test_vnext_feature_flags.py -q` → `16 passed`.
+- Final affected command: B17 S5-05～S5-08 plus Formation/Retrieval/Authority/Projection/Forget/write-bypass regression → `101 passed`.
+- Final risk command: `.venv\Scripts\python.exe -m pytest tests/test_safety_pipeline.py tests/test_safety_contract.py tests/test_safe_errors.py tests/test_vnext_forget_diagnostics.py -q` → `80 passed`.
+- Static/runner: touched-module ruff passed; application/config/migration/evaluation compileall passed; `git diff --check` passed; Shadow and rollout runners exited 0; report scan found no raw query/content/payload/raw_query fields.
+- Acceptance: levels 5/25/50/100 cannot be skipped; each requires observed requests and zero Policy Leakage, cross-tenant, Forget residual and error metrics; CUTOVER and ROLLBACK audits preserve window/metrics/rollback duration; snapshot reports `redacted=true` and `authority_mutations=0`.
+- B17 Gate: S5-05 through S5-08 DONE; B17 DONE; B18 READY only. No S5-09/S5-10/B18 implementation was performed.
+
 ## B16 start reconciliation
 
 - Date/time: 2026-08-25 +08:00; environment: Windows PowerShell, `D:\project\XA202612-2`, `.venv` Python/pytest/ruff.

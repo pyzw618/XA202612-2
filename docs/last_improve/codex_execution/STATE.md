@@ -1,5 +1,46 @@
 # MemoryHub vNext Codex Execution State
 
+## B17 start reconciliation — 2026-08-25
+
+- Current batch: B17 (`S5-05` through `S5-08`), status `IN_PROGRESS`; current task: S5-05 `IN_PROGRESS`.
+- Repository truth: branch `dev-remem`, HEAD `330f4d27f04b0729a53a2b63b1ab5747eb6f6dcb` (`feat(vnext): complete B16 s5 benchmark dashboard`, trailer `Batch-ID: B16`). Tracked worktree diff is empty.
+- Existing untracked `evaluation/results/*.db`/report artifacts and host-denied pytest temporary directories are preserved and excluded from this batch commit.
+- B17 was READY with no in-progress task; S5-05 is the smallest dependency-satisfied task. S3-08, S5-01 and prior S5 evidence are valid DONE; S5-06/S5-07/S5-08 remain untouched.
+- No applicable `AGENTS.md` was found. Boundary: only S5-05 through S5-08 plus required continuity/spec/test/report artifacts; do not execute, claim, research or modify S5-09/S5-10 or B18.
+- Exact next action: implement redacted Agent Usage/Utility Feedback Shadow and focused safety tests; shadow output must not mutate Authority,正文 or lifecycle state.
+
+## S5-05 checkpoint — 2026-08-25
+
+- Status: DONE. Added `memoryhub/application/feedback_service.py` with typed `INCLUDED`, `REFERENCED`, `ACTION_INFLUENCED`, `OUTCOME` and `CORRECTION` signals, redacted Trace spans, and deterministic non-authoritative utility proposals.
+- Retrieval integration records INCLUDED/REFERENCED usage after Activation creation when an optional feedback shadow is supplied; no Authority repository, content, status or version mutation is reachable from the shadow.
+- Validation: feedback/retrieval/formation Trace set 16 passed; safety/contract/error/write-bypass risk set 83 passed; scoped ruff, compileall and `git diff --check` passed.
+- Evidence: `EVIDENCE.md#s5-05-checkpoint`.
+- Next task: S5-06 `IN_PROGRESS`; implement apply-safe legacy migration, checkpoint/backup, count/hash/tenant/scope/version/evidence validation and explicit REVIEW output.
+
+## S5-06 checkpoint — 2026-08-25
+
+- Status: DONE. `scripts/migrate_vnext.py` now supports explicit `--apply` only after a fresh read-only scan, optional approved input hash, database backup, atomic Authority-compatible metadata update, SQLite checkpoint and external checkpoint JSON.
+- Eligible rows preserve old tables and receive a governed `vnext_authority` envelope; missing tenant/scope/version/evidence rows remain untouched in `REVIEW`; deleted rows cannot be promoted or revived. Projection rebuild remains deferred until Authority validation.
+- Validation: migration focused tests 4 passed; migration ruff/compileall passed; dry-run CLI exited 0 and emitted the existing empty-database report with read-only/no-delete/uncertain-data safeguards.
+- Evidence: `EVIDENCE.md#s5-06-checkpoint`.
+- Next task: S5-07 `IN_PROGRESS`; implement redacted Formation Shadow/Retrieval dual-read comparison and cutover report without changing returned legacy results.
+
+## S5-07 checkpoint — 2026-08-25
+
+- Status: DONE. Added `memoryhub/application/shadow_read_service.py` and `evaluation/run_vnext_shadow.py`; Formation Shadow is reused without Authority writes, while Retrieval dual-read executes vNext only as an observed branch and always returns the legacy response.
+- Reports classify result-set/order/version/scope/read-error differences and count Policy/Forget leaks using ID hashes and redacted Trace metadata only. The deterministic CLI artifact is `evaluation/results/vnext_shadow/shadow.json`.
+- Validation: Shadow/Formation/Retrieval/entrypoint set 36 passed; safety/contract/error/Forget/write-bypass set 86 passed; scoped ruff/compileall passed; Shadow CLI exited 0.
+- Evidence: `EVIDENCE.md#s5-07-checkpoint`.
+- Next task: S5-08 `IN_PROGRESS`; implement 5%→25%→50%→100% rollout gates, per-level observation evidence, explicit rollback window and read-only rollback switch.
+
+## S5-08 and B17 final acceptance — 2026-08-25
+
+- S5-08 DONE. Added `RolloutController`, explicit `VNextConfig` observation/rollback settings, rollout contract, deterministic cutover/rollback runner and `evaluation/results/vnext_shadow/rollout.json`.
+- Rollout is fixed at legacy/0 → canary/5 → canary/25 → canary/50 → vnext/100; no skip is allowed. Every level requires an observation window and zero Policy Leakage, cross-tenant results, Forget residuals and observed errors. CUTOVER and ROLLBACK audits include window IDs, metrics and rollback minutes.
+- B17 acceptance: S5-05 Usage/Feedback Shadow, S5-06 migration/REVIEW validation, S5-07 Formation/Retrieval Shadow dual-read, and S5-08 gated rollout/rollback all meet their exit criteria. Shadow and dual-read never write Authority正文/状态; migration preserves old tables and does not revive uncertain/deleted records.
+- Final validation: B17 affected suite 101 passed; safety/contract/error/Forget suite 80 passed; ruff, compileall, `git diff --check`, Shadow runner and rollout runner passed. Shadow artifacts contain no raw query/content/payload fields.
+- Batch status: B17 DONE; B18 READY only. Commit reference must be `SELF (Batch-ID: B17)` in the single B17 commit. Do not execute or modify S5-09/S5-10/B18.
+
 ## B16 start reconciliation — 2026-08-25
 
 - Current batch: B16 (`S5-01` through `S5-04`), status `IN_PROGRESS`; current task: S5-01 `IN_PROGRESS`.

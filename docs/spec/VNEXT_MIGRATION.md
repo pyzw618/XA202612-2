@@ -3,7 +3,7 @@
 版本：`vnext/v1`
 
 冻结任务：`S0-05`
-dry-run 实现：`scripts/migrate_vnext.py`
+dry-run/apply 实现：`scripts/migrate_vnext.py`
 
 ## S0-05 范围
 
@@ -47,7 +47,28 @@ python scripts/migrate_vnext.py --dry-run --report evaluation/results/vnext_migr
 
 ## Apply、兼容读取与回滚（S5-06 执行）
 
-S5-06 才能在审核 dry-run 报告后增加 apply：
+S5-06 在审核 dry-run 报告后允许显式 apply。默认仍只读；apply 必须指定数据库、
+备份和 checkpoint 路径，并可用 dry-run 的 `hash.input_hash` 作为
+`--expected-input-hash`：
+
+```powershell
+python scripts/migrate_vnext.py --db data/memoryhub.db --dry-run `
+  --report evaluation/results/vnext_migration/dry_run.json
+python scripts/migrate_vnext.py --db data/memoryhub.db --apply `
+  --report evaluation/results/vnext_migration/apply.json `
+  --backup evaluation/results/vnext_migration/backup.db `
+  --checkpoint evaluation/results/vnext_migration/checkpoint.json `
+  --expected-input-hash <dry-run-hash>
+```
+
+apply 只对 tenant、显式 Scope、版本和 Evidence 齐全的记录写入已有
+Preference/Knowledge Authority 兼容表的 `vnext_authority` 元数据；旧表和旧行不删除。
+不满足条件的记录保持原样，列入 `REVIEW` 清单，批次状态为
+`APPLIED_WITH_REVIEW`，不得静默成为 `LONG_TERM + ACTIVE + GLOBAL`。
+每次 apply 前生成备份，事务中写入 `vnext_migration_checkpoints`，并在外部
+checkpoint JSON 中记录 input hash、应用数、REVIEW 数和备份路径。
+
+具体步骤：
 
 1. 固定输入 hash、数据库快照/备份和环境 manifest；
 2. 先写 vNext Authority/Envelope 和迁移 checkpoint，再按版本构建
@@ -60,3 +81,7 @@ S5-06 才能在审核 dry-run 报告后增加 apply：
 
 回滚只撤销本次迁移产生的 Authority/Projection 记录或切换读别名，不回滚
 用户已经正确提交的旧 Authority 事实；Forget Tombstone 永远优先于旧 UPSERT。
+
+apply 失败时事务回滚；备份用于恢复原数据库，checkpoint/hash 用于判断报告与
+数据库是否匹配。应用前后的校验必须至少覆盖 source count、input hash、tenant、
+scope、content version、evidence refs、旧表保留和 REVIEW 未提升。

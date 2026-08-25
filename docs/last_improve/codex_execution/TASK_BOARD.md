@@ -1,5 +1,11 @@
 # MemoryHub vNext Task Board
 
+## B17 start reconciliation — 2026-08-25
+
+- B17 is `IN_PROGRESS`; S5-05 is the sole `IN_PROGRESS` task after branch/HEAD/status/diff and prior evidence reconciliation.
+- S5-01/S5-04 are DONE with valid B16 evidence; S5-06/S5-07/S5-08 are TODO and remain unmodified until their dependencies are complete.
+- Untracked evaluation database/report artifacts are pre-existing test output and are excluded from staging.
+
 ## B16 start reconciliation — 2026-08-25
 
 - Repository fact: B15 is committed at `5841161` with `Batch-ID: B15`; prior B15 commit-plan text was stale and has no bearing on S5 evidence.
@@ -86,10 +92,10 @@
 | S5-02 | DONE | S2-10, S3-10, S4-07 | Codex 2026-08-25 (B16) | EVIDENCE.md#s5-02-checkpoint | 固定版本/种子/环境的一命令四层 Runner |
 | S5-03 | DONE | S5-02 | Codex 2026-08-25 (B16) | EVIDENCE.md#s5-03-checkpoint | 同口径四系统与单机制消融，均值/方差/95% CI |
 | S5-04 | DONE | S4-06, S5-01, S5-02 | Codex 2026-08-25 (B16) | EVIDENCE.md#s5-04-and-b16-acceptance | 四视图、默认脱敏、管理授权与访问审计 |
-| S5-05 | TODO | S3-08, S5-01 | | | Agent Usage/Feedback Shadow |
-| S5-06 | TODO | S0-05, S1-01, S1-07 | | | 旧数据迁移与校验 |
-| S5-07 | TODO | S2-08, S3-09, S5-06 | | | Shadow 与双读报告 |
-| S5-08 | TODO | S5-07, S4 Gate | | | 灰度切流与回滚窗口 |
+| S5-05 | DONE | S3-08, S5-01 | Codex 2026-08-25 (B17) | EVIDENCE.md#s5-05-checkpoint | Agent Usage/Feedback Shadow；五类 Usage、Utility proposal、无 Authority 写入 |
+| S5-06 | DONE | S0-05, S1-01, S1-07 | Codex 2026-08-25 (B17) | EVIDENCE.md#s5-06-checkpoint | apply backup/checkpoint；count/hash/tenant/scope/version/evidence；REVIEW 保留 |
+| S5-07 | DONE | S2-08, S3-09, S5-06 | Codex 2026-08-25 (B17) | EVIDENCE.md#s5-07-checkpoint | Formation Shadow/Retrieval dual-read；差异/Policy/Forget 脱敏报告 |
+| S5-08 | DONE | S5-07, S4 Gate | Codex 2026-08-25 (B17) | EVIDENCE.md#s5-08-and-b17-final-acceptance | 5/25/50/100 分级门槛、切流/回滚审计与窗口 |
 | S5-09 | TODO | S5-08 | | | REST/CLI/MCP/SDK 与运维文档 |
 | S5-10 | TODO | S5-03, S5-04, S5-09 | | | 固定演示与最终验收包 |
 
@@ -98,4 +104,4 @@
 - IN_PROGRESS count: 0
 - Dependency violations: None
 - DONE without evidence: None
-- Last checked: 2026-08-25; B16 S5-01～S5-04 DONE; B17 READY only.
+- Last checked: 2026-08-25; B17 S5-05～S5-08 DONE; B18 READY only.

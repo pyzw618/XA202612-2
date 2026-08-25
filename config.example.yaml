@@ -25,6 +25,9 @@ vnext:
   # 生产环境必须保持 Policy 前置和 Authority 单写。
   policy_required: true
   authority_single_writer: true
+  # 每一级切流后的可观察窗口和可回滚时长。
+  rollback_window_minutes: 60
+  observation_window_requests: 1
   allow_policy_bypass: false
   # 保留兼容读回滚窗口，不代表允许第二个 Authority writer。
   allow_legacy_read_fallback: true

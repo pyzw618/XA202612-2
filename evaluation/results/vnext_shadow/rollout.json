@@ -1,0 +1,165 @@
+{
+  "current_level": 100,
+  "current_mode": "vnext",
+  "rollback_window_minutes": 60,
+  "observations": [
+    {
+      "level": 5,
+      "window_id": "demo-5",
+      "request_count": 1,
+      "policy_leak_count": 0,
+      "cross_tenant_count": 0,
+      "forget_residual_count": 0,
+      "error_count": 0,
+      "observed_at": "2026-08-24T17:29:52.291977+00:00"
+    },
+    {
+      "level": 25,
+      "window_id": "demo-25",
+      "request_count": 1,
+      "policy_leak_count": 0,
+      "cross_tenant_count": 0,
+      "forget_residual_count": 0,
+      "error_count": 0,
+      "observed_at": "2026-08-24T17:29:52.291977+00:00"
+    },
+    {
+      "level": 50,
+      "window_id": "demo-50",
+      "request_count": 1,
+      "policy_leak_count": 0,
+      "cross_tenant_count": 0,
+      "forget_residual_count": 0,
+      "error_count": 0,
+      "observed_at": "2026-08-24T17:29:52.291977+00:00"
+    },
+    {
+      "level": 100,
+      "window_id": "demo-100",
+      "request_count": 1,
+      "policy_leak_count": 0,
+      "cross_tenant_count": 0,
+      "forget_residual_count": 0,
+      "error_count": 0,
+      "observed_at": "2026-08-24T17:29:52.291977+00:00"
+    }
+  ],
+  "audits": [
+    {
+      "audit_id": "rollout-8bae9b9c27ae4507874d7e8e0d4e1f7a",
+      "action": "CUTOVER",
+      "previous_level": 0,
+      "next_level": 5,
+      "previous_mode": "legacy",
+      "next_mode": "canary",
+      "window_id": "demo-5",
+      "reason": "observation_window_passed",
+      "rollback_window_minutes": 60,
+      "metrics": {
+        "request_count": 1,
+        "policy_leak_count": 0,
+        "cross_tenant_count": 0,
+        "forget_residual_count": 0,
+        "error_count": 0
+      },
+      "recorded_at": "2026-08-24T17:29:52.291977+00:00"
+    },
+    {
+      "audit_id": "rollout-fb8e01d80d514ce4a9d591871cdfd7db",
+      "action": "ROLLBACK",
+      "previous_level": 5,
+      "next_level": 0,
+      "previous_mode": "canary",
+      "next_mode": "legacy",
+      "window_id": "demo-5",
+      "reason": "rollback rehearsal",
+      "rollback_window_minutes": 60,
+      "metrics": {
+        "request_count": 1,
+        "policy_leak_count": 0,
+        "cross_tenant_count": 0,
+        "forget_residual_count": 0,
+        "error_count": 0
+      },
+      "recorded_at": "2026-08-24T17:29:52.291977+00:00"
+    },
+    {
+      "audit_id": "rollout-039a5777e7544c7480b1043468de12bd",
+      "action": "CUTOVER",
+      "previous_level": 0,
+      "next_level": 5,
+      "previous_mode": "legacy",
+      "next_mode": "canary",
+      "window_id": "demo-5",
+      "reason": "observation_window_passed",
+      "rollback_window_minutes": 60,
+      "metrics": {
+        "request_count": 1,
+        "policy_leak_count": 0,
+        "cross_tenant_count": 0,
+        "forget_residual_count": 0,
+        "error_count": 0
+      },
+      "recorded_at": "2026-08-24T17:29:52.291977+00:00"
+    },
+    {
+      "audit_id": "rollout-1f7332f260f6451a83e54a65c3985074",
+      "action": "CUTOVER",
+      "previous_level": 5,
+      "next_level": 25,
+      "previous_mode": "canary",
+      "next_mode": "canary",
+      "window_id": "demo-25",
+      "reason": "observation_window_passed",
+      "rollback_window_minutes": 60,
+      "metrics": {
+        "request_count": 1,
+        "policy_leak_count": 0,
+        "cross_tenant_count": 0,
+        "forget_residual_count": 0,
+        "error_count": 0
+      },
+      "recorded_at": "2026-08-24T17:29:52.291977+00:00"
+    },
+    {
+      "audit_id": "rollout-1122fc87ebbd4fba8e1cb39b54857c61",
+      "action": "CUTOVER",
+      "previous_level": 25,
+      "next_level": 50,
+      "previous_mode": "canary",
+      "next_mode": "canary",
+      "window_id": "demo-50",
+      "reason": "observation_window_passed",
+      "rollback_window_minutes": 60,
+      "metrics": {
+        "request_count": 1,
+        "policy_leak_count": 0,
+        "cross_tenant_count": 0,
+        "forget_residual_count": 0,
+        "error_count": 0
+      },
+      "recorded_at": "2026-08-24T17:29:52.291977+00:00"
+    },
+    {
+      "audit_id": "rollout-09fde53e784a472b96c233fa69c4d6ec",
+      "action": "CUTOVER",
+      "previous_level": 50,
+      "next_level": 100,
+      "previous_mode": "canary",
+      "next_mode": "vnext",
+      "window_id": "demo-100",
+      "reason": "observation_window_passed",
+      "rollback_window_minutes": 60,
+      "metrics": {
+        "request_count": 1,
+        "policy_leak_count": 0,
+        "cross_tenant_count": 0,
+        "forget_residual_count": 0,
+        "error_count": 0
+      },
+      "recorded_at": "2026-08-24T17:29:52.291977+00:00"
+    }
+  ],
+  "redacted": true,
+  "authority_mutations": 0
+}

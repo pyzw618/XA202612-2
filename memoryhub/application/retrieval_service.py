@@ -21,6 +21,7 @@ from memoryhub.adapter.vnext_schemas import (
     RetrievedMemory,
 )
 from memoryhub.application.context_service import ContextAssemblyResult, ContextService
+from memoryhub.application.feedback_service import UsageKind
 from memoryhub.domain.contracts import (
     Activation,
     ActivationStatus,
@@ -80,6 +81,7 @@ class RetrievalService:
         trace_store: Any | None = None,
         authority_repository: AuthorityRepository | None = None,
         db: Any | None = None,
+        usage_feedback_service: Any | None = None,
     ) -> None:
         self.intent_router = intent_router or IntentRouter()
         self.planner = planner or RetrievalPlanner()
@@ -103,6 +105,7 @@ class RetrievalService:
         self.activation_repository = activation_repository
         self.retrieval_log_repository = retrieval_log_repository
         self.trace_store = trace_store
+        self.usage_feedback_service = usage_feedback_service
 
     def retrieve(
         self,
@@ -306,6 +309,19 @@ class RetrievalService:
                 except Exception:
                     # Observability writes must not fail retrieval.
                     pass
+            if self.usage_feedback_service is not None:
+                self.usage_feedback_service.record_usage(
+                    trace_id=request.request_id,
+                    query_id=query_id,
+                    task_id=request.task_id,
+                    tenant_id=request.tenant_id,
+                    user_id=request.user_id,
+                    memory_id=memory.memory_id,
+                    usage_kind=(
+                        UsageKind.INCLUDED if included else UsageKind.REFERENCED
+                    ),
+                    outcome_code=("IN_CONTEXT" if included else "SELECTED"),
+                )
         return activations
 
     def _record_retrieval_log(

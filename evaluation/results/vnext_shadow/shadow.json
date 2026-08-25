@@ -1,0 +1,12 @@
+{
+  "report_version": "vnext/shadow/v1",
+  "redacted": true,
+  "formation_runs": 0,
+  "retrieval_runs": 1,
+  "difference_counts": {
+    "RESULT_SET_MISMATCH": 1
+  },
+  "policy_leak_count": 0,
+  "forget_leak_count": 0,
+  "safe": true
+}
