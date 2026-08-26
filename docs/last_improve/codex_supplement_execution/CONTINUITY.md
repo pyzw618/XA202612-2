@@ -19,7 +19,7 @@
 |---|---|---|---|---|
 | S6-01 Formation 生产链 | DONE | 无 | 2026-08-25：Canonical Write Path 已接入 Boundary→Working/Episode/checkpoint→可重试 extraction task；worker 已接通 Reflection→Candidate/Evidence→Consolidation→Authority，默认 `candidate-only`；定向与受影响回归通过 | 等待 S6-02 DONE |
 | S6-02 真实读路径灰度 | DONE | S6-01 | 2026-08-26：共享 RolloutController/ShadowReadService 已装配全部真实读入口；legacy/shadow/dual-read/canary/vnext 统一选择，稳定哈希 canary，SQLite 持久化观测/差异/CUTOVER/ROLLBACK，零容忍门禁与只读回滚通过 | 等待 S6-03 DONE |
-| S6-03 持久化可观测性 | TODO | S6-02 | 审查确认 Trace/Dashboard 为进程内数据 | 等待 S6-02 DONE |
+| S6-03 持久化可观测性 | DONE | S6-02 | 2026-08-26：SQLite Trace/Metric/Audit 持久化、增量迁移、脱敏、采样/保留期、Dashboard/diagnostics 权限审计与跨重启验证通过 | 等待 S6-04 |
 | S6-04 演示与最终验收 | TODO | S6-03 | 审查确认演示命令与脚本不一致，兼容窗口未真实登记 | 等待 S6-03 DONE |
 
 ## 初始基线
@@ -69,3 +69,18 @@
   - 脱敏扫描：rollout 快照、审计、差异报告仅保存模式、层级、计数、哈希和 ID 引用，不保存 query、payload、memory 正文。
 - 限制：宿主机默认 pytest 临时目录/key-store 曾拒绝访问；通过显式固定测试配置和直接 SQLite 检查完成等价验证，未修改既有安全目录或临时产物。
 - 下一步：保持 S6-03、S6-04 为 `TODO`，停止本会话。
+
+### 2026-08-26 — S6-03 持久化可观测性
+
+- 阶段：S6-03；基线 HEAD：`4bc07ff`；工作区开始时无用户改动；S6-01=`DONE`、S6-02=`DONE`、S6-03=`TODO`、S6-04=`TODO`。
+- 状态变更：S6-03 `TODO` → `IN_PROGRESS` → `DONE`；S6-04 保持 `TODO`。本会话仅处理 Trace、Metric、Audit、Dashboard 的持久化、脱敏、保留期、采样与跨重启审计，未进入 S6-04。
+- 主要改动：新增 `observability_traces`、`observability_metrics`、`observability_audits` ORM 模型及 `Database._ensure_compatible_schema()` 加法式迁移/索引；应用装配将 TraceStore、InfrastructureMetrics、AuditStore 绑定业务 SQLite；Trace 按 trace/task/event/memory/query/tenant/category/status 建索引并按 7/30 天策略清理；错误、Denied、高风险 Policy、Forget、评测/benchmark 全量采样，普通成功按稳定 hash 采样；聚合指标不采样且保留全量计数；递归拒绝 content/text/payload/query/Evidence/body/embedding 等字段；Forget Audit 仅保留请求 ID、受影响数量和 ID hash；Dashboard/diagnostics 读取持久化脱敏投影，管理访问和 Forget 均有审计，Dashboard 提供 Memory/Episode/Retrieval Trace/Projection Version 关联字段。
+- 验收证据：
+  - `python -m compileall -q memoryhub tests/test_vnext_s6_03_observability.py`：通过。
+  - `ruff check`（全部 S6-03 改动文件）：通过；`git diff --check`：通过。
+  - `tests/test_vnext_s6_03_observability.py`：3 项通过，覆盖 Trace/Metric/Audit 重启恢复与索引、递归脱敏、评测全量采样、过期清理不影响聚合、增量迁移和 Dashboard 持久化投影。
+  - S6-03/Trace/Reliability/Storage/S6-02 核心回归：`25 passed, 2 deselected`；另有核心 Trace/Reliability 与 S6-03 组合 `19 passed`，Dashboard API 权限 `1 passed`，Retrieval Service `5 passed`，安全脱敏子集 `25 passed`。
+  - 直接 SQLite 重启验证：Trace 可按 trace/task/event/memory/query 关联查询；Metric 聚合计数恢复；Dashboard、Forget 和 diagnostics 审计跨重启保留；Trace 过期清理未删除 Authority 或 Metric aggregate。
+  - 脱敏验证：TraceSpan 嵌套敏感 key 在写入前拒绝；Dashboard benchmark/diagnostics 递归投影不输出 query、payload、正文或 Evidence；Forget Audit 仅保存 hash/count。
+- 限制：宿主机默认 pytest `tmp_path`/临时目录清理仍报 `WinError 5`，因此依赖该 fixture 的既有 Dashboard/Forget/迁移/安全测试未计作代码失败，使用固定工作区 SQLite 等价场景完成；既有 `tests/test_vnext_entrypoints.py` 的部分 helper 未注入 S6-02 `rollout_controller`，返回 `rollout.service_unavailable`，未修改该 S6-02 范围问题。未修改 `tests/security` 或宿主临时目录。
+- 下一步：仅允许后续会话领取 S6-04；本会话停止。

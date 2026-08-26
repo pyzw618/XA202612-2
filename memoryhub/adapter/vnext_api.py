@@ -520,6 +520,7 @@ async def vnext_diagnostics(
         tenant_id=req.tenant_id,
         user_id=req.user_id,
         include_sensitive=req.include_sensitive,
+        actor_id=x_memoryhub_admin or req.user_id,
     )
     return DiagnosticResponse(
         request_id=req.request_id,
@@ -527,7 +528,7 @@ async def vnext_diagnostics(
         target_type=req.target_type,
         target_id=req.target_id,
         items=items,
-        redacted=not req.include_sensitive,
+        redacted=True,
     )
 
 
@@ -550,7 +551,13 @@ async def vnext_dashboard(
             status_code=503, detail={"code": APIErrorCode.SERVICE_UNAVAILABLE.value}
         )
     try:
-        data = service.view(view, tenant_id=tenant_id, user_id=user_id, actor_id=user_id)
+        data = service.view(
+            view,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            actor_id=user_id,
+            audit_actor_id=x_memoryhub_admin,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail={"code": str(exc)}) from exc
     return DashboardResponse(

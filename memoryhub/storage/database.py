@@ -191,6 +191,70 @@ class Database:
                 "candidate_statuses": "JSON DEFAULT '{}'",
                 "memory_ids": "JSON DEFAULT '[]'",
             },
+            "observability_traces": {
+                "parent_id": "VARCHAR(128)",
+                "kind": "VARCHAR(32) DEFAULT 'INFRASTRUCTURE'",
+                "layer": "VARCHAR(64) DEFAULT ''",
+                "category": "VARCHAR(32) DEFAULT 'INFRASTRUCTURE'",
+                "status": "VARCHAR(32) DEFAULT 'SUCCEEDED'",
+                "tenant_id": "VARCHAR(64) DEFAULT ''",
+                "user_id": "VARCHAR(64) DEFAULT ''",
+                "task_id": "VARCHAR(128)",
+                "event_id": "VARCHAR(128)",
+                "memory_id": "VARCHAR(128)",
+                "query_id": "VARCHAR(128)",
+                "ids": "JSON DEFAULT '{}'",
+                "hashes": "JSON DEFAULT '{}'",
+                "classification": "JSON DEFAULT '{}'",
+                "scores": "JSON DEFAULT '{}'",
+                "reason_codes": "JSON DEFAULT '[]'",
+                "redacted": "BOOLEAN DEFAULT 1",
+                "sampled": "BOOLEAN DEFAULT 1",
+                "retention_class": "VARCHAR(16) DEFAULT 'NORMAL'",
+                "created_at": "DATETIME",
+                "expires_at": "DATETIME",
+            },
+            "observability_metrics": {
+                "tenant_id": "VARCHAR(64) DEFAULT ''",
+                "user_id": "VARCHAR(64) DEFAULT ''",
+                "metric_name": "VARCHAR(128) DEFAULT ''",
+                "category": "VARCHAR(32) DEFAULT 'INFRASTRUCTURE'",
+                "status": "VARCHAR(32) DEFAULT 'SUCCEEDED'",
+                "trace_id": "VARCHAR(128)",
+                "task_id": "VARCHAR(128)",
+                "event_id": "VARCHAR(128)",
+                "memory_id": "VARCHAR(128)",
+                "query_id": "VARCHAR(128)",
+                "count": "INTEGER DEFAULT 0",
+                "total_value": "FLOAT DEFAULT 0",
+                "min_value": "FLOAT DEFAULT 0",
+                "max_value": "FLOAT DEFAULT 0",
+                "samples": "JSON DEFAULT '[]'",
+                "retention_class": "VARCHAR(16) DEFAULT 'AGGREGATE'",
+                "created_at": "DATETIME",
+                "updated_at": "DATETIME",
+                "expires_at": "DATETIME",
+            },
+            "observability_audits": {
+                "tenant_id": "VARCHAR(64) DEFAULT ''",
+                "user_id": "VARCHAR(64) DEFAULT ''",
+                "actor_id": "VARCHAR(128) DEFAULT ''",
+                "action": "VARCHAR(64) DEFAULT ''",
+                "category": "VARCHAR(32) DEFAULT 'MANAGEMENT'",
+                "status": "VARCHAR(32) DEFAULT 'SUCCEEDED'",
+                "trace_id": "VARCHAR(128)",
+                "task_id": "VARCHAR(128)",
+                "event_id": "VARCHAR(128)",
+                "memory_id": "VARCHAR(128)",
+                "query_id": "VARCHAR(128)",
+                "target_type": "VARCHAR(64)",
+                "target_id": "VARCHAR(128)",
+                "details": "JSON DEFAULT '{}'",
+                "redacted": "BOOLEAN DEFAULT 1",
+                "retention_class": "VARCHAR(16) DEFAULT 'ELEVATED'",
+                "created_at": "DATETIME",
+                "expires_at": "DATETIME",
+            },
         }
         with self.engine.begin() as conn:
             for table, columns in migrations.items():
@@ -259,6 +323,32 @@ class Database:
                 "ON memory_projection_outbox (status, next_retry_at)",
                 "CREATE INDEX IF NOT EXISTS ix_memory_projection_outbox_memory_id_type "
                 "ON memory_projection_outbox (memory_id, memory_type)",
+                "CREATE INDEX IF NOT EXISTS ix_observability_traces_trace_created "
+                "ON observability_traces (trace_id, created_at)",
+                "CREATE INDEX IF NOT EXISTS ix_observability_traces_task_id "
+                "ON observability_traces (task_id)",
+                "CREATE INDEX IF NOT EXISTS ix_observability_traces_event_id "
+                "ON observability_traces (event_id)",
+                "CREATE INDEX IF NOT EXISTS ix_observability_traces_memory_id "
+                "ON observability_traces (memory_id)",
+                "CREATE INDEX IF NOT EXISTS ix_observability_traces_query_id "
+                "ON observability_traces (query_id)",
+                "CREATE INDEX IF NOT EXISTS ix_observability_traces_tenant_created "
+                "ON observability_traces (tenant_id, created_at)",
+                "CREATE INDEX IF NOT EXISTS ix_observability_metrics_dimensions "
+                "ON observability_metrics (tenant_id, user_id, metric_name, category, status)",
+                "CREATE INDEX IF NOT EXISTS ix_observability_audits_trace_id "
+                "ON observability_audits (trace_id)",
+                "CREATE INDEX IF NOT EXISTS ix_observability_audits_task_id "
+                "ON observability_audits (task_id)",
+                "CREATE INDEX IF NOT EXISTS ix_observability_audits_event_id "
+                "ON observability_audits (event_id)",
+                "CREATE INDEX IF NOT EXISTS ix_observability_audits_memory_id "
+                "ON observability_audits (memory_id)",
+                "CREATE INDEX IF NOT EXISTS ix_observability_audits_query_id "
+                "ON observability_audits (query_id)",
+                "CREATE INDEX IF NOT EXISTS ix_observability_audits_tenant_created "
+                "ON observability_audits (tenant_id, created_at)",
             ):
                 conn.exec_driver_sql(index_ddl)
 

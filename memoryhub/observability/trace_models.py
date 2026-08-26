@@ -72,6 +72,7 @@ class TraceSpan(BaseModel):
     )
     sampled: bool = True
     retention_class: Literal["NORMAL", "ELEVATED"] = "NORMAL"
+    status: str = "SUCCEEDED"
     expires_at: datetime | None = None
 
     @model_validator(mode="after")

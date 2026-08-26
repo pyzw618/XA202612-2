@@ -619,7 +619,12 @@ class MemoryProjectionOutboxRepository:
         return self.list_by_status(("dead_letter",), limit=limit)
 
     def list_by_memory(
-        self, memory_id: str, *, tenant_id: str | None = None, limit: int = 100
+        self,
+        memory_id: str,
+        *,
+        tenant_id: str | None = None,
+        user_id: str | None = None,
+        limit: int = 100,
     ) -> list[ProjectionOutboxView]:
         with self.db.session() as session:
             query = session.query(MemoryProjectionOutboxRow).filter(
@@ -627,6 +632,8 @@ class MemoryProjectionOutboxRepository:
             )
             if tenant_id is not None:
                 query = query.filter(MemoryProjectionOutboxRow.tenant_id == tenant_id)
+            if user_id is not None:
+                query = query.filter(MemoryProjectionOutboxRow.user_id == user_id)
             rows = (
                 query.order_by(MemoryProjectionOutboxRow.created_at.desc())
                 .limit(max(1, min(int(limit), 500)))

@@ -561,13 +561,21 @@ def create_app(
         app.state.vector_store = vector_store
         app.state.vector_engine = vector_engine
         app.state.evidence_store = EvidenceStore(config.storage.evidence_path)
-        from memoryhub.observability import InfrastructureMetrics, TraceSamplingPolicy, TraceStore
+        from memoryhub.observability import (
+            AuditStore,
+            InfrastructureMetrics,
+            TraceSamplingPolicy,
+            TraceStore,
+        )
 
         # A single redacted trace store associates S5 diagnostics across write,
         # retrieval, Forget and infrastructure paths. It is observability only,
         # never an Authority data store.
-        app.state.trace_store = TraceStore(sampling_policy=TraceSamplingPolicy())
-        app.state.infrastructure_metrics = InfrastructureMetrics()
+        app.state.trace_store = TraceStore(
+            db=db, sampling_policy=TraceSamplingPolicy()
+        )
+        app.state.infrastructure_metrics = InfrastructureMetrics(db=db)
+        app.state.audit_store = AuditStore(db)
 
         app.state.memory_write_service = MemoryWriteService(
             pref_repo=pref_repo,
@@ -660,12 +668,19 @@ def create_app(
         from memoryhub.application.diagnostic_service import DiagnosticService
         from memoryhub.application.forget_service import ForgetService
         app.state.forget_service = ForgetService(
-            db, authority_repository, trace_store=app.state.trace_store
+            db,
+            authority_repository,
+            trace_store=app.state.trace_store,
+            audit_store=app.state.audit_store,
         )
-        app.state.diagnostic_service = DiagnosticService(db, trace_store=app.state.trace_store)
+        app.state.diagnostic_service = DiagnosticService(
+            db, trace_store=app.state.trace_store, audit_store=app.state.audit_store
+        )
         app.state.dashboard_service = DashboardService(
             trace_store=app.state.trace_store,
             metrics=app.state.infrastructure_metrics,
+            db=db,
+            audit_store=app.state.audit_store,
         )
 
         # 前端 agent 演示适配层：事件处理协调器（依赖 memory_write_service 同步检索索引）

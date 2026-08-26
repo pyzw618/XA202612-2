@@ -613,6 +613,116 @@ class RolloutAuditRow(Base):
     recorded_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
 
 
+class ObservabilityTraceRow(Base):
+    """Durable redacted trace span; never an Authority/content store."""
+
+    __tablename__ = "observability_traces"
+    __table_args__ = (
+        Index("ix_observability_traces_tenant_created", "tenant_id", "created_at"),
+        Index("ix_observability_traces_trace_created", "trace_id", "created_at"),
+        Index("ix_observability_traces_category_status", "category", "status"),
+    )
+
+    span_id = Column(String(128), primary_key=True)
+    trace_id = Column(String(128), nullable=False, index=True)
+    parent_id = Column(String(128), nullable=True)
+    kind = Column(String(32), nullable=False, index=True)
+    layer = Column(String(64), nullable=False, default="")
+    category = Column(String(32), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="SUCCEEDED", index=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    task_id = Column(String(128), nullable=True, index=True)
+    event_id = Column(String(128), nullable=True, index=True)
+    memory_id = Column(String(128), nullable=True, index=True)
+    query_id = Column(String(128), nullable=True, index=True)
+    ids = Column(JSON, nullable=False, default=dict)
+    hashes = Column(JSON, nullable=False, default=dict)
+    classification = Column(JSON, nullable=False, default=dict)
+    scores = Column(JSON, nullable=False, default=dict)
+    reason_codes = Column(JSON, nullable=False, default=list)
+    redacted = Column(Boolean, nullable=False, default=True)
+    sampled = Column(Boolean, nullable=False, default=True)
+    retention_class = Column(String(16), nullable=False, default="NORMAL", index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    expires_at = Column(DateTime, nullable=True, index=True)
+
+
+class ObservabilityMetricRow(Base):
+    """Durable aggregate metric; samples are bounded and contain no content."""
+
+    __tablename__ = "observability_metrics"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "user_id", "metric_name", "category", "status",
+            name="uq_observability_metrics_dimension",
+        ),
+        Index("ix_observability_metrics_tenant_updated", "tenant_id", "updated_at"),
+        Index("ix_observability_metrics_trace", "trace_id"),
+        Index("ix_observability_metrics_task", "task_id"),
+        Index("ix_observability_metrics_event", "event_id"),
+        Index("ix_observability_metrics_memory", "memory_id"),
+        Index("ix_observability_metrics_query", "query_id"),
+        Index("ix_observability_metrics_category_status", "category", "status"),
+    )
+
+    metric_id = Column(String(256), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    metric_name = Column(String(128), nullable=False, index=True)
+    category = Column(String(32), nullable=False, default="INFRASTRUCTURE", index=True)
+    status = Column(String(32), nullable=False, default="SUCCEEDED", index=True)
+    trace_id = Column(String(128), nullable=True)
+    task_id = Column(String(128), nullable=True)
+    event_id = Column(String(128), nullable=True)
+    memory_id = Column(String(128), nullable=True)
+    query_id = Column(String(128), nullable=True)
+    count = Column(Integer, nullable=False, default=0)
+    total_value = Column(Float, nullable=False, default=0.0)
+    min_value = Column(Float, nullable=False, default=0.0)
+    max_value = Column(Float, nullable=False, default=0.0)
+    samples = Column(JSON, nullable=False, default=list)
+    retention_class = Column(String(16), nullable=False, default="AGGREGATE")
+    created_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    expires_at = Column(DateTime, nullable=True)
+
+
+class ObservabilityAuditRow(Base):
+    """Durable redacted audit, including management/dashboard access."""
+
+    __tablename__ = "observability_audits"
+    __table_args__ = (
+        Index("ix_observability_audits_tenant_created", "tenant_id", "created_at"),
+        Index("ix_observability_audits_trace", "trace_id"),
+        Index("ix_observability_audits_task", "task_id"),
+        Index("ix_observability_audits_event", "event_id"),
+        Index("ix_observability_audits_memory", "memory_id"),
+        Index("ix_observability_audits_query", "query_id"),
+        Index("ix_observability_audits_category_status", "category", "status"),
+    )
+
+    audit_id = Column(String(128), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    actor_id = Column(String(128), nullable=False)
+    action = Column(String(64), nullable=False, index=True)
+    category = Column(String(32), nullable=False, default="MANAGEMENT", index=True)
+    status = Column(String(32), nullable=False, default="SUCCEEDED", index=True)
+    trace_id = Column(String(128), nullable=True)
+    task_id = Column(String(128), nullable=True)
+    event_id = Column(String(128), nullable=True)
+    memory_id = Column(String(128), nullable=True)
+    query_id = Column(String(128), nullable=True)
+    target_type = Column(String(64), nullable=True)
+    target_id = Column(String(128), nullable=True)
+    details = Column(JSON, nullable=False, default=dict)
+    redacted = Column(Boolean, nullable=False, default=True)
+    retention_class = Column(String(16), nullable=False, default="ELEVATED")
+    created_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    expires_at = Column(DateTime, nullable=True, index=True)
+
+
 class IdempotencyRecordRow(Base):
     """Tenant-scoped request deduplication record without raw request body."""
 

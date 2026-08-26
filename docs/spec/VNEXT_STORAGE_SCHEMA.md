@@ -13,9 +13,25 @@ legacy short/mid tables as vNext state:
 | `retrieval_logs` | trace-safe retrieval summary | tenant/user/query/trace indexes |
 | `idempotency_records` | request deduplication | tenant/idempotency key unique |
 
-Every new table carries `tenant_id`, `user_id`, a vNext version field and
-appropriate status/version checks. Candidate rows are explicitly marked
+Every new Authority table carries `tenant_id`, `user_id`, a vNext version field
+and appropriate status/version checks. Candidate rows are explicitly marked
 `formation_status=CANDIDATE`; they are not ordinary retrieval authority rows.
+
+S6-03 adds three additive observability tables. They are diagnostic projections,
+not Authority data:
+
+| Table | Contents | Retention rule |
+|---|---|---|
+| `observability_traces` | Redacted spans plus indexed trace/task/event/memory/query IDs, tenant, category, status and expiry | Normal sampled success 7 days; error, denied, high-risk Policy, Forget and evaluation traffic 30 days |
+| `observability_metrics` | Full-count aggregate counters with bounded numeric timing samples and the same correlation dimensions | Aggregate rows are retained during diagnostic cleanup; they are never sampled away |
+| `observability_audits` | Redacted Forget/management/Dashboard access audit with actor, target, correlation IDs, status and expiry | Elevated audit retention, independently purgeable |
+
+`Database.init_schema()` creates these tables and their lookup indexes through
+the same additive `create_all()` plus `_ensure_compatible_schema()` migration
+path. Existing databases receive missing columns and indexes only; no Authority,
+Evidence, Lineage, Outbox or Projection row is deleted. Trace and Audit purge
+operates only on expired diagnostic rows, while Metric aggregate counts remain
+available across restarts.
 
 `Database.init_schema()` is additive and idempotent: `create_all()` creates new
 tables, `_ensure_compatible_schema()` adds missing columns/indexes to existing

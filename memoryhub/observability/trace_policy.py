@@ -19,7 +19,11 @@ class TraceCategory(str):
 
 
 _FORBIDDEN_KEYS = frozenset(
-    {"content", "text", "payload", "claim", "excerpt", "raw_query", "query", "embedding"}
+    {
+        "content", "text", "payload", "raw_payload", "original_payload", "claim",
+        "excerpt", "evidence", "evidence_text", "raw_query", "original_query",
+        "query", "body", "memory_body", "embedding",
+    }
 )
 
 
@@ -50,12 +54,15 @@ class TraceSamplingPolicy:
         category: str,
         risk_level: str = "NORMAL",
         outcome: str = "SUCCEEDED",
+        traffic_class: str = "NORMAL",
     ) -> bool:
         if category == TraceCategory.FORGET:
             return True
         if outcome.upper() in {"ERROR", "FAILED", "DENIED"}:
             return True
         if risk_level.upper() in {"HIGH", "CRITICAL"}:
+            return True
+        if traffic_class.upper() in {"EVALUATION", "EVAL", "BENCHMARK"}:
             return True
         if self.normal_sample_rate <= 0:
             return False
@@ -72,11 +79,13 @@ class TraceSamplingPolicy:
         category: str,
         risk_level: str = "NORMAL",
         outcome: str = "SUCCEEDED",
+        traffic_class: str = "NORMAL",
     ) -> datetime:
         elevated = (
             category == TraceCategory.FORGET
             or outcome.upper() in {"ERROR", "FAILED", "DENIED"}
             or risk_level.upper() in {"HIGH", "CRITICAL"}
+            or traffic_class.upper() in {"EVALUATION", "EVAL", "BENCHMARK"}
         )
         return created_at + timedelta(
             days=self.elevated_retention_days if elevated else self.normal_retention_days

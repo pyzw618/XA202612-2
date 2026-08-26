@@ -25,11 +25,14 @@ span is available; `trace_id` is the cross-system join key.
 
 Normal successful traces are deterministically sampled from `sha256(trace_id)`
 at the configured 10% rate, so a replay selects the same trace. High/critical
-risk, failed/denied/error, and all Forget traces are sampled at 100%.
+risk, failed/denied/error, evaluation/benchmark traffic, and all Forget traces
+are sampled at 100%.
 
 Normal sampled traces retain for 7 days. Mandatory/elevated traces retain for
-30 days. `TraceStore.purge_expired()` removes only expired diagnostic spans;
-it never affects Authority, Evidence, Lineage, Outbox or projection records.
+30 days. The SQLite `observability_traces` projection preserves indexed
+correlations across restarts. `TraceStore.purge_expired()` removes only expired
+diagnostic spans; it never affects Authority, Evidence, Lineage, Outbox or
+projection records.
 
 ## Redaction invariant
 

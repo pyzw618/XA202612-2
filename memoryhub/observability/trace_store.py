@@ -14,6 +14,7 @@ from typing import Any
 
 from memoryhub.observability.trace_models import TraceSpan, TraceSpanKind
 from memoryhub.observability.trace_policy import TraceCategory, TraceSamplingPolicy
+from memoryhub.storage.models import ObservabilityTraceRow
 
 
 class TraceStore:
@@ -28,26 +29,97 @@ class TraceStore:
         records: list[TraceSpan] | None = None,
         *,
         sampling_policy: TraceSamplingPolicy | None = None,
+        db=None,
     ) -> None:
         self._records: list[TraceSpan] = list(records or [])
+        self.db = db
         # Keep direct/test callers backward compatible; production wiring
         # supplies the S5 10% normal sampling policy explicitly.
         self.sampling_policy = sampling_policy or TraceSamplingPolicy(normal_sample_rate=1.0)
 
     @property
     def records(self) -> list[TraceSpan]:
+        if self.db is not None:
+            with self.db.session() as session:
+                rows = session.query(ObservabilityTraceRow).order_by(
+                    ObservabilityTraceRow.created_at, ObservabilityTraceRow.span_id
+                ).all()
+                return [self._row_to_span(row) for row in rows]
         return list(self._records)
+
+    @staticmethod
+    def _row_to_span(row: ObservabilityTraceRow) -> TraceSpan:
+        return TraceSpan(
+            span_id=row.span_id,
+            trace_id=row.trace_id,
+            parent_id=row.parent_id,
+            kind=row.kind,
+            layer=row.layer,
+            tenant_id=row.tenant_id,
+            user_id=row.user_id,
+            ids=dict(row.ids or {}),
+            hashes=dict(row.hashes or {}),
+            classification=dict(row.classification or {}),
+            scores={key: float(value) for key, value in (row.scores or {}).items()},
+            reason_codes=list(row.reason_codes or []),
+            redacted=bool(row.redacted),
+            created_at=row.created_at,
+            category=row.category,
+            sampled=bool(row.sampled),
+            retention_class=row.retention_class,
+            status=row.status,
+            expires_at=row.expires_at,
+        )
+
+    @staticmethod
+    def _row_for_span(span: TraceSpan) -> ObservabilityTraceRow:
+        ids = dict(span.ids)
+        return ObservabilityTraceRow(
+            span_id=span.span_id,
+            trace_id=span.trace_id,
+            parent_id=span.parent_id,
+            kind=span.kind,
+            layer=span.layer,
+            category=span.category,
+            status=span.status or str(span.classification.get("outcome", "SUCCEEDED")),
+            tenant_id=span.tenant_id,
+            user_id=span.user_id,
+            task_id=ids.get("task_id"),
+            event_id=ids.get("event_id"),
+            memory_id=ids.get("memory_id"),
+            query_id=ids.get("query_id"),
+            ids=ids,
+            hashes=dict(span.hashes),
+            classification=dict(span.classification),
+            scores=dict(span.scores),
+            reason_codes=list(span.reason_codes),
+            redacted=True,
+            sampled=span.sampled,
+            retention_class=span.retention_class,
+            created_at=span.created_at,
+            expires_at=span.expires_at,
+        )
 
     def record(self, span: TraceSpan) -> TraceSpan:
         if not isinstance(span, TraceSpan):
             raise TypeError("trace store requires TraceSpan")
         risk_level = str(span.classification.get("risk_level", "NORMAL"))
-        outcome = str(span.classification.get("outcome", "SUCCEEDED"))
+        outcome = str(
+            span.classification.get(
+                "outcome", span.classification.get("status", span.status or "SUCCEEDED")
+            )
+        )
+        traffic_class = str(
+            span.classification.get(
+                "traffic_class", span.classification.get("request_class", "NORMAL")
+            )
+        )
         if not self.sampling_policy.should_sample(
             trace_id=span.trace_id,
             category=span.category,
             risk_level=risk_level,
             outcome=outcome,
+            traffic_class=traffic_class,
         ):
             span.sampled = False
             return span
@@ -55,46 +127,76 @@ class TraceStore:
             span.category == TraceCategory.FORGET
             or outcome.upper() in {"ERROR", "FAILED", "DENIED"}
             or risk_level.upper() in {"HIGH", "CRITICAL"}
+            or traffic_class.upper() in {"EVALUATION", "EVAL", "BENCHMARK"}
         )
         span.sampled = True
         span.retention_class = "ELEVATED" if elevated else "NORMAL"
+        span.status = outcome.upper()
         span.expires_at = self.sampling_policy.expires_at(
             created_at=span.created_at,
             category=span.category,
             risk_level=risk_level,
             outcome=outcome,
+            traffic_class=traffic_class,
         )
-        self._records.append(span)
+        if self.db is None:
+            self._records.append(span)
+        else:
+            with self.db.session() as session:
+                row = session.get(ObservabilityTraceRow, span.span_id)
+                values = self._row_for_span(span)
+                if row is None:
+                    session.add(values)
+                else:
+                    for column in (
+                        "trace_id", "parent_id", "kind", "layer", "category", "status",
+                        "tenant_id", "user_id", "task_id", "event_id", "memory_id",
+                        "query_id", "ids", "hashes", "classification", "scores",
+                        "reason_codes", "redacted", "sampled", "retention_class",
+                        "created_at", "expires_at",
+                    ):
+                        setattr(row, column, getattr(values, column))
         return span
 
     def get(self, span_id: str) -> TraceSpan | None:
+        if self.db is not None:
+            with self.db.session() as session:
+                row = session.get(ObservabilityTraceRow, span_id)
+                return self._row_to_span(row) if row is not None else None
         for span in self._records:
             if span.span_id == span_id:
                 return span
         return None
 
     def list_by_trace(self, trace_id: str) -> list[TraceSpan]:
-        return [span for span in self._records if span.trace_id == trace_id]
+        return [span for span in self.records if span.trace_id == trace_id]
 
     def list_by_event(self, event_id: str) -> list[TraceSpan]:
-        return [span for span in self._records if span.ids.get("event_id") == event_id]
+        return [span for span in self.records if span.ids.get("event_id") == event_id]
 
     def list_by_candidate(self, candidate_id: str) -> list[TraceSpan]:
         return [
-            span for span in self._records if span.ids.get("candidate_id") == candidate_id
+            span for span in self.records if span.ids.get("candidate_id") == candidate_id
         ]
 
     def list_by_memory(self, memory_id: str) -> list[TraceSpan]:
-        return [span for span in self._records if span.ids.get("memory_id") == memory_id]
+        return [span for span in self.records if span.ids.get("memory_id") == memory_id]
 
     def list_by_query(self, query_id: str) -> list[TraceSpan]:
-        return [span for span in self._records if span.ids.get("query_id") == query_id]
+        return [span for span in self.records if span.ids.get("query_id") == query_id]
 
     def list_by_task(self, task_id: str) -> list[TraceSpan]:
-        return [span for span in self._records if span.ids.get("task_id") == task_id]
+        return [span for span in self.records if span.ids.get("task_id") == task_id]
 
     def purge_expired(self, *, now=None) -> int:
         now = now or datetime.now(timezone.utc)
+        if self.db is not None:
+            with self.db.session() as session:
+                deleted = session.query(ObservabilityTraceRow).filter(
+                    ObservabilityTraceRow.expires_at.is_not(None),
+                    ObservabilityTraceRow.expires_at <= now,
+                ).delete(synchronize_session=False)
+            return int(deleted)
         before = len(self._records)
         self._records = [
             span for span in self._records if span.expires_at is None or span.expires_at > now
@@ -107,6 +209,9 @@ class TraceStore:
         return sorted(spans, key=lambda s: s.created_at)
 
     def clear(self) -> None:
+        if self.db is not None:
+            with self.db.session() as session:
+                session.query(ObservabilityTraceRow).delete(synchronize_session=False)
         self._records.clear()
 
     def dump(self, path: str | Path) -> None:

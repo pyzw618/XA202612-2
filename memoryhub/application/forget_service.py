@@ -7,6 +7,8 @@ therefore retryable and can never make a forgotten memory readable again.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -15,6 +17,7 @@ from typing import Any
 
 from memoryhub.adapter.vnext_schemas import ForgetRequest, ForgetResponse, ForgetStatus
 from memoryhub.domain.contracts import EvolutionStatus
+from memoryhub.observability.audit_store import AuditStore
 from memoryhub.storage.authority_repository import AuthorityRepository
 from memoryhub.storage.database import Database
 from memoryhub.storage.memory_metadata import MemoryProjectionOutboxRepository
@@ -46,11 +49,13 @@ class ForgetService:
         authority: AuthorityRepository | None = None,
         outbox: MemoryProjectionOutboxRepository | None = None,
         trace_store: Any | None = None,
+        audit_store: AuditStore | None = None,
     ) -> None:
         self.db = db
         self.authority = authority or AuthorityRepository(db)
         self.outbox = outbox or MemoryProjectionOutboxRepository(db)
         self.trace_store = trace_store
+        self.audit_store = audit_store or AuditStore(db)
 
     def execute(
         self,
@@ -164,16 +169,33 @@ class ForgetService:
         outcome: str,
         high_risk: bool,
     ) -> None:
-        if self.trace_store is None:
-            return
-        self.trace_store.record_forget(
-            trace_id=request.request_id,
+        if self.trace_store is not None:
+            self.trace_store.record_forget(
+                trace_id=request.request_id,
+                tenant_id=request.tenant_id,
+                user_id=request.user_id,
+                request_id=request.request_id,
+                memory_ids=list(memory_ids),
+                outcome=outcome,
+                high_risk=high_risk,
+            )
+        self.audit_store.record(
+            action="FORGET",
+            category="FORGET",
+            status=outcome,
             tenant_id=request.tenant_id,
             user_id=request.user_id,
-            request_id=request.request_id,
-            memory_ids=list(memory_ids),
-            outcome=outcome,
-            high_risk=high_risk,
+            actor_id=request.user_id,
+            trace_id=request.request_id,
+            target_type="forget_request",
+            target_id=request.request_id,
+            details={
+                "affected_count": len(memory_ids),
+                "memory_ids_hash": hashlib.sha256(
+                    json.dumps(list(memory_ids), sort_keys=True).encode("utf-8")
+                ).hexdigest(),
+                "high_risk": high_risk,
+            },
         )
 
     def get(self, record_id: str, *, tenant_id: str, user_id: str) -> ForgetExecution | None:
