@@ -2,7 +2,7 @@
 
 版本：`vnext/v1`
 
-任务：`S5-09`
+任务：`S6-04`（补充完善阶段；保留 S5-09 的部署基线）
 
 ## 环境要求
 
@@ -56,30 +56,40 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-memoryhub-service.ps1
 .\.venv\Scripts\python.exe -m uvicorn memoryhub.app:app --host 127.0.0.1 --port 8099
 
 # 验证
-.\.venv\Scripts\python.exe - <<'PY'
-from memoryhub_client import MemoryHubClient
-print(MemoryHubClient().health())
-PY
+.\.venv\Scripts\python.exe -c "from memoryhub_client import MemoryHubClient; print(MemoryHubClient().health())"
 ```
 
 ## CLI 快速验证
 
 ```powershell
-# 安装后 CLI 全局可用
-memoryhub --help
+# 安装后 CLI 全局可用；PATH 形式为：memoryhub --help
+.\.venv\Scripts\memoryhub.exe --help
 
-# 搜索
-memoryhub search "周报格式" --json
+# 搜索；PATH 形式为：memoryhub search "周报格式" --json
+.\.venv\Scripts\memoryhub.exe search "周报格式" --json
 
 # 写入规范事件
-memoryhub event examples/vnext_demo/event_start_report.json
+.\.venv\Scripts\memoryhub.exe event examples/vnext_demo/event_start_report.json
 
 # 恢复任务
-memoryhub resume task_report_demo
+.\.venv\Scripts\memoryhub.exe resume task_report_demo
 
 # 遗忘预览（安全默认）
-memoryhub forget "删除周报格式偏好" --preview
+.\.venv\Scripts\memoryhub.exe forget "删除周报格式偏好" --preview
 ```
+
+## 固定验收演示
+
+演示不需要启动服务；所有 SQLite 和脱敏报告均写入显式输出目录：
+
+```powershell
+$demoOut = Join-Path $env:TEMP "memoryhub-vnext-demo"
+& .\.venv\Scripts\python.exe -m examples.vnext_demo.run_demo --scenario all --output-dir $demoOut
+Get-ChildItem -LiteralPath $demoOut -Filter "*.json"
+```
+
+应看到 `formation.json`、`evidence.json`、`scope.json`、`retrieval.json`、
+`resume.json`、`forget.json` 和 `all.json`；报告默认不含原始 query、正文或 Evidence 正文。
 
 ## MCP 接入
 

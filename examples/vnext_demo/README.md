@@ -1,52 +1,49 @@
 # MemoryHub vNext 固定可重放演示
 
-版本：`vnext/v1`
+版本：`vnext/v1` · 阶段：`S6-04`
 
-任务：`S5-10`
+脚本使用确定性 fixture 和本地 FastAPI TestClient，不需要启动服务、外部模型或
+Milvus。六类场景覆盖完整闭环：
 
-本目录包含一组脱敏、固定、可重放的演示脚本，展示 vNext 核心闭环：
-
-1. 形成：事件 → Working → Episode → Candidate
-2. 证据累积：多个独立任务推动 Candidate 固化
-3. Scope 覆盖：Global Markdown 与 Project-A DOCX 共存
-4. 检索解释：Intent、通道、分数、Scope、Budget
-5. 任务恢复：服务重启后恢复 Goal/约束/待办
-6. Forget 验证：删除后残留检索为 0
-
-## 前置条件
-
-- 服务已启动：`powershell -ExecutionPolicy Bypass -File .\scripts\start-memoryhub-service.ps1`
-- CLI 可用：`memoryhub --help`
-- 当前模式为 `legacy` 或 `vnext`（演示使用 vNext 统一入口）
+1. `formation`：事件 → Working → Episode → Candidate，默认不固化 Authority；
+2. `evidence`：两个独立任务的证据累积并固化为 Long-Term Authority；
+3. `scope`：Global 与 Project Scope 共存，Project 值优先；
+4. `retrieval`：展示 Intent、通道、Authority 检查、Scope、Budget 的红脱敏解释；
+5. `resume`：关闭并重新打开 SQLite 后恢复 Goal、Constraints、Pending Steps；
+6. `forget`：Authority 先阻断，验证 residual retrieval 为 0。
 
 ## 快速重放
 
+PowerShell：
+
 ```powershell
-# 1. 场景 1：项目报告偏好逐步形成
-.\.venv\Scripts\python.exe examples/vnext_demo/run_demo.py --scenario formation
-
-# 2. 场景 2：检索解释与 Scope 覆盖
-.\.venv\Scripts\python.exe examples/vnext_demo/run_demo.py --scenario retrieval
-
-# 3. 场景 3：任务恢复
-.\.venv\Scripts\python.exe examples/vnext_demo/run_demo.py --scenario resume
-
-# 4. 场景 4：Forget 验证
-.\.venv\Scripts\python.exe examples/vnext_demo/run_demo.py --scenario forget
-
-# 5. 全部
-.\.venv\Scripts\python.exe examples/vnext_demo/run_demo.py --scenario all
+$demoOut = Join-Path $env:TEMP "memoryhub-vnext-demo"
+& .\.venv\Scripts\python.exe -m examples.vnext_demo.run_demo --scenario formation --output-dir $demoOut
+& .\.venv\Scripts\python.exe -m examples.vnext_demo.run_demo --scenario evidence --output-dir $demoOut
+& .\.venv\Scripts\python.exe -m examples.vnext_demo.run_demo --scenario scope --output-dir $demoOut
+& .\.venv\Scripts\python.exe -m examples.vnext_demo.run_demo --scenario retrieval --output-dir $demoOut
+& .\.venv\Scripts\python.exe -m examples.vnext_demo.run_demo --scenario resume --output-dir $demoOut
+& .\.venv\Scripts\python.exe -m examples.vnext_demo.run_demo --scenario forget --output-dir $demoOut
+& .\.venv\Scripts\python.exe -m examples.vnext_demo.run_demo --scenario all --output-dir $demoOut
 ```
 
-## 输出
+Linux/macOS：
 
-每个场景输出 `examples/vnext_demo/output/<scenario>.json`，仅包含 ID、hash、分类、计数、Trace 摘要和审计元数据，不包含原文或敏感 Evidence。
+```bash
+demo_out="${TMPDIR:-/tmp}/memoryhub-vnext-demo"
+python -m examples.vnext_demo.run_demo --scenario all --output-dir "$demo_out"
+```
+
+不指定 `--output-dir` 时，脚本使用系统临时目录；不会写入本目录的默认源码路径。
+每次运行都会重置指定目录内由 demo 自己管理的 `demo.db`，保证重放从空库开始。
+
+## 输出契约
+
+每个场景生成 `<scenario>.json`；`all` 额外生成 `all.json`，其中列出六个场景和
+对应文件名。SQLite 数据库和全部报告都写入 `--output-dir`。报告默认只包含 ID、
+hash、分类、计数、解释和状态元数据，不包含原始 query、事件正文或 Evidence 正文。
 
 ## 数据
 
-- `event_start_report.json`：用户开始制作报告并给出格式约束
-- `event_use_docx.json`：用户说“这次请用 DOCX”
-- `event_repeat_docx.json`：另一个独立任务再次明确 DOCX
-- `event_markdown_global.json`：用户设置全局 Markdown 偏好
-
-所有正文均已脱敏，使用通用占位符。
+`event_start_report.json`、`event_use_docx.json`、`event_repeat_docx.json`、
+`event_markdown_global.json` 均为通用脱敏占位 fixture，不包含真实业务内容或密钥。

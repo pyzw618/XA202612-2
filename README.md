@@ -600,6 +600,23 @@ cd desktop-client && ctest --test-dir build -V
 
 ---
 
+## vNext 固定验收演示
+
+演示命令不需要启动服务；六类场景和输出契约见
+[`examples/vnext_demo/README.md`](examples/vnext_demo/README.md)。在已安装开发依赖的
+环境运行：
+
+```powershell
+$demoOut = Join-Path $env:TEMP "memoryhub-vnext-demo"
+& .\.venv\Scripts\python.exe -m examples.vnext_demo.run_demo --scenario all --output-dir $demoOut
+```
+
+命令会在 `$demoOut` 生成 `formation.json`、`evidence.json`、`scope.json`、
+`retrieval.json`、`resume.json`、`forget.json`、`all.json` 和 `demo.db`；JSON 报告
+默认只含脱敏 ID/hash、计数、分类和解释元数据。
+
+---
+
 ## 脚本与运维工具
 
 | 脚本                                              | 用途                                                     |

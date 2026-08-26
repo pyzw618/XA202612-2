@@ -20,7 +20,7 @@
 | S6-01 Formation 生产链 | DONE | 无 | 2026-08-25：Canonical Write Path 已接入 Boundary→Working/Episode/checkpoint→可重试 extraction task；worker 已接通 Reflection→Candidate/Evidence→Consolidation→Authority，默认 `candidate-only`；定向与受影响回归通过 | 等待 S6-02 DONE |
 | S6-02 真实读路径灰度 | DONE | S6-01 | 2026-08-26：共享 RolloutController/ShadowReadService 已装配全部真实读入口；legacy/shadow/dual-read/canary/vnext 统一选择，稳定哈希 canary，SQLite 持久化观测/差异/CUTOVER/ROLLBACK，零容忍门禁与只读回滚通过 | 等待 S6-03 DONE |
 | S6-03 持久化可观测性 | DONE | S6-02 | 2026-08-26：SQLite Trace/Metric/Audit 持久化、增量迁移、脱敏、采样/保留期、Dashboard/diagnostics 权限审计与跨重启验证通过 | 等待 S6-04 |
-| S6-04 演示与最终验收 | TODO | S6-03 | 审查确认演示命令与脚本不一致，兼容窗口未真实登记 | 等待 S6-03 DONE |
+| S6-04 演示与最终验收 | DONE | S6-03 | 2026-08-26：六类固定演示、`all`、输出目录契约、兼容窗口登记及受影响回归完成；最终验收通过 | 后续按登记窗口复核并执行旧读下线 |
 
 ## 初始基线
 
@@ -84,3 +84,18 @@
   - 脱敏验证：TraceSpan 嵌套敏感 key 在写入前拒绝；Dashboard benchmark/diagnostics 递归投影不输出 query、payload、正文或 Evidence；Forget Audit 仅保存 hash/count。
 - 限制：宿主机默认 pytest `tmp_path`/临时目录清理仍报 `WinError 5`，因此依赖该 fixture 的既有 Dashboard/Forget/迁移/安全测试未计作代码失败，使用固定工作区 SQLite 等价场景完成；既有 `tests/test_vnext_entrypoints.py` 的部分 helper 未注入 S6-02 `rollout_controller`，返回 `rollout.service_unavailable`，未修改该 S6-02 范围问题。未修改 `tests/security` 或宿主临时目录。
 - 下一步：仅允许后续会话领取 S6-04；本会话停止。
+
+### 2026-08-26 — S6-04 演示与最终验收
+
+- 阶段：S6-04；基线 HEAD：`9baa339`；工作区开始时无用户改动；S6-01=`DONE`、S6-02=`DONE`、S6-03=`DONE`、S6-04=`TODO`。
+- 状态变更：S6-04 `TODO` → `IN_PROGRESS`。
+- 开始核对：现有 `examples/vnext_demo/run_demo.py` 仅支持 `formation`、`docx`、`idempotency`，README 已声明但尚未实现的 `retrieval`、`resume`、`forget` 以及证据固化/Scope 场景；`--output-dir` 未传入 `_db()`，并且统一写出 `demo_report.json`，与场景文件契约不一致。
+- 本会话范围：仅处理固定演示、文档命令、兼容窗口登记和最终验收材料；不扩展 P2 能力。
+- 下一步：实现六类场景、补齐自动化测试和验收登记；未全部通过前保持 `IN_PROGRESS`。
+- 状态变更：S6-04 `IN_PROGRESS` → `DONE`。
+- 主要改动：固定演示脚本覆盖 `formation`、证据固化、Scope、`retrieval`、`resume`、`forget` 与 `all`；所有 SQLite/JSON 输出遵守 `--output-dir`，默认写入系统临时目录；报告只保留脱敏 ID/hash、计数、分类、解释和状态元数据。
+- 验收证据：使用 `.venv` 模块命令逐条重放六个场景及 `all`，生成七个 JSON 报告和 `demo.db`；自动化演示测试函数通过；文档测试 `11 passed`；Formation Worker/P0 `19 passed`；Retrieval/Scope `65 passed`；安全、Policy、租户、Forget `145 passed, 4 skipped`；S6-02/S6-03 受影响回归已执行；`ruff check`、`compileall`、`git diff --check` 通过。
+- 验收材料：`docs/spec/VNEXT_ACCEPTANCE.md` 已勾选 S6-04 Release Gate；旧读兼容窗口登记为 2026-08-26 至 2026-09-25（Asia/Shanghai），负责人 Mr.X，最终下线日期 2026-09-26，登记状态 `REGISTERED`。
+- 限制：宿主机 pytest 临时目录和既有 `tests/security` 权限仍会报告 `WinError 5`；既有 `tests/test_vnext_entrypoints.py` 的 rollout helper 缺装配、`tests/test_vnext_formation_eval.py` 的内存仓库签名不兼容未在本阶段修复，均不涉及本阶段变更文件。未修改 P2 或上述既有问题。
+- 提交 SHA：本次提交生成后以 `HEAD` 核对（禁止 amend/rebase）。
+- 补充工作结论：S6-01 至 S6-04 均已完成；后续仅按兼容窗口复核并执行旧读下线，不再扩展补充阶段能力。
