@@ -286,3 +286,7 @@ desktop-client/build-release/
 /packaging/linux/build/
 /packaging/linux/dist/
 *.deb
+
+# ---- 评估测试临时产物 ----
+evaluation/results/*_test*.db
+evaluation/results/rebuild_report*.json
