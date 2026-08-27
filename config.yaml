@@ -24,7 +24,7 @@ llm:
   max_tokens: 2048
 embedding:
   provider: mock
-  dimension: 1024
+  dimension: 768
   model_name: mock-embedding
 safety:
   rule_set_id: kylin-memoryhub.safety
