@@ -553,19 +553,12 @@ async def delete_memory(
     return _hard_delete_memory(request.app.state, memory_id, user_id)
 
 
-@router.get("/knowledge/{memory_id}/versions")
-async def get_knowledge_versions(
-    memory_id: str,
-    request: Request,
-    user_id: str = "default",
-):
-    """获取知识记忆的不可变版本历史（快照 + 当前版）。"""
-    repo = getattr(request.app.state, "know_repo", None)
-    if repo is None:
-        raise HTTPException(
-            status_code=503, detail="knowledge repository not initialized"
-        )
-    return repo.get_version_history(memory_id, user_id=user_id)
+# ============================================================
+# 知识版本历史
+#
+# 已由 api.py 注册：GET /api/memory/knowledge/{memory_id}/versions
+# 避免在同一 /api/memory 前缀下重复定义。
+# ============================================================
 
 
 @router.get("/memories/health")
@@ -966,60 +959,10 @@ async def release_quarantine(
 
 # ============================================================
 # 遗忘历史详情
+#
+# 已由 api.py 注册：GET /api/memory/forget/history/{record_id}
+# 避免在同一 /api/memory 前缀下重复定义。
 # ============================================================
-
-
-@router.get("/forget/history/{record_id}")
-async def get_forget_history_detail(
-    record_id: str,
-    request: Request,
-    user_id: str = "default",
-):
-    """遗忘历史详情：返回遗忘记录 + 被删记忆的当前快照（软删除通常仍可查）。"""
-    repo = getattr(request.app.state, "forget_repo", None)
-    if repo is None:
-        raise HTTPException(status_code=503, detail="forget repository not initialized")
-    record = repo.get_by_id(record_id)
-    if record is None or record.user_id != user_id:
-        raise HTTPException(status_code=404, detail="forget record not found")
-
-    state = request.app.state
-    resolved: list[dict[str, Any]] = []
-    for mid in record.target_memory_ids:
-        mtype, mem = _resolve_memory(state, mid, user_id)
-        if mem is None:
-            resolved.append(
-                {
-                    "memory_id": mid,
-                    "memory_type": None,
-                    "content": None,
-                    "note": "deleted permanently",
-                }
-            )
-            continue
-        if mtype == "preference":
-            content = mem.text
-            status_value = (
-                mem.status.value if hasattr(mem.status, "value") else str(mem.status)
-            )
-        else:
-            content = mem.name
-            status_value = (
-                mem.status.value if hasattr(mem.status, "value") else str(mem.status)
-            )
-        resolved.append(
-            {
-                "memory_id": mid,
-                "memory_type": mtype,
-                "content": content,
-                "status": status_value,
-            }
-        )
-
-    return {
-        "record": record.model_dump(mode="json"),
-        "memories": resolved,
-    }
 
 
 # ============================================================

@@ -288,5 +288,5 @@ desktop-client/build-release/
 *.deb
 
 # ---- 评估测试临时产物 ----
-evaluation/results/*_test*.db
+evaluation/results/*.db
 evaluation/results/rebuild_report*.json
