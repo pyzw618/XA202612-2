@@ -335,8 +335,9 @@ class ToolRegistry:
 
         self._add(
             "memoryhub_decide_facts",
-            "Commit or reject durable fact proposals after review, and resolve conflicts "
-            "returned by memoryhub_propose_facts.",
+            "Commit or reject durable fact proposals. If MemoryHub returns a decision_task, "
+            "the host Agent should use conversation context (or ask the user), then call this "
+            "tool again with the selected entity/predicate or conflict resolution.",
             {
                 "user_id": {"type": "string", "default": default_user},
                 "decisions": {
@@ -351,6 +352,9 @@ class ToolRegistry:
                             "project_id": {"type": "string"},
                             "resolution": {"type": "string", "enum": _FACT_RESOLUTIONS},
                             "conflict_decision_mode": {"type": "string", "enum": _FACT_MODES},
+                            "subject_entity_id": {"type": "string", "description": "选择已有主体实体 ID；create_new 表示新建"},
+                            "object_entity_id": {"type": "string", "description": "选择已有客体实体 ID；create_new 表示新建"},
+                            "predicate_id": {"type": "string", "description": "选择已有谓词 ID；create_new 表示新建"},
                             "force": {"type": "boolean", "default": False},
                         },
                         "required": ["proposal_id", "action"],

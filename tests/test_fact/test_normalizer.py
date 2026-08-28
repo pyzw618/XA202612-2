@@ -5,7 +5,7 @@
 import pytest
 from memoryhub.core.fact.store import FactStore
 from memoryhub.core.fact.normalizer import EntityNormalizer, PredicateNormalizer
-from memoryhub.core.fact.models import Entity
+from memoryhub.core.fact.models import Entity, FactDecisionRequired
 
 
 class TestEntityNormalizer:
@@ -122,13 +122,26 @@ class TestPredicateNormalizer:
         norm = PredicateNormalizer(store, api_key="dummy")
 
         result = norm.normalize("最喜欢的颜色是")
-        # 匹配不到时自动创建新谓词 ID
         assert result is not None
         assert result.startswith("pred:")
         # 验证已写入 store
         pred = store.get_predicate(result)
         assert pred is not None
         assert pred.canonical_name == "最喜欢的颜色是"
+
+    def test_ambiguous_predicate_delegates_to_host_agent(self):
+        store = FactStore(":memory:")
+        norm = PredicateNormalizer(store)
+        norm._keyword_match = lambda _text: None
+        norm._index.search = lambda *_args, **_kwargs: [
+            ("headquarters_location", 0.70),
+            ("located_in", 0.68),
+        ]
+
+        with pytest.raises(FactDecisionRequired) as exc_info:
+            norm.normalize("所在地")
+        assert exc_info.value.decision_type == "predicate_resolution"
+        assert "create_new" in exc_info.value.allowed_actions
 
     def test_ontology_loaded_into_store(self):
         store = FactStore(":memory:")

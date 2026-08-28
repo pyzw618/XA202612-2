@@ -66,6 +66,28 @@ class FactProposalStatus(str, Enum):
     AWAITING_DECISION = "awaiting_decision"
 
 
+class FactDecisionRequired(ValueError):
+    """A semantic choice must be delegated to the host Agent or user."""
+
+    def __init__(self, decision_type: str, *, input_text: str,
+                 candidates: list[dict], allowed_actions: list[str], reason: str):
+        super().__init__(reason)
+        self.decision_type = decision_type
+        self.input_text = input_text
+        self.candidates = candidates
+        self.allowed_actions = allowed_actions
+        self.reason = reason
+
+    def to_dict(self) -> dict:
+        return {
+            "decision_type": self.decision_type,
+            "input_text": self.input_text,
+            "candidates": self.candidates,
+            "allowed_actions": self.allowed_actions,
+            "reason": self.reason,
+        }
+
+
 # ─── 实体 ──────────────────────────────────────────────────────────────
 
 @dataclass

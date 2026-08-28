@@ -1,5 +1,20 @@
 # 更新记录
 
+## 2026-08-28
+
+### 事实语义裁决委托主 Agent
+
+- 实体和谓词归一化继续使用精确匹配、别名、关键词和向量分数完成确定性判断；出现多个可能项时返回结构化 `decision_task`，不再由 MemoryHub 内部调用 LLM 猜测。
+- 事实冲突仅由代码检测。未提供明确裁决时，候选保持 `awaiting_decision`，不写入 `disputed` 事实；主 Agent 可结合完整对话上下文直接选择，或询问用户。
+- `/facts/decide` 与 `memoryhub_decide_facts` 新增主体实体、客体实体和谓词选择字段，并保留 `replace / keep_old / merge / coexist` 冲突操作。
+- 所有主 Agent 返回的实体选择继续校验用户归属和实体类型，避免跨用户关联。
+- 自动 `MemoryEvent` 的事实抽取路径保持不变；本次只移除归一化和冲突裁决阶段的内部 LLM 调用。
+
+### 验证
+
+- Python 3.13 `compileall` 通过。
+- 事实模块回归：58 passed，1 skipped；API 与 MCP 定向回归：27 passed。
+
 ## 2026-08-18
 
 ### 事实记忆与冲突裁决

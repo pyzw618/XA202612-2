@@ -51,10 +51,16 @@ class _Pipeline:
         self.auto_resolve = kwargs["auto_resolve"]
         return SimpleNamespace(
             relation="CONFLICT",
-            resolution="replace" if self.auto_resolve else "escalate",
+            resolution="escalate",
             reason="test conflict",
-            existing_fact=SimpleNamespace(fact_id="fact_old"),
-            new_fact=SimpleNamespace(fact_id="fact_new"),
+            existing_fact=SimpleNamespace(
+                fact_id="fact_old", object_value="北京",
+                observed_at="2026-08-01T00:00:00Z", confidence=0.9,
+            ),
+            new_fact=SimpleNamespace(
+                fact_id="fact_new", object_value="深圳",
+                observed_at="2026-08-28T00:00:00Z", confidence=0.9,
+            ),
         )
 
 
@@ -67,7 +73,8 @@ def test_conflict_mode_is_read_from_persisted_proposal():
     )
 
     assert pipeline.auto_resolve is True
-    assert result["status"] == "committed"
+    assert result["status"] == "awaiting_decision"
+    assert result["decision_task"]["decision_type"] == "fact_conflict"
     assert result["conflict_decision_mode"] == "agent_autonomous"
 
 

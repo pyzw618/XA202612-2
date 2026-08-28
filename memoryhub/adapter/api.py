@@ -52,6 +52,7 @@ from memoryhub.core.fact.models import (
     EntityType,
     FactCandidate,
     FactDecisionMode,
+    FactDecisionRequired,
     FactProposalStatus,
     MemoryScope,
     RawTriple,
@@ -1217,6 +1218,9 @@ class FactDecisionInput(BaseModel):
     project_id: str | None = Field(default=None, max_length=256)
     resolution: Literal["replace", "keep_old", "merge", "coexist", "escalate"] | None = None
     conflict_decision_mode: Literal["user_review", "agent_autonomous"] | None = None
+    subject_entity_id: str | None = Field(default=None, max_length=256)
+    object_entity_id: str | None = Field(default=None, max_length=256)
+    predicate_id: str | None = Field(default=None, max_length=256)
     force: bool = False
 
 
@@ -1485,6 +1489,13 @@ def _decide_fact_proposal(pipeline, user_id: str, decision: FactDecisionInput) -
             "status": "awaiting_decision",
             "requires_decision": True,
             "reason": "scope is required",
+            "decision_task": {
+                "decision_type": "scope_resolution",
+                "input_text": proposal.raw_triple.evidence,
+                "candidates": [{"scope": "global"}, {"scope": "project"}],
+                "allowed_actions": ["select_scope"],
+                "reason": "事实作用域不明确，需要主 Agent 结合当前项目上下文裁决",
+            },
         }
     project_id = decision.project_id or proposal.project_id_hint
     try:
@@ -1499,7 +1510,29 @@ def _decide_fact_proposal(pipeline, user_id: str, decision: FactDecisionInput) -
                 == FactDecisionMode.AGENT_AUTONOMOUS.value
             ),
             user_id=user_id,
+            subject_entity_id=decision.subject_entity_id,
+            object_entity_id=decision.object_entity_id,
+            predicate_id=decision.predicate_id,
         )
+    except FactDecisionRequired as exc:
+        proposal.metadata["pending_decision"] = exc.to_dict()
+        pipeline.store.save_fact_proposal(
+            proposal,
+            user_id=user_id,
+            decision_mode=stored.get("decision_mode", FactDecisionMode.USER_REVIEW.value),
+            conflict_decision_mode=conflict_decision_mode,
+        )
+        pipeline.store.update_fact_proposal_status(
+            proposal.proposal_id,
+            user_id=user_id,
+            status=FactProposalStatus.AWAITING_DECISION.value,
+        )
+        return {
+            "proposal_id": proposal.proposal_id,
+            "status": FactProposalStatus.AWAITING_DECISION.value,
+            "requires_decision": True,
+            "decision_task": exc.to_dict(),
+        }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     requires_decision = (
@@ -1528,6 +1561,29 @@ def _decide_fact_proposal(pipeline, user_id: str, decision: FactDecisionInput) -
             stored_fact.fact_id if stored_fact is not None and not requires_decision else None
         ),
     )
+    decision_task = None
+    if requires_decision:
+        decision_task = {
+            "decision_type": "fact_conflict",
+            "input_text": proposal.raw_triple.evidence,
+            "candidates": [
+                {
+                    "role": "existing",
+                    "fact_id": result.existing_fact.fact_id,
+                    "object_value": result.existing_fact.object_value,
+                    "observed_at": result.existing_fact.observed_at,
+                    "confidence": result.existing_fact.confidence,
+                } if result.existing_fact is not None else {},
+                {
+                    "role": "proposed",
+                    "object_value": result.new_fact.object_value,
+                    "observed_at": result.new_fact.observed_at,
+                    "confidence": result.new_fact.confidence,
+                },
+            ],
+            "allowed_actions": ["replace", "keep_old", "merge", "coexist"],
+            "reason": result.reason,
+        }
     return {
         "proposal_id": proposal.proposal_id,
         "status": proposal_status,
@@ -1536,7 +1592,12 @@ def _decide_fact_proposal(pipeline, user_id: str, decision: FactDecisionInput) -
         "resolution": result.resolution,
         "reason": result.reason,
         "conflict_decision_mode": conflict_decision_mode,
-        "fact_id": stored_fact.fact_id if stored_fact is not None else None,
+        "fact_id": (
+            stored_fact.fact_id
+            if stored_fact is not None and not requires_decision
+            else None
+        ),
+        "decision_task": decision_task,
     }
 
 

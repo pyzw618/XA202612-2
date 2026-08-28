@@ -51,8 +51,8 @@ class FactMemoryPipeline:
     处理阶段:
       1. 提取: DeepSeek 提取 (S, P, O) 三元组
       2. 准入: 只保留适合本模块的客观事实
-      3. 提交时归一化: 代码 alias 匹配 + LLM 兜底
-      4. 提交时冲突处理: 同作用域代码查找 + 必要时 LLM 裁决
+      3. 提交时归一化: 代码确定性匹配；歧义返回主 Agent 裁决
+      4. 提交时冲突处理: 同作用域代码查找；冲突返回主 Agent 裁决
     """
 
     def __init__(
@@ -148,6 +148,9 @@ class FactMemoryPipeline:
         auto_resolve: bool = True,
         force: bool = False,
         user_id: Optional[str] = None,
+        subject_entity_id: Optional[str] = None,
+        object_entity_id: Optional[str] = None,
+        predicate_id: Optional[str] = None,
     ) -> ConflictResult:
         """明确提交一个候选事实，并执行同作用域冲突检测与写入。"""
         if not proposal.admission.should_remember and not force:
@@ -164,12 +167,12 @@ class FactMemoryPipeline:
             user_id or str(proposal.metadata.get("user_id", "")).strip() or "default"
         )
         rt = proposal.raw_triple
-        subj_id = self._normalize_entity(
-            rt.subject_text, rt.subject_type, final_user_id
+        subj_id = self._resolve_entity(
+            subject_entity_id, rt.subject_text, rt.subject_type, final_user_id
         )
-        pred_id = self.pred_norm.normalize(rt.predicate_text)
-        obj_id = self._normalize_entity(
-            rt.object_text, rt.object_type, final_user_id
+        pred_id = self._resolve_predicate(predicate_id, rt.predicate_text)
+        obj_id = self._resolve_entity(
+            object_entity_id, rt.object_text, rt.object_type, final_user_id
         )
 
         fact = Fact(
@@ -194,11 +197,16 @@ class FactMemoryPipeline:
                     raise ValueError(f"不支持的冲突裁决: {resolution}")
                 result.resolution = resolution
                 result.reason = f"[调用方裁决] {result.reason}"
-            elif auto_resolve:
-                result = self.detector.resolve(result)
             else:
                 result.resolution = Resolution.ESCALATE.value
                 result.reason = f"[等待主Agent裁决] {result.reason}"
+
+        # 未裁决的冲突只返回决策任务，不写入 disputed 事实。
+        if (
+            result.relation == "CONFLICT"
+            and result.resolution == Resolution.ESCALATE.value
+        ):
+            return result
 
         self._apply(result)
         self.store.save_fact_conflict(result)
@@ -374,6 +382,31 @@ class FactMemoryPipeline:
             if "user_id" not in str(exc):
                 raise
             return self.entity_norm.normalize(text, entity_type)
+
+    def _resolve_entity(
+        self, selected_id: Optional[str], text: str, entity_type: str, user_id: str
+    ) -> str:
+        if not selected_id:
+            return self._normalize_entity(text, entity_type, user_id)
+        if selected_id == "create_new":
+            return self.entity_norm._create_entity(text, entity_type, user_id=user_id)
+        entity = self.store.get_entity(selected_id, user_id=user_id)
+        if entity is None:
+            raise ValueError("selected entity does not exist or belongs to another user")
+        if entity.entity_type != entity_type:
+            raise ValueError("selected entity type does not match the proposed triple")
+        self.entity_norm._add_alias_if_new(selected_id, text, user_id=user_id)
+        return selected_id
+
+    def _resolve_predicate(self, selected_id: Optional[str], text: str) -> str:
+        if not selected_id:
+            return self.pred_norm.normalize(text)
+        if selected_id == "create_new":
+            return self.pred_norm._create_predicate(text)
+        if self.store.get_predicate(selected_id) is None:
+            raise ValueError("selected predicate does not exist")
+        self.pred_norm._add_alias_if_new(selected_id, text)
+        return selected_id
 
     def close(self):
         self.store.close()
