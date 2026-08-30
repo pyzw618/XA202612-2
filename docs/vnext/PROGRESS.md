@@ -67,7 +67,7 @@ DONE
 | Batch | 任务 | 状态 | 最后更新 |
 |---|---|---|---|
 | Batch 1 | Structured Reflection 接入 | DONE | 2026-08-31 |
-| Batch 2 | Event → Working State Reducer | NOT STARTED | - |
+| Batch 2 | Event → Working State Reducer | DONE | 2026-08-31 |
 | Batch 3 | Episode Enrichment | NOT STARTED | - |
 | Batch 4 | Boundary-driven Formation | NOT STARTED | - |
 | Batch 5 | Stage 1 Scenario Tests | NOT STARTED | - |
@@ -101,15 +101,22 @@ config.llm → OpenAIClient → StructuredReflectionModel → ReflectionService
 
 ```text
 Current update path:
-CanonicalWriteService.write() → _orchestrate_working() → WorkingService.
+CanonicalWriteService.write() → _orchestrate_working() → WorkingStateReducer
+→ WorkingService.
 
 Current important fields:
 current_goal, current_step, pending_steps, completed_steps, constraints,
-active_entities.
+active_entities, blockers, recent_findings, recent_failures, next_action.
+
+Current behavior:
+The deterministic reducer recognizes canonical `payload.tool_calls` success and
+failure states, concise targets, task terminal markers, and existing explicit
+payload state fields. It writes summaries, not raw tool output or an event log.
 
 Current limitations:
-Updates primarily project state fields already present in event payloads; real
-tool-trace reduction belongs to Batch 2.
+The OpenCode plugin still posts tool traces through the legacy `/api/memory/events`
+endpoint. Batch 2 covers canonical tool traces only; changing that integration is
+outside this Batch.
 ```
 
 ## 5.3 Episode
@@ -255,8 +262,8 @@ None
 
 - [x] 正常 vNext Reflection 使用配置中的真实 LLM。
 - [x] Reflection 输出经过结构化验证。
-- [ ] 常见 Agent Tool Trace 能驱动 Working State。
-- [ ] Working State 能表达当前任务状态。
+- [x] 常见 Agent Tool Trace 能驱动 Working State。
+- [x] Working State 能表达当前任务状态。
 - [ ] Episode 能表达主要任务过程。
 - [ ] Episode 包含关键成功/失败/修改/结果。
 - [ ] meaningful boundary 可以触发 Formation。
@@ -365,17 +372,17 @@ Temporary Workaround:
 # 11. 当前下一步
 
 ```text
-Start Stage 1 / Batch 2
+Start Stage 1 / Batch 3
 
 Task:
-Event → Working State Reducer
+Episode Enrichment
 
 Before coding:
 Read VNEXT_PLAN.md
 Read stage1-formation.md
 Read PROGRESS.md
 
-Then perform Codebase Reconnaissance only. Do not start Batch 3.
+Then perform Codebase Reconnaissance only. Do not start Batch 4.
 ```
 
 ---
@@ -489,3 +496,130 @@ Runtime-owned Reflection metadata is injected by the adapter before existing sch
 Batch 2 should modify only Working State reduction from raw Agent tool traces. Do not
 change StructuredReflectionModel, Episode enrichment, Boundary enqueue behavior,
 Retrieval, Feedback, Rollout, or Authority promotion.
+
+---
+
+## Batch 2 — Event → Working State Reducer
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+让 canonical vNext 事件中的真实 Agent 工具轨迹以 deterministic reducer 更新
+Working State，而不是要求调用方预先写入完整的 Working 字段。
+
+### Reconnaissance Findings
+
+- `CanonicalWriteService._orchestrate_working()` 原先只投影 payload 内已经存在的
+  `current_step`、steps、constraints 与 entities；`payload.tool_calls` 未被消费。
+- `WorkingService`、`WorkingPatch`、CAS、字段来源优先级和列表去重已经可复用，
+  不需要新的持久化或第二套状态模型。
+- vNext canonical Agent replay 会把工具调用放入 `payload.tool_calls`；OpenCode 插件
+  虽有同样的 tool trace，但当前仍发送至 Legacy `/api/memory/events`，不在本 Batch 迁移。
+- `WorkingSnapshot` 原有字段不足以稳定表达 blocker、近期发现、失败和下一步；新增
+  向后兼容的默认字段，仍使用同一个 Domain Contract。
+
+### Changes
+
+- 新增 `WorkingStateReducer`：仅基于 event/payload/tool name/arguments/status/error
+  做确定性归约，生成既有 `WorkingSnapshot` 或 `WorkingPatch`。
+- `CanonicalWriteService` 在未提供显式 snapshot/patch 时调用 reducer；显式调用方
+  传入的 snapshot/patch 优先级保持不变。
+- `WorkingSnapshot`、持久化状态与压缩摘要补充 blockers、recent_findings、
+  recent_failures、next_action；列表合并保持去重。
+- 工具成功更新 completed/findings 与文件 active entities；失败不会进入 completed。
+  同一工具/目标成功后会清除对应 blocker，但保留近期失败作为任务经历信息。状态
+  只保存短摘要，不保存原始 tool output 或 event 列表。
+
+### Files Touched
+
+```text
+memoryhub/application/working_reducer.py
+memoryhub/application/canonical_write.py
+memoryhub/domain/contracts.py
+memoryhub/application/working_service.py
+memoryhub/domain/working.py
+tests/test_vnext_working_reducer.py
+docs/vnext/PROGRESS.md
+```
+
+### Behavior Before
+
+```text
+Canonical event with payload.tool_calls
+→ CanonicalWriteService._orchestrate_working()
+→ no Working Patch unless caller had already supplied Working fields
+```
+
+### Behavior After
+
+```text
+Canonical event with payload.tool_calls
+→ WorkingStateReducer (deterministic summaries)
+→ existing WorkingPatch / WorkingService CAS
+→ Working State with progress, findings, failure, blocker and next action
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_vnext_working_reducer.py` | PASS (2) |
+| Contract and Working baseline | PASS (16) |
+| Batch vNext regression subset, excluding 3 existing retrieval fixtures | PASS (43; 3 deselected) |
+| `tests/test_no_production_write_bypass.py tests/test_vnext_p0_flow.py` | PASS (14) |
+| Final combined Batch regression suite | PASS (68; 3 deselected) |
+| Ruff on changed source/tests | PASS |
+
+### Evidence
+
+- Component test drives `user_instruction → read → read → test failure → patch → test success`
+  through `CanonicalWriteService`; the stored state preserves goal, completed actions,
+  recent failure, cleared blocker and a next action without storing `tool_calls`.
+- Reducer unit test proves a failed test produces `recent_failures` and a blocker but
+  no completed step; a terminal completion produces the deterministic completion patch.
+- Replaying the same canonical event produces `IDEMPOTENT` and leaves the Working
+  version unchanged.
+
+### Regression
+
+```text
+Legacy: no Legacy source or route changed; no-production-write-bypass and P0 tests passed.
+Safety: no Safety policy, gate or data path changed.
+candidate-only: Formation worker regression tests passed; Authority promotion logic unchanged.
+Other: existing vNext contract, task-state, boundary, reflection, formation and write entrypoint tests passed.
+```
+
+### Remaining Risks
+
+- The OpenCode plugin remains on the Legacy event endpoint, so its live tool traces do
+  not yet exercise this canonical reducer.
+- Action classification intentionally covers common deterministic tool names and
+  arguments only. Unknown or partial tool status is a no-op rather than an inferred state.
+- Reflection enqueue remains event-granular until Batch 4; this Batch does not alter it.
+- The three existing Retrieval entrypoint fixtures still require rollout/retrieval service
+  assembly and were excluded exactly as recorded for Batch 1.
+
+### Decisions
+
+```text
+Extend WorkingSnapshot with defaulted fields instead of creating a parallel reducer DTO.
+Use concise deterministic summaries and existing WorkingPatch/CAS semantics; do not call an LLM.
+```
+
+### Not Done
+
+- Batch 3 Episode enrichment.
+- Batch 4 boundary-gated Reflection enqueue.
+- Batch 5 Scenario tests.
+- OpenCode / Legacy event route migration.
+
+### Next Batch Notes
+
+Batch 3 should enrich EpisodeEvent payloads from the same canonical event/tool trace while
+preserving this reducer. Do not change Boundary enqueue, Reflection, Retrieval, Feedback,
+Rollout or Authority promotion.

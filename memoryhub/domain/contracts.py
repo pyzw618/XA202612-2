@@ -212,6 +212,10 @@ class WorkingSnapshot(GovernedModel):
     completed_steps: list[str] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
     active_entities: list[str] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    recent_findings: list[str] = Field(default_factory=list)
+    recent_failures: list[str] = Field(default_factory=list)
+    next_action: str = ""
     snapshot_version: int = Field(default=1, ge=1)
 
 

@@ -126,6 +126,10 @@ class WorkingStateService:
             "completed_steps": list(snapshot.completed_steps),
             "constraints": list(snapshot.constraints),
             "active_entities": list(snapshot.active_entities),
+            "blockers": list(snapshot.blockers),
+            "recent_findings": list(snapshot.recent_findings),
+            "recent_failures": list(snapshot.recent_failures),
+            "next_action": snapshot.next_action,
         }
 
 

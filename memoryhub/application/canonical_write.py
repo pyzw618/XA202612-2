@@ -19,6 +19,7 @@ from memoryhub.application.event_gateway import (
     EventGatewayResult,
     GatewayStatus,
 )
+from memoryhub.application.working_reducer import WorkingStateReducer
 from memoryhub.application.working_service import WorkingPatchResult, WorkingService
 from memoryhub.domain.contracts import (
     BoundaryCheckpointType,
@@ -78,6 +79,7 @@ class CanonicalWriteService:
         authority_facade: LongTermAuthorityFacade | None = None,
         memory_write_service: Any | None = None,
         boundary_detector: BoundaryDetector | None = None,
+        working_reducer: WorkingStateReducer | None = None,
         formation_mode: str = "candidate-only",
     ) -> None:
         self.db = db
@@ -88,6 +90,7 @@ class CanonicalWriteService:
         self.authority_facade = authority_facade
         self.memory_write_service = memory_write_service
         self.boundary_detector = boundary_detector or BoundaryDetector()
+        self.working_reducer = working_reducer or WorkingStateReducer()
         if formation_mode not in {"shadow", "candidate-only", "authority"}:
             raise ValueError("unsupported formation mode")
         self.formation_mode = formation_mode
@@ -274,23 +277,8 @@ class CanonicalWriteService:
             tenant_id=event.tenant_id, user_id=event.user_id, task_id=event.task_id
         )
         if current is None:
-            payload = event.payload or {}
-            goal = self._first_text(
-                payload, "current_goal", "goal", "instruction", "text"
-            ) or event.event_type
             created = self.working_service.create(
-                WorkingSnapshot(
-                    tenant_id=event.tenant_id,
-                    user_id=event.user_id,
-                    task_id=event.task_id,
-                    session_id=event.session_id,
-                    current_goal=goal,
-                    current_step=str(payload.get("current_step", "")),
-                    pending_steps=self._as_strings(payload.get("pending_steps")),
-                    completed_steps=self._as_strings(payload.get("completed_steps")),
-                    constraints=self._as_strings(payload.get("constraints")),
-                    active_entities=self._as_strings(payload.get("active_entities")),
-                ),
+                self.working_reducer.initial_snapshot(event),
                 working_state_id=self._working_state_id(event),
             )
             return WorkingPatchResult(
@@ -303,32 +291,12 @@ class CanonicalWriteService:
                     task_id=event.task_id,
                 ),
             )
-
-        payload = event.payload or {}
-        operations = []
-        for field in (
-            "current_step",
-            "pending_steps",
-            "completed_steps",
-            "constraints",
-            "active_entities",
-        ):
-            if field in payload:
-                from memoryhub.domain.contracts import WorkingPatchOperation
-
-                operations.append(
-                    WorkingPatchOperation(
-                        op="replace",
-                        path=f"/{field}",
-                        value=(
-                            payload[field]
-                            if field == "current_step"
-                            else self._as_strings(payload[field])
-                        ),
-                        source="event",
-                    )
-                )
-        if not operations:
+        patch = self.working_reducer.patch(
+            event,
+            current.state,
+            base_version=current.version,
+        )
+        if patch is None:
             return WorkingPatchResult(
                 working_state=current,
                 applied_paths=(),
@@ -339,18 +307,7 @@ class CanonicalWriteService:
                     task_id=event.task_id,
                 ),
             )
-        return self.working_service.apply_patch(
-            WorkingPatch(
-                tenant_id=event.tenant_id,
-                user_id=event.user_id,
-                task_id=event.task_id,
-                base_version=current.version,
-                operations=operations,
-                event_refs=[event.event_id],
-                reason="canonical_event_projection",
-            ),
-            event_id=event.event_id,
-        )
+        return self.working_service.apply_patch(patch, event_id=event.event_id)
 
     def _orchestrate_episode(
         self,

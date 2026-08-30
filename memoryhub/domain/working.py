@@ -23,7 +23,14 @@ DEFAULT_SOURCE_PRIORITIES: dict[str, int] = {
 }
 
 SEMANTIC_LIST_FIELDS = frozenset(
-    {"pending_steps", "completed_steps", "constraints", "active_entities"}
+    {
+        "pending_steps",
+        "completed_steps",
+        "constraints",
+        "active_entities",
+        "recent_findings",
+        "recent_failures",
+    }
 )
 
 
@@ -166,6 +173,10 @@ def compress_working_state(
         "completed_steps": list(state.get("completed_steps", []) or [])[:max_items],
         "constraints": list(state.get("constraints", []) or [])[:max_items],
         "active_entities": list(state.get("active_entities", []) or [])[:max_items],
+        "blockers": list(state.get("blockers", []) or [])[:max_items],
+        "recent_findings": list(state.get("recent_findings", []) or [])[:max_items],
+        "recent_failures": list(state.get("recent_failures", []) or [])[:max_items],
+        "next_action": str(state.get("next_action", "") or ""),
     }
     result: dict[str, Any] = {"schema_version": "vnext/working-summary/v1", **known}
     omitted = {
@@ -179,6 +190,10 @@ def compress_working_state(
         result["constraints"].pop()
     while len(str(result)) > max_chars and result["active_entities"]:
         result["active_entities"].pop()
+    while len(str(result)) > max_chars and result["recent_findings"]:
+        result["recent_findings"].pop()
+    while len(str(result)) > max_chars and result["recent_failures"]:
+        result["recent_failures"].pop()
     result["compressed"] = len(str(result)) > max_chars
     return result
 
