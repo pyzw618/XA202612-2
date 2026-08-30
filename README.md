@@ -229,7 +229,7 @@ MemoryHub 是为 **银河麒麟 OS / openKylin** 上运行的 AI Agent 提供的
 ### 安装后端依赖
 
 ```bash
-sudo apt install ./kylin-memoryhub_0.1.0-8_amd64.deb
+sudo apt install ./kylin-memoryhub_0.1.0-9_amd64.deb
 memoryhub-configure-opencode --current-user
 ```
 
