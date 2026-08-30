@@ -725,13 +725,21 @@ def create_app(
             knowledge_handler=knowledge_handler,
         )
         from memoryhub.application.formation_worker import FormationWorker
+        from memoryhub.application.reflection_service import (
+            ReflectionService,
+            StructuredReflectionModel,
+        )
 
+        app.state.reflection_service = ReflectionService(
+            model=StructuredReflectionModel(app.state.llm_client)
+        )
         app.state.formation_worker = FormationWorker(
             db,
             task_repository=extraction_task_repo,
             event_repository=event_repo,
             canonical_write_service=app.state.canonical_write_service,
             mode=config.vnext.formation_mode,
+            reflection_service=app.state.reflection_service,
         )
         if (
             app.state.event_ingestion_service is None

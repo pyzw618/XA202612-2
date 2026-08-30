@@ -8,6 +8,7 @@ from memoryhub.application.canonical_write import CanonicalWriteService
 from memoryhub.application.episode_service import EpisodeService
 from memoryhub.application.event_gateway import EventGateway
 from memoryhub.application.formation_worker import FormationWorker
+from memoryhub.application.reflection_service import ReflectionModel, ReflectionService
 from memoryhub.application.working_service import WorkingService
 from memoryhub.core.ingestion.retry import ExtractionRetryService
 from memoryhub.core.memory_write import MemoryWriteService
@@ -47,7 +48,7 @@ def _event(event_id: str, task_id: str, text: str, **payload) -> MemoryEventCont
     )
 
 
-def _stack(*, mode: str = "candidate-only"):
+def _stack(*, mode: str = "candidate-only", reflection_service: ReflectionService | None = None):
     db_path = Path(__file__).parents[1] / "evaluation" / "results" / (
         f"vnext_formation_worker_{mode}_{time.time_ns()}.db"
     )
@@ -76,6 +77,7 @@ def _stack(*, mode: str = "candidate-only"):
         event_repository=EventRepository(db),
         canonical_write_service=canonical,
         mode=mode,
+        reflection_service=reflection_service,
     )
     retry = ExtractionRetryService(
         task_repo=tasks,
@@ -181,4 +183,28 @@ def test_redelivery_does_not_duplicate_authority_lineage_or_evidence():
             session.query(MemoryEvidenceRow).filter_by(memory_id=memory_id).count()
             == before_evidence
         )
+    db.close()
+
+
+def test_invalid_reflection_output_does_not_stage_a_candidate():
+    class InvalidModel(ReflectionModel):
+        model_id = "invalid-reflection/v1"
+
+        def generate(self, prompt, *, input_hash, input_data=None):
+            return {"candidate_id": "missing-required-fields"}
+
+    reflection = ReflectionService(model=InvalidModel(), max_retries=0)
+    db, canonical, _worker, retry, tasks = _stack(reflection_service=reflection)
+    event = _event("invalid-reflection", "invalid-task", "Use DOCX")
+    result = canonical.write(event)
+
+    run = retry.run_due(user_id=event.user_id)
+    task = tasks.get(result.reflection_task.task_id, user_id=event.user_id)
+    candidates = CandidateRepository(db).list_for_review(
+        tenant_id=event.tenant_id, user_id=event.user_id
+    )
+
+    assert run.retried == 1
+    assert task is not None and task.candidate_ids == []
+    assert candidates == []
     db.close()

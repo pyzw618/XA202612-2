@@ -8,6 +8,7 @@ from memoryhub.application.reflection_service import (
     DeterministicReflectionModel,
     ReflectionModel,
     ReflectionService,
+    StructuredReflectionModel,
 )
 from memoryhub.core.reflection.prompts import PROMPT_VERSION
 from memoryhub.core.reflection.schema import ReflectionInput, ReflectionOutput, ReflectionRunError
@@ -95,3 +96,63 @@ def test_reflection_retries_then_routes_to_review_on_failure() -> None:
             )
         )
     assert model.calls == 3
+
+
+def test_structured_reflection_uses_configured_llm_and_runtime_metadata(
+    reflection_input: ReflectionInput,
+) -> None:
+    class ConfiguredLLM:
+        model = "configured-reflection-model"
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, Any]]] = []
+
+        def generate_json(
+            self,
+            prompt: str,
+            schema: dict[str, Any],
+            system_prompt: str = "",
+        ) -> dict[str, Any]:
+            self.calls.append((prompt, schema))
+            return {
+                "candidate_id": "candidate-configured",
+                "memory_type": "PREFERENCE",
+                "normalized_key": "format:docx",
+                "claim": {"format": "DOCX"},
+                "scope_level": "PROJECT",
+                "scope": "PROJECT:reporting",
+                "confidence": 0.8,
+                "utility": 0.7,
+                "stability": 0.6,
+                "reason": "explicit project preference",
+                "evidence_refs": [reflection_input.event_id],
+                "supporting_episode_ids": [reflection_input.episode_id],
+                "status": "ACCUMULATING",
+            }
+
+    llm = ConfiguredLLM()
+    candidate = ReflectionService(model=StructuredReflectionModel(llm)).run(reflection_input)
+
+    assert candidate.candidate_id == "candidate-configured"
+    assert candidate.memory_type is MemoryType.PREFERENCE
+    assert len(llm.calls) == 1
+    assert "candidate_id" in llm.calls[0][1]["properties"]
+
+
+def test_structured_reflection_rejects_invalid_schema_output(
+    reflection_input: ReflectionInput,
+) -> None:
+    class InvalidLLM:
+        model = "invalid-reflection-model"
+
+        def generate_json(
+            self,
+            prompt: str,
+            schema: dict[str, Any],
+            system_prompt: str = "",
+        ) -> dict[str, Any]:
+            return {"candidate_id": "missing-required-fields"}
+
+    service = ReflectionService(model=StructuredReflectionModel(InvalidLLM()), max_retries=0)
+    with pytest.raises(ReflectionRunError):
+        service.run(reflection_input)

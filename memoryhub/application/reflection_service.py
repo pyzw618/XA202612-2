@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from typing import Any, Protocol
 
 from memoryhub.core.reflection.prompts import PROMPT_VERSION, render_reflection_prompt
@@ -13,6 +14,8 @@ from memoryhub.core.reflection.schema import (
     ReflectionRunError,
 )
 from memoryhub.domain.contracts import Candidate, CandidateStatus, MemoryScope, MemoryType
+
+logger = logging.getLogger(__name__)
 
 
 class ReflectionModel(Protocol):
@@ -142,6 +145,44 @@ class DeterministicReflectionModel:
         return [value]
 
 
+class StructuredReflectionModel:
+    """Adapt the configured application LLM to the ReflectionModel contract.
+
+    The LLM owns only semantic Candidate fields.  Runtime-generated metadata is
+    supplied locally so the provider never has to reproduce the input hash or
+    identify itself correctly for schema validation.
+    """
+
+    def __init__(self, llm_client: Any) -> None:
+        if not callable(getattr(llm_client, "generate_json", None)):
+            raise TypeError("structured reflection requires an LLM generate_json client")
+        self.llm_client = llm_client
+        self.model_id = str(
+            getattr(llm_client, "model", "") or llm_client.__class__.__name__
+        )
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        input_hash: str,
+        input_data: ReflectionInput | None = None,
+    ) -> dict[str, Any]:
+        raw = self.llm_client.generate_json(
+            prompt,
+            schema=ReflectionOutput.model_json_schema(),
+        )
+        if not isinstance(raw, dict):
+            raise ValueError("structured reflection response must be an object")
+        # These values are controlled by the runtime rather than the model.
+        return {
+            **raw,
+            "model_id": self.model_id,
+            "prompt_version": PROMPT_VERSION,
+            "input_hash": input_hash,
+        }
+
+
 class ReflectionService:
     """Run reflection with prompt versioning, retries and Candidate-only output.
 
@@ -186,6 +227,12 @@ class ReflectionService:
                 if attempt == self.max_retries:
                     break
 
+        logger.warning(
+            "structured_reflection_failed input_hash=%s attempts=%s error_type=%s",
+            input_hash,
+            self.max_retries + 1,
+            type(last_error).__name__ if last_error is not None else "UnknownError",
+        )
         return self._failed_candidate(reflection_input, input_hash, last_error)
 
     @staticmethod
@@ -230,4 +277,5 @@ __all__ = [
     "DeterministicReflectionModel",
     "ReflectionModel",
     "ReflectionService",
+    "StructuredReflectionModel",
 ]
