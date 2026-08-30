@@ -70,7 +70,7 @@ DONE
 | Batch 2 | Event → Working State Reducer | DONE | 2026-08-31 |
 | Batch 3 | Episode Enrichment | DONE | 2026-08-31 |
 | Batch 4 | Boundary-driven Formation | DONE | 2026-08-31 |
-| Batch 5 | Stage 1 Scenario Tests | NOT STARTED | - |
+| Batch 5 | Stage 1 Scenario Tests | DONE | 2026-09-01 |
 
 ---
 
@@ -281,8 +281,8 @@ None
 - [x] 合法 Reflection 可以形成 Candidate。
 - [x] 非法 Reflection 不产生 Candidate。
 - [x] candidate-only 模式有效。
-- [ ] Legacy 主链路无明显回归。
-- [ ] 至少 6 类 Scenario Test 通过。
+- [x] Legacy 主链路无明显回归。
+- [x] 至少 6 类 Scenario Test 通过。
 
 ---
 
@@ -291,55 +291,67 @@ None
 ## Scenario A — 正常 Coding Task
 
 ```text
-Status: NOT RUN
+Status: PASS
 
 Result:
-TODO
+- Working State 正确演化：current_goal="Fix SSE reconnect issue"，
+  completed_steps 包含 Read application.yaml、Read sse_handler.py、
+  Updated application.yaml、Test passed: pytest tests/test_sse.py；
+  recent_failures 保留失败记录；blockers 在成功后清空。
+- Episode 保留 7 条语义历史，包含失败与成功转折。
+- task_completed 边界触发 Reflection，产生 Candidate，未写 Authority。
 ```
 
 ## Scenario B — 失败后恢复
 
 ```text
-Status: NOT RUN
+Status: PASS
 
 Result:
-TODO
+- Working State 记录 exporter returned 500 失败与恢复过程，最终 blockers 清空。
+- Episode 保留失败与恢复的关键转折。
+- task_completed 边界触发 Reflection。
 ```
 
 ## Scenario C — 低价值事件
 
 ```text
-Status: NOT RUN
+Status: PASS
 
 Result:
-TODO
+- read_file / git status / search / read_file 均未触发 Reflection。
+- retry.run_due() 无任务，CandidateRepository 为空。
 ```
 
 ## Scenario D — Explicit Remember
 
 ```text
-Status: NOT RUN
+Status: PASS
 
 Result:
-TODO
+- payload.boundary="explicit" 触发 Reflection，产生 Candidate。
+- Candidate scope 为 PROJECT，未无条件扩成 GLOBAL。
 ```
 
 ## Scenario E — candidate-only
 
 ```text
-Status: NOT RUN
+Status: PASS
 
 Result:
-TODO
+- Reflection 产生 Candidate。
+- PreferenceRepository / KnowledgeRepository 均无记录。
 ```
 
 ## Scenario F — LLM Invalid Output
 
 ```text
-Status: NOT RUN
+Status: PASS
 
 Result:
-TODO
+- 注入非法 Reflection model，schema 验证失败。
+- retry.run_due() 中任务进入 retry，未产生任何 Candidate。
+- caplog 捕获到 `structured_reflection_failed` 可观测日志。
 ```
 
 ---
@@ -380,17 +392,18 @@ Temporary Workaround:
 # 11. 当前下一步
 
 ```text
-Start Stage 1 / Batch 4
+Stage 1 / Batch 5 DONE
 
 Task:
-Boundary-driven Formation
+Start Stage 2 — Retrieval 实化
 
 Before coding:
 Read VNEXT_PLAN.md
-Read stage1-formation.md
+Read docs/vnext/stages/stage2-retrieval.md (if exists)
 Read PROGRESS.md
 
-Then perform Codebase Reconnaissance only. Do not start Batch 5.
+Then perform Codebase Reconnaissance only. Do not start Stage 2 implementation
+until the current reconnaissance is complete.
 ```
 
 ---
@@ -896,3 +909,110 @@ reverting to event-granular reflection.
 ### Next Batch Notes
 
 Batch 5 应基于 Batch 1-4 已完成的 Reflection / Working / Episode / Boundary 基础，建立真实连续 Agent Event 的 Scenario 测试（正常 Coding Task、失败后恢复、低价值事件、Explicit Remember、candidate-only、LLM Invalid Output）。不要回退 boundary-gated reflection，不要修改 Retrieval / Feedback / Rollout。
+
+
+---
+
+## Batch 5 — Stage 1 Scenario Tests
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+建立 Stage 1 要求的 6 类真实连续 Agent Event Scenario 测试，验证
+Event -> Working State -> Episode -> Boundary -> Reflection -> Candidate
+完整链路，并确认 candidate-only 模式与非法 Reflection 的安全行为。
+
+### Reconnaissance Findings
+
+- 当前真实实现：Batch 1–4 代码已提交，基础设施完整；缺少专属 scenario 测试文件。
+- 与 stage 文档一致的部分：candidate-only、boundary-gated reflection、structured reflection validation、working reducer、episode enrichment 均按设计工作。
+- 与 stage 文档不一致的部分：`PROGRESS.md` 第 11 节仍指向 Batch 4，已修正。
+- 复用的现有组件：`CanonicalWriteService`、`FormationWorker`、`ExtractionRetryService`、`WorkingStateRepository`、`EpisodeRepository`、`CandidateRepository`、`PreferenceRepository`、`KnowledgeRepository`。
+- 实际影响范围：仅新增测试文件与 `PROGRESS.md`。
+
+### Changes
+
+- 新增 `tests/test_vnext_stage1_scenarios.py`，实现 6 个 Scenario：
+  - A 正常 Coding Task
+  - B 失败后恢复
+  - C 低价值事件不触发 Reflection
+  - D Explicit Remember 触发 Formation
+  - E candidate-only 不写 Authority
+  - F LLM Invalid Output 不产生脏 Candidate
+- 修正 `PROGRESS.md` 中 Batch 5 状态、DoD 勾选、Scenario 结果、当前下一步。
+
+### Files Touched
+
+```text
+tests/test_vnext_stage1_scenarios.py
+docs/vnext/PROGRESS.md
+```
+
+### Behavior Before
+
+```text
+Stage 1 DoD 中 "至少 6 类 Scenario Test 通过" 未完成；
+无连续 Agent Event 的端到端 Formation 场景测试。
+```
+
+### Behavior After
+
+```text
+6 个 Stage 1 Scenario 全部通过；
+Stage 1 所有 DoD 条目已勾选；
+Formation 主链路在连续真实事件上得到验证。
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_vnext_stage1_scenarios.py` | PASS (6) |
+| Batch 1–4 + P0 + candidate + contracts regression | PASS (50) |
+| Ruff on changed source/tests | PASS |
+
+### Evidence
+
+- `test_scenario_a_normal_coding_task` 验证 Working State 随事件流演化、Episode 保留关键过程、task_completed 触发 Reflection、Candidate 产生且 Authority 为空。
+- `test_scenario_b_recovery_from_failure` 验证失败被记录、恢复后 blockers 清空、Episode 保留转折、Complete 触发 Reflection。
+- `test_scenario_c_low_value_events_do_not_trigger_reflection` 验证 read/git_status/search 不触发 Reflection、无 Candidate。
+- `test_scenario_d_explicit_remember_triggers_formation` 验证 `boundary=explicit` 触发 Reflection、Candidate Scope 不自动扩成 GLOBAL。
+- `test_scenario_e_candidate_only_does_not_write_authority` 验证 Candidate 产生但 Preference/Knowledge Authority 无记录。
+- `test_scenario_f_invalid_reflection_does_not_create_dirty_candidate` 验证非法 schema 输出不产生 Candidate、任务进入 retry、可观测日志被捕获。
+
+### Regression
+
+```text
+Legacy: 未修改任何 Legacy source/route/extractor；P0 flow regression 通过。
+Safety: 未修改 Safety policy/gate/payload masking。
+candidate-only: Formation worker 保持 candidate-only，Authority promotion 逻辑未变。
+Other: Batch 1–4 相关测试全部通过，Ruff 通过。
+```
+
+### Remaining Risks
+
+- Scenario 使用 deterministic reflection model；真实 LLM 集成仍依赖 Batch 1 的 `StructuredReflectionModel`，需在有 credentials 的环境单独验证。
+- OpenCode 插件仍走 Legacy 事件端点，未直接 exercise canonical scenario 路径。
+- Scenario 仅覆盖 SQLite in-memory；生产 Milvus/真实 embedding 路径需 Stage 4 benchmark 验证。
+
+### Decisions
+
+```text
+None
+```
+
+### Not Done
+
+- Stage 2 Retrieval 实化。
+- Stage 3 Feedback 闭环。
+- Stage 4 Evaluation & Cutover。
+- OpenCode / Legacy 路由迁移。
+
+### Next Batch Notes
+
+Stage 2 开始前必须重新执行 Codebase Reconnaissance，阅读 VNEXT_PLAN.md、stage2-retrieval.md 与 PROGRESS.md。当前 Formation 链路已完成，不要回退或修改 Formation 组件。
