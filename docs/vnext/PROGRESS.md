@@ -68,8 +68,8 @@ DONE
 |---|---|---|---|
 | Batch 1 | Structured Reflection 接入 | DONE | 2026-08-31 |
 | Batch 2 | Event → Working State Reducer | DONE | 2026-08-31 |
-| Batch 3 | Episode Enrichment | NOT STARTED | - |
-| Batch 4 | Boundary-driven Formation | NOT STARTED | - |
+| Batch 3 | Episode Enrichment | DONE | 2026-08-31 |
+| Batch 4 | Boundary-driven Formation | DONE | 2026-08-31 |
 | Batch 5 | Stage 1 Scenario Tests | NOT STARTED | - |
 
 ---
@@ -126,11 +126,19 @@ Current episode write path:
 CanonicalWriteService.write() → _orchestrate_episode() → EpisodeService.
 
 Current stored semantics:
-Episode snapshot plus append-only event records and boundary checkpoint state.
+Episode snapshot plus append-only, bounded semantic event records and boundary
+checkpoint state. Automatic canonical events retain source event type, timestamp,
+phase/state transition, and compact tool actions/results/failures; raw tool traces
+and unbounded output are not copied into Episode payloads.
+
+Reflection context:
+FormationWorker reads the append-only episode records into
+ReflectionInput.episode_history_summary, so Reflection now receives enriched
+task-process evidence.
 
 Current limitations:
-Canonical event payload currently stores mainly event_id and phase; meaningful
-tool action/result enrichment belongs to Batch 3.
+Episode resume replay still restores task state fields rather than producing a
+complete narrative summary. Reflection enqueue remains event-granular until Batch 4.
 ```
 
 ## 5.4 Boundary
@@ -264,12 +272,12 @@ None
 - [x] Reflection 输出经过结构化验证。
 - [x] 常见 Agent Tool Trace 能驱动 Working State。
 - [x] Working State 能表达当前任务状态。
-- [ ] Episode 能表达主要任务过程。
-- [ ] Episode 包含关键成功/失败/修改/结果。
-- [ ] meaningful boundary 可以触发 Formation。
-- [ ] 低价值 Event 不逐条触发 Reflection。
-- [ ] Explicit Remember 可以触发 Formation。
-- [ ] Task Complete / Failure 有明确 Formation 行为。
+- [x] Episode 能表达主要任务过程。
+- [x] Episode 包含关键成功/失败/修改/结果。
+- [x] meaningful boundary 可以触发 Formation。
+- [x] 低价值 Event 不逐条触发 Reflection。
+- [x] Explicit Remember 可以触发 Formation。
+- [x] Task Complete / Failure 有明确 Formation 行为。
 - [x] 合法 Reflection 可以形成 Candidate。
 - [x] 非法 Reflection 不产生 Candidate。
 - [x] candidate-only 模式有效。
@@ -372,17 +380,17 @@ Temporary Workaround:
 # 11. 当前下一步
 
 ```text
-Start Stage 1 / Batch 3
+Start Stage 1 / Batch 4
 
 Task:
-Episode Enrichment
+Boundary-driven Formation
 
 Before coding:
 Read VNEXT_PLAN.md
 Read stage1-formation.md
 Read PROGRESS.md
 
-Then perform Codebase Reconnaissance only. Do not start Batch 4.
+Then perform Codebase Reconnaissance only. Do not start Batch 5.
 ```
 
 ---
@@ -623,3 +631,268 @@ Use concise deterministic summaries and existing WorkingPatch/CAS semantics; do 
 Batch 3 should enrich EpisodeEvent payloads from the same canonical event/tool trace while
 preserving this reducer. Do not change Boundary enqueue, Reflection, Retrieval, Feedback,
 Rollout or Authority promotion.
+
+---
+
+## Batch 3 — Episode Enrichment
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+Make automatic canonical Episode events retain a bounded, meaningful task history rather
+than only an event ID and phase, while preserving the existing Episode contract and storage.
+
+### Reconnaissance Findings
+
+- `CanonicalWriteService._orchestrate_episode()` was the automatic Episode write path; it
+  wrote only `event_id` and `phase` into `EpisodeEventContract.payload`.
+- `EpisodeEventContract.payload`, `EpisodeRepository.append_event()` and its sequence/idempotency
+  rules already support compact structured semantics without a new DTO, table, or migration.
+- `FormationWorker` already reads the stored Episode records into
+  `ReflectionInput.episode_history_summary`; no Reflection-path change was needed.
+- `BoundaryDetector` remains invoked before the append, but reflection task enqueue remains
+  unconditional per accepted event. That discrepancy is intentional Batch 4 work.
+- Canonical Agent replay provides `payload.tool_calls`; OpenCode continues to use the Legacy
+  endpoint and is explicitly outside this Batch.
+
+### Changes
+
+- Added `EpisodeEventEnricher`, a pure deterministic component that turns canonical events and
+  common tool traces into bounded semantic payloads: source event type, occurred timestamp,
+  phase/state transition, tool name, target, action, result, success/failure, and compact
+  error/output summaries.
+- `CanonicalWriteService` now uses the enricher only for automatically orchestrated Episode
+  events. Explicit caller-provided `EpisodeEventContract` values keep their existing path.
+- Each event stores at most eight compact tool actions and each summary is capped at 160
+  characters; the source event ID remains the reference to the accepted canonical Event.
+- Added unit and component coverage for compacting tool output, preserving success/failure/
+  modification history, and passing enriched Episode history into Formation reflection input.
+
+### Files Touched
+
+```text
+memoryhub/application/episode_enricher.py
+memoryhub/application/canonical_write.py
+tests/test_vnext_episode_enrichment.py
+docs/vnext/PROGRESS.md
+```
+
+### Behavior Before
+
+```text
+Canonical Event
+→ _orchestrate_episode()
+→ EpisodeEvent(payload={event_id, phase})
+→ FormationWorker episode_history_summary contains shallow records
+```
+
+### Behavior After
+
+```text
+Canonical Event / payload.tool_calls
+→ EpisodeEventEnricher (deterministic, bounded summaries)
+→ existing EpisodeEventContract / EpisodeRepository append and idempotency
+→ FormationWorker episode_history_summary contains task actions, outcomes and failures
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_vnext_episode_enrichment.py` | PASS (3) |
+| Episode + Working + Formation + Boundary regression subset | PASS (22) |
+| P0 flow + contracts + write-bypass + non-Retrieval entrypoints | PASS (32; 3 deselected) |
+| Ruff on changed source/tests | PASS |
+| `git diff --check` | PASS |
+
+### Evidence
+
+- The component test records a successful file read and failed test command, verifies their
+  compact action/result/error fields, and proves raw `tool_calls` and 500-character output do
+  not enter the Episode payload.
+- The canonical component test runs `goal → read → test failure → patch → test success` and
+  verifies the append-only Episode rows retain each significant transition in source-event order.
+- The Formation component test captures `ReflectionInput` and verifies its Episode history
+  contains the enriched failed-test action rather than raw tool traces.
+- Existing Working, Episode lifecycle, Boundary, candidate-only Formation, P0 and production
+  write-bypass tests continue to pass.
+
+### Regression
+
+```text
+Legacy: no Legacy source, route, or extractor changed; write-bypass and P0 regression subset passed.
+Safety: no Safety policy, gate, or payload masking path changed.
+candidate-only: Formation worker regression passed; promotion logic is unchanged.
+Other: existing Episode sequence/idempotency and Working reducer behavior remain covered.
+```
+
+### Remaining Risks
+
+- The bounded summaries are intentionally deterministic and recognize common tool schemas only;
+  unknown tool status is retained as `UNKNOWN` rather than inferred.
+- Episode resume replay still returns task-state reconstruction, not a narrative Episode summary.
+- Reflection remains event-granular until Batch 4, so enriched history can still be reflected
+  more often than the target boundary-driven design allows.
+- OpenCode tool traces still use the Legacy endpoint and do not exercise this canonical path.
+- Pytest emits the pre-existing `asyncio_mode` unknown-config warning. A sandbox temporary-
+  directory permission issue was avoided by using an in-memory SQLite fixture for the new tests.
+
+### Decisions
+
+```text
+Reuse EpisodeEventContract.payload and the existing Episode repository instead of adding a new
+Episode schema or persistence path. Keep enrichment deterministic and bounded; do not create a
+full Episode summary or use an LLM in this Batch.
+```
+
+### Not Done
+
+- Boundary-gated Reflection enqueue (Batch 4).
+- Complete Episode narrative summary or resume API expansion.
+- Retrieval, Feedback, Rollout, Authority promotion, Safety, and Legacy/OpenCode route changes.
+- Stage 1 end-to-end scenario suite (Batch 5).
+
+### Next Batch Notes
+
+Batch 4 should reuse `BoundaryDetector` and gate only Reflection task enqueue. Preserve the
+new Episode enrichment, Working reducer, configured Reflection model, candidate-only behavior,
+and all Authority/Legacy boundaries. Do not start Batch 5 automatically.
+
+
+---
+
+## Batch 4 — Boundary-driven Formation
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+让 Reflection 默认由 meaningful boundary 驱动，而不是无条件按每个 Event 触发；补全 Batch 4 验收测试并修复既有测试对新的边界门控语义的适应。
+
+### Reconnaissance Findings
+
+- 当前真实实现：
+  - `CanonicalWriteService.write()` 的自动编排路径已用 `reflection_boundary = snapshot_result is not None` 门控 reflection task enqueue。
+  - `BoundaryDetector` 已支持 COMPLETE/FAILED/EXPLICIT（hard）和 START/PHASE/CONTEXT_PRESSURE（rule）。
+  - `FormationWorker` / `CandidateService` / `ExtractionTaskRepository` 的 idempotent enqueue 已可复用。
+- 与 stage 文档一致的部分：
+  - 低价值事件不再逐条触发 Reflection。
+  - Task Complete / Failure / Explicit Remember 可触发 Formation。
+  - candidate-only 模式保持有效。
+- 与 stage 文档不一致的部分：
+  - `PROGRESS.md` 标记 Batch 4 为 `NOT STARTED`，但核心代码已在工作树中。
+  - `test_formation_receives_enriched_episode_history` 仍假设普通 tool failure 会无条件触发 reflection。
+- 复用的现有组件：
+  - `BoundaryDetector`、`CanonicalWriteService`、`FormationWorker`、`CandidateService`、`ExtractionTaskRepository`。
+- 实际影响范围：
+  - 仅测试文件与 `PROGRESS.md`；源码逻辑未改动。
+
+### Changes
+
+- 修复 `tests/test_vnext_episode_enrichment.py::test_formation_receives_enriched_episode_history`：将普通 tool failure 改为 `payload.boundary="explicit"`，使其符合边界驱动语义，同时保留“Formation 收到富集 Episode history”的验证目标。
+- 新增 `tests/test_vnext_boundary_driven_formation.py`，覆盖 Batch 4 验收标准：
+  - 低价值事件（read_file / git_status / search）不触发 Reflection。
+  - `task_completed` 触发 Reflection 并完成 Episode。
+  - `task_failed` 触发 Reflection 并失败 Episode。
+  - `payload.boundary="explicit"` 触发 Reflection。
+  - 同类型 boundary debounce 抑制重复 enqueue。
+  - candidate-only 模式下 boundary 触发 Reflection 产生 Candidate，但不写 Long-Term Authority。
+- 更新 `docs/vnext/PROGRESS.md` Batch 4 状态与 Stage 1 DoD 跟踪。
+
+### Files Touched
+
+```text
+tests/test_vnext_episode_enrichment.py
+tests/test_vnext_boundary_driven_formation.py
+docs/vnext/PROGRESS.md
+```
+
+### Behavior Before
+
+```text
+Canonical Event
+→ _orchestrate_episode() 检测 boundary
+→ 无条件 enqueue reflection task（每 accepted event 一个）
+→ FormationWorker 逐事件 reflection
+```
+
+### Behavior After
+
+```text
+Canonical Event
+→ Working Reducer
+→ _orchestrate_episode() → BoundaryDetector.detect()
+→ 仅当 boundary 产生 snapshot 时才 enqueue reflection task
+→ FormationWorker 按 meaningful boundary reflection
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_vnext_boundary_driven_formation.py` | PASS (6) |
+| `tests/test_vnext_episode_enrichment.py` | PASS (3) |
+| `tests/test_vnext_boundary_detector.py` | PASS (10) |
+| `tests/test_vnext_formation_worker.py` | PASS (5) |
+| `tests/test_vnext_working_reducer.py` | PASS (2) |
+| `tests/test_vnext_reflection.py` | PASS (6) |
+| `tests/test_vnext_p0_flow.py` | PASS (8) |
+| `tests/test_vnext_authority_write.py` | PASS (11) |
+| `tests/test_vnext_candidate_service.py` | PASS (10) |
+| `tests/test_vnext_event_gateway.py` | PASS (12) |
+| `tests/test_vnext_contracts.py` | PASS (2) |
+| Batch 4 regression subset total | PASS (77) |
+| Ruff on changed source/tests | PASS |
+
+### Evidence
+
+- `test_low_value_tool_events_do_not_trigger_reflection` 证明 read_file / git_status / search 不生成 reflection task。
+- `test_task_complete_triggers_reflection` / `test_task_failed_triggers_reflection` 证明 terminal event type 生成 reflection task 并正确切换 Episode status。
+- `test_explicit_remember_triggers_reflection` 证明 `payload.boundary="explicit"` 生成 reflection task 且 Episode 保持 ACTIVE。
+- `test_boundary_debounce_prevents_duplicate_reflection_tasks` 证明同类型边界在 debounce 窗口内被抑制。
+- `test_candidate_only_does_not_write_authority` 证明 candidate-only 模式下 reflection 产生 Candidate，但 `PreferenceRepository` 无记录。
+- `test_formation_receives_enriched_episode_history` 继续证明 boundary 触发的 reflection 能拿到富集后的 Episode history。
+
+### Regression
+
+```text
+Legacy: no Legacy source, route, or extractor changed.
+Safety: no Safety policy, gate, or payload masking path changed.
+candidate-only: Formation worker regression passed; Authority promotion logic unchanged.
+Other: existing Episode sequence/idempotency, Working reducer, reflection validation, and P0 flow tests passed.
+```
+
+### Remaining Risks
+
+- 显式调用方提供 `episode_event` / `episode_snapshot` / `checkpoint` 时仍会无条件 enqueue reflection；这是 caller-driven 路径，不属于自动编排的 boundary-gated 范围。
+- `SIGNIFICANT_STATE_CHANGE` / `EPISODE_CHECKPOINT` / `SESSION_BOUNDARY` 等更细粒度边界类型未在当前 `BoundaryCheckpointType` 中定义；如需覆盖，应作为后续增强而非 Batch 4 必需。
+- OpenCode 插件仍走 Legacy 事件端点，未直接 exercise 本 canonical boundary-gated 路径。
+- Batch 5 end-to-end scenario suite 仍未建立。
+
+### Decisions
+
+```text
+Keep the existing BoundaryDetector checkpoint set (COMPLETE/FAILED/EXPLICIT/START/PHASE/CONTEXT_PRESSURE)
+for Batch 4; do not add new checkpoint types. Fix tests to align with boundary-gated semantics rather than
+reverting to event-granular reflection.
+```
+
+### Not Done
+
+- Batch 5 — Stage 1 Scenario Tests。
+- 新增 SIGNIFICANT_STATE_CHANGE / EPISODE_CHECKPOINT / SESSION_BOUNDARY 等边界类型。
+- Retrieval / Feedback / Rollout / Authority promotion 核心改动。
+- Legacy / OpenCode 路由迁移。
+
+### Next Batch Notes
+
+Batch 5 应基于 Batch 1-4 已完成的 Reflection / Working / Episode / Boundary 基础，建立真实连续 Agent Event 的 Scenario 测试（正常 Coding Task、失败后恢复、低价值事件、Explicit Remember、candidate-only、LLM Invalid Output）。不要回退 boundary-gated reflection，不要修改 Retrieval / Feedback / Rollout。

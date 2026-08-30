@@ -119,6 +119,7 @@ class EpisodeStatus(_ContractEnum):
 class BoundaryCheckpointType(_ContractEnum):
     """Kinds of task boundary checkpoint emitted by the detector."""
 
+    START = "START"
     COMPLETE = "COMPLETE"
     FAILED = "FAILED"
     EXPLICIT = "EXPLICIT"

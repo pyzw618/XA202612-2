@@ -13,6 +13,7 @@ from memoryhub.adapter.schemas import (
     SourceType,
 )
 from memoryhub.application.boundary_detector import BoundaryDetector
+from memoryhub.application.episode_enricher import EpisodeEventEnricher
 from memoryhub.application.episode_service import EpisodeService, EpisodeSnapshotResult
 from memoryhub.application.event_gateway import (
     EventGateway,
@@ -80,6 +81,7 @@ class CanonicalWriteService:
         memory_write_service: Any | None = None,
         boundary_detector: BoundaryDetector | None = None,
         working_reducer: WorkingStateReducer | None = None,
+        episode_enricher: EpisodeEventEnricher | None = None,
         formation_mode: str = "candidate-only",
     ) -> None:
         self.db = db
@@ -91,6 +93,7 @@ class CanonicalWriteService:
         self.memory_write_service = memory_write_service
         self.boundary_detector = boundary_detector or BoundaryDetector()
         self.working_reducer = working_reducer or WorkingStateReducer()
+        self.episode_enricher = episode_enricher or EpisodeEventEnricher()
         if formation_mode not in {"shadow", "candidate-only", "authority"}:
             raise ValueError("unsupported formation mode")
         self.formation_mode = formation_mode
@@ -113,16 +116,9 @@ class CanonicalWriteService:
             raise TypeError("canonical write requires MemoryEventContract")
         gateway = self.event_gateway.submit(event)
         if gateway.status is not GatewayStatus.COMMITTED:
-            task = None
             working_result = None
             snapshot_result = None
             if gateway.status is GatewayStatus.IDEMPOTENT:
-                task = self.extraction_tasks.enqueue(
-                    event_ids=[event.event_id],
-                    tenant_id=event.tenant_id,
-                    user_id=event.user_id,
-                    extractor_type=self._reflection_type(event, reflection_type),
-                )[0]
                 current = self.working_service.repository.get(
                     tenant_id=event.tenant_id,
                     user_id=event.user_id,
@@ -153,7 +149,10 @@ class CanonicalWriteService:
                 gateway=gateway,
                 working=working_result,
                 episode_snapshot=snapshot_result,
-                reflection_task=task,
+                # A retry must not turn a previously low-value event into a
+                # new reflection trigger. Existing boundary tasks are already
+                # durable and idempotent in ExtractionTaskRepository.
+                reflection_task=None,
             )
 
         working_result: WorkingPatchResult | None = None
@@ -188,6 +187,7 @@ class CanonicalWriteService:
 
         snapshot = episode_snapshot or checkpoint
         episode_event_result = None
+        reflection_boundary = episode_event is not None or snapshot is not None
         if episode_event is not None:
             self._ensure_episode_exists(episode_event)
             episode_event_result = self.episode_service.append(episode_event)
@@ -201,13 +201,16 @@ class CanonicalWriteService:
                 event,
                 working_result=working_result,
             )
+            reflection_boundary = snapshot_result is not None
 
-        task = self.extraction_tasks.enqueue(
-            event_ids=[event.event_id],
-            tenant_id=event.tenant_id,
-            user_id=event.user_id,
-            extractor_type=self._reflection_type(event, reflection_type),
-        )[0]
+        task = None
+        if reflection_boundary:
+            task = self.extraction_tasks.enqueue(
+                event_ids=[event.event_id],
+                tenant_id=event.tenant_id,
+                user_id=event.user_id,
+                extractor_type=self._reflection_type(event, reflection_type),
+            )[0]
 
         long_term_result = None
         receipt = None
@@ -359,7 +362,7 @@ class CanonicalWriteService:
                 task_id=event.task_id,
                 seq_no=seq,
                 event_type=(decision.checkpoint_type.value if decision else "CANONICAL_EVENT"),
-                payload={"event_id": event.event_id, "phase": event.payload.get("phase", "")},
+                payload=self.episode_enricher.enrich(event),
                 source_event_id=event.event_id,
             )
         )

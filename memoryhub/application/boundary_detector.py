@@ -34,6 +34,7 @@ class BoundaryDetector:
     _CONTEXT_PRESSURE_FIELDS = ("constraints", "pending_steps")
     _CONTEXT_PRESSURE_THRESHOLD = 8
     _DEBOUNCE_SECONDS = 5.0
+    _TASK_START_EVENT_TYPES = frozenset({"task_start", "task_started", "user_instruction"})
 
     def __init__(
         self,
@@ -109,6 +110,23 @@ class BoundaryDetector:
         """Explicit or terminal hard triggers always win."""
 
         explicit = str(payload.get("boundary", "")).strip().upper()
+        normalized_event_type = event_type.strip().lower()
+        if normalized_event_type in {"task_complete", "task_completed"}:
+            return BoundaryDecision(
+                checkpoint_type=BoundaryCheckpointType.COMPLETE,
+                trigger_kind=BoundaryTriggerKind.HARD,
+                score=1.0,
+                reason="event_type=task_complete",
+                debounce_key=f"{event_type}:hard-complete",
+            )
+        if normalized_event_type in {"task_failed", "task_failure"}:
+            return BoundaryDecision(
+                checkpoint_type=BoundaryCheckpointType.FAILED,
+                trigger_kind=BoundaryTriggerKind.HARD,
+                score=1.0,
+                reason="event_type=task_failed",
+                debounce_key=f"{event_type}:hard-failed",
+            )
         if explicit in {"COMPLETE", "DONE", "FINISH"}:
             return BoundaryDecision(
                 checkpoint_type=BoundaryCheckpointType.COMPLETE,
@@ -163,6 +181,15 @@ class BoundaryDetector:
         if status in {EpisodeStatus.COMPLETED, EpisodeStatus.FAILED}:
             return None
 
+        if not episode_history and self._is_task_start(event_type, payload):
+            return BoundaryDecision(
+                checkpoint_type=BoundaryCheckpointType.START,
+                trigger_kind=BoundaryTriggerKind.RULE,
+                score=0.7,
+                reason="task_start_event",
+                debounce_key=f"{event_type}:task-start",
+            )
+
         phase = payload.get("phase")
         if phase is not None and episode_history:
             last_phase = episode_history[-1].get("phase")
@@ -186,6 +213,14 @@ class BoundaryDetector:
             )
 
         return None
+
+    def _is_task_start(self, event_type: str, payload: dict[str, Any]) -> bool:
+        if event_type.strip().lower() in self._TASK_START_EVENT_TYPES:
+            return True
+        return any(
+            isinstance(payload.get(key), str) and payload[key].strip()
+            for key in ("goal", "instruction", "current_goal")
+        )
 
     def _model_suggestion(
         self,

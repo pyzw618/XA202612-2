@@ -40,6 +40,29 @@ def test_hard_failed(detector: BoundaryDetector) -> None:
     assert decision.trigger_kind is BoundaryTriggerKind.HARD
 
 
+@pytest.mark.parametrize(
+    ("event_type", "checkpoint_type"),
+    [
+        ("task_completed", BoundaryCheckpointType.COMPLETE),
+        ("task_failed", BoundaryCheckpointType.FAILED),
+    ],
+)
+def test_terminal_event_types_are_hard_boundaries(
+    detector: BoundaryDetector,
+    event_type: str,
+    checkpoint_type: BoundaryCheckpointType,
+) -> None:
+    decision = detector.detect(
+        tenant_id="t",
+        user_id="u",
+        task_id="task",
+        event_type=event_type,
+    )
+    assert decision is not None
+    assert decision.checkpoint_type is checkpoint_type
+    assert decision.trigger_kind is BoundaryTriggerKind.HARD
+
+
 def test_hard_explicit(detector: BoundaryDetector) -> None:
     decision = detector.detect(
         tenant_id="t",
@@ -51,6 +74,20 @@ def test_hard_explicit(detector: BoundaryDetector) -> None:
     assert decision is not None
     assert decision.checkpoint_type is BoundaryCheckpointType.EXPLICIT
     assert decision.trigger_kind is BoundaryTriggerKind.HARD
+
+
+def test_task_start_is_a_meaningful_rule_boundary(detector: BoundaryDetector) -> None:
+    decision = detector.detect(
+        tenant_id="t",
+        user_id="u",
+        task_id="task",
+        event_type="user_instruction",
+        event_payload={"text": "Repair the reconnect flow"},
+        episode_history=[],
+    )
+    assert decision is not None
+    assert decision.checkpoint_type is BoundaryCheckpointType.START
+    assert decision.trigger_kind is BoundaryTriggerKind.RULE
 
 
 def test_terminal_status_is_hard_boundary(detector: BoundaryDetector) -> None:
