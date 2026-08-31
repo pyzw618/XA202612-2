@@ -427,6 +427,7 @@ class RetrievalService:
             "top_k": plan.top_k,
             "required_layers": [layer.value for layer in plan.required_layers],
             "required_types": [memory_type.value for memory_type in plan.required_types],
+            "metadata_filter": plan.metadata_filter,
             "reason": plan.reason,
         }
 

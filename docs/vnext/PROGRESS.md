@@ -1559,3 +1559,148 @@ Batch 3 仅处理 Intent + Scope Propagation：补全 Legacy adapter 的 project
 level / memory_types / scene 等传播，评估最小 schema 兼容，并补充 Request →
 Planner → Executor → Result 隔离测试。不要重写 Authority、BM25、Vector 或
 Working / Episode executor；不要提前进入 Batch 4 的 Fusion / Rerank / Context Budget。
+
+---
+
+## Stage 2 Batch 3 — Intent + Scope Propagation
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+使 vNext retrieval request 的 tenant/user/project/task/session、intent 与 memory
+type 在 vNext → Legacy 适配、Channel Executor 与最终 Context 边界均不静默丢失，
+并阻止不同 project 的 Long-Term Memory 进入结果。
+
+### Changes
+
+- `memoryhub/adapter/vnext_schemas.py`：新增唯一的
+  `legacy_search_request_from_vnext()` 兼容适配器。project scope 映射到 Legacy
+  `project_id`；task/session/application/domain 映射到既有 `SceneScope`；task_id、
+  session_id、intent 对应 level、plan memory types 对应 Legacy types 均保留。
+- `memoryhub/adapter/retrieval_executor.py`：Vector 改用该单一适配器并传入
+  `RetrievalPlan`；Vector/Keyword/Metadata/Authority 在执行器入口按 request
+  tenant/user 与 exact scope（或 GLOBAL fallback）过滤。
+- `memoryhub/adapter/vnext_api.py`：rollout 的 legacy reader 复用同一适配器，
+  shadow/canary 对照不再构造丢失 scope 的简化 `SearchRequest`。
+- `memoryhub/retrieval/scope_resolver.py` + `memoryhub/application/context_service.py`：
+  最终 Context 边界执行 request tenant/user 校验；Long-Term 的非 GLOBAL 记录必须
+  与请求 scope 完全匹配，即使它不与其他候选形成 conflict group。
+- `memoryhub/application/retrieval_service.py`：在 response retrieval plan 中回显
+  `metadata_filter`，使 scope 规划可追踪。
+- 新增 `tests/test_vnext_batch3_scope_propagation.py`（5 个行为测试）。
+
+### Files Touched
+
+```text
+memoryhub/adapter/vnext_schemas.py
+memoryhub/adapter/retrieval_executor.py
+memoryhub/adapter/vnext_api.py
+memoryhub/retrieval/scope_resolver.py
+memoryhub/application/context_service.py
+memoryhub/application/retrieval_service.py
+tests/test_vnext_batch3_scope_propagation.py
+docs/vnext/PROGRESS.md
+```
+
+（核心源码 6 个文件，符合单 Batch ≤8 的限制；未改数据库 schema。）
+
+### Behavior Before
+
+```text
+vNext request(scope=PROJECT:project-b)
+→ Legacy Vector SearchRequest(project_id="", level="long", types=[])
+→ legacy/shadow reader 仅保留 user/query/top_k
+→ Authority/Keyword/Metadata/Vector 只按 tenant/user 读取
+→ ScopeResolver 只处理同 identity 冲突
+→ 无冲突的 PROJECT:project-a 记录可能进入 project-b Context
+```
+
+### Behavior After
+
+```text
+Request scope / task / session / intent / type
+→ single legacy compatibility adapter
+→ Legacy SearchRequest(project_id, SceneScope, session_id, level, memory_types)
+→ long-term channel early scope filter
+→ RRF / Rerank
+→ final ScopeResolver ownership + exact-scope guard
+→ Context / retrieval plan(metadata_filter)
+```
+
+GLOBAL Long-Term Memory 仍可作为任何明确 scope 的安全 fallback；Working/Episode
+仍由其 tenant/user/task/session 结构化 Repository 负责窄化，不被强制转为 embedding。
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_vnext_batch3_scope_propagation.py` | PASS (5) |
+| Batch 3 + interface/intent/planner/scope/working-episode/Batch 2/retrieval subset | PASS (89), 1 skipped, 1 deselected |
+| Stage 1 scenarios + boundary + Authority write | included above, PASS |
+| `ruff check` on changed source/tests | PASS |
+| `git diff --check` | PASS |
+
+`test_retrieval_log_persisted` 未在该合并回归中运行：当前 Windows pytest 临时目录
+ACL 会在 `tmp_path` 创建 `.lock` 时失败，属于 Reconnaissance 已确认的环境基线。
+
+### Evidence
+
+- project-b 请求会把 `PROJECT:project-b` 映射为 Legacy `project_id=project-b`，
+  保留 `task_id` 到 `SceneScope.task_type`、保留 session，并按 plan 传递 type/top_k。
+- Vector 测试证明 legacy retriever 接收到 project/type/top_k，且 project-a hit 在
+  channel 边界被拒绝。
+- Authority 测试证明仅返回 exact project-b 与 GLOBAL fallback，不返回 project-a。
+- ScopeResolver 测试证明不同 identity 的 project-a 候选也会在最终 Context 前被
+  丢弃；该情形此前不会进入 conflict resolution。
+
+### Scope Verification
+
+- tenant/user：Channel 入口与最终 ScopeResolver 双重校验。
+- project：vNext generic `scope_level/scope` 是现有 contract 的项目表达；现映射到
+  Legacy `project_id`，并在四个 Long-Term Channel 与最终 Context 同时执行。
+- task：vNext `task_id` 保留至 Legacy `SceneScope.task_type`；显式 TASK scope 同样
+  映射到该字段。Legacy contract 不存在独立 task_id，未新建平行字段。
+- session：保留至 Legacy `session_id`；显式 SESSION scope 同时映射到 SceneScope。
+- intent/type：Vector adapter 使用 plan 的 resolved intent/type；rollout legacy
+  reader使用 request intent hint（若调用方未提供 hint，则不存在可丢失的 intent）。
+
+### Retrieval Channel Verification
+
+| Channel | Batch 3 behavior |
+|---|---|
+| working | 未改；继续直接读取 WorkingStateRepository |
+| episode | 未改；继续直接读取 EpisodeRepository |
+| authority | ACTIVE owner-bound 读取后增加 exact scope / GLOBAL filter |
+| keyword | BM25 结果转换后增加 exact scope / GLOBAL filter |
+| metadata | 既有 memory_lookup 读取后增加 exact scope / GLOBAL filter |
+| vector | 继续复用 Legacy retriever；请求映射与返回结果均执行 scope 防线 |
+
+### Remaining Risks
+
+- Working/Episode storage 没有 `project_id`，因此 project-scoped structured fallback
+  仍无法实现；当前 task/session 读取不变，避免在 Batch 3 扩大 schema。
+- Legacy `SearchRequest` 没有独立 task_id/intent 字段，兼容适配只能使用其既有
+  `SceneScope`、level、memory_types 表达。
+- 没有 request scope 时保持现有 owner-scoped行为；不会推断项目范围。
+- Batch 4 的 token_budget 接线、Fusion/Rerank 细化、RECALLED activation、并行
+  Channel latency 与 Retrieval Log 的 per-channel 计数仍未处理。
+- 可选 `rank-bm25` / `faiss-cpu` 缺失，真实 BM25/FAISS backend 命中仍需具备依赖的
+  环境验证。
+
+### Regression
+
+未修改 Stage 1 Formation、Candidate-only、Authority 写入、Repository schema、
+Legacy HybridRetriever/BM25/FAISS 算法或 rollout controller。Stage 1 回归与既有
+Working/Episode、Batch 2 channel 测试通过。
+
+### Next Batch Notes
+
+Batch 4 仅处理 Fusion / Rerank / Context Budget：复用现有 RRF、Reranker、
+BudgetManager，接通 request token_budget，保留 channel provenance，补齐去重、
+RECALLED/SELECTED/IN_CONTEXT 与可观测性。不要改本 Batch 的 scope compatibility
+adapter 或重新设计 Working/Episode/Authority executor。

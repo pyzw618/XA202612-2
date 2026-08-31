@@ -22,10 +22,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from memoryhub.adapter.schemas import SearchRequest, SearchResult
+from memoryhub.adapter.schemas import SearchResult
 from memoryhub.adapter.vnext_schemas import (
     MemoryRetrievalRequest,
     RetrievedMemory,
+    legacy_search_request_from_vnext,
 )
 from memoryhub.domain.contracts import (
     EvolutionStatus,
@@ -37,20 +38,15 @@ from memoryhub.retrieval.keyword_search import _tokenize
 from memoryhub.retrieval.planner import RetrievalPlan
 
 
-def _search_request_from_vnext(request: MemoryRetrievalRequest) -> SearchRequest:
+def _search_request_from_vnext(
+    request: MemoryRetrievalRequest, plan: RetrievalPlan | None = None
+) -> Any:
     """Build the legacy SearchRequest used by the current retriever."""
-    from memoryhub.adapter.schemas import SceneScope
-
-    return SearchRequest(
-        user_id=request.user_id,
-        query=request.query,
-        context=SceneScope(),
-        project_id="",
-        top_k=request.page_size,
-        memory_types=[],
-        min_confidence=0.0,
-        level="long",
-        session_id=request.session_id,
+    return legacy_search_request_from_vnext(
+        request,
+        intent=plan.intent if plan is not None else None,
+        memory_types=plan.required_types if plan is not None else None,
+        top_k=plan.vector_top_k if plan is not None else None,
     )
 
 
@@ -204,7 +200,7 @@ def build_legacy_retriever_executor(state: Any) -> Any:
         if retriever is None:
             return []
         try:
-            search_req = _search_request_from_vnext(request)
+            search_req = _search_request_from_vnext(request, plan)
             response = retriever.search(search_req)
         except Exception:
             return []
@@ -218,7 +214,8 @@ def build_legacy_retriever_executor(state: Any) -> Any:
                 source="vector",
             )
             if converted is not None:
-                results.append(converted)
+                if _matches_request_scope(converted, request):
+                    results.append(converted)
         return results
 
     return executor
@@ -518,6 +515,21 @@ def _memory_type_matches(memory_type: MemoryType, plan: RetrievalPlan | None) ->
     return not plan or not plan.required_types or memory_type in plan.required_types
 
 
+def _matches_request_scope(memory: RetrievedMemory, request: MemoryRetrievalRequest) -> bool:
+    """Allow global fallback, otherwise require the exact requested scope.
+
+    The executor boundary must not return project/task/session records from a
+    different scope and rely on later conflict resolution to hide them.
+    """
+    if memory.tenant_id != request.tenant_id or memory.user_id != request.user_id:
+        return False
+    if request.scope_level is None or not request.scope:
+        return True
+    return memory.scope_level is MemoryScope.GLOBAL or (
+        memory.scope_level is request.scope_level and memory.scope == request.scope
+    )
+
+
 def _long_term_memory_from_legacy(
     memory: Any,
     *,
@@ -576,7 +588,8 @@ def build_keyword_executor(keyword_search: Any) -> Any:
                 source=channel,
             )
             if converted is not None:
-                results.append(converted)
+                if _matches_request_scope(converted, request):
+                    results.append(converted)
         return results
 
     return executor
@@ -612,7 +625,7 @@ def build_authority_executor(authority_repository: Any) -> Any:
             scope_bonus = 0.1 if request.scope and envelope.scope == request.scope else 0.0
             ranked.append((min(1.0, 0.5 + 0.5 * relevance + scope_bonus), envelope))
         ranked.sort(key=lambda item: (-item[0], item[1].memory_id))
-        return [
+        results = [
             RetrievedMemory(
                 tenant_id=envelope.tenant_id,
                 user_id=envelope.user_id,
@@ -631,6 +644,7 @@ def build_authority_executor(authority_repository: Any) -> Any:
             )
             for score, envelope in ranked[: max(1, plan.top_k * 2)]
         ]
+        return [memory for memory in results if _matches_request_scope(memory, request)]
 
     return executor
 
@@ -657,14 +671,14 @@ def build_metadata_executor(memory_lookup: dict[str, Any] | None) -> Any:
                 continue
             text = _legacy_memory_text(memory)
             relevance = _query_relevance(request.query, text)
-            results.append(
-                _long_term_memory_from_legacy(
-                    memory,
-                    tenant_id=request.tenant_id,
-                    channel=channel,
-                    score=0.5 + 0.5 * relevance,
-                )
+            candidate = _long_term_memory_from_legacy(
+                memory,
+                tenant_id=request.tenant_id,
+                channel=channel,
+                score=0.5 + 0.5 * relevance,
             )
+            if _matches_request_scope(candidate, request):
+                results.append(candidate)
         results.sort(key=lambda item: (-item.score, item.memory_id))
         return results[: max(1, plan.top_k * 2)]
 

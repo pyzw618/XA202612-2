@@ -110,6 +110,8 @@ class ContextService:
             scope_resolver = self.scope_resolver
         scope_resolution = scope_resolver.resolve(
             reranked,
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
             preferred_scope_level=request.scope_level,
             preferred_scope=request.scope,
         )

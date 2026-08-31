@@ -466,6 +466,56 @@ def _legacy_intent_hint(level: str, memory_types: list[str]) -> RetrievalIntent:
     return RetrievalIntent.MIXED
 
 
+def legacy_search_request_from_vnext(
+    request: MemoryRetrievalRequest,
+    *,
+    intent: RetrievalIntent | None = None,
+    memory_types: list[MemoryType] | None = None,
+    top_k: int | None = None,
+) -> SearchRequest:
+    """Downgrade vNext retrieval scope without discarding its query contract.
+
+    ``SearchRequest`` has no first-class task scope, so task/application/domain
+    scope is represented by its existing ``SceneScope`` fields.  Project scope
+    maps to the legacy ``project_id`` field.  This is intentionally a
+    compatibility adapter rather than a second scope model.
+    """
+    selected_intent = intent or request.intent_hint
+    scope_level = request.scope_level
+    scope = request.scope
+    scope_value = scope.split(":", 1)[-1] if ":" in scope else scope
+    context = SceneScope(task_type=request.task_id)
+    project_id = ""
+    if scope_level is MemoryScope.PROJECT:
+        project_id = scope_value
+    elif scope_level is MemoryScope.TASK:
+        context = context.model_copy(update={"task_type": scope_value})
+    elif scope_level is MemoryScope.SESSION:
+        context = context.model_copy(update={"scene": scope_value})
+    elif scope_level is MemoryScope.APPLICATION:
+        context = context.model_copy(update={"app": scope_value})
+    elif scope_level is MemoryScope.DOMAIN:
+        context = context.model_copy(update={"scene": scope_value})
+
+    level = {
+        RetrievalIntent.CURRENT_STATE: "short",
+        RetrievalIntent.TASK_HISTORY: "mid",
+        RetrievalIntent.EXPERIENCE: "mid",
+    }.get(selected_intent, "long")
+    legacy_types = [_legacy_memory_type(memory_type) for memory_type in memory_types or []]
+    return SearchRequest(
+        user_id=request.user_id,
+        query=request.query,
+        context=context,
+        project_id=project_id,
+        top_k=top_k or request.page_size,
+        memory_types=list(dict.fromkeys(legacy_types)),
+        min_confidence=0.0,
+        level=level,
+        session_id=request.session_id,
+    )
+
+
 def _legacy_memory_level(layer: LifecycleLayer) -> str:
     return {
         LifecycleLayer.WORKING: "short",
@@ -612,6 +662,7 @@ __all__ = [
     "MemoryRetrievalRequest",
     "MemoryRetrievalResponse",
     "RetrievedMemory",
+    "legacy_search_request_from_vnext",
     "ResumeTaskRequest",
     "ResumeTaskResponse",
     "WriteEventRequest",

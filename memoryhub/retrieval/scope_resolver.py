@@ -91,15 +91,24 @@ class ScopeResolver:
         self,
         candidates: list[RetrievedMemory],
         *,
+        tenant_id: str = "",
+        user_id: str = "",
         preferred_scope_level: MemoryScope | None = None,
         preferred_scope: str = "",
     ) -> ScopeResolution:
         """Run the full validation + conflict resolution pipeline."""
         validated = self._validate_candidates(candidates)
-        valid_memories = [r.memory for r in validated if r.valid]
-        invalid = [r for r in validated if not r.valid]
+        eligible, scope_dropped = self._filter_request_scope(
+            validated,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            preferred_scope_level=preferred_scope_level,
+            preferred_scope=preferred_scope,
+        )
+        valid_memories = [r.memory for r in eligible if r.valid]
+        invalid = [r for r in eligible if not r.valid]
 
-        selected, groups, dropped = self._resolve_conflicts(
+        selected, groups, conflict_dropped = self._resolve_conflicts(
             valid_memories,
             preferred_scope_level=preferred_scope_level,
             preferred_scope=preferred_scope,
@@ -108,10 +117,51 @@ class ScopeResolver:
         return ScopeResolution(
             selected=selected,
             conflict_groups=groups,
-            dropped=dropped,
+            dropped=[*scope_dropped, *conflict_dropped],
             invalid=invalid,
             authority_checked=self.authority_checked,
         )
+
+    @staticmethod
+    def _filter_request_scope(
+        results: list[ValidationResult],
+        *,
+        tenant_id: str,
+        user_id: str,
+        preferred_scope_level: MemoryScope | None,
+        preferred_scope: str,
+    ) -> tuple[list[ValidationResult], list[tuple[RetrievedMemory, str]]]:
+        """Apply request ownership/scope eligibility before conflict grouping.
+
+        Working and Episode candidates are already structurally narrowed by
+        their repositories.  Long-term candidates may use GLOBAL as a safe
+        fallback; every other scoped record must exactly match the request.
+        """
+        eligible: list[ValidationResult] = []
+        dropped: list[tuple[RetrievedMemory, str]] = []
+        for result in results:
+            memory = result.memory
+            reason = ""
+            if tenant_id and memory.tenant_id != tenant_id:
+                reason = "tenant does not match request"
+            elif user_id and memory.user_id != user_id:
+                reason = "user does not match request"
+            elif (
+                memory.layer is LifecycleLayer.LONG_TERM
+                and preferred_scope_level is not None
+                and preferred_scope
+                and memory.scope_level is not MemoryScope.GLOBAL
+                and (
+                    memory.scope_level is not preferred_scope_level
+                    or memory.scope != preferred_scope
+                )
+            ):
+                reason = "scope does not match request"
+            if reason:
+                dropped.append((memory, reason))
+            else:
+                eligible.append(result)
+        return eligible, dropped
 
     def _validate_candidates(
         self, candidates: list[RetrievedMemory]

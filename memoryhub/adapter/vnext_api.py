@@ -712,9 +712,9 @@ async def vnext_context(
 
 
 def _legacy_request(request: MemoryRetrievalRequest):
-    from memoryhub.adapter.schemas import SearchRequest
+    from memoryhub.adapter.vnext_schemas import legacy_search_request_from_vnext
 
-    return SearchRequest(user_id=request.user_id, query=request.query, top_k=request.page_size)
+    return legacy_search_request_from_vnext(request)
 
 
 __all__ = ["router"]
