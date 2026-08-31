@@ -24,6 +24,8 @@ from .event_gateway import EventGateway, EventGatewayResult, GatewayStatus
 from .evolution_service import EvolutionResult, EvolutionService, EvolutionServiceError
 from .feedback_service import (
     AgentUsageTrace,
+    FeedbackEvent,
+    FeedbackType,
     UsageKind,
     UtilityFeedback,
     UtilityFeedbackShadow,
@@ -66,6 +68,8 @@ __all__ = [
     "ContextAssemblyResult",
     "ContextService",
     "AgentUsageTrace",
+    "FeedbackEvent",
+    "FeedbackType",
     "UsageKind",
     "UtilityFeedback",
     "UtilityFeedbackShadow",

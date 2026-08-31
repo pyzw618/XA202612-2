@@ -33,6 +33,7 @@ from memoryhub.adapter.vnext_schemas import (
     WriteEventResponse,
 )
 from memoryhub.application.canonical_write import CanonicalWriteService
+from memoryhub.application.feedback_service import FeedbackEvent
 from memoryhub.application.forget_service import ForgetService
 from memoryhub.application.retrieval_service import RetrievalService
 from memoryhub.application.rollout_service import RolloutGateError
@@ -709,6 +710,19 @@ async def vnext_context(
         return selected.response
     context_text, _search = selected.response
     return ContextPayload(rendered_context=context_text)
+
+
+@router.post("/feedback")
+async def vnext_feedback(
+    req: FeedbackEvent,
+    request: Request,
+    identity: tuple[str, str] = Depends(_tenant_user),
+) -> dict[str, object]:
+    """Record attributed usage/outcome feedback through the vNext service."""
+    tenant_id, user_id = identity
+    service = _retrieval_service(request)
+    event = req.model_copy(update={"tenant_id": tenant_id, "user_id": user_id})
+    return service.record_feedback_event(event)
 
 
 def _legacy_request(request: MemoryRetrievalRequest):

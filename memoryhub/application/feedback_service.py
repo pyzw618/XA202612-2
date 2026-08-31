@@ -28,6 +28,37 @@ class UsageKind(str, Enum):
     CORRECTION = "CORRECTION"
 
 
+class FeedbackType(str, Enum):
+    EXPLICIT_POSITIVE = "EXPLICIT_POSITIVE"
+    EXPLICIT_NEGATIVE = "EXPLICIT_NEGATIVE"
+    TASK_SUCCESS = "TASK_SUCCESS"
+    TASK_FAILURE = "TASK_FAILURE"
+    PARTIAL_SUCCESS = "PARTIAL_SUCCESS"
+    USER_CORRECTION = "USER_CORRECTION"
+    USER_CONFIRMATION = "USER_CONFIRMATION"
+    UNKNOWN = "UNKNOWN"
+
+
+class FeedbackEvent(BaseModel):
+    """Auditable feedback input; it contains no raw query or memory content."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    feedback_id: str = Field(min_length=1)
+    tenant_id: str = Field(min_length=1)
+    user_id: str = Field(min_length=1)
+    project_id: str = ""
+    task_id: str = ""
+    session_id: str = ""
+    retrieval_id: str = Field(min_length=1)
+    memory_ids: list[str] = Field(default_factory=list)
+    feedback_type: FeedbackType
+    outcome: str = Field(default="UNKNOWN", min_length=1, max_length=64)
+    source: str = Field(default="agent", min_length=1, max_length=64)
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class AgentUsageTrace(BaseModel):
     """One typed usage signal with no query or memory正文 fields."""
 
@@ -61,6 +92,14 @@ class UtilityFeedback(BaseModel):
     accepted: bool
     utility_signal: float = Field(ge=-1.0, le=1.0)
     correction_code: str = Field(default="", max_length=64)
+    retrieval_id: str = ""
+    project_id: str = ""
+    task_id: str = ""
+    session_id: str = ""
+    feedback_type: FeedbackType | None = None
+    outcome: str = "UNKNOWN"
+    source: str = ""
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -96,6 +135,84 @@ class UtilityFeedbackShadow:
         self.trace_store = trace_store or TraceStore()
         self._usages: list[AgentUsageTrace] = []
         self._feedback: list[UtilityFeedback] = []
+
+    def record_event(
+        self,
+        event: FeedbackEvent,
+        *,
+        used_memory_ids: set[str],
+    ) -> dict[str, object]:
+        """Attribute one event conservatively and keep it shadow-only.
+
+        Explicit feedback is strong.  Outcome feedback is only attributable to
+        USED memories; multiple memories receive a weak signal.  A replayed
+        feedback_id is a no-op and returns the original feedback IDs.
+        """
+        if event.tenant_id == "" or event.user_id == "":
+            raise ValueError("feedback scope is required")
+        requested = list(dict.fromkeys(event.memory_ids))
+        if event.feedback_type in {
+            FeedbackType.EXPLICIT_POSITIVE,
+            FeedbackType.USER_CONFIRMATION,
+        }:
+            signal, accepted, attributable = 1.0, True, requested
+        elif event.feedback_type in {
+            FeedbackType.EXPLICIT_NEGATIVE,
+            FeedbackType.USER_CORRECTION,
+        }:
+            signal, accepted, attributable = -1.0, False, requested
+        elif event.feedback_type is FeedbackType.TASK_SUCCESS:
+            attributable = [m for m in requested if m in used_memory_ids]
+            signal, accepted = 0.5, True
+        elif event.feedback_type is FeedbackType.PARTIAL_SUCCESS:
+            attributable = [m for m in requested if m in used_memory_ids]
+            signal, accepted = 0.2, True
+        elif event.feedback_type is FeedbackType.TASK_FAILURE:
+            attributable = [m for m in requested if m in used_memory_ids]
+            signal, accepted = -0.2, False
+        else:
+            signal, accepted, attributable = 0.0, False, []
+        if event.feedback_type in {
+            FeedbackType.TASK_SUCCESS,
+            FeedbackType.TASK_FAILURE,
+            FeedbackType.PARTIAL_SUCCESS,
+        } and len(attributable) > 1:
+            signal *= 0.5
+        created: list[str] = []
+        for memory_id in attributable:
+            item = self.record_feedback(
+                feedback_id=f"{event.feedback_id}:{memory_id}",
+                usage_id=f"{event.retrieval_id}:{memory_id}",
+                trace_id=event.retrieval_id,
+                tenant_id=event.tenant_id,
+                user_id=event.user_id,
+                memory_id=memory_id,
+                usage_kind=UsageKind.CORRECTION if event.feedback_type in {
+                    FeedbackType.EXPLICIT_NEGATIVE,
+                    FeedbackType.USER_CORRECTION,
+                } else UsageKind.OUTCOME,
+                accepted=accepted,
+                utility_signal=signal,
+                retrieval_id=event.retrieval_id,
+                project_id=event.project_id,
+                task_id=event.task_id,
+                session_id=event.session_id,
+                feedback_type=event.feedback_type,
+                outcome=event.outcome,
+                source=event.source,
+                confidence=event.confidence * (0.5 if len(attributable) > 1 else 1.0),
+            )
+            created.append(item.feedback_id)
+        return {
+            "feedback_id": event.feedback_id,
+            "attributed_memory_ids": attributable,
+            "feedback_ids": created,
+            "unattributed_memory_ids": [m for m in requested if m not in attributable],
+            "attribution": (
+                "strong" if len(attributable) == 1
+                else "weak" if len(attributable) > 1 else "none"
+            ),
+        }
 
     @property
     def usages(self) -> list[AgentUsageTrace]:
@@ -147,12 +264,25 @@ class UtilityFeedbackShadow:
         accepted: bool,
         utility_signal: float,
         correction_code: str = "",
+        feedback_id: str | None = None,
+        retrieval_id: str = "",
+        project_id: str = "",
+        task_id: str = "",
+        session_id: str = "",
+        feedback_type: FeedbackType | str | None = None,
+        outcome: str = "UNKNOWN",
+        source: str = "",
+        confidence: float = 1.0,
     ) -> UtilityFeedback:
         kind = UsageKind(usage_kind)
         if kind not in {UsageKind.OUTCOME, UsageKind.CORRECTION}:
             raise ValueError("feedback usage_kind must be OUTCOME or CORRECTION")
+        stable_id = feedback_id or f"feedback-{uuid.uuid4().hex}"
+        for existing in self._feedback:
+            if existing.feedback_id == stable_id:
+                return existing
         item = UtilityFeedback(
-            feedback_id=f"feedback-{uuid.uuid4().hex}",
+            feedback_id=stable_id,
             usage_id=usage_id,
             trace_id=trace_id,
             tenant_id=tenant_id,
@@ -162,6 +292,14 @@ class UtilityFeedbackShadow:
             accepted=accepted,
             utility_signal=utility_signal,
             correction_code=correction_code,
+            retrieval_id=retrieval_id,
+            project_id=project_id,
+            task_id=task_id,
+            session_id=session_id,
+            feedback_type=FeedbackType(feedback_type) if feedback_type is not None else None,
+            outcome=outcome,
+            source=source,
+            confidence=confidence,
         )
         self._feedback.append(item)
         self._record_feedback_trace(item)
@@ -248,12 +386,18 @@ class UtilityFeedbackShadow:
                     "feedback_id": item.feedback_id,
                     "usage_id": item.usage_id,
                     "memory_id": item.memory_id,
+                    "retrieval_id": item.retrieval_id,
+                    "task_id": item.task_id,
+                    "session_id": item.session_id,
                 },
                 classification={
                     "usage_kind": item.usage_kind.value,
                     "accepted": item.accepted,
                     "correction_code": item.correction_code,
                     "shadow_only": True,
+                    "feedback_type": item.feedback_type.value if item.feedback_type else "",
+                    "outcome": item.outcome,
+                    "source": item.source,
                 },
                 scores={"utility_signal": item.utility_signal},
             )
@@ -262,6 +406,8 @@ class UtilityFeedbackShadow:
 
 __all__ = [
     "AgentUsageTrace",
+    "FeedbackEvent",
+    "FeedbackType",
     "UsageKind",
     "UtilityFeedback",
     "UtilityFeedbackShadow",

@@ -8,7 +8,12 @@ and rejection of memories that never made it into context.
 from __future__ import annotations
 
 from memoryhub.adapter.vnext_schemas import MemoryRetrievalRequest, RetrievedMemory
-from memoryhub.application.feedback_service import UsageKind, UtilityFeedbackShadow
+from memoryhub.application.feedback_service import (
+    FeedbackEvent,
+    FeedbackType,
+    UsageKind,
+    UtilityFeedbackShadow,
+)
 from memoryhub.application.retrieval_service import RetrievalService
 from memoryhub.domain.contracts import (
     ActivationStatus,
@@ -267,3 +272,64 @@ def test_app_wires_usage_feedback_shadow_to_retrieval_service(tmp_path):
         retrieval_service = app.state.retrieval_service
         assert retrieval_service is not None
         assert retrieval_service.usage_feedback_service is not None
+
+
+def test_record_feedback_event_requires_used_memory_for_task_outcome():
+    db = Database(":memory:")
+    db.init_schema()
+    shadow = UtilityFeedbackShadow()
+    service = RetrievalService(
+        channel_executors={"metadata": _fixed_executor([_memory("m1")])},
+        activation_repository=ActivationRepository(db),
+        retrieval_log_repository=RetrievalLogRepository(db),
+        usage_feedback_service=shadow,
+    )
+    result = service.retrieve(_request())
+
+    event = FeedbackEvent(
+        feedback_id="fb-outcome",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        task_id="task-1",
+        retrieval_id=result.retrieval_log_id,
+        memory_ids=["m1"],
+        feedback_type=FeedbackType.TASK_FAILURE,
+        outcome="TIMEOUT",
+    )
+    rejected = service.record_feedback_event(event)
+    assert rejected["status"] == "accepted"
+    assert rejected["attribution"] == "none"
+    assert shadow.feedback == []
+
+    service.record_usage_feedback(
+        retrieval_id=result.retrieval_log_id,
+        memory_ids=["m1"],
+        tenant_id="tenant-1",
+        user_id="user-1",
+    )
+    attributed = service.record_feedback_event(
+        event.model_copy(update={"feedback_id": "fb-outcome-2"})
+    )
+    assert attributed["attribution"] == "strong"
+    assert attributed["attributed_memory_ids"] == ["m1"]
+
+
+def test_feedback_event_rejects_cross_scope_retrieval():
+    db = Database(":memory:")
+    db.init_schema()
+    service = RetrievalService(
+        channel_executors={"metadata": _fixed_executor([_memory("m1")])},
+        activation_repository=ActivationRepository(db),
+        retrieval_log_repository=RetrievalLogRepository(db),
+        usage_feedback_service=UtilityFeedbackShadow(),
+    )
+    result = service.retrieve(_request())
+    event = FeedbackEvent(
+        feedback_id="fb-cross-tenant",
+        tenant_id="tenant-2",
+        user_id="user-1",
+        retrieval_id=result.retrieval_log_id,
+        memory_ids=["m1"],
+        feedback_type=FeedbackType.EXPLICIT_POSITIVE,
+    )
+    assert service.record_feedback_event(event)["status"] == "rejected"

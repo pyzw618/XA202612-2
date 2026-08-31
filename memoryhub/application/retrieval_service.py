@@ -22,7 +22,7 @@ from memoryhub.adapter.vnext_schemas import (
     RetrievedMemory,
 )
 from memoryhub.application.context_service import ContextAssemblyResult, ContextService
-from memoryhub.application.feedback_service import UsageKind
+from memoryhub.application.feedback_service import FeedbackEvent, UsageKind
 from memoryhub.domain.contracts import (
     Activation,
     ActivationStatus,
@@ -312,6 +312,56 @@ class RetrievalService:
                     pass
         return result
 
+    def record_feedback_event(self, event: FeedbackEvent) -> dict[str, object]:
+        """Validate and attribute a feedback event without updating memory scores."""
+        if self.retrieval_log_repository is None or self.activation_repository is None:
+            return {"feedback_id": event.feedback_id, "status": "unavailable"}
+        log = self.retrieval_log_repository.get(retrieval_log_id=event.retrieval_id)
+        if log is None or log.tenant_id != event.tenant_id or log.user_id != event.user_id:
+            return {
+                "feedback_id": event.feedback_id,
+                "status": "rejected",
+                "reason": "scope_mismatch_or_retrieval_not_found",
+            }
+        selected = set(log.plan.get("selected_memory_ids", []))
+        recorded_scope = {
+            "project_id": log.plan.get("project_id", ""),
+            "task_id": log.plan.get("task_id", ""),
+            "session_id": log.plan.get("session_id", ""),
+            "scope": log.plan.get("scope", ""),
+        }
+        for field in ("project_id", "task_id", "session_id"):
+            value = getattr(event, field)
+            if value and recorded_scope[field] and value != recorded_scope[field]:
+                return {
+                    "feedback_id": event.feedback_id,
+                    "status": "rejected",
+                    "reason": f"{field}_scope_mismatch",
+                }
+        requested = list(dict.fromkeys(event.memory_ids))
+        if any(memory_id not in selected for memory_id in requested):
+            return {
+                "feedback_id": event.feedback_id,
+                "status": "rejected",
+                "reason": "memory_not_selected",
+                "untrusted_memory_ids": [m for m in requested if m not in selected],
+            }
+        used = set()
+        for memory_id in requested:
+            activation = self.activation_repository.get(
+                tenant_id=event.tenant_id,
+                user_id=event.user_id,
+                query_id=log.query_id,
+                memory_id=memory_id,
+            )
+            if activation is not None and activation.status == "USED":
+                used.add(memory_id)
+        shadow = self.usage_feedback_service
+        if shadow is None or not hasattr(shadow, "record_event"):
+            return {"feedback_id": event.feedback_id, "status": "unavailable"}
+        result = shadow.record_event(event, used_memory_ids=used)
+        return {"feedback_id": event.feedback_id, "status": "accepted", **result}
+
     def _enqueue_repair(self, memory: RetrievedMemory) -> None:
         """Enqueue a high-priority projection repair without failing retrieval."""
         if self.db is None:
@@ -480,6 +530,10 @@ class RetrievalService:
                     "required_types": [memory_type.value for memory_type in plan.required_types],
                     "channel_metrics": assembly.trace.get("channel_metrics", {}),
                     "selected_memory_ids": list(assembly.context.relevant_memory_ids),
+                    "project_id": request.scope.split(":", 1)[1] if request.scope.startswith("PROJECT:") else "",
+                    "task_id": request.task_id,
+                    "session_id": request.session_id,
+                    "scope": request.scope,
                 },
                 candidate_count=assembly.trace.get("fusion_candidates", 0),
                 selected_count=len(assembly.context.relevant_memory_ids),

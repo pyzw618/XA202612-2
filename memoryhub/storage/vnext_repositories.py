@@ -125,6 +125,9 @@ class ActivationView:
     query_id: str
     memory_id: str
     content_version: int
+    status: str = "RECALLED"
+    included_in_context: bool = False
+    used_at: datetime | None = None
 
 
 class WorkingStateRepository:
@@ -1004,6 +1007,9 @@ class ActivationRepository:
             query_id=row.query_id,
             memory_id=row.memory_id,
             content_version=row.content_version,
+            status=row.status,
+            included_in_context=bool(row.included_in_context),
+            used_at=row.used_at,
         )
 
 

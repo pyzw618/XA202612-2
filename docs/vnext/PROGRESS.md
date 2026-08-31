@@ -25,7 +25,7 @@ Batch 1 已完成。
 # 2. 当前总体状态
 
 ```text
-vNext Stage: Stage 2 Closure
+vNext Stage: Stage 3 — Feedback 闭环
 Status: IN PROGRESS
 
 Formation Mode:
@@ -45,8 +45,8 @@ Batch 3 — Intent + Scope Propagation
 Batch 4 — Fusion / Rerank / Context Budget
 Batch 5 — Retrieval Scenario Tests & Legacy Comparison
 
-Current Closure Target:
-Fix Batch 4 — Budget / Intent / Retrieval Log Closure (DONE)
+Current Target:
+Stage 3 Batch 3 — Utility / Stability Update
 ```
 
 ---
@@ -108,7 +108,7 @@ DONE
 | Batch | 任务 | 状态 | 最后更新 |
 |---|---|---|---|
 | Batch 1 | Activation Completion — USED | DONE | 2026-08-31 |
-| Batch 2 | Feedback Event & Attribution | NOT STARTED | 暂不执行 |
+| Batch 2 | Feedback Event & Attribution | DONE | 2026-09-01 |
 | Batch 3 | Utility / Stability Update | NOT STARTED | 暂不执行 |
 | Batch 4 | Memory Evolution & Safeguards | NOT STARTED | 暂不执行 |
 | Batch 5 | Feedback Scenario Tests & Stage 3 Validation | NOT STARTED | 暂不执行 |
@@ -2656,3 +2656,129 @@ Batch 5: PASS (11), FAIL 0, SKIP 0.
 
 No next Fix Batch is authorized by this closure plan. Stop here and perform the
 separate final Stage 2 Closure Review.
+
+---
+
+## Stage 3 Batch 2 — Feedback Event & Attribution
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+建立统一的 vNext Feedback Event，并将显式反馈、任务结果和 USED 状态通过保守 attribution 连接起来；本 Batch 不更新 Candidate/Authority 分数，也不触发 Evolution。
+
+### Changes
+
+- 扩展现有 `feedback_service`，新增 `FeedbackEvent` / `FeedbackType`。
+- 复用 `UtilityFeedbackShadow.record_event()` 实现显式反馈、任务结果、弱归因和未归因结果。
+- 以稳定 `feedback_id` 实现 feedback replay 幂等。
+- `RetrievalService.record_feedback_event()` 校验 retrieval、tenant/user、project/task/session、selected memory 和 USED 状态。
+- Retrieval Log 复用现有 `plan` JSON 保存 project/task/session/scope 绑定。
+- 新增 `/api/memory/vnext/feedback` 和 Agent client/MCP vNext feedback 入口；Legacy `/feedback` 保持兼容。
+- Activation view 暴露 status/in-context/used_at，供 attribution 校验使用。
+
+### Files Touched
+
+```text
+memoryhub/application/feedback_service.py
+memoryhub/application/retrieval_service.py
+memoryhub/adapter/vnext_api.py
+memoryhub/storage/vnext_repositories.py
+memoryhub/application/__init__.py
+agent-integration/memoryhub_client/client.py
+agent-integration/memoryhub_mcp/tools.py
+tests/test_vnext_feedback_service.py
+tests/test_vnext_activation_used.py
+agent-integration/tests/test_mcp_server.py
+```
+
+### Behavior Before
+
+```text
+USED 只可更新 Activation；没有统一 feedback event、outcome attribution 或稳定 feedback 幂等键。
+Legacy /feedback 与 vNext usage shadow 分离；MCP/CLI 不能提交 retrieval-aware feedback。
+```
+
+### Behavior After
+
+```text
+FeedbackEvent
+  → retrieval/scope/selection validation
+  → USED-only outcome attribution
+  → strong explicit attribution or weak multi-memory attribution
+  → UtilityFeedbackShadow trace
+```
+
+Feedback 仍为 shadow-only；不会修改 Candidate/Authority 内容、分数、状态或版本。
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_vnext_feedback_service.py` + `tests/test_vnext_activation_used.py` focused | PASS 14, FAIL 0, SKIP 0; 1 existing `tmp_path` setup ERROR excluded from focused assertion run |
+| `agent-integration/tests/test_mcp_server.py` + `tests/test_vnext_entrypoints.py` | PASS 9, FAIL 0, SKIP 0 |
+| Ruff on changed files (`E501` ignored for pre-existing long lines) | PASS |
+| compileall on changed source | PASS |
+
+### Exact PASS / FAIL / SKIP counts
+
+```text
+Batch 2 assertion tests: PASS 23, FAIL 0, SKIP 0
+Environment-blocked test setups: 2 ERROR (pytest tmp_path/.lock ACL)
+Known warnings: asyncio_mode config warning and dependency deprecation warnings
+```
+
+### Evidence
+
+- Explicit negative feedback creates one correction record and replaying the same `feedback_id` creates no duplicate.
+- Task failure with no USED memory produces `attribution=none` and no feedback record.
+- Multiple USED memories receive weak attribution and reduced confidence/signal.
+- Cross-tenant retrieval feedback is rejected before shadow recording.
+- Legacy MCP feedback remains available; new `memoryhub_vnext_feedback` submits retrieval-aware events.
+
+### Feedback Attribution Evidence
+
+- Explicit positive/negative and user confirmation/correction are strong when the memory is selected.
+- `TASK_SUCCESS`, `TASK_FAILURE`, and `PARTIAL_SUCCESS` only attribute to memories already marked USED.
+- Multiple attributed memories are downgraded to weak attribution.
+- `IN_CONTEXT` without `USED` is not treated as outcome attribution.
+- Unrelated task failure does not automatically penalize a memory.
+
+### Score Update Evidence
+
+```text
+No Candidate or Authority score update in Batch 2.
+UtilityFeedbackShadow only records bounded signals and feedback-derived inputs for Batch 3.
+```
+
+### Scope Verification
+
+- Retrieval feedback checks retrieval log tenant/user identity.
+- New retrieval logs retain project/task/session/scope values.
+- Event project/task/session values must match the recorded retrieval scope when supplied.
+- Selected-memory membership is required before explicit feedback is accepted.
+- Forget, Safety, Authority writes and deletion behavior were not bypassed or changed.
+
+### Regression
+
+```text
+Stage 1 Formation design: unchanged.
+Stage 2 Retrieval architecture: unchanged; only existing Retrieval Log metadata and Activation view were reused.
+Legacy /feedback behavior: preserved.
+MCP/entrypoint regression: PASS 9, FAIL 0, SKIP 0.
+```
+
+### Remaining Risks
+
+- Feedback events are currently held in the in-process `UtilityFeedbackShadow`; durable feedback audit/idempotency storage remains for a later hardening decision.
+- `Agent /step` fallback to the first three cards remains weak evidence and is not equivalent to explicit attribution.
+- The existing managed Windows pytest temp-directory ACL prevents two `tmp_path` setup tests from executing in this environment.
+- Candidate/Authority utility, stability and evolution updates are intentionally not implemented.
+
+### Next Batch Notes
+
+Stage 3 Batch 2 is complete. The next authorized batch is Batch 3 — Utility / Stability Update. Do not start it automatically.

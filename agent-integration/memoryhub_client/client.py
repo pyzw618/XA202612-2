@@ -276,6 +276,25 @@ class MemoryHubClient:
             headers={"X-MemoryHub-Tenant": tenant_id, "X-MemoryHub-User": user_id},
         ) or {}
 
+    def vnext_feedback(
+        self,
+        payload: dict[str, Any],
+        *,
+        tenant_id: str = "default",
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Submit attributed vNext feedback with the caller's identity."""
+        user_id = user_id or self.user_id
+        body = dict(payload)
+        body.setdefault("tenant_id", tenant_id)
+        body.setdefault("user_id", user_id)
+        return self._request(
+            "POST",
+            "/vnext/feedback",
+            json_body=body,
+            headers={"X-MemoryHub-Tenant": tenant_id, "X-MemoryHub-User": user_id},
+        ) or {}
+
     def write_events(self, events: list[dict[str, Any]]) -> dict[str, Any]:
         return self._request("POST", "/events", json_body={"events": events}) or {}
 
