@@ -136,17 +136,24 @@ class RetrievalService:
 
         # 3. Channel execution
         channel_results: dict[str, list[RetrievedMemory]] = {}
+        channel_metrics: dict[str, dict[str, float | int]] = {}
         for channel in plan.enabled_channels:
+            channel_started_at = time.perf_counter()
             executor = self.channel_executors.get(channel)
             if executor is None:
                 # No executor registered: treat as empty result rather than fail.
                 channel_results[channel] = []
+                channel_metrics[channel] = {"count": 0, "latency_ms": 0.0}
                 continue
             try:
                 channel_results[channel] = executor(request, plan, channel)
             except Exception:
                 # Degrade gracefully: record an empty result for this channel.
                 channel_results[channel] = []
+            channel_metrics[channel] = {
+                "count": len(channel_results[channel]),
+                "latency_ms": round((time.perf_counter() - channel_started_at) * 1000, 3),
+            }
 
         # 4/5/6. Context assembly (fusion → rerank → scope → budget)
         assembly = self.context_service.build_context(
@@ -157,6 +164,7 @@ class RetrievalService:
             constraints=constraints,
             conflict_notes=conflict_notes,
         )
+        assembly.trace["channel_metrics"] = channel_metrics
 
         # 7. Activation logging for selected memories
         activations = self._record_activations(
@@ -268,6 +276,48 @@ class RetrievalService:
         IN_CONTEXT) without changing the memory's lifecycle layer.
         """
         activations: list[Activation] = []
+        # Recall is observable only after scope/authority validation.  Raw
+        # fusion candidates can include deleted or invalid projections and
+        # must never receive an activation record.
+        recalled_memories = (
+            assembly.scope_resolution.selected if assembly.scope_resolution else []
+        )
+        for rank, memory in enumerate(recalled_memories, start=1):
+            activation = Activation(
+                activation_id=f"act-{uuid.uuid4().hex}",
+                tenant_id=request.tenant_id,
+                user_id=request.user_id,
+                query_id=query_id,
+                memory_id=memory.memory_id,
+                task_id=request.task_id or "global",
+                intent=intent,
+                status=ActivationStatus.RECALLED,
+                rank=rank,
+                initial_score=memory.score,
+                reranked_score=memory.score,
+                included_in_context=False,
+            )
+            activations.append(activation)
+            if self.activation_repository is not None:
+                try:
+                    self.activation_repository.record(
+                        activation_id=activation.activation_id,
+                        tenant_id=activation.tenant_id,
+                        user_id=activation.user_id,
+                        query_id=activation.query_id,
+                        memory_id=activation.memory_id,
+                        task_id=activation.task_id,
+                        intent=activation.intent.value,
+                        status=activation.status.value,
+                        rank=activation.rank,
+                        initial_score=activation.initial_score,
+                        reranked_score=activation.reranked_score,
+                        content_version=memory.content_version,
+                        included_in_context=False,
+                    )
+                except Exception:
+                    # Observability writes must not fail retrieval.
+                    pass
         selected_memories = (
             assembly.scope_resolution.selected if assembly.scope_resolution else []
         )
@@ -352,6 +402,7 @@ class RetrievalService:
                     "authority_checked": plan.authority_checked,
                     "required_layers": [layer.value for layer in plan.required_layers],
                     "required_types": [memory_type.value for memory_type in plan.required_types],
+                    "channel_metrics": assembly.trace.get("channel_metrics", {}),
                 },
                 candidate_count=assembly.trace.get("fusion_candidates", 0),
                 selected_count=assembly.trace.get("scope_selected_count", 0),
@@ -401,6 +452,7 @@ class RetrievalService:
                     "enabled_channels": plan.enabled_channels,
                     "degraded_channels": plan.degraded_channels,
                     "authority_checked": plan.authority_checked,
+                    "channel_metrics": assembly.trace.get("channel_metrics", {}),
                 },
                 scores={
                     "fusion_candidates": assembly.trace.get("fusion_candidates", 0),

@@ -66,9 +66,9 @@ class ContextService:
         self.scope_resolver = scope_resolver or ScopeResolver()
         self.authority_repository = authority_repository
         self.repair_callback = repair_callback
-        self.context_builder = StructuredContextBuilder(
-            budget_manager=budget_manager or BudgetManager()
-        )
+        # A supplied manager is an explicit application policy.  Otherwise the
+        # request owns the budget, so it must be constructed per retrieval.
+        self.budget_manager = budget_manager
 
     def build_context(
         self,
@@ -85,7 +85,9 @@ class ContextService:
 
         # 1. Fusion
         fusion = self.fusion_engine.fuse(
-            channel_results, top_k=plan.top_k * 2 or 20
+            channel_results,
+            top_k=plan.top_k * 2 or 20,
+            channel_weights=self._channel_weights(plan.intent.value),
         )
 
         # 2. Rerank
@@ -96,7 +98,7 @@ class ContextService:
             scope=request.scope,
             task_id=request.task_id,
             top_k=plan.top_k,
-            intent=request.intent_hint.value if request.intent_hint else "",
+            intent=plan.intent.value,
         )
 
         # 3. Scope resolution
@@ -127,7 +129,11 @@ class ContextService:
             }
 
         # 4/5. Budget + structured context
-        context = self.context_builder.build(
+        context_builder = StructuredContextBuilder(
+            budget_manager=self.budget_manager
+            or BudgetManager(token_budget=request.token_budget)
+        )
+        context = context_builder.build(
             scope_resolution.selected,
             working_state=working_state or {},
             constraints=constraints or [],
@@ -137,7 +143,7 @@ class ContextService:
             stage_dropped["budget"] = dict(context.dropped_reasons)
 
         trace = {
-            "intent": request.intent_hint.value if request.intent_hint else "",
+            "intent": plan.intent.value,
             "enabled_channels": plan.enabled_channels,
             "authority_checked": plan.authority_checked,
             "fusion_candidates": fusion.total_candidates,
@@ -146,7 +152,7 @@ class ContextService:
             "scope_selected_count": len(scope_resolution.selected),
             "scope_invalid_count": len(scope_resolution.invalid),
             "budget_tokens": context.selected_tokens,
-            "budget_remaining": context.selected_tokens,  # payload carries remaining via builder
+            "budget_remaining": max(0, request.token_budget - context.selected_tokens),
             "relevant_memory_ids": context.relevant_memory_ids,
         }
 
@@ -157,6 +163,29 @@ class ContextService:
             stage_dropped=stage_dropped,
             trace=trace,
         )
+
+    @staticmethod
+    def _channel_weights(intent: str) -> dict[str, float]:
+        """Keep intent-specific channel priority explicit and explainable."""
+        defaults = {
+            "working": 1.0,
+            "episode": 1.0,
+            "authority": 1.0,
+            "keyword": 1.0,
+            "metadata": 1.0,
+            "vector": 1.0,
+        }
+        preferred = {
+            "CURRENT_STATE": ("working", "episode", "authority", "vector"),
+            "TASK_HISTORY": ("episode", "working", "authority", "vector"),
+            "PREFERENCE": ("authority", "keyword", "metadata", "vector"),
+            "SEMANTIC_FACT": ("authority", "vector", "keyword", "metadata"),
+            "PROCEDURE": ("authority", "episode", "keyword", "vector"),
+            "EXPERIENCE": ("episode", "authority", "vector", "keyword"),
+        }.get(intent, ())
+        for rank, channel in enumerate(preferred):
+            defaults[channel] = 1.35 - 0.1 * rank
+        return defaults
 
     @staticmethod
     def extract_working_state(

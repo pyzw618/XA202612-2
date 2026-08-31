@@ -56,6 +56,7 @@ class ReciprocalRankFusion:
         channel_results: dict[str, list[RetrievedMemory]],
         *,
         top_k: int | None = None,
+        channel_weights: dict[str, float] | None = None,
     ) -> FusionResult:
         """Fuse ranked results from multiple channels.
 
@@ -129,7 +130,8 @@ class ReciprocalRankFusion:
             for channel, ranks in channel_ranks.items():
                 rank = ranks.get(key)
                 if rank is not None:
-                    contribution = 1.0 / (self.k + rank)
+                    weight = max(0.0, float((channel_weights or {}).get(channel, 1.0)))
+                    contribution = weight / (self.k + rank)
                     breakdown[channel] = contribution
                     breakdown["fused"] += contribution
                     # Find the original score for this channel.
@@ -149,6 +151,10 @@ class ReciprocalRankFusion:
             merged_breakdown.update(breakdown)
             merged_breakdown["channel_scores"] = channel_scores
             merged_breakdown["rrf_k"] = self.k
+            merged_breakdown["channel_weights"] = {
+                channel: max(0.0, float((channel_weights or {}).get(channel, 1.0)))
+                for channel in channel_ranks
+            }
 
             new_item = RetrievedMemory(
                 **item.model_dump(

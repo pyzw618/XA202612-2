@@ -41,6 +41,8 @@ MemoryRetrievalRequest
 Stage 2 已完成：
 Batch 1 — Working / Episode Executors
 Batch 2 — Authority / Keyword / Vector Executors
+Batch 3 — Intent + Scope Propagation
+Batch 4 — Fusion / Rerank / Context Budget
 ```
 
 ---
@@ -50,7 +52,7 @@ Batch 2 — Authority / Keyword / Vector Executors
 | Stage | 名称 | 状态 | 备注 |
 |---|---|---|---|
 | Stage 1 | Formation 实化 | DONE | 全部 5 个 Batch + Independent Review Repair 完成 |
-| Stage 2 | Retrieval 实化 | IN PROGRESS | Batch 1 完成；不进入下一 Batch |
+| Stage 2 | Retrieval 实化 | IN PROGRESS | Batch 1–4 完成；不进入下一 Batch |
 | Stage 3 | Feedback 闭环 | NOT STARTED | 暂不执行 |
 | Stage 4 | Evaluation & Cutover | NOT STARTED | 暂不执行 |
 
@@ -83,8 +85,8 @@ DONE
 |---|---|---|---|
 | Batch 1 | Working / Episode Executors | DONE | 2026-08-31 |
 | Batch 2 | Authority / Keyword / Vector Executors | DONE | 2026-08-31 |
-| Batch 3 | Intent + Scope Propagation | NOT STARTED | — |
-| Batch 4 | Fusion / Rerank / Context Budget | NOT STARTED | — |
+| Batch 3 | Intent + Scope Propagation | DONE | 2026-08-31 |
+| Batch 4 | Fusion / Rerank / Context Budget | DONE | 2026-08-31 |
 | Batch 5 | Retrieval Scenario Tests & Legacy Comparison | NOT STARTED | — |
 
 ---
@@ -1704,3 +1706,99 @@ Batch 4 仅处理 Fusion / Rerank / Context Budget：复用现有 RRF、Reranker
 BudgetManager，接通 request token_budget，保留 channel provenance，补齐去重、
 RECALLED/SELECTED/IN_CONTEXT 与可观测性。不要改本 Batch 的 scope compatibility
 adapter 或重新设计 Working/Episode/Authority executor。
+
+---
+
+## Stage 2 Batch 4 — Fusion / Rerank / Context Budget
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+让现有多通道候选按解析后的 Intent 完成可解释融合、重排、Scope 校验和请求级预算，
+并使 Activation 与检索日志真实反映 Retrieval Pipeline。
+
+### Changes
+
+- `ReciprocalRankFusion` 支持显式 channel weights，并将实际权重写入 score breakdown；默认行为保持不变。
+- `ContextService` 按 `RetrievalPlan.intent`（而非可为空的 request hint）传入 reranker，并在未注入应用级 BudgetManager 时使用 `request.token_budget`。
+- `RetrievalService` 记录各 channel 的候选数和耗时；仅在 Scope/Authority 校验后记录 `RECALLED`，之后继续记录 `SELECTED` 或 `IN_CONTEXT`。
+- 新增 Batch 4 行为测试，覆盖 intent-aware RRF、request budget、resolved intent 与 Activation progression。
+
+### Files Touched
+
+```text
+memoryhub/retrieval/fusion.py
+memoryhub/application/context_service.py
+memoryhub/application/retrieval_service.py
+tests/test_vnext_batch4_fusion_context.py
+docs/vnext/PROGRESS.md
+```
+
+### Behavior Before
+
+```text
+Fusion 仅使用无权重 RRF；ContextService 使用 request.intent_hint，且总是使用默认
+2000 token BudgetManager；Activation 仅有 SELECTED / IN_CONTEXT；日志没有 per-channel metrics。
+```
+
+### Behavior After
+
+```text
+Planner resolved intent → intent-specific RRF channel weights + reranker → ScopeResolver
+→ request token_budget（或显式应用 policy）→ ContextPayload。
+
+Scope/Authority 通过的候选记录 RECALLED；预算选中后记录 SELECTED 或 IN_CONTEXT；
+retrieval log / trace 记录每个已计划 channel 的 count 与 latency。
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_vnext_batch4_fusion_context.py` | PASS (3) |
+| Batch 1–4 retrieval subset | PASS (63), 1 skipped, 1 deselected |
+| `test_retrieval_log_persisted` | 环境基线：Windows pytest temp `.lock` ACL，未执行 |
+
+### Evidence
+
+- Batch 4 测试证明 PREFERENCE 的 Authority channel weight 高于 vector，且权重被写入 score breakdown。
+- 未提供 intent hint 时，ContextService 仍使用 Planner 的 PREFERENCE intent；128 token request 的 Context 不超预算。
+- RetrievalService 测试证明 scope-valid 记忆有 `RECALLED` 与 `IN_CONTEXT` activation；既有测试证明 DELETED memory 不会被 activation 记录。
+
+### Scope Verification
+
+- 本 Batch 未修改 Request → Legacy adapter 或任一 executor 的 scope 过滤。
+- RRF / rerank 后仍由 ScopeResolver 在 Budget 前执行最终 tenant/user 与 exact scope / GLOBAL fallback 校验；无效或 DELETED 候选不会产生 Activation。
+- `selected_memories` 继续携带 scope，ContextPayload 仅接收已校验的 source IDs。
+
+### Retrieval Channel Verification
+
+| Channel | Batch 4 behavior |
+|---|---|
+| working / episode | 继续结构化读取；CURRENT_STATE / TASK_HISTORY 获得优先权重 |
+| authority / keyword / metadata | 保持 Batch 2/3 adapter 和 scope filter；按长期 intent 获得权重 |
+| vector | 继续是独立 Legacy-backed channel，未成为 vNext 唯一检索路径 |
+
+### Remaining Risks
+
+- 去重仍依赖稳定 `memory_id` / content version；不同 ID 的等价内容 identity consolidation 留待必要的独立架构决策，避免本 Batch 误合并不同事实。
+- Working/Episode storage 没有 project_id，project-scoped structured fallback 仍未实现。
+- 可选 `rank-bm25` / `faiss-cpu` 缺失，真实 BM25/FAISS backend 命中待具备依赖的环境验证。
+- pytest 临时目录 ACL 仍使 `test_retrieval_log_persisted` 无法在此 Windows 环境运行。
+
+### Regression
+
+```text
+未修改 Stage 1 Formation、Candidate-only、Repository schema、Scope adapter、
+Working/Episode/Authority/Keyword/Vector executor 或 Legacy Retriever 算法。
+Batch 1–4 retrieval subset 63 passed；DELETED candidate activation 回归通过。
+```
+
+### Next Batch Notes
+
+Batch 5 仅补 Retrieval scenario tests 与 Legacy 对照；不要修改本 Batch 的融合、重排、预算或 activation 语义，除非 scenario 暴露明确回归。Stage 3 USED/Outcome/utility evolution 仍未开始。
