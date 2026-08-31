@@ -53,6 +53,7 @@ def _request(
     intent: RetrievalIntent,
     tenant_id: str = TENANT,
     user_id: str = USER,
+    project_id: str = "",
 ) -> MemoryRetrievalRequest:
     return MemoryRetrievalRequest(
         request_id=f"req-{task_id or 'recent'}-{intent.value.lower()}",
@@ -61,6 +62,8 @@ def _request(
         query=query,
         task_id=task_id,
         session_id=session_id,
+        scope_level=MemoryScope.PROJECT if project_id else None,
+        scope=f"PROJECT:{project_id}" if project_id else "",
         intent_hint=intent,
     )
 
@@ -77,6 +80,7 @@ def _create_working_state(
     tenant_id: str = TENANT,
     user_id: str = USER,
     working_state_id: str | None = None,
+    project_id: str = "",
 ):
     state = {
         "current_goal": goal,
@@ -95,6 +99,7 @@ def _create_working_state(
         tenant_id=tenant_id,
         user_id=user_id,
         task_id=task_id,
+        project_id=project_id,
         session_id=session_id,
         state=state,
     )
@@ -111,12 +116,14 @@ def _create_episode(
     events: list[dict] | None = None,
     tenant_id: str = TENANT,
     user_id: str = USER,
+    project_id: str = "",
 ):
     view = repo.create(
         episode_id=episode_id,
         tenant_id=tenant_id,
         user_id=user_id,
         task_id=task_id,
+        project_id=project_id,
         session_id=session_id,
         goal=goal,
     )
@@ -245,6 +252,37 @@ def test_current_state_falls_back_to_session_states_without_task() -> None:
     db.close()
 
 
+def test_current_state_project_scope_filters_exact_and_recent_fallback() -> None:
+    db = _db()
+    repo = WorkingStateRepository(db)
+    _create_working_state(
+        repo, task_id="task-a", project_id="project-a", working_state_id="ws-a"
+    )
+    _create_working_state(
+        repo, task_id="task-b", project_id="project-b", working_state_id="ws-b"
+    )
+
+    executor = build_working_executor(repo)
+    fallback = executor(
+        _request(intent=RetrievalIntent.CURRENT_STATE, project_id="project-b"),
+        plan=None,
+        channel="working",
+    )
+    wrong_exact = executor(
+        _request(
+            task_id="task-a",
+            intent=RetrievalIntent.CURRENT_STATE,
+            project_id="project-b",
+        ),
+        plan=None,
+        channel="working",
+    )
+
+    assert [memory.memory_id for memory in fallback] == ["ws:ws-b"]
+    assert wrong_exact == []
+    db.close()
+
+
 def test_working_fallback_is_bounded() -> None:
     db = _db()
     repo = WorkingStateRepository(db)
@@ -355,6 +393,37 @@ def test_task_history_fallback_ranks_by_query_relevance() -> None:
     assert len(results) == 2
     assert results[0].score > results[1].score
     assert results[0].score_breakdown["relevance"] > results[1].score_breakdown["relevance"]
+    db.close()
+
+
+def test_episode_project_scope_filters_exact_and_recent_fallback() -> None:
+    db = _db()
+    repo = EpisodeRepository(db)
+    _create_episode(
+        repo, episode_id="ep-a", task_id="task-a", project_id="project-a"
+    )
+    _create_episode(
+        repo, episode_id="ep-b", task_id="task-b", project_id="project-b"
+    )
+
+    executor = build_episode_executor(repo)
+    fallback = executor(
+        _request(intent=RetrievalIntent.TASK_HISTORY, project_id="project-b"),
+        plan=None,
+        channel="episode",
+    )
+    wrong_exact = executor(
+        _request(
+            task_id="task-a",
+            intent=RetrievalIntent.TASK_HISTORY,
+            project_id="project-b",
+        ),
+        plan=None,
+        channel="episode",
+    )
+
+    assert [memory.memory_id for memory in fallback] == ["ep:ep-b"]
+    assert wrong_exact == []
     db.close()
 
 

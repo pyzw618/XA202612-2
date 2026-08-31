@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 
 from memoryhub.storage.database import Database
+from memoryhub.storage.models import Base
 from memoryhub.storage.vnext_repositories import (
     ActivationRepository,
     CandidateRepository,
@@ -72,6 +74,73 @@ def test_working_state_compare_and_set_is_tenant_scoped(db: Database) -> None:
     assert repository.get(
         tenant_id="tenant-a", user_id="user-a", task_id="task-1"
     ).state == {"current_step": "review"}
+
+
+def test_init_schema_adds_project_scope_to_existing_working_and_episode_tables() -> None:
+    database = Database(":memory:")
+    database.engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(database.engine)
+    with database.engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE working_states")
+        connection.exec_driver_sql("DROP TABLE task_episodes")
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE working_states (
+                working_state_id VARCHAR(64) PRIMARY KEY,
+                tenant_id VARCHAR(64) NOT NULL,
+                user_id VARCHAR(64) NOT NULL,
+                task_id VARCHAR(128) NOT NULL,
+                session_id VARCHAR(128) NOT NULL DEFAULT '',
+                version INTEGER NOT NULL DEFAULT 1,
+                state JSON NOT NULL DEFAULT '{}',
+                field_sources JSON NOT NULL DEFAULT '{}',
+                last_event_id VARCHAR(64),
+                schema_version VARCHAR(16) NOT NULL DEFAULT 'vnext/v1',
+                content_version INTEGER NOT NULL DEFAULT 1,
+                created_at DATETIME,
+                updated_at DATETIME
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE task_episodes (
+                episode_id VARCHAR(64) PRIMARY KEY,
+                tenant_id VARCHAR(64) NOT NULL,
+                user_id VARCHAR(64) NOT NULL,
+                task_id VARCHAR(128) NOT NULL,
+                session_id VARCHAR(128) NOT NULL DEFAULT '',
+                status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+                current_phase VARCHAR(64) NOT NULL DEFAULT '',
+                goal TEXT NOT NULL DEFAULT '',
+                snapshot JSON NOT NULL DEFAULT '{}',
+                snapshot_version INTEGER NOT NULL DEFAULT 1,
+                last_event_seq INTEGER NOT NULL DEFAULT 0,
+                resume_token_hash VARCHAR(128),
+                stale_resources JSON NOT NULL DEFAULT '[]',
+                required_revalidation JSON NOT NULL DEFAULT '[]',
+                resource_versions JSON NOT NULL DEFAULT '{}',
+                schema_version VARCHAR(16) NOT NULL DEFAULT 'vnext/v1',
+                content_version INTEGER NOT NULL DEFAULT 1,
+                created_at DATETIME,
+                updated_at DATETIME
+            )
+            """
+        )
+
+    database._ensure_compatible_schema()
+    with database.engine.connect() as connection:
+        working_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(working_states)")
+        }
+        episode_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(task_episodes)")
+        }
+    assert "project_id" in working_columns
+    assert "project_id" in episode_columns
+    database.close()
 
 
 def test_episode_append_assigns_monotonic_sequence_and_rejects_stale_expected_seq(

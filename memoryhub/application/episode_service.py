@@ -47,6 +47,7 @@ class EpisodeStateService:
         tenant_id: str,
         user_id: str,
         task_id: str,
+        project_id: str = "",
         session_id: str = "",
         goal: str = "",
     ) -> EpisodeSnapshotView:
@@ -55,6 +56,7 @@ class EpisodeStateService:
             tenant_id=tenant_id,
             user_id=user_id,
             task_id=task_id,
+            project_id=project_id,
             session_id=session_id,
             goal=goal,
         )

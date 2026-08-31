@@ -141,9 +141,11 @@ class Database:
             },
             "working_states": {
                 "field_sources": "JSON DEFAULT '{}'",
+                "project_id": "VARCHAR(128) NOT NULL DEFAULT ''",
             },
             "task_episodes": {
                 "resource_versions": "JSON DEFAULT '{}'",
+                "project_id": "VARCHAR(128) NOT NULL DEFAULT ''",
             },
             "memory_lineage": {
                 "tenant_id": "VARCHAR(64)",

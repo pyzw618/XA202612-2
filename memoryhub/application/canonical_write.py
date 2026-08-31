@@ -162,6 +162,7 @@ class CanonicalWriteService:
             created = self.working_service.create(
                 working_snapshot,
                 working_state_id=working_state_id,
+                project_id=self._project_id(event),
             )
             working_result = WorkingPatchResult(
                 working_state=created,
@@ -189,11 +190,13 @@ class CanonicalWriteService:
         episode_event_result = None
         reflection_boundary = episode_event is not None or snapshot is not None
         if episode_event is not None:
-            self._ensure_episode_exists(episode_event)
+            self._ensure_episode_exists(
+                episode_event, project_id=self._project_id(event)
+            )
             episode_event_result = self.episode_service.append(episode_event)
         snapshot_result = None
         if snapshot is not None:
-            self._ensure_episode_exists(snapshot)
+            self._ensure_episode_exists(snapshot, project_id=self._project_id(event))
             snapshot_result = self.episode_service.snapshot(snapshot)
 
         if episode_event is None and snapshot is None:
@@ -260,6 +263,8 @@ class CanonicalWriteService:
     def _ensure_episode_exists(
         self,
         reference: EpisodeEventContract | EpisodeSnapshot,
+        *,
+        project_id: str = "",
     ) -> None:
         existing = self.episode_service.repository.get(
             tenant_id=reference.tenant_id,
@@ -277,6 +282,7 @@ class CanonicalWriteService:
             tenant_id=reference.tenant_id,
             user_id=reference.user_id,
             task_id=reference.task_id,
+            project_id=project_id,
             session_id=session_id,
             goal=goal,
         )
@@ -289,6 +295,7 @@ class CanonicalWriteService:
             created = self.working_service.create(
                 self.working_reducer.initial_snapshot(event),
                 working_state_id=self._working_state_id(event),
+                project_id=self._project_id(event),
             )
             return WorkingPatchResult(
                 working_state=created,
@@ -336,6 +343,7 @@ class CanonicalWriteService:
                 tenant_id=event.tenant_id,
                 user_id=event.user_id,
                 task_id=event.task_id,
+                project_id=self._project_id(event),
                 session_id=event.session_id,
                 goal=str(working_result.state.get("current_goal", event.event_type)),
             )
@@ -403,6 +411,17 @@ class CanonicalWriteService:
     @staticmethod
     def _working_state_id(event: MemoryEventContract) -> str:
         return f"working-{event.tenant_id}-{event.user_id}-{event.task_id}"[:64]
+
+    @staticmethod
+    def _project_id(event: MemoryEventContract) -> str:
+        """Read the canonical project identity without inferring it from task/session IDs."""
+        project_id = event.payload.get("project_id")
+        if project_id:
+            return str(project_id).strip()
+        scope = event.payload.get("scope")
+        if isinstance(scope, dict) and scope.get("project_id"):
+            return str(scope["project_id"]).strip()
+        return ""
 
     @staticmethod
     def _as_strings(value: Any) -> list[str]:

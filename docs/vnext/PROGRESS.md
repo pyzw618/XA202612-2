@@ -25,7 +25,7 @@ Batch 1 已完成。
 # 2. 当前总体状态
 
 ```text
-vNext Stage: Stage 2 — Retrieval 实化
+vNext Stage: Stage 2 Closure
 Status: IN PROGRESS
 
 Formation Mode:
@@ -44,6 +44,9 @@ Batch 2 — Authority / Keyword / Vector Executors
 Batch 3 — Intent + Scope Propagation
 Batch 4 — Fusion / Rerank / Context Budget
 Batch 5 — Retrieval Scenario Tests & Legacy Comparison
+
+Current Closure Target:
+Fix Batch 1 — Scope Isolation & Agent Scope Propagation (DONE)
 ```
 
 ---
@@ -89,6 +92,15 @@ DONE
 | Batch 3 | Intent + Scope Propagation | DONE | 2026-08-31 |
 | Batch 4 | Fusion / Rerank / Context Budget | DONE | 2026-08-31 |
 | Batch 5 | Retrieval Scenario Tests & Legacy Comparison | DONE | 2026-09-02 |
+
+## 4.2 Stage 2 Closure 状态
+
+| Fix Batch | 名称 | 状态 | 最后更新 |
+|---|---|---|---|
+| Fix 1 | Scope Isolation & Agent Scope Propagation | DONE | 2026-08-31 |
+| Fix 2 | Stage 1 Formation Regression Recovery | NOT STARTED | — |
+| Fix 3 | Test Environment & Real Scenario Verification | NOT STARTED | — |
+| Fix 4 | Budget / Intent / Retrieval Log Closure | NOT STARTED | — |
 
 ---
 
@@ -1953,3 +1965,122 @@ No production Safety/Legacy source code changed outside the retrieval path.
 ### Next Batch Notes
 
 Stage 2 已完成全部 5 个 Batch。下一阶段为 Stage 3 — Feedback 闭环，本 Batch 不会自动开始。任何后续 Batch 启动前需先阅读 VNEXT_PLAN.md 与对应 stage 文档。
+
+---
+
+## Stage 2 Closure Fix 1 — Scope Isolation & Agent Scope Propagation
+
+### Status
+
+```text
+DONE
+```
+
+### Reconnaissance Findings
+
+- Working/Task Episode 持久化均没有 `project_id`，无 task 时的 `list_recent()`
+  只按 tenant/user（可选 session）查询。
+- project-b 请求可真实召回 project-a 的 Working/Episode；ScopeResolver 只对
+  Long-Term candidate 做 exact project 过滤，无法补救结构化层泄漏。
+- Agent `/step` 输入 contract 不接受 project_id/task_id，构造 vNext request 时也
+  未传 task/session/project；scene/task_type 只存在于 Legacy request。
+- Batch 5 的 Cross Project/Cross User tests 在当前环境因 `rank-bm25` 缺失被 skip，
+  且 Cross Project 只覆盖 Authority，不覆盖 Working/Episode。
+
+### Changes
+
+- `working_states` / `task_episodes` 增加向后兼容的 `project_id` 字段及 additive
+  SQLite migration；Repository View、create/get/list_recent contract 同步 project。
+- Working/Episode executor 对显式 project scope 同时约束 exact task 与 fallback；
+  显式 task/project 组合未命中时 fail closed，不降级到其他 task。
+- Canonical write 从 event payload 的 `project_id` 或 `scope.project_id` 写入
+  Working/Episode，保持 task/session/project 为独立身份。
+- Agent `/step` 接收 project_id/task_id，并向 canonical event、Legacy request 与
+  vNext request 传播 project/task/session；scene/task_type 继续由既有 SceneScope 表达。
+
+### Files Touched
+
+```text
+memoryhub/storage/models.py
+memoryhub/storage/database.py
+memoryhub/storage/vnext_repositories.py
+memoryhub/application/working_service.py
+memoryhub/application/episode_service.py
+memoryhub/application/canonical_write.py
+memoryhub/adapter/retrieval_executor.py
+memoryhub/adapter/agent_api.py
+tests/test_vnext_working_episode_executors.py
+tests/test_vnext_repositories.py
+tests/test_competition_api.py
+tests/test_vnext_working_reducer.py
+docs/vnext/PROGRESS.md
+```
+
+### Behavior Before
+
+```text
+PROJECT:project-b + no task/session
+→ list_recent(tenant, user)
+→ project-a Working/Episode enters Context
+
+Agent /step project_id/task_id
+→ AgentStepRequest drops fields
+→ vNext request has no task/session/project scope
+```
+
+### Behavior After
+
+```text
+PROJECT:project-b
+→ exact task or list_recent(..., project_id="project-b")
+→ only project-b Working/Episode; unknown legacy project rows fail closed
+
+Agent /step
+→ canonical event(project/task/session)
+→ Legacy SearchRequest(project/session/SceneScope)
+→ MemoryRetrievalRequest(task/session/PROJECT scope)
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| Fix 1 focused scope/migration/agent tests | PASS (16), FAIL 0, SKIP 0 |
+| Fix 1 + Repository/task state/Batch 3 scope/Stage 1 targeted regression | PASS (62), FAIL 0, SKIP 0 |
+| Ruff on changed files (`E501` ignored for pre-existing long lines) | PASS |
+| `git diff --check` | PASS |
+
+### Evidence
+
+- Working/Episode project tests prove both no-task fallback and mismatched exact task reject
+  project-a while returning project-b.
+- Existing executor tests continue to prove cross-tenant/cross-user isolation.
+- Migration test starts from pre-Closure Working/Episode tables and proves both receive
+  `project_id` through the compatibility migration.
+- Agent handler test executes the real `/step` handler and captures canonical, Legacy and
+  vNext calls, proving project/task/session/scene/task_type propagation.
+- Canonical write component test proves event project scope is persisted on both Working and
+  Episode rows through the real orchestration path.
+
+### Regression
+
+```text
+Stage 1 scenarios/boundary/episode/working reducer: PASS
+Repository and task-state contracts: PASS
+Batch 3 scope propagation and ScopeResolver: PASS
+Production write-bypass guard: PASS
+Legacy Retrieval algorithms: not modified
+```
+
+### Remaining Risks
+
+- Existing rows migrated with empty project_id cannot be safely attributed; explicit project
+  requests intentionally exclude them. A separate trusted backfill would require authoritative
+  task/session-to-project data that the current schema does not contain.
+- Batch 5 dependency skips and Windows pytest temp ACL remain Fix 3 work.
+- Stage 1 Candidate Real/InMemory Repository drift remains Fix 2 work.
+
+### Next Fix Batch Notes
+
+Fix 2 only: recover Stage 1 Formation regression and unify Candidate Repository contracts.
+Do not change Fix 1 scope semantics, Retrieval Fusion/Budget/Intent, or begin Stage 3.

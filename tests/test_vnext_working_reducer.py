@@ -124,6 +124,30 @@ def test_reducer_generates_deterministic_tool_failure_and_terminal_patches() -> 
     assert _operation_value(completed.operations, "/blockers") == []
 
 
+def test_canonical_write_persists_project_on_working_and_episode(db: Database) -> None:
+    service = _service(db)
+    service.write(
+        _event(
+            "project-bound-event",
+            event_type="user_instruction",
+            payload={"text": "Repair project B", "project_id": "project-b"},
+        )
+    )
+
+    working = service.working_service.repository.get(
+        tenant_id="tenant-reducer",
+        user_id="user-reducer",
+        task_id="task-reducer",
+    )
+    episode = service.episode_service.repository.get_by_task_id(
+        tenant_id="tenant-reducer",
+        user_id="user-reducer",
+        task_id="task-reducer",
+    )
+    assert working is not None and working.project_id == "project-b"
+    assert episode is not None and episode.project_id == "project-b"
+
+
 def test_canonical_tool_trace_evolves_working_state_and_is_idempotent(db: Database) -> None:
     service = _service(db)
     service.write(

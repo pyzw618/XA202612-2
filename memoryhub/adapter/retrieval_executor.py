@@ -62,6 +62,16 @@ def _scope_text(value: Any) -> str:
     return str(value) if value else "GLOBAL"
 
 
+def _requested_project_id(request: MemoryRetrievalRequest) -> str | None:
+    """Return an explicit project constraint, or None for an unscoped request."""
+    if request.scope_level is not MemoryScope.PROJECT or not request.scope:
+        return None
+    value = request.scope.strip()
+    if value.upper().startswith("PROJECT:"):
+        value = value.split(":", 1)[1]
+    return value or None
+
+
 def _legacy_memory_metadata(memory: Any) -> dict[str, Any]:
     extra_payload = getattr(memory, "extra_payload", {}) or {}
     authority = extra_payload.get("vnext_authority", {})
@@ -311,11 +321,13 @@ def build_working_executor(working_repository: Any) -> Any:
             return []
         try:
             task_id = (request.task_id or "").strip()
+            project_id = _requested_project_id(request)
             if task_id:
                 view = working_repository.get(
                     tenant_id=request.tenant_id,
                     user_id=request.user_id,
                     task_id=task_id,
+                    project_id=project_id,
                 )
                 if view is not None and view.task_id:
                     return [
@@ -325,11 +337,16 @@ def build_working_executor(working_repository: Any) -> Any:
                             breakdown={"channel": channel, "match": "task"},
                         )
                     ]
+                # An explicit task constraint is authoritative.  Do not silently
+                # replace it with another recent task when the project/task pair
+                # does not exist.
+                return []
             session_id = (request.session_id or "").strip()
             views = working_repository.list_recent(
                 tenant_id=request.tenant_id,
                 user_id=request.user_id,
                 session_id=session_id or None,
+                project_id=project_id,
                 limit=WORKING_FALLBACK_LIMIT,
             )
         except Exception:
@@ -449,11 +466,13 @@ def build_episode_executor(episode_repository: Any) -> Any:
             return []
         try:
             task_id = (request.task_id or "").strip()
+            project_id = _requested_project_id(request)
             if task_id:
                 view = episode_repository.get_by_task_id(
                     tenant_id=request.tenant_id,
                     user_id=request.user_id,
                     task_id=task_id,
+                    project_id=project_id,
                     status=None,
                 )
                 if view is not None and view.task_id:
@@ -465,11 +484,15 @@ def build_episode_executor(episode_repository: Any) -> Any:
                             key_events=_episode_events(episode_repository, view),
                         )
                     ]
+                # An explicit task constraint is authoritative.  A miss must not
+                # degrade into another task's history.
+                return []
             session_id = (request.session_id or "").strip()
             views = episode_repository.list_recent(
                 tenant_id=request.tenant_id,
                 user_id=request.user_id,
                 session_id=session_id or None,
+                project_id=project_id,
                 limit=EPISODE_FALLBACK_LIMIT,
             )
         except Exception:

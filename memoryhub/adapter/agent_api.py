@@ -22,6 +22,7 @@ from memoryhub.adapter.schemas import (
 from memoryhub.adapter.vnext_schemas import MemoryRetrievalRequest
 from memoryhub.application.event_gateway import GatewayStatus
 from memoryhub.core.forget import MemoryForgetter
+from memoryhub.domain.contracts import MemoryScope
 
 router = APIRouter(prefix="/api/agent", tags=["agent-adapter"])
 
@@ -169,6 +170,8 @@ class AgentStepRequest(BaseModel):
     turn_id: str
     user_message: str
     retrieval_query: str = ""
+    project_id: str = ""
+    task_id: str = ""
     scene: str = "chat"
     task_type: str = "memory_demo"
     # 用 dict 而非 MemoryEvent，以便在构造时归一化旧演示数据的 source_type 枚举
@@ -213,7 +216,13 @@ def _events_from_replay(body: ReplayRequest) -> list[MemoryEvent]:
     return events
 
 
-def _to_memory_event_contract(event: MemoryEvent) -> Any:
+def _to_memory_event_contract(
+    event: MemoryEvent,
+    *,
+    project_id: str = "",
+    task_id: str = "",
+    session_id: str = "",
+) -> Any:
     """Build a vNext canonical event from a sanitized legacy MemoryEvent."""
     from datetime import datetime
 
@@ -227,6 +236,8 @@ def _to_memory_event_contract(event: MemoryEvent) -> Any:
             occurred = datetime.utcnow()
 
     payload = dict(event.payload or {})
+    if project_id:
+        payload["project_id"] = project_id
     payload["text"] = event.text or payload.get("text", "")
     if event.tool_calls:
         payload["tool_calls"] = [tc.model_dump(mode="json") for tc in event.tool_calls]
@@ -241,8 +252,8 @@ def _to_memory_event_contract(event: MemoryEvent) -> Any:
             if hasattr(event.source_type, "value")
             else str(event.source_type)
         ),
-        task_id=event.session_id or payload.get("task_id", "default-task"),
-        session_id=event.session_id or "",
+        task_id=task_id or str(payload.get("task_id") or "") or event.session_id or "default-task",
+        session_id=session_id or event.session_id or "",
         occurred_at=occurred,
         payload=payload,
         policy_action="ALLOW",
@@ -311,7 +322,14 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
     if canonical is None:
         raise HTTPException(status_code=503, detail="canonical write service not initialized")
     for event in safe_events:
-        canonical.write(_to_memory_event_contract(event))
+        canonical.write(
+            _to_memory_event_contract(
+                event,
+                project_id=body.project_id,
+                task_id=body.task_id,
+                session_id=body.session_id,
+            )
+        )
     written_event_ids = [event.event_id for event in safe_events]
 
     user_id = safe_events[0].user_id if safe_events else "demo_user"
@@ -319,6 +337,8 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
         user_id=user_id,
         query=body.retrieval_query or body.user_message,
         context=SceneScope(scene=body.scene, task_type=body.task_type),
+        project_id=body.project_id,
+        session_id=body.session_id,
         top_k=8,
         memory_types=["preference", "knowledge"],
     )
@@ -327,6 +347,10 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
         tenant_id=request.headers.get("X-MemoryHub-Tenant", user_id or "default"),
         user_id=user_id,
         query=legacy_request.query,
+        task_id=body.task_id,
+        session_id=body.session_id,
+        scope_level=(MemoryScope.PROJECT if body.project_id else None),
+        scope=(f"PROJECT:{body.project_id}" if body.project_id else ""),
         page_size=legacy_request.top_k,
     )
     selected = rollout.read(

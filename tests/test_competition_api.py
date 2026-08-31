@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
-from memoryhub.adapter.schemas import KnowledgeMemory, KnowledgeType, SceneScope
+from memoryhub.adapter.agent_api import AgentStepRequest, execute_agent_step
+from memoryhub.adapter.schemas import KnowledgeMemory, KnowledgeType, SceneScope, SearchResponse
 from memoryhub.app import create_app
 from memoryhub.config import load_config
+from memoryhub.domain.contracts import MemoryScope
 
 
 @pytest.fixture()
@@ -70,6 +74,67 @@ def test_health_endpoint_is_minimal_and_ready(client):
         "service": "Kylin-MemoryHub",
         "version": "0.1.0",
     }
+
+
+def test_agent_step_propagates_project_task_session_and_scene():
+    captured = []
+    canonical_events = []
+    legacy_requests = []
+
+    class CapturingCanonical:
+        def write(self, event):
+            canonical_events.append(event)
+            return SimpleNamespace(status="COMMITTED")
+
+    def legacy_search(request):
+        legacy_requests.append(request)
+        return SearchResponse()
+
+    class CapturingRollout:
+        def read(self, request, *, legacy_reader, vnext_reader):
+            captured.append(request)
+            legacy_reader(request)
+            return SimpleNamespace(response=SearchResponse(results=[], latency_ms=0))
+
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            event_processor=None,
+            canonical_write_service=CapturingCanonical(),
+            retriever=SimpleNamespace(memory_lookup={}, search=legacy_search),
+            retrieval_service=SimpleNamespace(search=lambda _request: None),
+            rollout_read_service=CapturingRollout(),
+        )
+    )
+    body = AgentStepRequest.model_validate(
+        {
+            "session_id": "session-b",
+            "turn_id": "turn-b",
+            "user_message": "where am I",
+            "project_id": "project-b",
+            "task_id": "task-b",
+            "scene": "coding",
+            "task_type": "debugging",
+            "events": [_event()],
+        }
+    )
+    result = asyncio.run(execute_agent_step(body, SimpleNamespace(app=app, headers={})))
+
+    assert result["session_id"] == "session-b"
+    assert len(captured) == 1
+    request = captured[0]
+    assert request.task_id == "task-b"
+    assert request.session_id == "session-b"
+    assert request.scope_level is MemoryScope.PROJECT
+    assert request.scope == "PROJECT:project-b"
+    assert len(canonical_events) == 1
+    assert canonical_events[0].task_id == "task-b"
+    assert canonical_events[0].session_id == "session-b"
+    assert canonical_events[0].payload["project_id"] == "project-b"
+    assert len(legacy_requests) == 1
+    assert legacy_requests[0].project_id == "project-b"
+    assert legacy_requests[0].session_id == "session-b"
+    assert legacy_requests[0].context.scene == "coding"
+    assert legacy_requests[0].context.task_type == "debugging"
 
 
 def _propose(client: TestClient, object_text: str) -> str:

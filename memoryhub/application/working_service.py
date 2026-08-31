@@ -47,6 +47,7 @@ class WorkingStateService:
         snapshot: WorkingSnapshot,
         *,
         working_state_id: str,
+        project_id: str = "",
         field_sources: dict[str, str] | None = None,
     ) -> WorkingStateView:
         if not isinstance(snapshot, WorkingSnapshot):
@@ -56,6 +57,7 @@ class WorkingStateService:
             tenant_id=snapshot.tenant_id,
             user_id=snapshot.user_id,
             task_id=snapshot.task_id,
+            project_id=project_id,
             session_id=snapshot.session_id,
             version=snapshot.snapshot_version,
             state=self._snapshot_state(snapshot),

@@ -47,6 +47,7 @@ class WorkingStateView:
     tenant_id: str
     user_id: str
     task_id: str
+    project_id: str
     version: int
     state: dict[str, Any]
     field_sources: dict[str, str]
@@ -72,6 +73,7 @@ class EpisodeSnapshotView:
     tenant_id: str
     user_id: str
     task_id: str
+    project_id: str
     session_id: str
     status: str
     current_phase: str
@@ -139,6 +141,7 @@ class WorkingStateRepository:
         user_id: str,
         task_id: str,
         state: dict[str, Any],
+        project_id: str = "",
         session_id: str = "",
         version: int = 1,
         field_sources: dict[str, str] | None = None,
@@ -148,6 +151,7 @@ class WorkingStateRepository:
             tenant_id=tenant_id,
             user_id=user_id,
             task_id=task_id,
+            project_id=project_id,
             session_id=session_id,
             state=dict(state),
             field_sources=dict(field_sources or {}),
@@ -158,13 +162,21 @@ class WorkingStateRepository:
             session.flush()
             return self._view(row)
 
-    def get(self, *, tenant_id: str, user_id: str, task_id: str) -> WorkingStateView | None:
+    def get(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        task_id: str,
+        project_id: str | None = None,
+    ) -> WorkingStateView | None:
         with self.db.session() as session:
-            row = (
-                session.query(WorkingStateRow)
-                .filter_by(tenant_id=tenant_id, user_id=user_id, task_id=task_id)
-                .one_or_none()
+            query = session.query(WorkingStateRow).filter_by(
+                tenant_id=tenant_id, user_id=user_id, task_id=task_id
             )
+            if project_id is not None:
+                query = query.filter_by(project_id=project_id)
+            row = query.one_or_none()
             return self._view(row) if row is not None else None
 
     def list_recent(
@@ -173,6 +185,7 @@ class WorkingStateRepository:
         tenant_id: str,
         user_id: str,
         session_id: str | None = None,
+        project_id: str | None = None,
         limit: int = 3,
     ) -> list[WorkingStateView]:
         """Most recently updated working states, optionally bound to one session.
@@ -187,6 +200,8 @@ class WorkingStateRepository:
             )
             if session_id:
                 query = query.filter_by(session_id=session_id)
+            if project_id is not None:
+                query = query.filter_by(project_id=project_id)
             rows = (
                 query.order_by(WorkingStateRow.updated_at.desc())
                 .limit(max(1, limit))
@@ -248,6 +263,7 @@ class WorkingStateRepository:
             tenant_id=row.tenant_id,
             user_id=row.user_id,
             task_id=row.task_id,
+            project_id=row.project_id or "",
             version=row.version,
             state=dict(row.state or {}),
             field_sources=dict(row.field_sources or {}),
@@ -268,6 +284,7 @@ class EpisodeRepository:
         tenant_id: str,
         user_id: str,
         task_id: str,
+        project_id: str = "",
         session_id: str = "",
         goal: str = "",
     ) -> EpisodeSnapshotView:
@@ -277,6 +294,7 @@ class EpisodeRepository:
                     tenant_id=tenant_id,
                     user_id=user_id,
                     task_id=task_id,
+                    project_id=project_id,
                     session_id=session_id,
                     goal=goal,
                 )
@@ -296,7 +314,13 @@ class EpisodeRepository:
             return self._snapshot_view(row) if row is not None else None
 
     def get_by_task_id(
-        self, *, tenant_id: str, user_id: str, task_id: str, status: str | None = "ACTIVE"
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        task_id: str,
+        project_id: str | None = None,
+        status: str | None = "ACTIVE",
     ) -> EpisodeSnapshotView | None:
         """Resolve a task to its active episode for the resume endpoint.
 
@@ -307,6 +331,8 @@ class EpisodeRepository:
             query = session.query(TaskEpisodeRow).filter_by(
                 tenant_id=tenant_id, user_id=user_id, task_id=task_id
             )
+            if project_id is not None:
+                query = query.filter_by(project_id=project_id)
             if status is not None:
                 query = query.filter_by(status=status)
             row = (
@@ -322,6 +348,7 @@ class EpisodeRepository:
         tenant_id: str,
         user_id: str,
         session_id: str | None = None,
+        project_id: str | None = None,
         include_archived: bool = False,
         limit: int = 5,
     ) -> list[EpisodeSnapshotView]:
@@ -337,6 +364,8 @@ class EpisodeRepository:
             )
             if session_id:
                 query = query.filter_by(session_id=session_id)
+            if project_id is not None:
+                query = query.filter_by(project_id=project_id)
             if not include_archived:
                 query = query.filter(TaskEpisodeRow.status != "ARCHIVED")
             rows = (
@@ -546,6 +575,7 @@ class EpisodeRepository:
             tenant_id=row.tenant_id,
             user_id=row.user_id,
             task_id=row.task_id,
+            project_id=row.project_id or "",
             session_id=row.session_id,
             status=row.status,
             current_phase=row.current_phase,
