@@ -118,3 +118,23 @@ def test_llm_scorer_confidence_is_respected() -> None:
     routed = r.route("any query")
     assert routed.intent is RetrievalIntent.EXPERIENCE
     assert routed.confidence >= 0.95
+
+
+def test_common_natural_chinese_queries_route_without_hints() -> None:
+    router = IntentRouter()
+    cases = {
+        "我现在做到哪里了": RetrievalIntent.CURRENT_STATE,
+        "我现在进展到哪了": RetrievalIntent.CURRENT_STATE,
+        "当前做到哪一步了": RetrievalIntent.CURRENT_STATE,
+        "之前这个问题是怎么处理的": RetrievalIntent.TASK_HISTORY,
+        "之前遇到过类似问题吗": RetrievalIntent.TASK_HISTORY,
+        "上次是怎么解决的": RetrievalIntent.TASK_HISTORY,
+        "我一般用 Maven 还是 Gradle": RetrievalIntent.PREFERENCE,
+        "我平时更喜欢用什么": RetrievalIntent.PREFERENCE,
+        "我之前偏好什么": RetrievalIntent.PREFERENCE,
+        "这个项目数据库用什么": RetrievalIntent.SEMANTIC_FACT,
+        "项目现在用的是什么数据库": RetrievalIntent.SEMANTIC_FACT,
+        "这个项目的技术栈是什么": RetrievalIntent.SEMANTIC_FACT,
+    }
+    for query, expected in cases.items():
+        assert router.route(query).intent is expected, query

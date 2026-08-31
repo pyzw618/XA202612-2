@@ -77,6 +77,89 @@ def estimate_tokens(obj: Any) -> int:
     return max(1, len(text.encode("utf-8")) // 3)
 
 
+def _trim_text(value: str, target_tokens: int) -> str:
+    """Trim text to the local token estimate while keeping its beginning."""
+    if target_tokens <= 0:
+        return ""
+    max_bytes = max(1, target_tokens * 3)
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    trimmed = encoded[:max_bytes].decode("utf-8", errors="ignore").rstrip()
+    return f"{trimmed}…"
+
+
+def _compress_value(value: Any, target_tokens: int) -> Any:
+    """Return a compact representation suitable for a bounded context."""
+    if isinstance(value, str):
+        return _trim_text(value, target_tokens)
+    if isinstance(value, list):
+        if target_tokens <= 1:
+            return []
+        result: list[Any] = []
+        for item in value:
+            if estimate_tokens(result + [item]) > target_tokens:
+                break
+            result.append(item)
+        if not result and value:
+            result.append(_compress_value(value[0], max(1, target_tokens)))
+        return result
+    if isinstance(value, dict):
+        if target_tokens <= 1:
+            return {}
+        result: dict[str, Any] = {}
+        remaining = max(1, target_tokens)
+        for key, item in value.items():
+            key_cost = estimate_tokens({key: ""})
+            item_budget = max(1, remaining - key_cost)
+            compact = _compress_value(item, item_budget)
+            result[key] = compact
+            remaining -= estimate_tokens({key: compact})
+            if remaining <= 0:
+                break
+        return result
+    return value
+
+
+def _compress_protected(
+    working_state: dict[str, Any],
+    constraints: list[str],
+    token_budget: int,
+) -> tuple[dict[str, Any], list[str]]:
+    """Compress protected materials so protection never means unlimited size."""
+    available = max(1, token_budget)
+    working_tokens = estimate_tokens(working_state)
+    constraints_tokens = estimate_tokens(constraints)
+    total = working_tokens + constraints_tokens
+    if total <= available:
+        return working_state, constraints
+
+    working_target = max(1, int(available * working_tokens / total)) if total else 1
+    constraints_target = max(0, available - working_target)
+    compact_working = _compress_value(working_state, working_target)
+    compact_constraints = _compress_value(constraints, constraints_target)
+
+    # A second deterministic pass accounts for dictionary/list framing.
+    if estimate_tokens(compact_working) + estimate_tokens(compact_constraints) > available:
+        compact_constraints = []
+        compact_working = _compress_value(working_state, available)
+    if estimate_tokens(compact_working) + estimate_tokens(compact_constraints) > available:
+        remaining = max(1, available - estimate_tokens(compact_constraints) - 2)
+        compact_working = {
+            "current_goal": _trim_text(
+                str(working_state.get("current_goal", "")), remaining
+            )
+        }
+        for _ in range(128):
+            if estimate_tokens(compact_working) + estimate_tokens(compact_constraints) <= available:
+                break
+            current_goal = str(compact_working.get("current_goal", ""))
+            compact_working["current_goal"] = _trim_text(
+                current_goal, max(1, estimate_tokens(current_goal) - 2)
+            )
+    return compact_working, compact_constraints
+
+
 class BudgetManager:
     """Protect hard constraints and current state while trimming soft memories."""
 
@@ -114,7 +197,13 @@ class BudgetManager:
         dropped: dict[str, str] = {}
         tokens_by_category: dict[str, int] = {}
 
-        # 1. Current state is protected.
+        # Protection means priority, not permission to exceed the request budget.
+        protected_budget = max(1, self.token_budget - self.allocation.buffer)
+        working_state, constraints = _compress_protected(
+            working_state, constraints, protected_budget
+        )
+
+        # 1. Current state is protected (and may have been compacted).
         current_state_tokens = estimate_tokens(working_state)
         tokens_by_category["current_state"] = current_state_tokens
 
@@ -193,6 +282,19 @@ class BudgetManager:
         )
 
         total = sum(tokens_by_category.values()) + self.allocation.buffer
+        # The final guard protects against heuristic rounding and future category
+        # changes.  Protected content has already been compacted above.
+        if total > self.token_budget:
+            overflow = total - self.token_budget
+            selected_conflict_notes = (
+                selected_conflict_notes[:-overflow]
+                if overflow
+                else selected_conflict_notes
+            )
+            tokens_by_category["conflict_notes"] = sum(
+                estimate_tokens(n) for n in selected_conflict_notes
+            )
+            total = sum(tokens_by_category.values()) + self.allocation.buffer
         return BudgetResult(
             selected_memories=selected_memories,
             selected_working_state=working_state,

@@ -46,7 +46,7 @@ Batch 4 — Fusion / Rerank / Context Budget
 Batch 5 — Retrieval Scenario Tests & Legacy Comparison
 
 Current Closure Target:
-Fix Batch 3 — Test Environment & Real Scenario Verification (DONE)
+Fix Batch 4 — Budget / Intent / Retrieval Log Closure (DONE)
 ```
 
 ---
@@ -99,8 +99,8 @@ DONE
 |---|---|---|---|
 | Fix 1 | Scope Isolation & Agent Scope Propagation | DONE | 2026-08-31 |
 | Fix 2 | Stage 1 Formation Regression Recovery | DONE | 2026-08-31 |
-| Fix 3 | Test Environment & Real Scenario Verification | NOT STARTED | — |
-| Fix 4 | Budget / Intent / Retrieval Log Closure | NOT STARTED | — |
+| Fix 3 | Test Environment & Real Scenario Verification | DONE | 2026-08-31 |
+| Fix 4 | Budget / Intent / Retrieval Log Closure | DONE | 2026-08-31 |
 
 ---
 
@@ -2239,3 +2239,85 @@ No Schema or Repository Contract changes
 ### Next Fix Batch Notes
 
 Fix 3 is complete. Stop here; do not begin Fix 4 or Stage 3 automatically.
+
+---
+
+## Stage 2 Closure Fix 4 — Budget / Intent / Retrieval Log Closure
+
+### Status
+
+```text
+DONE
+```
+
+### Reconnaissance Findings
+
+- Oversized protected Working State exceeded the requested token budget because
+  protection bypassed compression.
+- The high-frequency Chinese queries in the Closure acceptance criteria were
+  not deterministically classified without `intent_hint`.
+- Retrieval logs persisted counts but not the final context memory IDs.
+
+### Changes
+
+- Added deterministic bounded compression for protected Working State and
+  constraints; protection now means priority, not unlimited size.
+- Added explainable Chinese phrase rules for current state, task history,
+  preference, semantic fact, and project build-tool queries.
+- Reused the existing retrieval-log `plan` JSON to persist
+  `selected_memory_ids`; no new schema field was introduced.
+
+### Files Touched
+
+```text
+memoryhub/retrieval/context_builder.py
+memoryhub/retrieval/intent_router.py
+memoryhub/application/retrieval_service.py
+tests/test_vnext_context_budget.py
+tests/test_vnext_intent_router.py
+tests/test_vnext_retrieval_service.py
+docs/vnext/PROGRESS.md
+```
+
+### Tests
+
+```text
+Fix 4 focused tests: PASS (27), FAIL 0, SKIP 0
+Batch 5 scenarios + Fix 4 focused tests: PASS (38), FAIL 0, SKIP 0
+Retrieval/context/planner/reranker regression: PASS (34), FAIL 0, SKIP 0,
+  deselected 1
+Ruff: PASS
+compileall: PASS
+git diff --check: PASS
+```
+
+### Evidence
+
+- An oversized Working State with a 128-token budget now returns total estimated
+  context tokens at or below 128 while retaining a compact current-goal signal.
+- All twelve Closure Chinese query examples route to their expected intent
+  without `intent_hint`.
+- Cross-project and Cross-user Batch 5 scenarios pass after the new routing
+  rules; no Scope implementation changed.
+- Retrieval Log persistence assertion now requires the persisted selected ID.
+
+### Regression
+
+```text
+Scope, Working/Episode, Legacy Retrieval, and Stage 1 modules unchanged.
+Batch 5: PASS (11), FAIL 0, SKIP 0.
+```
+
+### Remaining Risks
+
+- `test_retrieval_log_persisted` remains unexecutable in the managed sandbox
+  because pytest cannot create/clean its Windows `.lock` temporary directory;
+  this is an environment failure, not a test skip or assertion pass.
+- Existing `asyncio_mode` and dependency deprecation warnings remain.
+- Final Stage 2 Closure Review is still required before declaring readiness for
+  Stage 3; this Batch does not enter Stage 3.
+
+### Next Fix Batch Notes
+
+No next Fix Batch is authorized by this closure plan. Stop here and perform the
+separate final Stage 2 Closure Review.

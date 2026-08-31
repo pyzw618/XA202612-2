@@ -403,9 +403,10 @@ class RetrievalService:
                     "required_layers": [layer.value for layer in plan.required_layers],
                     "required_types": [memory_type.value for memory_type in plan.required_types],
                     "channel_metrics": assembly.trace.get("channel_metrics", {}),
+                    "selected_memory_ids": list(assembly.context.relevant_memory_ids),
                 },
                 candidate_count=assembly.trace.get("fusion_candidates", 0),
-                selected_count=assembly.trace.get("scope_selected_count", 0),
+                selected_count=len(assembly.context.relevant_memory_ids),
                 degraded_channels=plan.degraded_channels,
                 latency_ms=round(latency_ms, 3),
             )

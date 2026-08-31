@@ -46,6 +46,8 @@ class IntentRouter:
     _INTENT_RULES: dict[RetrievalIntent, list[str]] = {
         RetrievalIntent.CURRENT_STATE: [
             r"当前(?:的)?(?:任务|步骤|状态|目标)(?:是(?:什么|啥))?",
+            r"我现在(?:做到|进展到|进行到)(?:哪里|哪儿|哪一步|哪|什么程度)",
+            r"当前做到哪一步了",
 
             r"现在(?:该|要|需要)做(?:什么|啥)",
             r"(?:current|ongoing)\s+(?:task|step|goal|state)(?:\s+is)?",
@@ -55,17 +57,22 @@ class IntentRouter:
         RetrievalIntent.TASK_HISTORY: [
             r"(?:任务|这个任务).*?(?:历史|做过什么|进展)",
             r"(?:之前|上次|以前)(?:做|处理|执行)过",
+            r"(?:之前|上次|以前).*?(?:这个问题|类似问题).*?(?:怎么|如何)(?:处理|解决)",
+            r"(?:之前遇到过类似问题吗|上次是怎么解决的)",
             r"^(?:task|episode|session)\s+history\b",
             r"^what\s+(?:did|have)\s+i\s+(?:done|worked\s+on)",
         ],
         RetrievalIntent.PREFERENCE: [
             r"(?:偏好|喜欢|总是|通常|默认)(?:用|使用|选|选择)",
+            r"我(?:一般用|平时更喜欢用|之前偏好|平时喜欢什么)",
+            r"(?:这个项目|项目现在|该项目).*(?:构建工具|用什么构建)",
             r"^(?:prefer|like\s+to|always|default)\s+(?:use|choose|want)",
             r"(?:format|style|样式|格式|排版)(?:偏好|设置|选择)?",
             r"(?:用|使用)\s*(?:docx|markdown|pdf|word|excel|ppt)\b",
         ],
         RetrievalIntent.SEMANTIC_FACT: [
             r"^(?:什么是|什么是|怎么|如何|为什么|在哪里|是谁)",
+            r"(?:这个项目|项目现在|该项目).*(?:数据库|技术栈|用什么)",
             r"^(?:what|who|where|when|why|how)\b.*\?",
             r"^(?:define|explain|meaning\s+of)\b",
         ],
@@ -135,6 +142,13 @@ class IntentRouter:
                 intent_hint,
                 1.0,
                 f"intent_hint={intent_hint.value} overrides rule scores",
+            )
+
+        if re.search(r"(?:之前遇到过类似问题吗|上次是怎么解决的)", query):
+            return self._build(
+                RetrievalIntent.TASK_HISTORY,
+                1.0,
+                "explicit task-history phrase",
             )
 
         if self.llm_scorer is not None:

@@ -85,6 +85,21 @@ class TestBudgetManager:
         assert result.total_tokens <= 2000
         assert result.remaining_budget >= 0
 
+    def test_oversized_protected_state_is_compressed_to_budget(self):
+        manager = BudgetManager(token_budget=128)
+        working = {
+            "current_goal": "G" * 1000,
+            "current_step": "S" * 1000,
+            "blockers": ["B" * 1000],
+            "pending_steps": ["P" * 1000],
+            "completed_steps": ["C" * 1000],
+        }
+        result = manager.apply(
+            [], working_state=working, constraints=["K" * 1000]
+        )
+        assert result.total_tokens <= 128
+        assert result.selected_working_state
+
 
 class TestStructuredContextBuilder:
     def test_builds_context_payload(self):

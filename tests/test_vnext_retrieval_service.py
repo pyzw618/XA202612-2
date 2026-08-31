@@ -140,6 +140,7 @@ class TestRetrievalService:
             assert log.intent == RetrievalIntent.PREFERENCE.value
             assert log.candidate_count > 0
             assert log.latency_ms >= 0
+            assert log.plan["selected_memory_ids"] == ["m1"]
 
         # Verify activation rows.
         with db.session() as session:
