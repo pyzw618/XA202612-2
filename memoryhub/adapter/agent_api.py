@@ -176,6 +176,7 @@ class AgentStepRequest(BaseModel):
     task_type: str = "memory_demo"
     # 用 dict 而非 MemoryEvent，以便在构造时归一化旧演示数据的 source_type 枚举
     events: list[dict[str, Any]] = Field(default_factory=list)
+    used_memory_ids: list[str] = Field(default_factory=list)
 
 
 _SOURCE_TYPE_ALIASES = {
@@ -361,7 +362,9 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
         legacy_reader=lambda _request: retriever.search(legacy_request),
         vnext_reader=lambda value: retrieval_service.search(value),
     )
-    search_response = selected.response
+    vnext_search_response = selected.response
+    retrieval_log_id = getattr(vnext_search_response, "retrieval_log_id", "")
+    search_response = vnext_search_response
     if hasattr(search_response, "to_legacy_search_response"):
         search_response = search_response.to_legacy_search_response()
     cards = []
@@ -396,7 +399,23 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
                 "tags": list(getattr(memory, "tags", [])),
             }
         )
-    used_ids = [card["memory_id"] for card in cards[:3]]
+    used_ids = (
+        body.used_memory_ids
+        if body.used_memory_ids
+        else [card["memory_id"] for card in cards[:3]]
+    )
+
+    if retrieval_service is not None and retrieval_log_id and used_ids:
+        retrieval_service.record_usage_feedback(
+            retrieval_id=retrieval_log_id,
+            memory_ids=used_ids,
+            tenant_id=step_tenant_id,
+            user_id=user_id,
+            task_id=body.task_id,
+            session_id=body.session_id,
+            usage_source="agent.step",
+            confidence=1.0 if body.used_memory_ids else 0.5,
+        )
 
     summary_lines = []
     summary_lines.append(f"实际检索到 {len(cards)} 条记忆，使用 {len(used_ids)} 条")

@@ -194,6 +194,7 @@ class MemoryRetrievalResponse(APIModel):
     api_version: Literal["vnext/v1"] = "vnext/v1"
     request_id: str = Field(min_length=1)
     trace_id: str = Field(min_length=1)
+    retrieval_log_id: str = Field(default="", min_length=0)
     intent: RetrievalIntent
     retrieval_plan: dict[str, Any] = Field(default_factory=dict)
     selected_memories: list[RetrievedMemory] = Field(default_factory=list)
@@ -241,6 +242,7 @@ class MemoryRetrievalResponse(APIModel):
         return cls(
             request_id=request_id,
             trace_id=request_id,
+            retrieval_log_id="",
             intent=RetrievalIntent.MIXED,
             selected_memories=items,
             context=ContextPayload(relevant_memory_ids=[item.memory_id for item in items]),

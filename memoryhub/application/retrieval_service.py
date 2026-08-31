@@ -12,6 +12,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from memoryhub.adapter.vnext_schemas import (
@@ -174,11 +175,23 @@ class RetrievalService:
             assembly,
         )
 
+        latency_ms = (time.perf_counter() - started_at) * 1000
+        retrieval_log_id = self._record_retrieval_log(
+            request,
+            trace_id,
+            query_id,
+            routed.intent,
+            plan,
+            assembly,
+            latency_ms,
+        )
+
         # Build response
         selected = assembly.context.relevant_memory_ids
         response = MemoryRetrievalResponse(
             request_id=request.request_id,
             trace_id=trace_id,
+            retrieval_log_id=retrieval_log_id,
             intent=routed.intent,
             retrieval_plan=self._plan_to_dict(plan, routed),
             selected_memories=(
@@ -189,17 +202,6 @@ class RetrievalService:
             degraded_channels=plan.degraded_channels,
             completeness=self._completeness(plan, channel_results),
             total_count=len(selected),
-        )
-
-        latency_ms = (time.perf_counter() - started_at) * 1000
-        retrieval_log_id = self._record_retrieval_log(
-            request,
-            trace_id,
-            query_id,
-            routed.intent,
-            plan,
-            assembly,
-            latency_ms,
         )
 
         self._record_trace(
@@ -235,6 +237,80 @@ class RetrievalService:
     ) -> ContextPayload:
         """Convenience wrapper that returns only the context payload."""
         return self.retrieve(request, **kwargs).response.context
+
+    def record_usage_feedback(
+        self,
+        *,
+        retrieval_id: str,
+        memory_ids: list[str],
+        tenant_id: str,
+        user_id: str,
+        task_id: str = "",
+        session_id: str = "",
+        usage_source: str = "agent",
+        confidence: float = 1.0,
+    ) -> dict[str, Any]:
+        """Record that specific memories from a retrieval were actually used.
+
+        This is the strong-evidence path: the caller explicitly identifies the
+        memories the agent depended on. Only memories that passed scope checks
+        and were selected into context may be marked USED.
+        """
+        result: dict[str, Any] = {
+            "retrieval_id": retrieval_id,
+            "memory_ids": list(memory_ids),
+            "marked": [],
+            "rejected": [],
+            "untrusted": [],
+        }
+        if not memory_ids:
+            return result
+        if self.retrieval_log_repository is None or self.activation_repository is None:
+            return result
+        try:
+            log = self.retrieval_log_repository.get(retrieval_log_id=retrieval_id)
+        except Exception:
+            return result
+        if log is None:
+            return result
+        if log.tenant_id != tenant_id or log.user_id != user_id:
+            result["rejected"].extend(memory_ids)
+            return result
+        selected = set(log.plan.get("selected_memory_ids", []))
+        query_id = log.query_id
+        trace_id = log.trace_id
+        for memory_id in memory_ids:
+            if memory_id not in selected:
+                result["untrusted"].append(memory_id)
+                continue
+            try:
+                _, newly_marked = self.activation_repository.mark_used(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    query_id=query_id,
+                    memory_id=memory_id,
+                    used_at=datetime.now(timezone.utc),
+                )
+                result["marked"].append(memory_id)
+            except Exception:
+                result["rejected"].append(memory_id)
+                continue
+            if self.usage_feedback_service is not None and newly_marked:
+                try:
+                    self.usage_feedback_service.record_usage(
+                        trace_id=trace_id,
+                        query_id=query_id,
+                        task_id=task_id,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        memory_id=memory_id,
+                        usage_kind=UsageKind.ACTION_INFLUENCED,
+                        utility_signal=0.0,
+                        outcome_code="USED",
+                    )
+                except Exception:
+                    pass
+        return result
 
     def _enqueue_repair(self, memory: RetrievedMemory) -> None:
         """Enqueue a high-priority projection repair without failing retrieval."""

@@ -8,7 +8,7 @@ canonical application services built in later S1/S2 tasks.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from memoryhub.domain.candidate import can_transition
@@ -897,25 +897,103 @@ class ActivationRepository:
         content_version: int,
         included_in_context: bool = False,
     ) -> ActivationView:
-        row = MemoryActivationRow(
-            activation_id=activation_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            query_id=query_id,
-            memory_id=memory_id,
-            task_id=task_id,
-            intent=intent,
-            status=status,
-            rank=rank,
-            initial_score=initial_score,
-            reranked_score=reranked_score,
-            content_version=content_version,
-            included_in_context=included_in_context,
-        )
+        """Upsert an activation row so retrieval progression stays one row per memory."""
         with self.db.session() as session:
+            existing = (
+                session.query(MemoryActivationRow)
+                .filter_by(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    query_id=query_id,
+                    memory_id=memory_id,
+                    content_version=content_version,
+                )
+                .first()
+            )
+            if existing is not None:
+                existing.status = status
+                existing.rank = rank
+                existing.initial_score = initial_score
+                existing.reranked_score = reranked_score
+                existing.included_in_context = included_in_context
+                session.flush()
+                return self._view(existing)
+            row = MemoryActivationRow(
+                activation_id=activation_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                query_id=query_id,
+                memory_id=memory_id,
+                task_id=task_id,
+                intent=intent,
+                status=status,
+                rank=rank,
+                initial_score=initial_score,
+                reranked_score=reranked_score,
+                content_version=content_version,
+                included_in_context=included_in_context,
+            )
             session.add(row)
             session.flush()
             return self._view(row)
+
+    def get(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        query_id: str,
+        memory_id: str,
+    ) -> ActivationView | None:
+        """Return the latest activation for a memory in a query."""
+        with self.db.session() as session:
+            row = (
+                session.query(MemoryActivationRow)
+                .filter_by(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    query_id=query_id,
+                    memory_id=memory_id,
+                )
+                .order_by(MemoryActivationRow.content_version.desc())
+                .first()
+            )
+            return self._view(row) if row is not None else None
+
+    def mark_used(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        query_id: str,
+        memory_id: str,
+        used_at: datetime | None = None,
+    ) -> tuple[ActivationView, bool]:
+        """Promote the latest activation to USED; idempotent for the same event.
+
+        Returns the activation view and a boolean that is True only when the row
+        was actually changed to USED by this call.
+        """
+        with self.db.session() as session:
+            row = (
+                session.query(MemoryActivationRow)
+                .filter_by(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    query_id=query_id,
+                    memory_id=memory_id,
+                )
+                .order_by(MemoryActivationRow.content_version.desc())
+                .first()
+            )
+            if row is None:
+                raise KeyError(f"activation not found for {memory_id}")
+            if row.status == "USED" and row.used_at is not None:
+                return self._view(row), False
+            row.status = "USED"
+            row.used_at = used_at or datetime.now(timezone.utc)
+            session.flush()
+            return self._view(row), True
 
     @staticmethod
     def _view(row: MemoryActivationRow) -> ActivationView:
@@ -985,6 +1063,16 @@ class RetrievalLogRepository:
             session.add(row)
             session.flush()
             return self._view(row)
+
+    def get(self, *, retrieval_log_id: str) -> RetrievalLogView | None:
+        """Load a persisted retrieval log by id."""
+        with self.db.session() as session:
+            row = (
+                session.query(RetrievalLogRow)
+                .filter_by(retrieval_log_id=retrieval_log_id)
+                .one_or_none()
+            )
+            return self._view(row) if row is not None else None
 
     @staticmethod
     def _view(row: RetrievalLogRow) -> RetrievalLogView:

@@ -922,6 +922,7 @@ def create_app(
         # Build it only after the legacy retriever is available so vector is a
         # real channel rather than an accidentally omitted startup dependency.
         from memoryhub.adapter.retrieval_executor import build_channel_executors
+        from memoryhub.application.feedback_service import UtilityFeedbackShadow
         from memoryhub.application.retrieval_service import RetrievalService
         from memoryhub.retrieval.planner import RetrievalPlanner
         from memoryhub.storage.vnext_repositories import (
@@ -935,6 +936,7 @@ def create_app(
             channel_executors=channel_executors,
             activation_repository=ActivationRepository(db),
             retrieval_log_repository=RetrievalLogRepository(db),
+            usage_feedback_service=UtilityFeedbackShadow(trace_store=app.state.trace_store),
             trace_store=app.state.trace_store,
             authority_repository=authority_repository,
             db=db,

@@ -56,8 +56,8 @@ Fix Batch 4 — Budget / Intent / Retrieval Log Closure (DONE)
 | Stage | 名称 | 状态 | 备注 |
 |---|---|---|---|
 | Stage 1 | Formation 实化 | DONE | 全部 5 个 Batch + Independent Review Repair 完成 |
-| Stage 2 | Retrieval 实化 | IN PROGRESS | Batch 1–4 完成；不进入下一 Batch |
-| Stage 3 | Feedback 闭环 | NOT STARTED | 暂不执行 |
+| Stage 2 | Retrieval 实化 | DONE | 全部 5 个 Batch + Closure Fix 1–5 完成 |
+| Stage 3 | Feedback 闭环 | IN PROGRESS | Batch 1 — Activation Completion: USED |
 | Stage 4 | Evaluation & Cutover | NOT STARTED | 暂不执行 |
 
 状态仅允许：
@@ -102,6 +102,16 @@ DONE
 | Fix 3 | Test Environment & Real Scenario Verification | DONE | 2026-08-31 |
 | Fix 4 | Budget / Intent / Retrieval Log Closure | DONE | 2026-08-31 |
 | Fix 5 | Agent /step Canonical Write Tenant Scope Propagation | DONE | 2026-09-02 |
+
+# 4.3 Stage 3 Batch 状态
+
+| Batch | 任务 | 状态 | 最后更新 |
+|---|---|---|---|
+| Batch 1 | Activation Completion — USED | DONE | 2026-08-31 |
+| Batch 2 | Feedback Event & Attribution | NOT STARTED | 暂不执行 |
+| Batch 3 | Utility / Stability Update | NOT STARTED | 暂不执行 |
+| Batch 4 | Memory Evolution & Safeguards | NOT STARTED | 暂不执行 |
+| Batch 5 | Feedback Scenario Tests & Stage 3 Validation | NOT STARTED | 暂不执行 |
 
 ---
 
@@ -230,6 +240,201 @@ existing Agent adapter behavior compatible.
 ### Next Batch Notes
 
 Stage 2 Closure 的 tenant 硬阻塞已清除。若要继续推进 Closure，需单独处理 `test_competition_api.py` 中 `policy_failed` 与 `processing=None` 两个问题，并重新评估是否还存在其他 Closure DoD 缺口。
+
+---
+
+## Stage 3 Batch 1 — Activation Completion: USED
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+补齐 Retrieval → Context → USED 的显式使用反馈链路：
+
+```text
+RECALLED → SELECTED / IN_CONTEXT → USED
+```
+
+让系统可以明确知道哪些 Memory 被 Agent 真正使用，并记录到 Activation 与 Usage Shadow。
+
+### Reconnaissance Findings
+
+- 当前真实实现：
+  - `ActivationStatus` 已有 `USED` 枚举，但代码中没有任何位置写入 `USED`。
+  - `RetrievalService._record_activations()` 写入 `RECALLED` / `SELECTED` / `IN_CONTEXT`，并因 `MemoryActivationRow` unique 约束导致 `SELECTED/IN_CONTEXT` 覆盖失败（静默吞异常）。
+  - `UtilityFeedbackShadow` 已存在，但 `app.py` 未注入 `RetrievalService`，影子记录实际不生效。
+  - `AgentStepRequest` 没有 `used_memory_ids` 字段；`/step` 自行取前 3 张 card 作为 used，不基于 Agent 真实回传。
+- 与 stage 文档一致的部分：
+  - `ActivationRepository`、`RetrievalLogRepository`、`MemoryActivationRow` 字段已满足 USED 记录需求。
+  - `UtilityFeedbackShadow` 设计为只写 shadow / trace，不直接修改 Authority。
+- 与 stage 文档不一致的部分：
+  - `MemoryRetrievalResponse` 没有 `retrieval_log_id`，调用方无法把 usage 关联回 retrieval。
+  - `ActivationRepository.record()` 不是幂等 upsert，重复状态写入会冲突。
+- 复用的现有组件：
+  - `ActivationRepository` / `MemoryActivationRow`
+  - `RetrievalLogRepository` / `RetrievalLogRow`
+  - `UtilityFeedbackShadow` / `UsageKind`
+  - `RetrievalService` / `MemoryRetrievalResponse`
+  - `AgentStepRequest` / `/api/agent/step`
+- 实际影响范围：
+  - `memoryhub/storage/vnext_repositories.py`（Activation upsert/mark_used、RetrievalLog get）
+  - `memoryhub/application/retrieval_service.py`（retrieval_log_id 回传、record_usage_feedback）
+  - `memoryhub/adapter/vnext_schemas.py`（response DTO 增加 retrieval_log_id）
+  - `memoryhub/adapter/agent_api.py`（AgentStepRequest 增加 used_memory_ids，/step 记录 usage）
+  - `memoryhub/app.py`（注入 UtilityFeedbackShadow）
+  - `tests/test_vnext_activation_used.py`（7 个新测试）
+
+### Changes
+
+- `ActivationRepository.record()` 改为 upsert：同 `(tenant,user,query,memory,content_version)` 更新状态而非重复插入。
+- 新增 `ActivationRepository.get()` 与 `mark_used()`；`mark_used()` 返回 `(ActivationView, newly_marked)`，支持幂等 USED 写入。
+- 新增 `RetrievalLogRepository.get()`，用于 usage feedback 时校验 scope 与 selected_memory_ids。
+- `MemoryRetrievalResponse` 增加 `retrieval_log_id` 字段。
+- `RetrievalService` 在 `retrieve()` 中先写 retrieval log 再构造 response，把 `retrieval_log_id` 带回给调用方。
+- 新增 `RetrievalService.record_usage_feedback()`：
+  - 通过 `retrieval_log_id` 加载 retrieval log。
+  - 校验 `tenant_id` / `user_id` 与 log 一致（scope 拒绝）。
+  - 校验 memory_id 在 `selected_memory_ids` 中（未进入 context 则标记 untrusted）。
+  - 调用 `ActivationRepository.mark_used()`。
+  - 仅当真正 newly_marked 时写入 `UtilityFeedbackShadow`（`UsageKind.ACTION_INFLUENCED`, outcome_code=USED）。
+- `AgentStepRequest` 增加 `used_memory_ids: list[str]`。
+- `/api/agent/step` 在检索后使用 `body.used_memory_ids`（显式回传）作为强证据，否则 fallback 到前 3 张 card（弱证据），并调用 `record_usage_feedback()`。
+- `app.py` 装配 `RetrievalService` 时注入 `UtilityFeedbackShadow(trace_store=app.state.trace_store)`。
+
+### Files Touched
+
+```text
+memoryhub/adapter/vnext_schemas.py
+memoryhub/adapter/agent_api.py
+memoryhub/application/retrieval_service.py
+memoryhub/storage/vnext_repositories.py
+memoryhub/app.py
+tests/test_vnext_activation_used.py
+docs/vnext/PROGRESS.md
+```
+
+（核心源码 6 个文件，符合单 Batch ≤8 限制。）
+
+### Behavior Before
+
+```text
+Agent /step
+  → retrieval_service.search()
+  → response 无 retrieval_log_id
+  → used_ids = 前 3 张 card
+  → 响应返回 used_memory_ids
+  → 无 Activation USED 写入
+  → UtilityFeedbackShadow 未接入生产
+```
+
+### Behavior After
+
+```text
+Agent /step
+  → retrieval_service.search()
+  → response.retrieval_log_id = rl-xxx
+  → Agent 回传 used_memory_ids
+  → record_usage_feedback(retrieval_log_id, used_memory_ids)
+  → 校验 tenant/user scope
+  → 校验 memory 在 selected_memory_ids 中
+  → ActivationRepository.mark_used()
+  → ActivationStatus = USED
+  → UtilityFeedbackShadow.record_usage(ACTION_INFLUENCED, USED)
+```
+
+重复上报同一 `(retrieval_id, memory_id)`：DB 中只保留一个 USED 行；shadow 中只保留一个 USED usage。
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_vnext_activation_used.py` | PASS (7) |
+| `tests/test_vnext_retrieval_service.py` | PASS (6) |
+| `tests/test_vnext_feedback_service.py` | PASS (3) |
+| `tests/test_vnext_batch4_fusion_context.py` | PASS (3) |
+| `tests/test_vnext_batch5_retrieval_scenarios.py` | PASS (11) |
+| `tests/test_vnext_stage1_scenarios.py` | PASS (6) |
+| `tests/test_vnext_boundary_driven_formation.py` | PASS (6) |
+| `tests/test_vnext_entrypoints.py` | PASS (8) |
+| `tests/test_vnext_batch3_scope_propagation.py` | PASS (5) |
+| Batch 1 + Stage 1 + Stage 2 targeted regression | PASS (55) |
+| `ruff check` on changed source/tests | PASS |
+| `compileall` on changed source/tests | PASS |
+
+`tests/test_competition_api.py` 仍有两个预存失败：`test_replay_is_read_only_until_execute_and_masks_tool_results`（policy_failed）、`test_agent_step_extracts_memory_from_raw_dialogue_and_retrieves_it`（processing=None）。两者与 Batch 1 无关，未修复。
+
+### Evidence
+
+- `test_upsert_activation_keeps_final_status`：两次 `record()` 后 DB 只有 1 行，最终状态为 `IN_CONTEXT`。
+- `test_record_usage_feedback_promotes_to_used`：显式 feedback 把 `IN_CONTEXT` 推进到 `USED`，shadow 中出现 `ACTION_INFLUENCED/USED`。
+- `test_record_usage_feedback_is_idempotent`：重复 feedback 后 DB 仍只有 1 个 USED 行，shadow 只有 1 个 USED usage。
+- `test_record_usage_feedback_rejects_not_in_context`：未进入 context 的 memory 被标记为 `untrusted`，不会变为 USED。
+- `test_record_usage_feedback_rejects_cross_tenant`：tenant-a feedback 不能更新 tenant-b retrieval 下的 activation。
+- `test_retrieval_service_response_carries_retrieval_log_id`：`MemoryRetrievalResponse` 真实携带 `retrieval_log_id`。
+- `test_app_wires_usage_feedback_shadow_to_retrieval_service`：app factory 启动后 `app.state.retrieval_service.usage_feedback_service` 非空。
+
+### Feedback Attribution Evidence
+
+- `/step` 使用 Agent 显式回传的 `used_memory_ids` 作为强证据（confidence=1.0）。
+- 无显式回传时 fallback 到前 3 张 card（confidence=0.5）。
+- `record_usage_feedback()` 通过 retrieval log 的 `selected_memory_ids` 验证 memory 是否真实进入 context；未进入者为 `untrusted`。
+- 跨 tenant/user 反馈直接 `rejected`。
+
+### Score Update Evidence
+
+- Batch 1 不更新 utility / stability / evolution；`UtilityFeedbackShadow` 仅记录 `ACTION_INFLUENCED/USED` signal，为 Batch 3 的 bounded updater 提供输入。
+- 当前 shadow 的 `report()` 可基于 usage 信号生成 `UtilityUpdateProposal`，但不写入 Candidate / Authority。
+
+### Scope Verification
+
+- `record_usage_feedback()` 在调用 `mark_used()` 前校验 `log.tenant_id == tenant_id` 且 `log.user_id == user_id`。
+- `ActivationRepository.get()` / `mark_used()` 查询使用 `(tenant_id, user_id, query_id, memory_id)` 组合。
+- 测试 `test_record_usage_feedback_rejects_cross_tenant` 直接验证跨 tenant 被拒绝。
+
+### Regression
+
+```text
+Formation: Stage 1 scenarios / boundary / working reducer / entrypoints PASSED.
+Retrieval: Stage 2 Batch 1–5 / retrieval service / feedback service / fusion / scope PASSED.
+Safety: no Safety policy or gate changed.
+candidate-only: no Authority/Formation mode change.
+Legacy: no legacy source or route changed except Agent /step request/response contract.
+```
+
+### Remaining Risks
+
+- Agent `/step` 的 fallback（前 3 张 card）是弱证据；生产环境应优先要求 Agent 显式回传 `used_memory_ids`。
+- `MemoryActivationRow` 的 upsert 依赖 `(tenant,user,query,memory,content_version)` 唯一性；未来如允许同一 query 同一 memory 多个 content_version，需调整 `get()`/`mark_used()` 语义。
+- MCP/CLI 目前仍通过 legacy `/api/memory/feedback` 反馈，未接入 vNext usage feedback；后续 Batch 可考虑为 MCP 增加显式 usage 工具。
+
+### Decisions
+
+```text
+1. Activation progression stays one row per (tenant,user,query,memory,content_version); record() upserts.
+2. USED requires retrieval_log_id + selected_memory_ids proof; no retrieval log = no mark.
+3. UtilityFeedbackShadow is wired in production but remains shadow-only; Authority/Candidate mutation is Batch 3.
+4. Agent /step accepts used_memory_ids explicitly and falls back to top-3 cards only for backward compatibility.
+```
+
+### Not Done
+
+- Batch 2 Feedback Event & Attribution（explicit positive/negative、task outcome）。
+- Batch 3 Utility / Stability bounded update。
+- Batch 4 Memory Evolution（ACTIVE/DORMANT/SUPERSEDED）。
+- Batch 5 Scenario Tests。
+- 修复 `tests/test_competition_api.py` 中两个与 Batch 1 无关的预存失败。
+
+### Next Batch Notes
+
+Batch 2 应建立 Feedback Event & Attribution：
+- 明确 Feedback Contract（feedback_id、retrieval_id、memory_ids、feedback_type、outcome、source、confidence）。
+- 区分 Explicit Positive / Explicit Negative / Task Success / Task Failure / User Correction。
+- 引入保守归因规则：多 Memory 场景 weak attribution、Task Failure 不等于 memory negative。
+- 保持 Batch 1 的 USED 幂等、scope 校验、shadow-only 约束。
 
 ---
 
@@ -583,23 +788,24 @@ Temporary Workaround:
 # 11. 当前下一步
 
 ```text
-Stage 2 / Batch 1 DONE（Working / Episode Executors）
+Stage 3 / Batch 1 DONE（Activation Completion: USED）
 
 Task:
-Stage 2 Batch 2 — Authority / Keyword / Vector Executors
+Stage 3 Batch 2 — Feedback Event & Attribution
 
 Before coding:
 Read VNEXT_PLAN.md
-Read docs/vnext/stages/stage2-retrieval.md §8（Batch 2）
-Read PROGRESS.md §5.6（Retrieval 基线）与 Batch 1 记录
+Read docs/vnext/stages/stage3-feedback.md §7（Batch 2）
+Read PROGRESS.md Stage 3 Batch 1 记录
 
 Key context for Batch 2:
-- app.py 中 RetrievalService 装配早于 retriever 赋值，vector executor 目前
-  在真实 app 中不会注册；Batch 2 需一并修正装配顺序（pre-existing 缺口）。
-- keyword/metadata/authority channel 在 Planner 计划中 enabled 但缺 executor，
-  静默降级为空；Batch 2 落地后需验证 degraded_channels 语义。
-- _search_request_from_vnext 的 project_id=""/level="long" scope 丢失留给
-  Batch 3，本 Batch 不要提前修。
+- Batch 1 已完成 USED 状态、幂等写入、scope 校验、shadow-only 记录。
+- Batch 2 需建立 Feedback Contract：feedback_id、retrieval_id、memory_ids、
+  feedback_type、outcome、source、confidence。
+- 支持 Explicit Positive / Explicit Negative / Task Success / Task Failure /
+  User Correction 等类型。
+- 引入保守归因：多 Memory 场景 weak attribution、Task Failure 不等于 memory negative。
+- 不提前实现 utility/stability 更新（Batch 3）或 evolution 状态机（Batch 4）。
 ```
 
 ---
