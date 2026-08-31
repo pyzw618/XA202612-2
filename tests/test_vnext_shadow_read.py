@@ -3,8 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from memoryhub.adapter.vnext_schemas import MemoryRetrievalRequest
+from memoryhub.application.reflection_service import (
+    DeterministicReflectionModel,
+    ReflectionService,
+)
 from memoryhub.application.shadow_read_service import ShadowReadService
 from memoryhub.observability.trace_store import TraceStore
+
+
+def _reflection_service() -> ReflectionService:
+    return ReflectionService(model=DeterministicReflectionModel())
 
 
 @dataclass
@@ -29,7 +37,7 @@ def _request() -> MemoryRetrievalRequest:
 
 def test_dual_read_returns_legacy_and_records_redacted_deltas() -> None:
     trace_store = TraceStore()
-    service = ShadowReadService(trace_store=trace_store)
+    service = ShadowReadService(reflection_service=_reflection_service(), trace_store=trace_store)
     legacy = [Item("memory-1")]
     vnext = [Item("memory-2")]
 
@@ -48,7 +56,7 @@ def test_dual_read_returns_legacy_and_records_redacted_deltas() -> None:
 
 
 def test_dual_read_fails_open_to_legacy_when_vnext_errors() -> None:
-    service = ShadowReadService()
+    service = ShadowReadService(reflection_service=_reflection_service())
     legacy = [{"memory_id": "memory-1", "tenant_id": "tenant-1"}]
 
     result = service.dual_read(
@@ -63,7 +71,7 @@ def test_dual_read_fails_open_to_legacy_when_vnext_errors() -> None:
 
 
 def test_dual_read_detects_policy_and_forget_leaks() -> None:
-    service = ShadowReadService()
+    service = ShadowReadService(reflection_service=_reflection_service())
     result = service.dual_read(
         _request(),
         legacy_reader=lambda request: [],

@@ -215,6 +215,12 @@ class CanonicalWriteService:
         long_term_result = None
         receipt = None
         if long_term is not None:
+            if self.formation_mode != "authority":
+                raise ValueError(
+                    "long_term writes through the canonical event path are only "
+                    "allowed in formation_mode='authority'; use write_authority for "
+                    "explicit authority mutations"
+                )
             long_term_result, receipt = self._write_long_term(
                 event, long_term, action=long_term_action
             )
@@ -435,7 +441,7 @@ class CanonicalWriteService:
                 legacy_memory,
                 action=action or self._memory_action(validation.existing, envelope),
                 provenance=self._provenance(event),
-                skip_write_gate=True,
+                skip_write_gate=False,
             )
         else:
             repository.save(envelope)

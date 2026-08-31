@@ -5,7 +5,10 @@ from pathlib import Path
 import pytest
 
 from memoryhub.application.candidate_service import CandidateService
-from memoryhub.application.reflection_service import ReflectionService
+from memoryhub.application.reflection_service import (
+    DeterministicReflectionModel,
+    ReflectionService,
+)
 from memoryhub.core.reflection.schema import ReflectionInput
 from memoryhub.domain.candidate import normalize_claim_key
 from memoryhub.domain.contracts import (
@@ -166,7 +169,7 @@ def test_normalize_claim_key_is_stable_and_case_insensitive() -> None:
 def test_reflection_output_flows_through_candidate_service_without_authority(
     service: CandidateService,
 ) -> None:
-    reflection = ReflectionService()
+    reflection = ReflectionService(model=DeterministicReflectionModel())
     candidate = reflection.run(
         ReflectionInput(
             tenant_id="tenant-a",

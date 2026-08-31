@@ -198,7 +198,6 @@ async def write_canonical_events(
         episode_event = _pop_episode_event(event_data)
         episode_snapshot = _pop_episode_snapshot(event_data)
         checkpoint = _pop_checkpoint(event_data)
-        long_term = _pop_long_term(event_data)
 
         # Re-validate after payload extraction so the event remains clean.
         event_contract = MemoryEventContract.model_validate(event_data)
@@ -212,7 +211,6 @@ async def write_canonical_events(
                 episode_event=episode_event,
                 episode_snapshot=episode_snapshot,
                 checkpoint=checkpoint,
-                long_term=long_term,
             )
         except Exception as exc:
             raise _canonical_error(
@@ -238,8 +236,9 @@ async def write_canonical_events(
         ):
             # Propagate the task_id for callers that only wrote working state.
             pass
-        if result.long_term is not None:
-            memory_ids.append(result.long_term.memory_id)
+        # The /events endpoint is the Formation path; Authority mutations are not
+        # accepted here.  Long-term memory_ids only come from reflected/promoted
+        # Candidates in authority mode, never from a hidden payload field.
         if result.reflection_task is not None:
             candidate_ids.extend(result.reflection_task.candidate_ids)
             memory_ids.extend(result.reflection_task.memory_ids)

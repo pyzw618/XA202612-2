@@ -17,6 +17,7 @@ from memoryhub.application.formation_shadow import (
     FormationShadowService,
     ShadowComparisonReport,
 )
+from memoryhub.application.reflection_service import ReflectionService
 from memoryhub.application.rollout_service import RolloutController
 from memoryhub.observability.trace_models import TraceSpan, TraceSpanKind
 from memoryhub.observability.trace_policy import TraceCategory
@@ -118,8 +119,18 @@ class ShadowReadService:
         *,
         formation_shadow: FormationShadowService | None = None,
         trace_store: TraceStore | None = None,
+        reflection_service: ReflectionService | None = None,
     ) -> None:
-        self.formation_shadow = formation_shadow or FormationShadowService()
+        if formation_shadow is None and reflection_service is None:
+            raise TypeError(
+                "ShadowReadService requires an explicit reflection_service "
+                "(or a pre-built FormationShadowService)"
+            )
+        self.formation_shadow = (
+            formation_shadow
+            if formation_shadow is not None
+            else FormationShadowService(reflection_service=reflection_service)
+        )
         self.trace_store = trace_store or TraceStore()
         self.report = VNextShadowReport()
 

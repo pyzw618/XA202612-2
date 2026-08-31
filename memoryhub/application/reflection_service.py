@@ -197,7 +197,13 @@ class ReflectionService:
         max_retries: int = 2,
         prompt_version: str = PROMPT_VERSION,
     ) -> None:
-        self.model = model or DeterministicReflectionModel()
+        if model is None:
+            raise TypeError(
+                "ReflectionService requires an explicit model; "
+                "use StructuredReflectionModel(<configured llm>) in production "
+                "or DeterministicReflectionModel()/FakeReflectionModel() in tests"
+            )
+        self.model = model
         self.max_retries = max_retries
         self.prompt_version = prompt_version
 

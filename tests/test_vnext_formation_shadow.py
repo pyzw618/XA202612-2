@@ -8,12 +8,20 @@ from memoryhub.application.formation_shadow import (
     InMemoryCandidateRepository,
     LegacyMemoryStub,
 )
+from memoryhub.application.reflection_service import (
+    DeterministicReflectionModel,
+    ReflectionService,
+)
 from memoryhub.domain.contracts import (
     MemoryEventContract,
     MemoryScope,
 )
 from memoryhub.observability.trace_models import TraceSpanKind
 from memoryhub.observability.trace_store import TraceStore
+
+
+def _reflection_service() -> ReflectionService:
+    return ReflectionService(model=DeterministicReflectionModel())
 
 
 def _event(
@@ -44,7 +52,7 @@ def _event(
 
 def test_shadow_runs_vnext_and_legacy_without_active_write() -> None:
     store = TraceStore()
-    service = FormationShadowService(trace_store=store)
+    service = FormationShadowService(reflection_service=_reflection_service(), trace_store=store)
     event = _event("event-shadow-1", "This time use DOCX")
 
     report = service.compare_event(
@@ -61,7 +69,7 @@ def test_shadow_runs_vnext_and_legacy_without_active_write() -> None:
 
 
 def test_shadow_flags_premature_legacy_promotion() -> None:
-    service = FormationShadowService()
+    service = FormationShadowService(reflection_service=_reflection_service())
     event = _event("event-shadow-2", "Use DOCX for all reports")
 
     report = service.compare_event(
@@ -75,7 +83,7 @@ def test_shadow_flags_premature_legacy_promotion() -> None:
 
 
 def test_repeated_evidence_reduces_premature_promotion() -> None:
-    service = FormationShadowService()
+    service = FormationShadowService(reflection_service=_reflection_service())
     event1 = _event(
         "event-shadow-3a",
         "Project-A formal report must use DOCX.",
@@ -104,7 +112,7 @@ def test_repeated_evidence_reduces_premature_promotion() -> None:
 
 
 def test_scope_and_type_mismatches_are_reported() -> None:
-    service = FormationShadowService()
+    service = FormationShadowService(reflection_service=_reflection_service())
     event = _event(
         "event-shadow-4",
         "Fix the report export by restarting the exporter.",
@@ -124,7 +132,7 @@ def test_scope_and_type_mismatches_are_reported() -> None:
 
 def test_trace_store_records_redacted_formation_chain() -> None:
     store = TraceStore()
-    service = FormationShadowService(trace_store=store)
+    service = FormationShadowService(reflection_service=_reflection_service(), trace_store=store)
     event = _event("event-shadow-5", "Use Markdown")
 
     service.compare_event(
@@ -197,7 +205,10 @@ def test_custom_legacy_adapter_can_be_injected() -> None:
                 )
             ]
 
-    service = FormationShadowService(legacy_adapter=CustomAdapter())
+    service = FormationShadowService(
+        reflection_service=_reflection_service(),
+        legacy_adapter=CustomAdapter(),
+    )
     event = _event("event-shadow-6", "Use DOCX")
     report = service.compare_event(event, episode_id="episode-shadow-6")
     assert report.legacy_results[0]["memory_type"] == "EPISODIC"
@@ -206,7 +217,7 @@ def test_custom_legacy_adapter_can_be_injected() -> None:
 
 def test_s2_gate_docx_forms_local_candidate_not_global() -> None:
     """S2 Gate: 'This time use DOCX' only forms a PROJECT Candidate, not GLOBAL."""
-    service = FormationShadowService()
+    service = FormationShadowService(reflection_service=_reflection_service())
     event = _event(
         "event-shadow-gate-docx",
         "This time please use DOCX for Project-A reports.",
@@ -221,7 +232,7 @@ def test_s2_gate_docx_forms_local_candidate_not_global() -> None:
 
 def test_s2_gate_repeated_evidence_promotes_with_reason_codes() -> None:
     """S2 Gate: multiple independent tasks with clear evidence promote and explain."""
-    service = FormationShadowService()
+    service = FormationShadowService(reflection_service=_reflection_service())
     event1 = _event(
         "event-shadow-gate-1",
         "Project-A formal report must use DOCX.",
@@ -245,7 +256,7 @@ def test_s2_gate_repeated_evidence_promotes_with_reason_codes() -> None:
 def test_s2_gate_global_markdown_and_project_docx_coexist() -> None:
     """S2 Gate: GLOBAL Markdown and PROJECT DOCX coexist without overwrite."""
     store = TraceStore()
-    service = FormationShadowService(trace_store=store)
+    service = FormationShadowService(reflection_service=_reflection_service(), trace_store=store)
     events = [
         _event(
             "event-shadow-gate-md",
@@ -305,7 +316,7 @@ def test_s2_gate_global_markdown_and_project_docx_coexist() -> None:
 
 def test_s2_gate_repair_forms_procedural_candidate() -> None:
     """S2 Gate: two successful repairs form a PROCEDURAL candidate under review."""
-    service = FormationShadowService()
+    service = FormationShadowService(reflection_service=_reflection_service())
     event1 = _event(
         "event-shadow-gate-proc-1",
         "Fix report export by restarting the exporter.",
@@ -332,7 +343,7 @@ def test_s2_gate_repair_forms_procedural_candidate() -> None:
 
 def test_s2_gate_decisions_are_explainable_by_reason_codes() -> None:
     """S2 Gate: every consolidation decision carries reason codes."""
-    service = FormationShadowService()
+    service = FormationShadowService(reflection_service=_reflection_service())
     for text in [
         "Project-A formal report must use DOCX.",
         "Fix report export by restarting the exporter.",

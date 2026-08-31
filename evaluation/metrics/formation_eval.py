@@ -11,8 +11,16 @@ from memoryhub.application.formation_shadow import (
     DeterministicLegacyExtractionAdapter,
     FormationShadowService,
 )
+from memoryhub.application.reflection_service import (
+    DeterministicReflectionModel,
+    ReflectionService,
+)
 from memoryhub.domain.contracts import MemoryEventContract
 from memoryhub.observability.trace_store import TraceStore
+
+
+def _reflection_service() -> ReflectionService:
+    return ReflectionService(model=DeterministicReflectionModel())
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,7 +183,10 @@ class FormationEvaluator:
 
     def _evaluate_samples(self, path: Path) -> list[SampleResult]:
         dataset = json.loads(path.read_text(encoding="utf-8"))
-        service = FormationShadowService(legacy_adapter=self._legacy_adapter)
+        service = FormationShadowService(
+            legacy_adapter=self._legacy_adapter,
+            reflection_service=_reflection_service(),
+        )
         results: list[SampleResult] = []
         for sample in dataset.get("samples", []):
             event = MemoryEventContract.model_validate(sample["event"])
@@ -209,6 +220,7 @@ class FormationEvaluator:
             service = FormationShadowService(
                 legacy_adapter=self._legacy_adapter,
                 trace_store=trace_store,
+                reflection_service=_reflection_service(),
             )
             last_report = None
             for item in pair["events"]:

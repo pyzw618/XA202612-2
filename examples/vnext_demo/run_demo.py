@@ -30,6 +30,10 @@ from memoryhub.application.episode_service import EpisodeService
 from memoryhub.application.event_gateway import EventGateway
 from memoryhub.application.forget_service import ForgetService
 from memoryhub.application.formation_worker import FormationWorker
+from memoryhub.application.reflection_service import (
+    DeterministicReflectionModel,
+    ReflectionService,
+)
 from memoryhub.application.retrieval_service import RetrievalService
 from memoryhub.application.rollout_service import RolloutController
 from memoryhub.application.shadow_read_service import RolloutReadService, ShadowReadService
@@ -175,6 +179,7 @@ def _make_runtime(
         event_repository=EventRepository(db),
         canonical_write_service=canonical,
         mode=formation_mode,
+        reflection_service=ReflectionService(model=DeterministicReflectionModel()),
     )
     retry = ExtractionRetryService(
         task_repo=tasks,
@@ -234,7 +239,11 @@ def _make_runtime(
     )
     app.state.rollout_controller = rollout
     app.state.rollout_read_service = RolloutReadService(
-        controller=rollout, shadow_read=ShadowReadService(trace_store=trace_store)
+        controller=rollout,
+        shadow_read=ShadowReadService(
+            trace_store=trace_store,
+            reflection_service=ReflectionService(model=DeterministicReflectionModel()),
+        ),
     )
     app.state.user_rule_identity_resolver = None
     app.include_router(vnext_router)

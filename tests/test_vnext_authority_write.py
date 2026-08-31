@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from memoryhub.adapter.schemas import MemoryWriteReceipt
 from memoryhub.application.canonical_write import CanonicalWriteService
 from memoryhub.application.episode_service import EpisodeService
@@ -33,6 +35,7 @@ from memoryhub.storage.models import (
     EventRow,
     ExtractionTaskRow,
     IdempotencyRecordRow,
+    KnowledgeRow,
     MemoryEvidenceRow,
     MemoryLineageRow,
     MemoryProjectionOutboxRow,
@@ -41,13 +44,17 @@ from memoryhub.storage.models import (
 from memoryhub.storage.vnext_repositories import EpisodeRepository, WorkingStateRepository
 
 ROOT = Path(__file__).parents[1]
-DB_PATH = ROOT / "evaluation" / "results" / "vnext_authority_write_test.db"
+DB_BASE = ROOT / "evaluation" / "results" / "vnext_authority_write_test"
+_db_counter = 0
 
 
 def _db() -> Database:
-    for suffix in ("", "-wal", "-shm"):
-        DB_PATH.with_name(DB_PATH.name + suffix).unlink(missing_ok=True)
-    db = Database(str(DB_PATH))
+    import time
+
+    global _db_counter
+    _db_counter += 1
+    db_path = DB_BASE.parent / f"{DB_BASE.name}_{int(time.time() * 1000)}_{_db_counter}.db"
+    db = Database(str(db_path))
     db.init_schema()
     return db
 
@@ -242,6 +249,7 @@ def test_canonical_write_commits_task_state_reflection_and_long_term_authority()
         episode_service=episodes,
         authority_facade=facade,
         memory_write_service=writer,
+        formation_mode="authority",
     )
     snapshot = WorkingSnapshot(
         tenant_id="tenant-a",
@@ -320,4 +328,103 @@ def test_canonical_write_commits_task_state_reflection_and_long_term_authority()
     with db.session() as session:
         assert session.query(ExtractionTaskRow).count() == 1
         assert session.query(MemoryEvidenceRow).count() == 1
+    db.close()
+
+
+def _candidate_only_service(db: Database) -> CanonicalWriteService:
+    pref_repo = PreferenceRepository(db)
+    know_repo = KnowledgeRepository(db)
+    authority = AuthorityRepository(
+        db, preference_repository=pref_repo, knowledge_repository=know_repo
+    )
+    facade = LongTermAuthorityFacade(authority)
+    writer = MemoryWriteService(
+        pref_repo=pref_repo,
+        know_repo=know_repo,
+        project_immediately=False,
+    )
+    return CanonicalWriteService(
+        db,
+        event_gateway=EventGateway(db, policy=lambda event: event),
+        working_service=WorkingService(WorkingStateRepository(db)),
+        episode_service=EpisodeService(EpisodeRepository(db)),
+        authority_facade=facade,
+        memory_write_service=writer,
+        formation_mode="candidate-only",
+    )
+
+
+def test_candidate_only_rejects_long_term_payload() -> None:
+    """candidate-only + _long_term → Authority is not written and Formation fails fast."""
+    db = _db()
+    service = _candidate_only_service(db)
+
+    with pytest.raises(ValueError, match="long_term writes"):
+        service.write(_event(), long_term=_envelope())
+
+    with db.session() as session:
+        assert session.query(PreferenceRow).count() == 0
+        assert session.query(KnowledgeRow).count() == 0
+    db.close()
+
+
+def test_candidate_only_normal_formation_creates_candidate_not_authority() -> None:
+    """Normal candidate formation creates a Candidate but never touches Authority."""
+    db = _db()
+    from memoryhub.application.formation_worker import FormationWorker
+    from memoryhub.application.reflection_service import (
+        DeterministicReflectionModel,
+        ReflectionService,
+    )
+    from memoryhub.core.ingestion.retry import ExtractionRetryService
+    from memoryhub.storage.database import EventRepository
+    from memoryhub.storage.vnext_repositories import CandidateRepository
+
+    service = _candidate_only_service(db)
+    tasks = service.extraction_tasks
+    worker = FormationWorker(
+        db,
+        task_repository=tasks,
+        event_repository=EventRepository(db),
+        canonical_write_service=service,
+        mode="candidate-only",
+        reflection_service=ReflectionService(
+            model=DeterministicReflectionModel(), max_retries=0
+        ),
+    )
+    retry = ExtractionRetryService(
+        task_repo=tasks,
+        event_repo=EventRepository(db),
+        executor=object(),
+        vnext_executor=worker,
+    )
+
+    event = _event("event-candidate-formation")
+    result = service.write(event)
+    assert result.reflection_task is not None
+
+    run = retry.run_due(user_id=event.user_id)
+    assert run.succeeded == 1
+
+    with db.session() as session:
+        assert session.query(PreferenceRow).count() == 0
+        assert session.query(KnowledgeRow).count() == 0
+        candidates = CandidateRepository(db).list_for_review(
+            tenant_id=event.tenant_id, user_id=event.user_id
+        )
+        assert len(candidates) == 1
+    db.close()
+
+
+def test_explicit_authority_writer_routes_through_safety_gate() -> None:
+    """The separated write_authority interface still commits Authority in any mode."""
+    db = _db()
+    service = _candidate_only_service(db)
+
+    envelope, receipt = service.write_authority(_event(), _envelope())
+    assert envelope.memory_id == "pref-v1"
+    assert isinstance(receipt, MemoryWriteReceipt)
+
+    with db.session() as session:
+        assert session.query(PreferenceRow).count() == 1
     db.close()

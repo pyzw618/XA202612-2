@@ -1016,3 +1016,181 @@ None
 ### Next Batch Notes
 
 Stage 2 开始前必须重新执行 Codebase Reconnaissance，阅读 VNEXT_PLAN.md、stage2-retrieval.md 与 PROGRESS.md。当前 Formation 链路已完成，不要回退或修改 Formation 组件。
+
+
+---
+
+## Stage 1 Independent Review Repair
+
+### Status
+
+```text
+DONE
+```
+
+### Objectives
+
+修复 Stage 1 Independent Review 中标记的三个 P1：
+
+1. Repair-1：关闭 vNext `/events` 通过 `_long_term` payload 字段直接写入 Long-Term Authority 的绕过路径。
+2. Repair-2：移除 production/runtime path 中 `ReflectionService()` / `FormationWorker()` 的隐式 deterministic fallback。
+3. Repair-3：增加使用 configured LLM（FakeConfiguredLLMClient）的 Formation 端到端组件测试。
+
+### Reconnaissance Findings
+
+- `CanonicalWriteService.write()` 接受 `long_term` 参数，并在 `formation_mode=candidate-only` 时仍可写入 Authority。
+- `vnext_api.py` 的 `/events` endpoint 通过 `_pop_long_term()` 从 payload 中解析 `_long_term`，为绕过路径的入口。
+- `_write_long_term()` 调用 `memory_write_service.upsert_memory(..., skip_write_gate=True)`，绕过 Safety Write Gate。
+- `ReflectionService.__init__` 默认 `model or DeterministicReflectionModel()`，`FormationWorker` 默认 `reflection_service or ReflectionService()`，`FormationShadowService` 与 `ShadowReadService` 也存在同样隐式 fallback。
+- Stage 1 已经通过 deterministic model 验证 Formation 链路，但缺少用 `StructuredReflectionModel` + fake LLM client 的端到端组件测试。
+
+### Changes
+
+- Repair-1：
+  - `CanonicalWriteService.write()` 在 `formation_mode != "authority"` 且收到 `long_term` 时立即抛出 `ValueError`，fail fast。
+  - `CanonicalWriteService._write_long_term()` 将 `skip_write_gate=True` 改为 `skip_write_gate=False`，让 Authority 写入经过 Safety Write Gate。
+  - `vnext_api.py` `/events` endpoint 移除 `_long_term` 的解析与传递，响应中不再返回直接 Authority memory_ids。
+- Repair-2：
+  - `ReflectionService.__init__` 要求显式传入 `model`，否则抛出 `TypeError`。
+  - `FormationWorker.__init__` 要求显式传入 `reflection_service`，否则抛出 `TypeError`。
+  - `FormationShadowService.__init__` 要求显式传入 `reflection_service`，否则抛出 `TypeError`。
+  - `ShadowReadService.__init__` 要求显式传入 `reflection_service` 或预构建的 `FormationShadowService`。
+  - `memoryhub/app.py` 提前创建 `app.state.reflection_service`（`StructuredReflectionModel` 包装配置的 `OpenAIClient`），并显式注入 `ShadowReadService` 与 `FormationWorker`。
+  - `examples/vnext_demo/run_demo.py`、`evaluation/run_vnext_shadow.py`、`evaluation/metrics/formation_eval.py` 显式注入 deterministic reflection_service。
+  - 更新所有测试，显式注入 `DeterministicReflectionModel` 或 fake model；不再允许 `ReflectionService()` / `FormationWorker()` 静默走 deterministic。
+- Repair-3：
+  - 新增 `tests/test_vnext_formation_configured_llm.py`。
+  - 实现 `FakeConfiguredLLMClient(BaseLLMClient)`，替代最底层外部模型请求。
+  - 使用生产相同调用链：`CanonicalWriteService -> Boundary -> FormationWorker -> ReflectionService -> StructuredReflectionModel -> FakeConfiguredLLMClient`。
+  - 覆盖 Success、Invalid Output、Provider Failure 三类场景，验证 Candidate 创建/不创建、Authority 不写入、retry 行为保留。
+- 测试修正：
+  - `tests/test_vnext_authority_write.py` 增加 candidate-only 拒绝 long_term、显式 `write_authority` 仍可用、normal formation 创建 Candidate 不写 Authority 的测试。
+  - `tests/test_vnext_entrypoints.py` 移除 `_long_term`，断言 `/events` 不再返回 Authority memory_ids。
+  - `tests/test_vnext_p0_flow.py` 移除 P0-01/P0-06/P0-07 中的 `_long_term` payload。
+
+### Files Touched
+
+```text
+memoryhub/application/canonical_write.py
+memoryhub/adapter/vnext_api.py
+memoryhub/application/reflection_service.py
+memoryhub/application/formation_worker.py
+memoryhub/application/formation_shadow.py
+memoryhub/application/shadow_read_service.py
+memoryhub/app.py
+examples/vnext_demo/run_demo.py
+evaluation/run_vnext_shadow.py
+evaluation/metrics/formation_eval.py
+tests/test_vnext_reflection.py
+tests/test_vnext_formation_worker.py
+tests/test_vnext_candidate_service.py
+tests/test_vnext_formation_shadow.py
+tests/test_vnext_shadow_read.py
+tests/test_vnext_s6_02_rollout.py
+tests/test_vnext_authority_write.py
+tests/test_vnext_entrypoints.py
+tests/test_vnext_p0_flow.py
+tests/test_vnext_formation_configured_llm.py
+docs/vnext/PROGRESS.md
+```
+
+### Behavior Before
+
+```text
+candidate-only mode + /events payload._long_term
+→ CanonicalWriteService.write(long_term=...)
+→ _write_long_term(skip_write_gate=True)
+→ Authority written (bypass)
+
+ReflectionService()
+→ DeterministicReflectionModel (silent fallback)
+
+FormationWorker(reflection_service=None)
+→ ReflectionService()
+→ DeterministicReflectionModel (silent fallback)
+```
+
+### Behavior After
+
+```text
+candidate-only mode + /events payload._long_term
+→ /events ignores _long_term
+→ CanonicalWriteService.write() raises ValueError if long_term supplied
+→ Authority not written
+
+Explicit Authority write
+→ CanonicalWriteService.write_authority()
+→ _write_long_term(skip_write_gate=False)
+→ Safety Write Gate
+→ Authority
+
+ReflectionService(model=StructuredReflectionModel(<configured llm>))
+→ FormationWorker(reflection_service=...)
+→ production Formation path
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_vnext_reflection.py` | PASS (6) |
+| `tests/test_vnext_formation_worker.py` | PASS (5) |
+| `tests/test_vnext_stage1_scenarios.py` | PASS (6) |
+| `tests/test_vnext_boundary_driven_formation.py` | PASS (6) |
+| `tests/test_vnext_episode_enrichment.py` | PASS (3) |
+| `tests/test_vnext_authority_write.py` | PASS (14) |
+| `tests/test_vnext_entrypoints.py` | PASS (9; 3 deselected retrieval fixtures) |
+| `tests/test_vnext_p0_flow.py` | PASS (8) |
+| `tests/test_vnext_candidate_service.py` | PASS (10) |
+| `tests/test_vnext_shadow_read.py` | PASS (3) |
+| `tests/test_vnext_s6_02_rollout.py` | PASS (3; 1 deselected shadow fixture) |
+| `tests/test_no_production_write_bypass.py` | PASS (5) |
+| `tests/test_vnext_formation_configured_llm.py` | PASS (3) |
+| Combined targeted regression suite | PASS (69; 4 deselected) |
+| Ruff on changed source/tests | PASS |
+
+### Evidence
+
+- `test_candidate_only_rejects_long_term_payload` 证明 candidate-only + `long_term` 会抛错，Authority 表无记录。
+- `test_candidate_only_normal_formation_creates_candidate_not_authority` 证明正常 Formation 产生 Candidate，Authority 表无记录。
+- `test_explicit_authority_writer_routes_through_safety_gate` 证明 `write_authority` 显式接口仍可用。
+- `tests/test_vnext_formation_configured_llm.py` 三个测试分别验证：合法 structured response 产生 Candidate、非法 schema 不创建 Candidate、LLM 异常不创建 Candidate 且 retry 行为保留。
+- `tests/test_vnext_reflection.py` 验证 `ReflectionService()` 无显式 model 时抛 `TypeError`；显式 `StructuredReflectionModel` 调用 configured LLM。
+- `app.py` 中 `app.state.reflection_service` 创建后同时注入 `ShadowReadService` 与 `FormationWorker`，生产路径无 deterministic fallback。
+
+### Regression
+
+```text
+Legacy: no Legacy source/route/extractor changed; P0 flow and write-bypass tests passed.
+Safety: Authority write now routes through Safety Write Gate; candidate-only bypass closed.
+candidate-only: Formation worker regression passed; Authority promotion logic unchanged.
+Other: 69 targeted regression tests passed; Ruff passed.
+```
+
+### Remaining Risks
+
+- `tests/test_vnext_formation_shadow.py` 全部 11 个用例失败：pre-existing `InMemoryCandidateRepository.create()` 不接受 `confidence/utility/stability` 关键字参数。在 Repair 之前的 HEAD 已失败，与本次修改无关。
+- `tests/test_vnext_entrypoints.py::test_vnext_search_returns_consistent_ids_and_trace` / `test_vnext_context_returns_same_memories_as_search` / `test_legacy_search_delegates_to_vnext_retrieval_service` 失败：fixture 未装配 `rollout_controller` / `rollout_read_service`。属于 Stage 2 retrieval fixture 问题，与本次修改无关。
+- `tests/test_vnext_s6_02_rollout.py::test_shadow_and_dual_read_return_legacy_only_and_redact_report` 失败：未传入 rollout_controller；与 Stage 2 rollout fixture 相关，与本次修改无关。
+- `OpenCode vNext endpoint 迁移` 与 `OpenCode 原始 Tool Trace 集成风险` 仅记录，本次未处理。
+- Stage 2 Retrieval / Candidate Promotion / Feedback / Utility / Rollout / Dashboard / Authority Schema 重构等明确不在本次范围内。
+
+### Decisions
+
+```text
+1. candidate-only /events path 禁止 Authority 写入；显式 Authority 写保留为 write_authority 并经过 Safety Gate。
+2. ReflectionService / FormationWorker / FormationShadowService / ShadowReadService 均要求显式 reflection_service，生产使用 StructuredReflectionModel + configured LLM。
+3. FakeConfiguredLLMClient 仅替换最底层 LLM 请求，保持上层 prompt/schema/validation/worker 链路不变。
+```
+
+### Not Done
+
+- Stage 2 Retrieval 实化。
+- Stage 3 Feedback 闭环。
+- Stage 4 Evaluation & Cutover。
+- FormationShadowService 的 pre-existing InMemoryCandidateRepository 兼容性修复。
+- Stage 2 retrieval/rollout fixture 修复。
+
+### Next Batch Notes
+
+本次 Repair 已完成并 STOP。下一会话不应自动开始 Stage 2；如需继续，应重新执行 Codebase Reconnaissance 并阅读 `docs/vnext/stages/stage2-retrieval.md` 与 `PROGRESS.md`。

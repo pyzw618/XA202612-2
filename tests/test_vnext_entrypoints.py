@@ -55,7 +55,6 @@ def _event(
     episode_id = f"episode-{task_id}"
     payload: dict[str, Any] = {
         "instruction": "Use DOCX",
-        "_long_term": _long_term().model_dump(mode="json"),
     }
     if include_episode:
         payload["_episode_snapshot"] = _episode_snapshot(
@@ -186,7 +185,9 @@ def test_canonical_write_endpoint_creates_event_working_episode_and_memory() -> 
     assert len(body["event_ids"]) == 1
     assert body["episode_id"] == "episode-task-entry"
     assert body["working_state_version"] == 1
-    assert body["memory_ids"] == ["pref-entry"]
+    # The /events Formation path in candidate-only mode does not accept hidden
+    # _long_term payloads, so no Authority memory_id is returned directly.
+    assert body["memory_ids"] == []
 
     with db.session() as session:
         assert session.query(EventRow).count() == 1

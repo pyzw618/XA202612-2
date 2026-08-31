@@ -34,7 +34,7 @@ def reflection_input() -> ReflectionInput:
 def test_reflection_outputs_candidate_with_prompt_version_and_input_hash(
     reflection_input: ReflectionInput,
 ) -> None:
-    service = ReflectionService()
+    service = ReflectionService(model=DeterministicReflectionModel())
     candidate = service.run(reflection_input)
     assert isinstance(candidate, Candidate)
     assert candidate.memory_type is MemoryType.PREFERENCE
@@ -44,7 +44,7 @@ def test_reflection_outputs_candidate_with_prompt_version_and_input_hash(
 
 
 def test_reflection_records_model_and_prompt_metadata(reflection_input: ReflectionInput) -> None:
-    service = ReflectionService()
+    service = ReflectionService(model=DeterministicReflectionModel())
     candidate = service.run(reflection_input)
     # Candidate schema does not carry model_id/prompt_version directly; the
     # deterministic model is tested below to prove those fields are produced.

@@ -258,9 +258,15 @@ class FormationShadowService:
         consolidation_service: ConsolidationService | None = None,
         trace_store: TraceStore | None = None,
     ) -> None:
+        if reflection_service is None:
+            raise TypeError(
+                "FormationShadowService requires an explicit reflection_service; "
+                "use ReflectionService(StructuredReflectionModel(<configured llm>)) "
+                "in production or inject a deterministic/fake ReflectionService in tests"
+            )
         self._candidate_repo = InMemoryCandidateRepository()
         self._candidate_service = CandidateService(self._candidate_repo)
-        self._reflection_service = reflection_service or ReflectionService()
+        self._reflection_service = reflection_service
         self._legacy_adapter = legacy_adapter or DeterministicLegacyExtractionAdapter()
         self._consolidation_service = consolidation_service or ConsolidationService(
             authority_facade=None

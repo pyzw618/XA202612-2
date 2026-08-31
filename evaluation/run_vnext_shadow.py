@@ -7,6 +7,10 @@ import json
 from pathlib import Path
 
 from memoryhub.adapter.vnext_schemas import MemoryRetrievalRequest
+from memoryhub.application.reflection_service import (
+    DeterministicReflectionModel,
+    ReflectionService,
+)
 from memoryhub.application.shadow_read_service import ShadowReadService
 
 
@@ -17,7 +21,9 @@ def main(argv: list[str] | None = None) -> int:
         default="evaluation/results/vnext_shadow/shadow.json",
     )
     args = parser.parse_args(argv)
-    service = ShadowReadService()
+    service = ShadowReadService(
+        reflection_service=ReflectionService(model=DeterministicReflectionModel())
+    )
     request = MemoryRetrievalRequest(
         request_id="shadow-demo-request",
         tenant_id="tenant-demo",

@@ -191,7 +191,6 @@ def test_p0_01_start_report_with_constraints_creates_working_state() -> None:
                 pending_steps=["draft", "review"],
                 constraints=["format: DOCX"],
             ).model_dump(mode="json"),
-            "_long_term": _long_term("pref-p0-01").model_dump(mode="json"),
         },
     )
 
@@ -520,7 +519,6 @@ def test_p0_06_client_and_rest_produce_same_event_id() -> None:
         payload={
             "text": "multi-entrypoint consistency",
             "_working_snapshot": _working_snapshot(task_id).model_dump(mode="json"),
-            "_long_term": _long_term("pref-p0-06").model_dump(mode="json"),
         },
     )
 
@@ -578,7 +576,6 @@ def test_p0_07_idempotent_event_does_not_duplicate_rows() -> None:
         payload={
             "text": "idempotent event",
             "_working_snapshot": _working_snapshot(task_id).model_dump(mode="json"),
-            "_long_term": _long_term("pref-p0-07").model_dump(mode="json"),
         },
     )
     payload = {

@@ -650,15 +650,27 @@ def create_app(
         # One application-scoped controller and one shadow service own every
         # production read decision.  Their state is rollout-only and durable;
         # Authority records are never changed by rollback.
+        from memoryhub.application.reflection_service import (
+            ReflectionService,
+            StructuredReflectionModel,
+        )
         from memoryhub.application.rollout_service import RolloutController
         from memoryhub.application.shadow_read_service import (
             RolloutReadService,
             ShadowReadService,
         )
 
+        # Production/runtime reflection model is created once and shared by the
+        # Formation worker and the shadow dual-read path so neither path can fall
+        # back to a deterministic model.
+        app.state.reflection_service = ReflectionService(
+            model=StructuredReflectionModel(app.state.llm_client)
+        )
+
         app.state.rollout_controller = RolloutController(config.vnext, db=db)
         app.state.shadow_read_service = ShadowReadService(
-            trace_store=app.state.trace_store
+            trace_store=app.state.trace_store,
+            reflection_service=app.state.reflection_service,
         )
         app.state.rollout_read_service = RolloutReadService(
             controller=app.state.rollout_controller,
@@ -725,14 +737,7 @@ def create_app(
             knowledge_handler=knowledge_handler,
         )
         from memoryhub.application.formation_worker import FormationWorker
-        from memoryhub.application.reflection_service import (
-            ReflectionService,
-            StructuredReflectionModel,
-        )
 
-        app.state.reflection_service = ReflectionService(
-            model=StructuredReflectionModel(app.state.llm_client)
-        )
         app.state.formation_worker = FormationWorker(
             db,
             task_repository=extraction_task_repo,

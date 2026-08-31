@@ -8,7 +8,11 @@ from memoryhub.application.canonical_write import CanonicalWriteService
 from memoryhub.application.episode_service import EpisodeService
 from memoryhub.application.event_gateway import EventGateway
 from memoryhub.application.formation_worker import FormationWorker
-from memoryhub.application.reflection_service import ReflectionModel, ReflectionService
+from memoryhub.application.reflection_service import (
+    DeterministicReflectionModel,
+    ReflectionModel,
+    ReflectionService,
+)
 from memoryhub.application.working_service import WorkingService
 from memoryhub.core.ingestion.retry import ExtractionRetryService
 from memoryhub.core.memory_write import MemoryWriteService
@@ -48,7 +52,15 @@ def _event(event_id: str, task_id: str, text: str, **payload) -> MemoryEventCont
     )
 
 
-def _stack(*, mode: str = "candidate-only", reflection_service: ReflectionService | None = None):
+def _stack(
+    *,
+    mode: str = "candidate-only",
+    reflection_service: ReflectionService | None = None,
+):
+    if reflection_service is None:
+        reflection_service = ReflectionService(
+            model=DeterministicReflectionModel(), max_retries=0
+        )
     db_path = Path(__file__).parents[1] / "evaluation" / "results" / (
         f"vnext_formation_worker_{mode}_{time.time_ns()}.db"
     )

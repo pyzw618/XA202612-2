@@ -2,10 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from memoryhub.application.reflection_service import (
+    DeterministicReflectionModel,
+    ReflectionService,
+)
 from memoryhub.application.rollout_service import RolloutController, RolloutGateError
 from memoryhub.application.shadow_read_service import RolloutReadService, ShadowReadService
 from memoryhub.config import VNextConfig
 from memoryhub.storage.database import Database
+
+
+def _reflection_service() -> ReflectionService:
+    return ReflectionService(model=DeterministicReflectionModel())
 
 
 @dataclass
@@ -20,7 +28,8 @@ def test_shadow_and_dual_read_return_legacy_only_and_redact_report() -> None:
     for mode in ("shadow", "dual-read"):
         controller = RolloutController(VNextConfig(mode=mode))
         service = RolloutReadService(
-            controller=controller, shadow_read=ShadowReadService()
+            controller=controller,
+            shadow_read=ShadowReadService(reflection_service=_reflection_service()),
         )
         result = service.read(
             request,

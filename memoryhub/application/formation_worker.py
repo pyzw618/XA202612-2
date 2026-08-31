@@ -64,7 +64,13 @@ class FormationWorker:
         self.event_repository = event_repository
         self.canonical_write_service = canonical_write_service
         self.mode = mode
-        self.reflection = reflection_service or ReflectionService()
+        if reflection_service is None:
+            raise TypeError(
+                "FormationWorker requires an explicit reflection_service; "
+                "use ReflectionService(StructuredReflectionModel(<configured llm>)) "
+                "in production or inject a deterministic/fake ReflectionService in tests"
+            )
+        self.reflection = reflection_service
         self.candidates = CandidateRepository(db)
         self.candidate_service = CandidateService(self.candidates)
         self.evidence = EvidenceRepository(db)
