@@ -621,16 +621,20 @@ def create_app(
             db=db,
             policy=build_safety_policy(app.state.safety_gate),
         )
+        working_state_repository = WorkingStateRepository(db)
+        episode_repository = EpisodeRepository(db)
         app.state.canonical_write_service = CanonicalWriteService(
             db=db,
             event_gateway=event_gateway,
-            working_service=WorkingService(WorkingStateRepository(db)),
-            episode_service=EpisodeService(EpisodeRepository(db)),
+            working_service=WorkingService(working_state_repository),
+            episode_service=EpisodeService(episode_repository),
             extraction_tasks=extraction_task_repo,
             authority_facade=authority_facade,
             memory_write_service=app.state.memory_write_service,
             formation_mode=config.vnext.formation_mode,
         )
+        app.state.working_state_repository = working_state_repository
+        app.state.episode_repository = episode_repository
         app.state.episode_service = app.state.canonical_write_service.episode_service
 
         # vNext unified retrieval service: all read entrypoints delegate here.

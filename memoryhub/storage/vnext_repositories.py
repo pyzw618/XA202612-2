@@ -167,6 +167,33 @@ class WorkingStateRepository:
             )
             return self._view(row) if row is not None else None
 
+    def list_recent(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        session_id: str | None = None,
+        limit: int = 3,
+    ) -> list[WorkingStateView]:
+        """Most recently updated working states, optionally bound to one session.
+
+        Read-only fallback for retrieval when no task_id is supplied.  The
+        caller owns narrowing and capping; this query never returns more than
+        ``limit`` rows so historical states stay bounded.
+        """
+        with self.db.session() as session:
+            query = session.query(WorkingStateRow).filter_by(
+                tenant_id=tenant_id, user_id=user_id
+            )
+            if session_id:
+                query = query.filter_by(session_id=session_id)
+            rows = (
+                query.order_by(WorkingStateRow.updated_at.desc())
+                .limit(max(1, limit))
+                .all()
+            )
+            return [self._view(row) for row in rows]
+
     def compare_and_set(
         self,
         *,
@@ -288,6 +315,36 @@ class EpisodeRepository:
                 ).first()
             )
             return self._snapshot_view(row) if row is not None else None
+
+    def list_recent(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        session_id: str | None = None,
+        include_archived: bool = False,
+        limit: int = 5,
+    ) -> list[EpisodeSnapshotView]:
+        """Most recently updated episodes, optionally bound to one session.
+
+        Read-only retrieval fallback when no task_id is supplied.  ARCHIVED
+        episodes are excluded by default so context never surfaces retired
+        task history; the result count is bounded by ``limit``.
+        """
+        with self.db.session() as session:
+            query = session.query(TaskEpisodeRow).filter_by(
+                tenant_id=tenant_id, user_id=user_id
+            )
+            if session_id:
+                query = query.filter_by(session_id=session_id)
+            if not include_archived:
+                query = query.filter(TaskEpisodeRow.status != "ARCHIVED")
+            rows = (
+                query.order_by(TaskEpisodeRow.updated_at.desc())
+                .limit(max(1, limit))
+                .all()
+            )
+            return [self._snapshot_view(row) for row in rows]
 
     def append_event(
         self,

@@ -25,19 +25,21 @@ Batch 1 已完成。
 # 2. 当前总体状态
 
 ```text
-vNext Stage: Stage 1 — Formation 实化
+vNext Stage: Stage 2 — Retrieval 实化
 Status: IN PROGRESS
 
 Formation Mode:
-candidate-only
+candidate-only（Stage 1 已完成，保持不变）
 
 Current Target:
-Event
-→ Working State
-→ Episode
-→ Boundary
-→ Structured Reflection
-→ Candidate
+MemoryRetrievalRequest
+→ IntentRouter → RetrievalPlanner
+→ Channel Executors (working / episode / vector / keyword / metadata / authority)
+→ ReciprocalRankFusion → VNextReranker
+→ ScopeResolver → BudgetManager → ContextPayload
+
+Stage 2 已完成：
+Batch 1 — Working / Episode Executors
 ```
 
 ---
@@ -46,8 +48,8 @@ Event
 
 | Stage | 名称 | 状态 | 备注 |
 |---|---|---|---|
-| Stage 1 | Formation 实化 | IN PROGRESS | Batch 1 已完成；不进入下一 Batch |
-| Stage 2 | Retrieval 实化 | NOT STARTED | Stage 1 完成后开始 |
+| Stage 1 | Formation 实化 | DONE | 全部 5 个 Batch + Independent Review Repair 完成 |
+| Stage 2 | Retrieval 实化 | IN PROGRESS | Batch 1 完成；不进入下一 Batch |
 | Stage 3 | Feedback 闭环 | NOT STARTED | 暂不执行 |
 | Stage 4 | Evaluation & Cutover | NOT STARTED | 暂不执行 |
 
@@ -71,6 +73,18 @@ DONE
 | Batch 3 | Episode Enrichment | DONE | 2026-08-31 |
 | Batch 4 | Boundary-driven Formation | DONE | 2026-08-31 |
 | Batch 5 | Stage 1 Scenario Tests | DONE | 2026-09-01 |
+
+---
+
+# 4.1 Stage 2 Batch 状态
+
+| Batch | 任务 | 状态 | 最后更新 |
+|---|---|---|---|
+| Batch 1 | Working / Episode Executors | DONE | 2026-08-31 |
+| Batch 2 | Authority / Keyword / Vector Executors | NOT STARTED | — |
+| Batch 3 | Intent + Scope Propagation | NOT STARTED | — |
+| Batch 4 | Fusion / Rerank / Context Budget | NOT STARTED | — |
+| Batch 5 | Retrieval Scenario Tests & Legacy Comparison | NOT STARTED | — |
 
 ---
 
@@ -165,6 +179,38 @@ FormationWorker → ReflectionService → CandidateService.stage().
 candidate-only behavior:
 FormationWorker skips _promote() unless mode == authority; default config is
 candidate-only.
+```
+
+## 5.6 Retrieval（Stage 2 Batch 1 后基线）
+
+```text
+Retrieval pipeline (already existing, unchanged in Batch 1):
+IntentRouter (7 intents) → RetrievalPlanner (6 channels) → channel executors
+→ ReciprocalRankFusion → VNextReranker → ScopeResolver → BudgetManager
+→ ContextPayload；activation/retrieval_log/trace 落库。
+
+Channel executor contract:
+(request, plan, channel) -> list[RetrievedMemory]；缺少 executor 的 channel
+静默降级为空列表。
+
+Batch 1 后已注册的 executor:
+- working  ← WorkingStateRepository（exact task → session/recent fallback，限 3 条）
+- episode  ← EpisodeRepository（exact task → session/recent fallback，限 5 条，
+             ARCHIVED 默认排除，确定性 query relevance 排序）
+- vector   ← 仅当 state.retriever 已存在时注册
+
+已知装配顺序缺口（pre-existing，Batch 1 未修改）:
+app.py 中 RetrievalService 在 startup() 内先于 retriever 装配构建，
+build_channel_executors(app.state) 执行时 app.state.retriever 尚未赋值，
+因此真实 app 中 vector executor 实际不会注册（Stage 1 期间即如此，
+非 Batch 1 引入）。Batch 2 处理 vector/keyword/authority executor 时需一并
+修正装配顺序。
+
+Scope 现状:
+MemoryRetrievalRequest 无 project_id 字段；project scope 仅通过 scope_level
++ scope 表达。Working/Episode 结果 scope_level=TASK、scope=task_id。
+_search_request_from_vnext 仍硬编码 project_id=""/level="long"，
+Legacy Retriever 复用时的 scope 传递留给 Batch 3。
 ```
 
 ---
@@ -392,18 +438,23 @@ Temporary Workaround:
 # 11. 当前下一步
 
 ```text
-Stage 1 / Batch 5 DONE
+Stage 2 / Batch 1 DONE（Working / Episode Executors）
 
 Task:
-Start Stage 2 — Retrieval 实化
+Stage 2 Batch 2 — Authority / Keyword / Vector Executors
 
 Before coding:
 Read VNEXT_PLAN.md
-Read docs/vnext/stages/stage2-retrieval.md (if exists)
-Read PROGRESS.md
+Read docs/vnext/stages/stage2-retrieval.md §8（Batch 2）
+Read PROGRESS.md §5.6（Retrieval 基线）与 Batch 1 记录
 
-Then perform Codebase Reconnaissance only. Do not start Stage 2 implementation
-until the current reconnaissance is complete.
+Key context for Batch 2:
+- app.py 中 RetrievalService 装配早于 retriever 赋值，vector executor 目前
+  在真实 app 中不会注册；Batch 2 需一并修正装配顺序（pre-existing 缺口）。
+- keyword/metadata/authority channel 在 Planner 计划中 enabled 但缺 executor，
+  静默降级为空；Batch 2 落地后需验证 degraded_channels 语义。
+- _search_request_from_vnext 的 project_id=""/level="long" scope 丢失留给
+  Batch 3，本 Batch 不要提前修。
 ```
 
 ---
@@ -1194,3 +1245,187 @@ Other: 69 targeted regression tests passed; Ruff passed.
 ### Next Batch Notes
 
 本次 Repair 已完成并 STOP。下一会话不应自动开始 Stage 2；如需继续，应重新执行 Codebase Reconnaissance 并阅读 `docs/vnext/stages/stage2-retrieval.md` 与 `PROGRESS.md`。
+
+---
+
+## Stage 2 Batch 1 — Working / Episode Executors
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+为 RetrievalPlanner 的 working / episode channel 实装结构化 Channel Executor，
+使 CURRENT_STATE / TASK_HISTORY 读取真实 Working State 与 Task Episode 存储，
+不再退化为空结果或唯一依赖 legacy vector search。
+
+### Reconnaissance Findings
+
+- 当前真实实现：
+  - `RetrievalService` 管线（IntentRouter → Planner → executors → RRF → Reranker
+    → ScopeResolver → Budget）完整存在，但 `build_channel_executors` 只注册了
+    `vector` channel；CURRENT_STATE / TASK_HISTORY 在真实 app 中返回空候选
+    （completeness=NONE）。
+  - `WorkingStateRepository` / `EpisodeRepository` 已有 exact-key 读接口
+    （`get` / `get_by_task_id` / `list_events`），但缺少 session/recent 回退查询。
+  - `WorkingStateRow` / `TaskEpisodeRow` 只有 session_id，没有 project_id 列。
+- 与 stage 文档一致的部分：6 channel 定义、executor contract、缺失 executor
+  静默降级、RRF 保留 channel 归因均成立。
+- 与 stage 文档不一致的部分：
+  - Storage 无 project_id 列，working channel 的 project-scoped lookup 只能
+    留到 Batch 3（scope 传播）一并处理。
+  - `_search_request_from_vnext` 硬编码 `project_id=""` / `level="long"`，
+    Legacy Retriever 复用点的 scope 丢失属于 Batch 3 范围。
+- 复用的现有组件：`WorkingStateRepository` / `EpisodeRepository` /
+  `RetrievalService` 管线 / `_tokenize`（确定性 relevance）/ `SearchResult` 适配。
+- 实际影响范围：1 个 executor 文件重写、2 个只读查询新增、app.py 装配、1 个新测试文件。
+
+### Changes
+
+- `memoryhub/storage/vnext_repositories.py`：为 `WorkingStateRepository` 与
+  `EpisodeRepository` 各新增只读 `list_recent()`（session 过滤 + limit 上限；
+  Episode 默认排除 ARCHIVED）。
+- `memoryhub/adapter/retrieval_executor.py`：
+  - 新增 `build_working_executor`：exact task 匹配（score=1.0，match="task"），
+    否则 session/recent 回退（限 3 条，recency 衰减 0.1/名次，match="recent"）。
+  - 新增 `build_episode_executor`：exact task 匹配（score=1.0），否则
+    session/recent 回退（限 5 条，确定性 token-overlap relevance 排序，
+    recency 为 tiebreaker），携带最近 5 条 episode event 摘要。
+  - Working 结果还原全部结构化字段（goal/step/pending/completed/constraints/
+    entities/blockers/findings/failures/next_action），不经过 embedding。
+  - `build_channel_executors` 注册 working / episode（vector 保持原 getattr 逻辑）。
+- `memoryhub/app.py`：startup 中提升 `working_state_repository` /
+  `episode_repository` 到 app.state 并传入 `build_channel_executors`。
+- 新增 `tests/test_vnext_working_episode_executors.py`（11 个测试）。
+
+### Files Touched
+
+```text
+memoryhub/storage/vnext_repositories.py
+memoryhub/adapter/retrieval_executor.py
+memoryhub/app.py
+tests/test_vnext_working_episode_executors.py
+docs/vnext/PROGRESS.md
+```
+
+（核心源码 3 个文件，低于 ≤8 的限制。）
+
+### Behavior Before
+
+```text
+/api/memory/vnext/search (CURRENT_STATE, rollout mode=vnext)
+→ RetrievalPlanner enabled_channels=[working, metadata, authority]
+→ working/episode 无 executor → 空候选
+→ selected_memories=[]，completeness=NONE
+真实 app 中 build_channel_executors 实际注册 {} （retriever 赋值晚于装配，
+vector 也未注册，pre-existing）
+```
+
+### Behavior After
+
+```text
+/api/memory/vnext/search (CURRENT_STATE / TASK_HISTORY, rollout mode=vnext)
+→ RetrievalPlanner → working / episode executor
+→ WorkingStateRepository.get / list_recent（结构化读取，无 embedding）
+→ EpisodeRepository.get_by_task_id / list_recent + list_events（最近 5 条摘要）
+→ RetrievedMemory{layer=WORKING|EPISODE, scope_level=TASK, scope=task_id,
+   score_breakdown.channel=working|episode}
+→ RRF → Reranker → Scope → Budget → ContextPayload.relevant_memory_ids
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_vnext_working_episode_executors.py` | PASS (11) |
+| Retrieval framework subset（service/planner/intent/fusion/scope/budget） | PASS |
+| Stage 1 formation 链路 + P0 + write-bypass + contracts 回归 | PASS (138 合并) |
+| Ruff on changed source/tests | PASS |
+| `git diff --check` | PASS |
+| 已知失败基线（entrypoints 3 + s6_02 1 + formation_shadow 11 + memory_api 1） | 15 failed / 14 passed，与 Batch 1 之前一致 |
+
+### Evidence
+
+- `test_current_state_returns_exact_task_working_state` 证明 working channel
+  返回 `ws:` 结果，layer=WORKING、scope=TASK/task、match=task，且 content 还原
+  current_goal / current_step / pending_steps / next_action。
+- `test_task_history_returns_episode_with_key_events` 证明 episode channel
+  返回 `ep:` 结果并携带 episode event 摘要。
+- 隔离测试证明 working / episode 均按 (tenant_id, user_id) 严格隔离。
+- `test_retrieval_service_current_state_uses_working_channel` /
+  `test_retrieval_service_task_history_uses_episode_channel` 证明两个 channel
+  真实经过 RetrievalService 主链路（planner → executor → fusion → context）。
+- 真实 app factory 端到端 smoke（`with TestClient(app)` lifespan，rollout
+  mode=vnext）：`/events` 写入返回 working_state_version=1 → CURRENT_STATE
+  search 返回 `ws:working-...` 命中（channel=working，还原 goal/blockers，
+  completeness=FULL）→ boundary 事件返回 REFLECTION_PENDING → TASK_HISTORY
+  search 返回 `ep:episode-...` 命中（channel=episode，completeness=FULL）。
+  write → working → search 主链路真实打通。
+- `test_scenario_*` 与 P0/write-bypass 回归证明 Stage 1 Formation 与 Legacy
+  链路未被破坏。
+
+### Regression
+
+```text
+Legacy: 未修改 Legacy source/route/extractor；no-production-write-bypass 与
+P0 flow 测试通过。test_memory_api round-trip 500 为 pre-existing（git stash
+在干净工作树上复现确认）。
+Safety: 未修改 Safety policy / gate / payload masking。
+candidate-only: Formation 全链路回归通过；boundary 事件仍返回
+REFLECTION_PENDING；Authority promotion 未变。
+Other: 合并回归 138 passed；Ruff 与 git diff --check 干净。
+```
+
+### Remaining Risks
+
+- app.py 装配顺序缺口（pre-existing，非本 Batch 引入）：`RetrievalService`
+  在 startup() 内早于 `app.state.retriever` 赋值构建，因此真实 app 中 vector
+  executor 不会注册，long-term intent 的 vector channel 静默为空。Batch 2
+  落地 vector/keyword/authority executor 时需一并修正。
+- storage 无 project_id 列：working/episode 的 project-scoped lookup 无法在本
+  Batch 实现；project scope 语义留给 Batch 3。
+- `_search_request_from_vnext` 仍硬编码 `project_id=""` / `level="long"`：
+  Legacy Retriever 复用点的 Intent/Scope 丢失留给 Batch 3。
+- RECALLED activation status 尚未在 executor 中记录（现有 RetrievalService
+  落库逻辑未变）。
+- episode fallback 的 relevance 为确定性 token overlap（jieba 可用时更好），
+  无 jieba 环境下区分度下降但不破坏排序正确性（测试已兼容两种环境）。
+- legacy-mode smoke 中发现 `data/vector_index.faiss` 相关 FAISS 维度断言
+  500（`HybridRetriever` → `VectorStore.search`）；经 git stash 在 HEAD 上
+  复现确认为 pre-existing 环境问题（陈旧共享索引文件），与本 Batch 无关。
+
+### Decisions
+
+```text
+1. Working/Episode 结果使用合成 memory_id 前缀（ws: / ep:）+ source_ids 引用
+   底层 working_state_id / episode_id，避免与 Long-Term memory_id 空间冲突。
+2. Episode fallback 排序采用确定性 token-overlap relevance（复用
+   keyword_search._tokenize），不引入 embedding 或 LLM。
+3. Episode exact 匹配使用 get_by_task_id(status=None)，ARCHIVED 排除仅在
+   fallback 生效——exact 命中是显式 task 上下文，返回并标注 status 供下游判断。
+4. 新增只读 list_recent() 而非复用写路径或新建第二套查询层。
+```
+
+### Not Done
+
+- Batch 2：authority / keyword / vector executor，及 app.py 装配顺序修正。
+- Batch 3：Intent + Scope 传播（`_search_request_from_vnext` 的
+  project_id/level、project-scoped working lookup、scope_level 传递补全）。
+- Batch 4：Fusion / Rerank / Context Budget 实化。
+- Batch 5：Scenario tests & Legacy 对比。
+- OpenCode 插件迁移到 canonical endpoint（沿用 Stage 1 记录）。
+
+### Next Batch Notes
+
+Batch 2 应按 stage2-retrieval.md §8 实装 authority / keyword / vector executor：
+- 复用 `AuthorityRepository` / `LongTermAuthorityFacade` / `KeywordSearcher` /
+  现有 retriever，不建平行检索框架。
+- 必须修正 app.py 中 RetrievalService 装配早于 retriever 的顺序问题，否则
+  vector executor 在真实 app 仍不会注册。
+- 验证 keyword/metadata/authority 落地后 `degraded_channels` 语义与
+  Planner fallback channel（metadata/authority）配合是否正确。
+- 不要动 working / episode executor 的匹配与回退语义；不要提前做 Batch 3
+  的 scope 传播。
