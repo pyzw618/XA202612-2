@@ -101,6 +101,135 @@ DONE
 | Fix 2 | Stage 1 Formation Regression Recovery | DONE | 2026-08-31 |
 | Fix 3 | Test Environment & Real Scenario Verification | DONE | 2026-08-31 |
 | Fix 4 | Budget / Intent / Retrieval Log Closure | DONE | 2026-08-31 |
+| Fix 5 | Agent /step Canonical Write Tenant Scope Propagation | DONE | 2026-09-02 |
+
+---
+
+## Fix 5 — Agent /step Canonical Write Tenant Scope Propagation
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+消除 Stage 2 Closure Review 中唯一明确的硬阻塞：Agent `/step` 与 `/replay` 的 canonical write 未使用与 vNext Retrieval 相同的 tenant scope，导致同一请求内 write tenant ≠ read tenant。
+
+### Reconnaissance Findings
+
+- `memoryhub/adapter/agent_api.py` 的 `_to_memory_event_contract()` 在 line 246 硬编码 `tenant_id="default"`。
+- `/api/agent/step` 仅在构造 `MemoryRetrievalRequest` 时从 `X-MemoryHub-Tenant` header 解析 tenant（line 347），并回退到 `user_id`。
+- `/api/agent/replay` 完全不解析 header，所有 replay event 都写入 `default` tenant。
+- 生产 `/events` 端点 `memoryhub/adapter/vnext_api.py` 已使用 `_tenant_user()` 正确解析并绑定 tenant；Agent 适配层是缺口。
+- `tests/test_competition_api.py` 中两个失败测试与 tenant bug **不直接相关**：
+  - `test_replay_is_read_only_until_execute_and_masks_tool_results` 失败原因是 canonical write 返回 `REJECTED / policy_failed`（已通过临时诊断脚本确认）。
+  - `test_agent_step_extracts_memory_from_raw_dialogue_and_retrieves_it` 失败原因是 `execute_agent_step` 把 `processing` 硬编码为 `None`。
+
+### Changes
+
+- 给 `_to_memory_event_contract()` 增加 `tenant_id: str = "default"` 参数，取代函数体内的硬编码。
+- `/api/agent/step` 在 request boundary 解析一次 tenant：`request.headers.get("X-MemoryHub-Tenant", "default")`。
+  - 同一 tenant 传给 `_to_memory_event_contract(..., tenant_id=step_tenant_id)`。
+  - 同一 tenant 传给 `MemoryRetrievalRequest(..., tenant_id=step_tenant_id)`。
+- `/api/agent/replay` 在 request boundary 解析一次 tenant 并传给 `_to_memory_event_contract(..., tenant_id=replay_tenant_id)`。
+- 无 header 时统一回退到 `"default"`，保持现有 default tenant 兼容行为。
+- 在 `tests/test_competition_api.py` 新增 4 个 tenant propagation 测试：
+  - header 传播的 `/step` canonical + retrieval 一致性。
+  - 无 header 时保持 default tenant。
+  - 跨 tenant 隔离（tenant-a write vs tenant-b read）。
+  - `/replay` header 传播到 canonical event。
+
+### Files Touched
+
+```text
+memoryhub/adapter/agent_api.py
+tests/test_competition_api.py
+docs/vnext/PROGRESS.md
+```
+
+### Behavior Before
+
+```text
+HTTP Request
+  ↓
+  ├─ Canonical Write → _to_memory_event_contract(tenant_id="default") → default tenant
+  └─ vNext Retrieval → MemoryRetrievalRequest(tenant_id=header|user_id) → tenant-a
+
+同一 /step 请求内 write tenant ≠ read tenant。
+```
+
+### Behavior After
+
+```text
+HTTP Request
+  ↓
+Resolved Tenant (header or "default")
+  ├─ Canonical Write → _to_memory_event_contract(tenant_id=resolved) → same tenant
+  └─ vNext Retrieval → MemoryRetrievalRequest(tenant_id=resolved) → same tenant
+
+write tenant == read tenant。
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_competition_api.py::test_agent_step_propagates_tenant_from_header_to_canonical_and_retrieval` | PASS |
+| `tests/test_competition_api.py::test_agent_step_without_tenant_header_uses_default_tenant` | PASS |
+| `tests/test_competition_api.py::test_agent_step_does_not_leak_tenant_across_users` | PASS |
+| `tests/test_competition_api.py::test_replay_propagates_tenant_from_header_to_canonical` | PASS |
+| `tests/test_competition_api.py::test_agent_step_propagates_project_task_session_and_scene` | PASS |
+| `tests/test_competition_api.py` total | 8 passed, 2 failed, 1 skipped |
+| Agent scope propagation / competition API tests | 8 passed, 2 failed, 1 skipped |
+| Stage 1 Formation regression (11 files, 81 tests) | PASS |
+| Stage 2 targeted regression (10 files, 62 tests + 13 working/episode executor tests) | PASS |
+| `tests/test_vnext_entrypoints.py` | 8 passed |
+| `ruff check memoryhub/adapter/agent_api.py` | PASS |
+
+### Evidence
+
+- `/step` handler line 329 `step_tenant_id = request.headers.get("X-MemoryHub-Tenant", "default")` 与 line 334-338 把同一值传入 `_to_memory_event_contract`，line 352 把同一值传入 `MemoryRetrievalRequest`。
+- `/replay` handler line 284 `replay_tenant_id = request.headers.get("X-MemoryHub-Tenant", "default")` 与 line 287-288 传入 `_to_memory_event_contract`。
+- `_to_memory_event_contract` 签名现在携带 `tenant_id` 参数并在 line 247 使用 `tenant_id=tenant_id`。
+- 新增测试直接调用 `execute_agent_step` / `replay_conversation` 并捕获 fake canonical service 与 rollout service，断言 write event 与 retrieval request 的 `tenant_id` 一致。
+
+### Regression
+
+```text
+Legacy: no legacy source or route changed.
+Formation: Stage 1 Formation regression suite (81 tests) passed.
+Retrieval: Stage 2 targeted regression suite (75 tests) passed.
+Safety: no Safety policy or gate changed.
+candidate-only: no Authority/Formation mode change.
+```
+
+### Remaining Risks
+
+- `tests/test_competition_api.py` 仍有两个与 tenant 无关的失败：
+  - `test_replay_is_read_only_until_execute_and_masks_tool_results` 被 policy processor 拒绝（`policy_failed`）。
+  - `test_agent_step_extracts_memory_from_raw_dialogue_and_retrieves_it` 的 `processing` 字段在响应中硬编码为 `None`。
+  两者均不在 "只修 tenant propagation" 的范围内，未在本次修复。
+- `tests/test_competition_api.py` 与 `memoryhub/adapter/agent_api.py` 仍有 ruff `format` 历史格式问题，本次未改动以控制 diff 范围；`ruff check` 在 `agent_api.py` 上通过。
+
+### Decisions
+
+```text
+Resolve tenant once at the request boundary and pass the same value explicitly to both
+write and read paths. Default to "default" when X-MemoryHub-Tenant is absent to keep
+existing Agent adapter behavior compatible.
+```
+
+### Not Done
+
+- 未修改 Retrieval Architecture、Formation、Fusion、Budget、IntentRouter。
+- 未修复上述两个与 tenant 无关的 `test_competition_api.py` 失败。
+- 未进入 Stage 3。
+
+### Next Batch Notes
+
+Stage 2 Closure 的 tenant 硬阻塞已清除。若要继续推进 Closure，需单独处理 `test_competition_api.py` 中 `policy_failed` 与 `processing=None` 两个问题，并重新评估是否还存在其他 Closure DoD 缺口。
 
 ---
 

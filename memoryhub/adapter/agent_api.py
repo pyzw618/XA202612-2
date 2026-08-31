@@ -219,6 +219,7 @@ def _events_from_replay(body: ReplayRequest) -> list[MemoryEvent]:
 def _to_memory_event_contract(
     event: MemoryEvent,
     *,
+    tenant_id: str = "default",
     project_id: str = "",
     task_id: str = "",
     session_id: str = "",
@@ -243,7 +244,7 @@ def _to_memory_event_contract(
         payload["tool_calls"] = [tc.model_dump(mode="json") for tc in event.tool_calls]
 
     return MemoryEventContract(
-        tenant_id="default",
+        tenant_id=tenant_id,
         user_id=event.user_id or "default",
         event_id=event.event_id,
         event_type=event.event_type,
@@ -280,9 +281,10 @@ async def replay_conversation(body: ReplayRequest, request: Request):
 
     written_event_ids: list[str] = []
     processing = None
+    replay_tenant_id = request.headers.get("X-MemoryHub-Tenant", "default")
     if body.execute:
         for event in safe_events:
-            result = canonical.write(_to_memory_event_contract(event))
+            result = canonical.write(_to_memory_event_contract(event, tenant_id=replay_tenant_id))
             if result.status == GatewayStatus.COMMITTED:
                 written_event_ids.append(event.event_id)
 
@@ -321,18 +323,19 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
 
     if canonical is None:
         raise HTTPException(status_code=503, detail="canonical write service not initialized")
+    user_id = safe_events[0].user_id if safe_events else "demo_user"
+    step_tenant_id = request.headers.get("X-MemoryHub-Tenant", "default")
     for event in safe_events:
         canonical.write(
             _to_memory_event_contract(
                 event,
+                tenant_id=step_tenant_id,
                 project_id=body.project_id,
                 task_id=body.task_id,
                 session_id=body.session_id,
             )
         )
     written_event_ids = [event.event_id for event in safe_events]
-
-    user_id = safe_events[0].user_id if safe_events else "demo_user"
     legacy_request = SearchRequest(
         user_id=user_id,
         query=body.retrieval_query or body.user_message,
@@ -344,7 +347,7 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
     )
     vnext_request = MemoryRetrievalRequest(
         request_id=f"agent-step-{user_id}-{hash(legacy_request.query) & 0xFFFFFFFF:08x}",
-        tenant_id=request.headers.get("X-MemoryHub-Tenant", user_id or "default"),
+        tenant_id=step_tenant_id,
         user_id=user_id,
         query=legacy_request.query,
         task_id=body.task_id,

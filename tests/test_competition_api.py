@@ -8,7 +8,12 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from memoryhub.adapter.agent_api import AgentStepRequest, execute_agent_step
+from memoryhub.adapter.agent_api import (
+    AgentStepRequest,
+    ReplayRequest,
+    execute_agent_step,
+    replay_conversation,
+)
 from memoryhub.adapter.schemas import KnowledgeMemory, KnowledgeType, SceneScope, SearchResponse
 from memoryhub.app import create_app
 from memoryhub.config import load_config
@@ -306,3 +311,186 @@ def test_long_demo_builds_memory_across_one_multi_turn_session(client):
     assert any(item.get("knowledge_type") == "workflow" for item in responses[5]["candidate_memories"])
     assert any(item.get("knowledge_type") == "template" for item in responses[7]["candidate_memories"])
     assert len(responses[8]["fact_proposals"]) == 2
+
+
+def test_agent_step_propagates_tenant_from_header_to_canonical_and_retrieval():
+    """Agent /step must use the same resolved tenant for canonical write and vNext retrieval."""
+    captured_retrieval = []
+    captured_canonical = []
+
+    class CapturingCanonical:
+        def write(self, event):
+            captured_canonical.append(event)
+            return SimpleNamespace(status="COMMITTED")
+
+    def legacy_search(request):
+        return SearchResponse()
+
+    class CapturingRollout:
+        def read(self, request, *, legacy_reader, vnext_reader):
+            captured_retrieval.append(request)
+            legacy_reader(request)
+            return SimpleNamespace(response=SearchResponse(results=[], latency_ms=0))
+
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            event_processor=None,
+            canonical_write_service=CapturingCanonical(),
+            retriever=SimpleNamespace(memory_lookup={}, search=legacy_search),
+            retrieval_service=SimpleNamespace(search=lambda _request: None),
+            rollout_read_service=CapturingRollout(),
+        )
+    )
+    body = AgentStepRequest.model_validate(
+        {
+            "session_id": "session-t",
+            "turn_id": "turn-t",
+            "user_message": "hello",
+            "project_id": "project-t",
+            "task_id": "task-t",
+            "scene": "coding",
+            "task_type": "debugging",
+            "events": [_event()],
+        }
+    )
+    request = SimpleNamespace(
+        app=app,
+        headers={"X-MemoryHub-Tenant": "tenant-a"},
+    )
+    result = asyncio.run(execute_agent_step(body, request))
+
+    assert result["session_id"] == "session-t"
+    assert len(captured_canonical) == 1
+    assert captured_canonical[0].tenant_id == "tenant-a"
+    assert len(captured_retrieval) == 1
+    assert captured_retrieval[0].tenant_id == "tenant-a"
+
+
+def test_agent_step_without_tenant_header_uses_default_tenant():
+    """Without X-MemoryHub-Tenant both write and read paths keep the existing default tenant."""
+    captured_retrieval = []
+    captured_canonical = []
+
+    class CapturingCanonical:
+        def write(self, event):
+            captured_canonical.append(event)
+            return SimpleNamespace(status="COMMITTED")
+
+    def legacy_search(request):
+        return SearchResponse()
+
+    class CapturingRollout:
+        def read(self, request, *, legacy_reader, vnext_reader):
+            captured_retrieval.append(request)
+            legacy_reader(request)
+            return SimpleNamespace(response=SearchResponse(results=[], latency_ms=0))
+
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            event_processor=None,
+            canonical_write_service=CapturingCanonical(),
+            retriever=SimpleNamespace(memory_lookup={}, search=legacy_search),
+            retrieval_service=SimpleNamespace(search=lambda _request: None),
+            rollout_read_service=CapturingRollout(),
+        )
+    )
+    body = AgentStepRequest.model_validate(
+        {
+            "session_id": "session-default",
+            "turn_id": "turn-default",
+            "user_message": "hello",
+            "events": [_event()],
+        }
+    )
+    request = SimpleNamespace(app=app, headers={})
+    asyncio.run(execute_agent_step(body, request))
+
+    assert captured_canonical[0].tenant_id == "default"
+    assert captured_retrieval[0].tenant_id == "default"
+
+
+def test_agent_step_does_not_leak_tenant_across_users():
+    """A retrieval made under tenant-b must not see a canonical write scoped to tenant-a."""
+    captured_retrieval = []
+    captured_canonical = []
+
+    class CapturingCanonical:
+        def write(self, event):
+            captured_canonical.append(event)
+            return SimpleNamespace(status="COMMITTED")
+
+    def legacy_search(request):
+        return SearchResponse()
+
+    class CapturingRollout:
+        def read(self, request, *, legacy_reader, vnext_reader):
+            captured_retrieval.append(request)
+            legacy_reader(request)
+            return SimpleNamespace(response=SearchResponse(results=[], latency_ms=0))
+
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            event_processor=None,
+            canonical_write_service=CapturingCanonical(),
+            retriever=SimpleNamespace(memory_lookup={}, search=legacy_search),
+            retrieval_service=SimpleNamespace(search=lambda _request: None),
+            rollout_read_service=CapturingRollout(),
+        )
+    )
+    body = AgentStepRequest.model_validate(
+        {
+            "session_id": "session-isolation",
+            "turn_id": "turn-isolation",
+            "user_message": "hello",
+            "events": [_event()],
+        }
+    )
+    # First, write under tenant-a
+    asyncio.run(
+        execute_agent_step(
+            body,
+            SimpleNamespace(app=app, headers={"X-MemoryHub-Tenant": "tenant-a"}),
+        )
+    )
+    # Then read under tenant-b
+    asyncio.run(
+        execute_agent_step(
+            body,
+            SimpleNamespace(app=app, headers={"X-MemoryHub-Tenant": "tenant-b"}),
+        )
+    )
+
+    assert captured_canonical[0].tenant_id == "tenant-a"
+    assert captured_retrieval[1].tenant_id == "tenant-b"
+    assert captured_canonical[0].tenant_id != captured_retrieval[1].tenant_id
+
+
+def test_replay_propagates_tenant_from_header_to_canonical():
+    """Agent /replay must bind the resolved tenant to canonical events it writes."""
+    captured = []
+
+    class CapturingCanonical:
+        def write(self, event):
+            captured.append(event)
+            return SimpleNamespace(status="COMMITTED")
+
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            event_processor=None,
+            canonical_write_service=CapturingCanonical(),
+        )
+    )
+    body = ReplayRequest.model_validate(
+        {
+            "schema_version": "conversation-replay/1.0",
+            "session_id": "sess_replay_tenant",
+            "events": [_event()],
+            "execute": True,
+        }
+    )
+    request = SimpleNamespace(app=app, headers={"X-MemoryHub-Tenant": "tenant-replay"})
+    response = asyncio.run(replay_conversation(body, request))
+
+    assert response["written_event_ids"] == ["evt_demo_001"]
+    assert len(captured) == 1
+    assert captured[0].tenant_id == "tenant-replay"
