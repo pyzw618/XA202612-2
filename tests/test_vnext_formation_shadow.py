@@ -168,8 +168,12 @@ def test_in_memory_candidate_repository_accumulates_frequency() -> None:
         scope="PROJECT:reporting",
         evidence_refs=["event-1"],
         supporting_episode_ids=["episode-1"],
+        confidence=0.8,
+        utility=0.7,
+        stability=0.6,
     )
     assert view.frequency == 1
+    assert (view.confidence, view.utility, view.stability) == (0.8, 0.7, 0.6)
     updated = repo.add_evidence(
         tenant_id="tenant",
         user_id="user",
@@ -177,8 +181,12 @@ def test_in_memory_candidate_repository_accumulates_frequency() -> None:
         event_id="event-2",
         episode_id="episode-2",
         is_independent=True,
+        confidence=0.9,
+        utility=0.8,
+        stability=0.7,
     )
     assert updated.frequency == 2
+    assert (updated.confidence, updated.utility, updated.stability) == (0.9, 0.8, 0.7)
 
 
 def test_legacy_adapter_returns_global_stubs() -> None:

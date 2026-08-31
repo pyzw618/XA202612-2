@@ -46,7 +46,7 @@ Batch 4 — Fusion / Rerank / Context Budget
 Batch 5 — Retrieval Scenario Tests & Legacy Comparison
 
 Current Closure Target:
-Fix Batch 1 — Scope Isolation & Agent Scope Propagation (DONE)
+Fix Batch 3 — Test Environment & Real Scenario Verification (DONE)
 ```
 
 ---
@@ -98,7 +98,7 @@ DONE
 | Fix Batch | 名称 | 状态 | 最后更新 |
 |---|---|---|---|
 | Fix 1 | Scope Isolation & Agent Scope Propagation | DONE | 2026-08-31 |
-| Fix 2 | Stage 1 Formation Regression Recovery | NOT STARTED | — |
+| Fix 2 | Stage 1 Formation Regression Recovery | DONE | 2026-08-31 |
 | Fix 3 | Test Environment & Real Scenario Verification | NOT STARTED | — |
 | Fix 4 | Budget / Intent / Retrieval Log Closure | NOT STARTED | — |
 
@@ -2084,3 +2084,158 @@ Legacy Retrieval algorithms: not modified
 
 Fix 2 only: recover Stage 1 Formation regression and unify Candidate Repository contracts.
 Do not change Fix 1 scope semantics, Retrieval Fusion/Budget/Intent, or begin Stage 3.
+
+---
+
+## Stage 2 Closure Fix 2 — Stage 1 Formation Regression Recovery
+
+### Status
+
+```text
+DONE
+```
+
+### Reconnaissance Findings
+
+- `CandidateService.stage()` already passed `confidence`, `utility`, and `stability` to the repository on create and evidence merge.
+- The production `CandidateRepository` supported those fields, while `InMemoryCandidateRepository` used by `FormationShadowService` did not.
+- The mismatch caused Formation Shadow and Formation Evaluation to fail before consolidation; it was a Repository contract drift, not a Schema or Retrieval issue.
+
+### Changes
+
+- Synchronized `InMemoryCandidateRepository.create()` with the production Candidate Repository scoring parameters.
+- Synchronized `InMemoryCandidateRepository.add_evidence()` and preserved the production max-score update semantics.
+- Extended the InMemory contract test to verify score propagation and monotonic updates.
+
+### Files Touched
+
+```text
+memoryhub/application/formation_shadow.py
+tests/test_vnext_formation_shadow.py
+docs/vnext/PROGRESS.md
+```
+
+### Tests
+
+```text
+43 passed, 0 failed, 0 skipped
+```
+
+Covered:
+
+- Candidate Service
+- Formation Shadow
+- Formation Evaluation
+- Stage 1 scenarios
+- Candidate Repository
+- Formation Worker
+
+### Evidence
+
+- Formation Shadow scenarios now execute through candidate staging and consolidation instead of failing on the InMemory Repository signature.
+- Formation Evaluation samples and pairs execute successfully.
+- InMemory score fields are retained on creation and updated by maximum value on evidence merge, matching the production repository.
+
+### Regression
+
+```text
+git diff --check: PASS
+ruff: PASS
+compileall: PASS
+Stage 1 scenarios: PASS
+Repository/Worker regression: PASS
+Retrieval, Scope, Legacy Retrieval, and Stage 3 modules: unchanged
+```
+
+### Remaining Risks
+
+- Fix 3 remains outstanding for the previously skipped Batch 5 real retrieval scenarios and Windows pytest ACL verification.
+- Fix 4 remains outstanding for hard budget enforcement, natural Chinese intent routing, and persisted selected memory IDs.
+
+### Next Fix Batch Notes
+
+Fix 2 is complete. Stop here; do not begin Fix 3 or Stage 3 automatically.
+
+
+---
+
+## Stage 2 Closure Fix 3 — Test Environment & Real Scenario Verification
+
+### Status
+
+```text
+DONE
+```
+
+### Reconnaissance Findings
+
+- Batch 5 had a module-level `skipif(BM25Okapi is None)`, so all 11 scenarios were skipped when
+  the environment lacked `rank-bm25`, including scenarios that do not use the keyword channel.
+- The current environment had no `rank-bm25`, `faiss-cpu`, or `jieba`, although all three were
+  already declared by the production/dev dependency manifests.
+- Batch 5's real Working/Episode fixture did not pass `project_id` after Fix 1 added project
+  isolation. This caused four scenarios to fail closed under the valid `PROJECT:project-1` request.
+- Retrieval Log and Legacy tests were blocked by the Windows pytest temporary-directory `.lock`
+  ACL before their test bodies ran. Running under native Windows permissions allowed them to run.
+
+### Changes
+
+- Replaced the Batch 5 module-level dependency skip with a dependency-specific marker on only the
+  keyword scenarios (E and I); missing optional keyword dependencies no longer suppress core
+  Working/Episode/Authority/Scope scenarios.
+- Updated the Batch 5 real repository fixture to persist its default `project_id=project-1` on
+  Working and Episode rows, with an explicit override available for isolation cases.
+- Installed the already-declared `rank-bm25`, `faiss-cpu`, and `jieba` packages in the test
+  environment. No production dependency manifest was changed.
+
+### Files Touched
+
+```text
+tests/test_vnext_batch5_retrieval_scenarios.py
+docs/vnext/PROGRESS.md
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| Batch 5 real scenarios | PASS (11), FAIL 0, SKIP 0 |
+| Retrieval Log persistence + Legacy RET-01~09 (native Windows permissions) | PASS (11), FAIL 0, SKIP 0 |
+| Fix 3 affected regression: Batch 5, Retrieval Service, Scope, Repository, Stage 1 | PASS (47), FAIL 0, SKIP 0 |
+| Ruff on changed Batch 5 test | PASS |
+| `git diff --check` | PASS |
+| `compileall` on changed Batch 5 test | PASS |
+
+### Evidence
+
+- Scenario A, H, J, and Legacy-vNext comparison initially failed because the test fixture wrote
+  empty project scope; after fixture alignment, all A-J scenarios and the comparison passed.
+- Cross-project and cross-user evidence remains covered by Scenarios F and G and the existing
+  Fix 1 scope regression tests; the production Working/Episode/Scope regression subset passed.
+- Retrieval Log persistence passed under native permissions and verified the persisted log row and
+  activation rows through the real `RetrievalService` path.
+- Legacy RET-01~09 passed with real FAISS/BM25/Jieba dependencies; no Legacy source was changed.
+
+### Regression
+
+```text
+Stage 1 scenarios: PASS
+Working/Episode executors and repositories: PASS
+Batch 3 scope propagation: PASS
+Retrieval Service: PASS
+Legacy Retrieval acceptance: PASS
+No Schema or Repository Contract changes
+```
+
+### Remaining Risks
+
+- The managed sandbox still cannot create/clean pytest temporary directories because of its ACL;
+  the persistence and Legacy temp-path tests require native Windows permissions in this environment.
+- The test runner reports an existing `asyncio_mode` unknown-config warning and existing dependency
+  deprecation warnings; neither affects the Fix 3 results.
+- Fix 4 remains outstanding for hard budget enforcement, natural Chinese intent routing, and
+  persisted selected memory IDs.
+
+### Next Fix Batch Notes
+
+Fix 3 is complete. Stop here; do not begin Fix 4 or Stage 3 automatically.

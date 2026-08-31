@@ -37,7 +37,10 @@ from memoryhub.storage.vnext_repositories import (
     WorkingStateRepository,
 )
 
-pytestmark = pytest.mark.skipif(BM25Okapi is None, reason="rank-bm25 is not installed")
+_keyword_backend_required = pytest.mark.skipif(
+    BM25Okapi is None,
+    reason="rank-bm25 is not installed; keyword-specific scenario is environment-blocked",
+)
 
 ROOT = Path(__file__).parents[1]
 DB_BASE = ROOT / "evaluation" / "results" / "vnext_batch5_scenarios"
@@ -108,6 +111,7 @@ class _Harness:
         user_id: str,
         task_id: str,
         session_id: str = "",
+        project_id: str = "project-1",
         **fields: Any,
     ) -> None:
         state = {
@@ -128,6 +132,7 @@ class _Harness:
             user_id=user_id,
             task_id=task_id,
             session_id=session_id,
+            project_id=project_id,
             state=state,
         )
 
@@ -139,6 +144,7 @@ class _Harness:
         episode_id: str,
         task_id: str,
         session_id: str = "",
+        project_id: str = "project-1",
         goal: str = "",
         events: list[tuple[str, dict[str, Any], str]] | None = None,
     ) -> None:
@@ -148,6 +154,7 @@ class _Harness:
             user_id=user_id,
             task_id=task_id,
             session_id=session_id,
+            project_id=project_id,
             goal=goal,
         )
         for seq, (event_type, payload, source_event_id) in enumerate(events or [], start=1):
@@ -365,6 +372,7 @@ def test_scenario_d_semantic_fact_from_authority() -> None:
     )
 
 
+@_keyword_backend_required
 def test_scenario_e_exact_keyword_hit() -> None:
     db = _db()
     harness = _Harness(db)
@@ -515,6 +523,7 @@ def test_scenario_h_mixed_intent_uses_working_and_episode() -> None:
     assert "EPISODE" in layers
 
 
+@_keyword_backend_required
 def test_scenario_i_duplicate_projection_deduplicated() -> None:
     db = _db()
     harness = _Harness(db)

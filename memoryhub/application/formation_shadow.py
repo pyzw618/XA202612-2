@@ -114,6 +114,9 @@ class InMemoryCandidateRepository:
         evidence_refs: list[str] | None = None,
         supporting_episode_ids: list[str] | None = None,
         frequency: int = 1,
+        confidence: float = 0.0,
+        utility: float = 0.0,
+        stability: float = 0.0,
     ) -> CandidateView:
         row = CandidateView(
             candidate_id=candidate_id,
@@ -126,9 +129,9 @@ class InMemoryCandidateRepository:
             scope_level=scope_level,
             scope=scope,
             claim=dict(claim),
-            confidence=0.0,
-            utility=0.0,
-            stability=0.0,
+            confidence=confidence,
+            utility=utility,
+            stability=stability,
             frequency=frequency,
             evidence_refs=list(evidence_refs or []),
             supporting_episode_ids=list(supporting_episode_ids or []),
@@ -157,6 +160,9 @@ class InMemoryCandidateRepository:
         event_id: str,
         episode_id: str,
         is_independent: bool = True,
+        confidence: float | None = None,
+        utility: float | None = None,
+        stability: float | None = None,
     ) -> CandidateView:
         key = self._key(tenant_id=tenant_id, user_id=user_id, candidate_id=candidate_id)
         existing = self._rows[key]
@@ -176,9 +182,21 @@ class InMemoryCandidateRepository:
             scope_level=existing.scope_level,
             scope=existing.scope,
             claim=dict(existing.claim),
-            confidence=existing.confidence,
-            utility=existing.utility,
-            stability=existing.stability,
+            confidence=(
+                max(existing.confidence, confidence)
+                if confidence is not None
+                else existing.confidence
+            ),
+            utility=(
+                max(existing.utility, utility)
+                if utility is not None
+                else existing.utility
+            ),
+            stability=(
+                max(existing.stability, stability)
+                if stability is not None
+                else existing.stability
+            ),
             frequency=frequency,
             evidence_refs=sorted(refs),
             supporting_episode_ids=sorted(episodes),
