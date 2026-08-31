@@ -50,6 +50,8 @@ def _memory_text(memory) -> str:
 
 def _memory_metadata(memory) -> dict:
     """Metadata used by owner, type, confidence, and scope filters."""
+    extra_payload = getattr(memory, "extra_payload", {}) or {}
+    authority = extra_payload.get("vnext_authority", {})
     if memory.memory_type == "fact":
         scope = {"scope": memory.scope, "project_id": memory.project_id or ""}
         fact_fields = {
@@ -61,6 +63,7 @@ def _memory_metadata(memory) -> dict:
         scope = memory.scope.model_dump()
         fact_fields = {}
     return {
+        "tenant_id": getattr(memory, "tenant_id", "") or authority.get("tenant_id", "default"),
         "memory_type": memory.memory_type,
         "user_id": memory.user_id,
         "content": _memory_text(memory),
@@ -531,10 +534,12 @@ def create_app(
             ttl_seconds=config.retrieval.cache_ttl_seconds,
         )
 
-        keyword_search = None
-        if not (config.runtime.is_production or vector_engine is not None):
-            keyword_search = KeywordSearcher()
-            if memories:
+        # BM25 is an independent vNext channel even when the vector backend is
+        # Milvus.  The existing HybridRetriever may still use the same index
+        # for the legacy compatibility path.
+        keyword_search = KeywordSearcher()
+        if memories:
+            try:
                 keyword_search.build_index(
                     [
                         (
@@ -545,6 +550,11 @@ def create_app(
                         for memory in memories
                     ]
                 )
+            except ImportError:
+                logger.warning(
+                    "vnext_keyword_channel_unavailable: rank-bm25 is not installed"
+                )
+                keyword_search = None
 
         app.state.db = db
         app.state.pref_repo = pref_repo
@@ -617,6 +627,8 @@ def create_app(
             knowledge_repository=know_repo,
         )
         authority_facade = LongTermAuthorityFacade(authority_repository)
+        app.state.authority_repository = authority_repository
+        app.state.authority_facade = authority_facade
         event_gateway = EventGateway(
             db=db,
             policy=build_safety_policy(app.state.safety_gate),
@@ -637,20 +649,6 @@ def create_app(
         app.state.episode_repository = episode_repository
         app.state.episode_service = app.state.canonical_write_service.episode_service
 
-        # vNext unified retrieval service: all read entrypoints delegate here.
-        from memoryhub.adapter.retrieval_executor import build_channel_executors
-        from memoryhub.application.retrieval_service import RetrievalService
-        from memoryhub.storage.vnext_repositories import (
-            ActivationRepository,
-            RetrievalLogRepository,
-        )
-
-        app.state.retrieval_service = RetrievalService(
-            channel_executors=build_channel_executors(app.state),
-            activation_repository=ActivationRepository(db),
-            retrieval_log_repository=RetrievalLogRepository(db),
-            trace_store=app.state.trace_store,
-        )
         # One application-scoped controller and one shadow service own every
         # production read decision.  Their state is rollout-only and durable;
         # Authority records are never changed by rollback.
@@ -862,7 +860,6 @@ def create_app(
                 "HybridRetriever is only allowed in development/test "
                 "or explicit diagnostic scenarios"
             )
-            assert keyword_search is not None
             retriever = HybridRetriever(
                 vector_search=vector_search_adapter,
                 keyword_search=keyword_search,
@@ -920,6 +917,28 @@ def create_app(
         app.state.embedding_client = embedding_client
         app.state.cache = cache
         app.state.retriever = retriever
+
+        # vNext unified retrieval service: all read entrypoints delegate here.
+        # Build it only after the legacy retriever is available so vector is a
+        # real channel rather than an accidentally omitted startup dependency.
+        from memoryhub.adapter.retrieval_executor import build_channel_executors
+        from memoryhub.application.retrieval_service import RetrievalService
+        from memoryhub.retrieval.planner import RetrievalPlanner
+        from memoryhub.storage.vnext_repositories import (
+            ActivationRepository,
+            RetrievalLogRepository,
+        )
+
+        channel_executors = build_channel_executors(app.state)
+        app.state.retrieval_service = RetrievalService(
+            planner=RetrievalPlanner(available_channels=list(channel_executors)),
+            channel_executors=channel_executors,
+            activation_repository=ActivationRepository(db),
+            retrieval_log_repository=RetrievalLogRepository(db),
+            trace_store=app.state.trace_store,
+            authority_repository=authority_repository,
+            db=db,
+        )
         app.state.sync_service = sync_service
         app.state.projection_outbox_worker = projection_outbox_worker
         app.state.compensation_task = compensation_task

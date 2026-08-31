@@ -40,6 +40,7 @@ MemoryRetrievalRequest
 
 Stage 2 已完成：
 Batch 1 — Working / Episode Executors
+Batch 2 — Authority / Keyword / Vector Executors
 ```
 
 ---
@@ -81,7 +82,7 @@ DONE
 | Batch | 任务 | 状态 | 最后更新 |
 |---|---|---|---|
 | Batch 1 | Working / Episode Executors | DONE | 2026-08-31 |
-| Batch 2 | Authority / Keyword / Vector Executors | NOT STARTED | — |
+| Batch 2 | Authority / Keyword / Vector Executors | DONE | 2026-08-31 |
 | Batch 3 | Intent + Scope Propagation | NOT STARTED | — |
 | Batch 4 | Fusion / Rerank / Context Budget | NOT STARTED | — |
 | Batch 5 | Retrieval Scenario Tests & Legacy Comparison | NOT STARTED | — |
@@ -1429,3 +1430,132 @@ Batch 2 应按 stage2-retrieval.md §8 实装 authority / keyword / vector execu
   Planner fallback channel（metadata/authority）配合是否正确。
 - 不要动 working / episode executor 的匹配与回退语义；不要提前做 Batch 3
   的 scope 传播。
+
+---
+
+## Stage 2 Batch 2 — Authority / Keyword / Vector Executors
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+在既有 RetrievalService 主链路中实化 long-term Authority、BM25 Keyword、
+metadata 与 Legacy-backed Vector channel，并修复真实 app 的 executor 装配顺序；
+保持 Working / Episode 的结构化读取和 Legacy Retriever 算法不变。
+
+### Changes
+
+- `memoryhub/adapter/retrieval_executor.py`：修复 Legacy `SearchResult` 转换器对
+  不存在的 `user_id` 字段的访问；新增独立 Keyword、Authority、metadata executor；
+  `build_channel_executors` 按 app.state 注册四个 long-term channel，同时保留
+  Working / Episode 结构化 executor。
+- `memoryhub/app.py`：索引 metadata 增加 tenant 标识；BM25 同时服务 vNext 与
+  Legacy，缺少可选依赖时显式 warning/degraded；AuthorityRepository / Facade
+  放入 app.state；将 RetrievalService 创建移到 retriever 完成之后，并注入真实
+  channel map、AuthorityRepository 与 DB。
+- 新增 `tests/test_vnext_batch2_retrieval_channels.py`，覆盖 channel、隔离和
+  Vector 转换行为。
+
+### Files Touched
+
+```text
+memoryhub/adapter/retrieval_executor.py
+memoryhub/app.py
+tests/test_vnext_batch2_retrieval_channels.py
+docs/vnext/PROGRESS.md
+```
+
+（核心源码 2 个文件，低于 ≤8 的限制；未修改 Repository schema、Legacy
+Retriever 算法、Formation 主链路。）
+
+### Behavior Before
+
+```text
+真实 app startup：RetrievalService 在 app.state.retriever 赋值前构建，vector
+executor 未注册；keyword / metadata / authority 也未注册。
+Legacy vector adapter：SearchResult 没有 user_id，转换抛 AttributeError，随后
+被 RetrievalService 捕获并把 vector 静默变为空 channel。
+```
+
+### Behavior After
+
+```text
+retriever + AuthorityRepository + keyword index 就绪后才构建 RetrievalService；
+Planner.available_channels 与实际 executor map 对齐。vector 复用现有 Legacy
+retriever 但只作为一个 channel；keyword 独立调用 BM25；metadata 读取现有
+memory_lookup；authority 读取 request tenant/user 下的 ACTIVE envelope；四路
+均进入原有 RRF → Reranker → Scope → Budget 主链路。
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_vnext_batch2_retrieval_channels.py` | PASS (4), 1 skipped（未安装 rank-bm25） |
+| vNext core subset（working/episode/intent/planner/fusion/scope/context/interface） | PASS (88), 1 skipped |
+| `ruff check` on changed source/tests | PASS |
+| `git diff --check` | PASS |
+| Stage 1 scenarios + authority write + configured LLM + app production assembly | 16 passed；3 setup error（pytest 临时目录 ACL） |
+| Legacy retrieval / acceptance | pre-existing failures：缺少 `faiss-cpu` / `rank-bm25`，另有 pytest 临时目录 ACL 错误 |
+
+### Evidence
+
+- Vector 测试使用真实 `SearchResult` schema，证明转换不再读取不存在的
+  `user_id`，并保留 request owner 与 vector source。
+- Authority 测试写入不同 user/status 的 envelope，证明只返回同 tenant/user 下
+  的 ACTIVE Authority；metadata / keyword 测试覆盖 owner 隔离与 source/layer。
+- registration 测试证明同一 `build_channel_executors` 可装配 vector、keyword、
+  metadata、authority；静态检查证明 retriever 赋值先于 RetrievalService 创建。
+
+### Scope Verification
+
+- 本 Batch 未修改 `MemoryRetrievalRequest`、IntentRouter、Planner scope 规则，
+  也未修改 `_search_request_from_vnext` 的 project/level 映射。
+- 新增/修复的 channel adapter 均使用 request tenant/user 作为边界；Keyword、
+  metadata、Authority 不跨 owner 返回，Vector conversion 拒绝明确不匹配的
+  tenant/user。
+- 已知 scope 丢失仍存在：vNext 没有独立 `project_id`，Legacy adapter 仍硬编码
+  `project_id=""` / `level="long"`；这是 Batch 3 Intent + Scope Propagation 的
+  明确遗留，不在本 Batch 偷改 schema 或传播链。
+
+### Retrieval Channel Verification
+
+| Channel | Batch 2 状态 | 实际来源 |
+|---|---|---|
+| working | 保持 Batch 1 | `WorkingStateRepository` 结构化读取 |
+| episode | 保持 Batch 1 | `EpisodeRepository` 结构化读取 |
+| vector | DONE | existing Legacy retriever adapter |
+| keyword | DONE（依赖缺失时显式 degraded） | existing `KeywordSearcher` / BM25 |
+| metadata | DONE | existing `memory_lookup` |
+| authority | DONE | `AuthorityRepository.list` |
+
+### Remaining Risks
+
+- 当前环境没有 `rank-bm25` / `faiss-cpu`，无法完成真实 BM25/FAISS backend 命中；
+  Milvus/embedding 真实服务也仍需外部环境验证。
+- executor 异常仍采用空结果降级，channel 级异常原因和详细计数留给后续 Batch。
+- project_id 的完整 Request → Planner → Executor → Result 传播留给 Batch 3；
+  `RECALLED` activation、token_budget、Fusion/Rerank 细化、Legacy vs vNext 对比
+  和 rollout cutover 尚未完成。
+
+### Regression
+
+```text
+未修改 Formation / Reflection / Working reducer / Episode enrichment / Candidate-only
+主设计；Stage 1 场景与 Authority write 链通过。
+未修改 Legacy HybridRetriever、Milvus、BM25 算法本体或写入/Feedback/Evolution。
+vNext 核心回归 88 passed；新增 Batch 2 行为测试 4 passed。
+Legacy retrieval 失败由当前环境缺少既有可选依赖和 pytest temp ACL 引起，非本 Batch
+引入，已在 Batch 1 基线中存在。
+```
+
+### Next Batch Notes
+
+Batch 3 仅处理 Intent + Scope Propagation：补全 Legacy adapter 的 project_id /
+level / memory_types / scene 等传播，评估最小 schema 兼容，并补充 Request →
+Planner → Executor → Result 隔离测试。不要重写 Authority、BM25、Vector 或
+Working / Episode executor；不要提前进入 Batch 4 的 Fusion / Rerank / Context Budget。

@@ -19,6 +19,7 @@ land; a missing executor degrades to an empty channel result.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from memoryhub.adapter.schemas import SearchRequest, SearchResult
@@ -53,24 +54,95 @@ def _search_request_from_vnext(request: MemoryRetrievalRequest) -> SearchRequest
     )
 
 
-def _search_result_to_retrieved_memory(result: SearchResult) -> RetrievedMemory | None:
+def _scope_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value or "GLOBAL"
+    if isinstance(value, dict):
+        for key in ("scope", "project_id", "task_id", "task_type", "scene", "app"):
+            candidate = value.get(key)
+            if candidate:
+                return str(candidate)
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value) if value else "GLOBAL"
+
+
+def _legacy_memory_metadata(memory: Any) -> dict[str, Any]:
+    extra_payload = getattr(memory, "extra_payload", {}) or {}
+    authority = extra_payload.get("vnext_authority", {})
+    status = getattr(memory, "status", "ACTIVE")
+    return {
+        "tenant_id": getattr(memory, "tenant_id", "") or authority.get("tenant_id", "default"),
+        "user_id": getattr(memory, "user_id", "default"),
+        "memory_type": getattr(memory, "memory_type", "semantic"),
+        "confidence": float(getattr(memory, "confidence", 0.0) or 0.0),
+        "status": getattr(status, "value", status),
+        "scope": getattr(memory, "scope", {}),
+    }
+
+
+def _legacy_memory_text(memory: Any) -> str:
+    parts = [
+        getattr(memory, "text", ""),
+        getattr(memory, "content", ""),
+        getattr(memory, "name", ""),
+        getattr(memory, "subject", ""),
+        getattr(memory, "predicate", ""),
+        getattr(memory, "object_value", ""),
+    ]
+    steps = getattr(memory, "steps", []) or []
+    parts.extend(str(step) for step in steps)
+    return " ".join(str(part).strip() for part in parts if part).strip()
+
+
+def _memory_scope(metadata: dict[str, Any]) -> tuple[MemoryScope, str]:
+    raw_scope = metadata.get("scope", "GLOBAL")
+    authority = metadata.get("vnext_authority", {})
+    scope_level = metadata.get("scope_level") or authority.get("scope_level")
+    if scope_level:
+        level = _safe_scope(scope_level)
+    elif isinstance(raw_scope, dict) and raw_scope.get("project_id"):
+        level = MemoryScope.PROJECT
+    elif isinstance(raw_scope, dict) and any(
+        raw_scope.get(key) for key in ("task_id", "task_type")
+    ):
+        level = MemoryScope.TASK
+    elif isinstance(raw_scope, dict) and any(
+        raw_scope.get(key) for key in ("scene", "app")
+    ):
+        level = MemoryScope.APPLICATION
+    else:
+        level = MemoryScope.GLOBAL
+    return level, _scope_text(raw_scope)
+
+
+def _search_result_to_retrieved_memory(
+    result: SearchResult,
+    *,
+    tenant_id: str = "default",
+    user_id: str = "default",
+    source: str | None = None,
+) -> RetrievedMemory | None:
     """Best-effort conversion from legacy SearchResult to vNext RetrievedMemory."""
     metadata = result.metadata or {}
-    scope_level_str = metadata.get("scope_level", "GLOBAL")
-    scope = metadata.get("scope", "GLOBAL")
+    scope_level, scope = _memory_scope(metadata)
     memory_type_str = result.memory_type or "semantic"
     memory_level_str = result.memory_level or "long"
     evolution_status = metadata.get("evolution_status", "ACTIVE")
     content_version = metadata.get("content_version", 1)
 
-    scope_level = _safe_scope(scope_level_str)
     memory_type = _safe_memory_type(memory_type_str)
     layer = _safe_layer(memory_level_str)
     status = _safe_status(evolution_status)
+    owner = metadata.get("user_id") or user_id
+    if owner != user_id:
+        return None
+    result_tenant = metadata.get("tenant_id") or tenant_id
+    if result_tenant != tenant_id:
+        return None
 
     return RetrievedMemory(
-        tenant_id=metadata.get("tenant_id") or "default",
-        user_id=result.user_id or "default",
+        tenant_id=result_tenant,
+        user_id=owner,
         memory_id=result.memory_id,
         memory_type=memory_type,
         layer=layer,
@@ -81,14 +153,16 @@ def _search_result_to_retrieved_memory(result: SearchResult) -> RetrievedMemory 
         content={"text": result.content or ""},
         score=float(result.score),
         score_breakdown=metadata.get("score_breakdown", {}),
-        source_ids=[result.source or "retriever"],
+        source_ids=[source or result.source or "retriever"],
     )
 
 
 def _safe_scope(value: str) -> MemoryScope:
+    if isinstance(value, MemoryScope):
+        return value
     try:
-        return MemoryScope(value.upper())
-    except ValueError:
+        return MemoryScope(str(value).upper())
+    except (TypeError, ValueError):
         return MemoryScope.GLOBAL
 
 
@@ -137,7 +211,12 @@ def build_legacy_retriever_executor(state: Any) -> Any:
 
         results: list[RetrievedMemory] = []
         for result in response.results:
-            converted = _search_result_to_retrieved_memory(result)
+            converted = _search_result_to_retrieved_memory(
+                result,
+                tenant_id=request.tenant_id,
+                user_id=request.user_id,
+                source="vector",
+            )
             if converted is not None:
                 results.append(converted)
         return results
@@ -430,14 +509,174 @@ def build_episode_executor(episode_repository: Any) -> Any:
     return executor
 
 
+# --------------------------------------------------------------------------
+# Long-term channels: reuse the existing BM25 and Authority adapters.
+# --------------------------------------------------------------------------
+
+
+def _memory_type_matches(memory_type: MemoryType, plan: RetrievalPlan | None) -> bool:
+    return not plan or not plan.required_types or memory_type in plan.required_types
+
+
+def _long_term_memory_from_legacy(
+    memory: Any,
+    *,
+    tenant_id: str,
+    channel: str,
+    score: float,
+) -> RetrievedMemory:
+    metadata = _legacy_memory_metadata(memory)
+    memory_type = _safe_memory_type(str(metadata.get("memory_type", "semantic")))
+    scope_level, scope = _memory_scope(metadata)
+    text = _legacy_memory_text(memory)
+    content: dict[str, Any] = {"text": text}
+    if getattr(memory, "payload", None):
+        content["payload"] = memory.payload
+    if getattr(memory, "steps", None):
+        content["steps"] = list(memory.steps)
+    return RetrievedMemory(
+        tenant_id=tenant_id,
+        user_id=str(metadata.get("user_id") or "default"),
+        memory_id=str(getattr(memory, "memory_id", "")),
+        memory_type=memory_type,
+        layer=LifecycleLayer.LONG_TERM,
+        scope_level=scope_level,
+        scope=scope,
+        content_version=max(1, int(getattr(memory, "version", 1) or 1)),
+        evolution_status=_safe_status(str(metadata.get("status", "ACTIVE"))).value,
+        content=content,
+        score=max(0.0, float(score)),
+        score_breakdown={"channel": channel},
+        source_ids=[f"{channel}:{getattr(memory, 'memory_id', '')}"],
+    )
+
+
+def build_keyword_executor(keyword_search: Any) -> Any:
+    """Execute BM25 independently of the Legacy hybrid fusion path."""
+
+    def executor(
+        request: MemoryRetrievalRequest,
+        plan: RetrievalPlan,
+        channel: str,
+    ) -> list[RetrievedMemory]:
+        if keyword_search is None or not request.query:
+            return []
+        try:
+            raw_results = keyword_search.search(
+                request.query, top_k=max(1, plan.keyword_top_k)
+            )
+        except Exception:
+            return []
+        results: list[RetrievedMemory] = []
+        for result in raw_results:
+            converted = _search_result_to_retrieved_memory(
+                result,
+                tenant_id=request.tenant_id,
+                user_id=request.user_id,
+                source=channel,
+            )
+            if converted is not None:
+                results.append(converted)
+        return results
+
+    return executor
+
+
+def build_authority_executor(authority_repository: Any) -> Any:
+    """Read active, tenant/user-bound LongTermEnvelopes from Authority."""
+
+    def executor(
+        request: MemoryRetrievalRequest,
+        plan: RetrievalPlan,
+        channel: str,
+    ) -> list[RetrievedMemory]:
+        if authority_repository is None:
+            return []
+        try:
+            envelopes = authority_repository.list(
+                tenant_id=request.tenant_id,
+                user_id=request.user_id,
+                include_inactive=False,
+            )
+        except Exception:
+            return []
+
+        ranked: list[tuple[float, Any]] = []
+        for envelope in envelopes:
+            if not _memory_type_matches(envelope.memory_type, plan):
+                continue
+            text = json.dumps(envelope.content, ensure_ascii=False, sort_keys=True)
+            relevance = _query_relevance(
+                request.query, f"{envelope.normalized_key} {text}"
+            )
+            scope_bonus = 0.1 if request.scope and envelope.scope == request.scope else 0.0
+            ranked.append((min(1.0, 0.5 + 0.5 * relevance + scope_bonus), envelope))
+        ranked.sort(key=lambda item: (-item[0], item[1].memory_id))
+        return [
+            RetrievedMemory(
+                tenant_id=envelope.tenant_id,
+                user_id=envelope.user_id,
+                memory_id=envelope.memory_id,
+                memory_type=envelope.memory_type,
+                layer=LifecycleLayer.LONG_TERM,
+                scope_level=envelope.scope_level,
+                scope=envelope.scope,
+                content_version=envelope.content_version,
+                projection_version=envelope.projection_version,
+                evolution_status=envelope.evolution_status.value,
+                content=dict(envelope.content),
+                score=score,
+                score_breakdown={"channel": channel, "authority": True},
+                source_ids=[f"authority:{envelope.memory_id}"],
+            )
+            for score, envelope in ranked[: max(1, plan.top_k * 2)]
+        ]
+
+    return executor
+
+
+def build_metadata_executor(memory_lookup: dict[str, Any] | None) -> Any:
+    """Metadata-only long-term candidate lookup over the existing memory cache."""
+
+    def executor(
+        request: MemoryRetrievalRequest,
+        plan: RetrievalPlan,
+        channel: str,
+    ) -> list[RetrievedMemory]:
+        results: list[RetrievedMemory] = []
+        for memory in (memory_lookup or {}).values():
+            metadata = _legacy_memory_metadata(memory)
+            if metadata.get("tenant_id") != request.tenant_id:
+                continue
+            if metadata.get("user_id") != request.user_id:
+                continue
+            memory_type = _safe_memory_type(str(metadata.get("memory_type", "semantic")))
+            if not _memory_type_matches(memory_type, plan):
+                continue
+            if plan.required_layers and LifecycleLayer.LONG_TERM not in plan.required_layers:
+                continue
+            text = _legacy_memory_text(memory)
+            relevance = _query_relevance(request.query, text)
+            results.append(
+                _long_term_memory_from_legacy(
+                    memory,
+                    tenant_id=request.tenant_id,
+                    channel=channel,
+                    score=0.5 + 0.5 * relevance,
+                )
+            )
+        results.sort(key=lambda item: (-item.score, item.memory_id))
+        return results[: max(1, plan.top_k * 2)]
+
+    return executor
+
+
 def build_channel_executors(state: Any) -> dict[str, Any]:
     """Build the channel executors available in the current application state.
 
     ``vector`` maps to the existing retriever; ``working`` and ``episode``
-    read their structured repositories directly.  Channels without a real
-    executor in state (keyword/metadata/authority) are simply absent so the
-    retrieval service degrades them to empty results until their executors
-    land.
+    read their structured repositories directly.  Long-term channels reuse
+    the existing BM25, memory lookup and Authority adapters independently.
     """
     executors: dict[str, Any] = {}
     if getattr(state, "retriever", None) is not None:
@@ -448,4 +687,12 @@ def build_channel_executors(state: Any) -> dict[str, Any]:
     episode_repository = getattr(state, "episode_repository", None)
     if episode_repository is not None:
         executors["episode"] = build_episode_executor(episode_repository)
+    keyword_search = getattr(state, "keyword_search", None)
+    if keyword_search is not None:
+        executors["keyword"] = build_keyword_executor(keyword_search)
+    if getattr(state, "memory_lookup", None) is not None:
+        executors["metadata"] = build_metadata_executor(state.memory_lookup)
+    authority_repository = getattr(state, "authority_repository", None)
+    if authority_repository is not None:
+        executors["authority"] = build_authority_executor(authority_repository)
     return executors
