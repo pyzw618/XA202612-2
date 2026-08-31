@@ -217,11 +217,17 @@ class VNextReranker:
         task_id: str = "",
         top_k: int | None = None,
         intent: str = "",
+        intent_type_boosts: dict[str, dict[str, float]] | None = None,
     ) -> list[RetrievedMemory]:
         """Rerank fused candidates and return a new ordered list."""
+        type_boosts = self.intent_type_boosts
+        if intent_type_boosts is not None:
+            type_boosts = intent_type_boosts
         scored: list[tuple[float, RetrievedMemory]] = []
         for candidate in candidates:
-            breakdown = self._score(candidate, query, scope_level, scope, task_id, intent)
+            breakdown = self._score(
+                candidate, query, scope_level, scope, task_id, intent, type_boosts
+            )
             final_score = breakdown["final_score"]
             merged_breakdown = dict(candidate.score_breakdown)
             merged_breakdown.update(breakdown)
@@ -248,6 +254,7 @@ class VNextReranker:
         scope: str,
         task_id: str,
         intent: str,
+        intent_type_boosts: dict[str, dict[str, float]],
     ) -> dict[str, float]:
         base_score = self._clamp(candidate.score)
         relevance = self._compute_relevance(query, candidate)
@@ -269,7 +276,7 @@ class VNextReranker:
         type_key = candidate.memory_type.value
         if candidate.layer is not LifecycleLayer.LONG_TERM:
             type_key = candidate.layer.value
-        boost = self.intent_type_boosts.get(intent, {}).get(type_key, 1.0)
+        boost = intent_type_boosts.get(intent, {}).get(type_key, 1.0)
         final_score = min(1.0, weighted * boost)
 
         return {

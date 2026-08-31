@@ -43,6 +43,7 @@ Batch 1 — Working / Episode Executors
 Batch 2 — Authority / Keyword / Vector Executors
 Batch 3 — Intent + Scope Propagation
 Batch 4 — Fusion / Rerank / Context Budget
+Batch 5 — Retrieval Scenario Tests & Legacy Comparison
 ```
 
 ---
@@ -87,7 +88,7 @@ DONE
 | Batch 2 | Authority / Keyword / Vector Executors | DONE | 2026-08-31 |
 | Batch 3 | Intent + Scope Propagation | DONE | 2026-08-31 |
 | Batch 4 | Fusion / Rerank / Context Budget | DONE | 2026-08-31 |
-| Batch 5 | Retrieval Scenario Tests & Legacy Comparison | NOT STARTED | — |
+| Batch 5 | Retrieval Scenario Tests & Legacy Comparison | DONE | 2026-09-02 |
 
 ---
 
@@ -1802,3 +1803,153 @@ Batch 1–4 retrieval subset 63 passed；DELETED candidate activation 回归通�
 ### Next Batch Notes
 
 Batch 5 仅补 Retrieval scenario tests 与 Legacy 对照；不要修改本 Batch 的融合、重排、预算或 activation 语义，除非 scenario 暴露明确回归。Stage 3 USED/Outcome/utility evolution 仍未开始。
+
+
+---
+
+## Stage 2 Batch 5 — Retrieval Scenario Tests & Legacy Comparison
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+建立 Stage 2 的真实 retrieval scenario 测试（Current State、Task History、Preference、Semantic Fact、Keyword、Scope Isolation、Dedup、Context Budget、Mixed Intent、Legacy-vs-vNext 对照），验证完整链路 Intent → Planner → Channel Executors → Fusion → Rerank → Scope → Budget → Context，并修复 scenario 暴露的入口测试与 intent-routing 稳定性问题。
+
+### Reconnaissance Findings
+
+- 当前真实实现：Batch 1–4 已落地 working/episode/authority/keyword/vector/metadata executor、RRF、VNextReranker、ScopeResolver、BudgetManager；Batch 5 首次用真实 repository + mock vector 跑端到端 scenario。
+- 与 stage 文档一致的部分：调用链完整，channel executor、fusion、rerank、scope、budget 均按设计工作；keyword BM25 负分需归一化；entrypoint fixture 缺 rollout/retrieval service。
+- 与 stage 文档不一致的部分：自然中文查询无法稳定命中 router 正则，需用 `intent_hint` 强制目标 intent 以保证 scenario 确定性；`VNextReranker.DEFAULT_TYPE_WEIGHTS` 中 WORKING/EPISODE 权重仅 0.05，导致 state/history 查询时 working/episode memory 易被大量长期噪声挤出 top_k。
+- 复用的现有组件：WorkingStateRepository、EpisodeRepository、AuthorityRepository、KeywordSearcher、BM25、VNextReranker、ReciprocalRankFusion、ScopeResolver、BudgetManager、StructuredContextBuilder、RetrievalService、IntentRouter。
+- 实际影响范围：reranker/context_service/intent_router 最小适配 + scenario/entrypoint 测试 + 已有 keyword executor 归一化修复。
+
+### Changes
+
+- `memoryhub/adapter/retrieval_executor.py`：新增 `_normalize_keyword_scores()`，将 BM25 原始负分 min-max 归一化到 `[0, 1]`，解决 `RetrievedMemory(score>=0)` schema 约束冲突。
+- `memoryhub/retrieval/reranker.py`：`VNextReranker.rerank()` 增加可选 `intent_type_boosts` 参数，单次调用可覆盖实例级 boost；`_score()` 使用传入 boost 表实现 intent-aware type boost。
+- `memoryhub/application/context_service.py`：`build_context()` 根据 `plan.intent` 生成 intent-aware type boost 并传给 reranker；新增 `_intent_type_boosts()` 静态方法。
+- `memoryhub/retrieval/intent_router.py`：移除 `intent_hint is not MIXED` 限制，允许测试显式强制 MIXED intent（其他场景已可强制）。
+- `tests/test_vnext_entrypoints.py`：补全 `RolloutController` + `RolloutReadService` + `ShadowReadService` fixture；修正 activations 数量与 legacy header。
+- `tests/test_vnext_batch5_retrieval_scenarios.py`：新增 11 个 scenario / 对照测试（A-J + Legacy-vs-vNext）。
+
+### Files Touched
+
+```text
+memoryhub/adapter/retrieval_executor.py
+memoryhub/application/context_service.py
+memoryhub/retrieval/intent_router.py
+memoryhub/retrieval/reranker.py
+tests/test_vnext_entrypoints.py
+tests/test_vnext_batch5_retrieval_scenarios.py
+docs/vnext/PROGRESS.md
+```
+
+### Behavior Before
+
+```text
+Keyword BM25 可能返回负分 → Pydantic 校验失败。
+自然中文 query 不命中 router 正则 → 返回 MIXED/EXPERIENCE，scenario 断言失败。
+WORKING/EPISODE 在 rerank 中默认权重 0.05 → 易被长期噪声挤出 top_k，budget 前丢失。
+IntentRouter 忽略 MIXED hint → 无法强制 MIXED。
+Entrypoint test fixture 缺少 rollout_read_service → vNext entrypoint 测试失败。
+```
+
+### Behavior After
+
+```text
+Keyword BM25 负分归一化到 [0, 1]，schema 约束满足。
+Scenario 使用 intent_hint 强制目标 Intent，router 输出稳定。
+ContextService 按 intent 传入 type boost：CURRENT_STATE 提升 WORKING，TASK_HISTORY 提升 EPISODE，PREFERENCE/SEMANTIC_FACT/PROCEDURE/EXPERIENCE 提升对应类型，MIXED 同时提升 WORKING/EPISODE。
+MIXED hint 可被显式强制。
+Entrypoint fixture 补齐 rollout/shadow read service，8 个 entrypoint 测试通过。
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_vnext_batch5_retrieval_scenarios.py` | PASS (11) |
+| `tests/test_vnext_batch2_retrieval_channels.py` | PASS |
+| `tests/test_vnext_batch3_scope_propagation.py` | PASS |
+| `tests/test_vnext_batch4_fusion_context.py` | PASS |
+| `tests/test_vnext_retrieval_service.py` | PASS |
+| `tests/test_vnext_retrieval_planner.py` | PASS |
+| `tests/test_vnext_intent_router.py` | PASS |
+| `tests/test_vnext_context_service.py` | PASS |
+| `tests/test_vnext_context_budget.py` | PASS |
+| `tests/test_vnext_fusion_reranker.py` | PASS |
+| `tests/test_vnext_entrypoints.py` | PASS (8) |
+| `tests/test_vnext_stage1_scenarios.py` | PASS |
+| Batch 1–5 retrieval + entrypoint + Stage 1 scenario 回归 | PASS (98) |
+| Ruff on changed source/tests | PASS |
+
+### Evidence
+
+- `test_scenario_a_current_state_returns_working_state`：强制 CURRENT_STATE 后返回 WORKING 层记忆，包含 current_goal / current_step / blockers。
+- `test_scenario_b_task_history_returns_episode`：强制 TASK_HISTORY 后返回 EPISODE 层记忆，key_events 包含 pytest 通过记录。
+- `test_scenario_c_preference_authority_beats_vector`：强制 PREFERENCE，authority 的 PREFERENCE 记忆排在 mock vector 通用命中之前。
+- `test_scenario_d_semantic_fact_from_authority`：强制 SEMANTIC_FACT，authority 返回包含 PostgreSQL 的事实。
+- `test_scenario_e_exact_keyword_hit`：BM25 精确命中并按相关度排序。
+- `test_scenario_f/g_cross_project/user_isolation`：ScopeResolver 过滤掉非目标 project/user。
+- `test_scenario_h_mixed_intent_uses_working_and_episode`：强制 MIXED，selected memories 同时包含 WORKING 与 EPISODE。
+- `test_scenario_i_duplicate_projection_deduplicated`：三通道返回同一 memory_id，fusion 后仅出现一次。
+- `test_scenario_j_context_budget_trims_low_value_memory`：256 token budget 下 WORKING 记忆保留，长期噪声被裁剪，`len(ids) < 21`。
+- `TestLegacyVsVNextComparison`：legacy vector-only 命中 `legacy-only`，vNext CURRENT_STATE 命中 `ws:ws:task-1`，两者不同。
+
+### Scope Verification
+
+- Request → Planner → Executor → Result 中 scope 未丢失：Working/Episode/Authority executor 继续使用 tenant_id/user_id/scope 过滤，ScopeResolver 最终校验。
+- Scenario F/G 证明 project/user scope isolation 生效。
+
+### Retrieval Channel Verification
+
+| Channel | Batch 5 行为 |
+|---|---|
+| working | 结构化 task → session/recent fallback；CURRENT_STATE intent 下受 rerank type boost 保护 |
+| episode | 结构化 task → session/recent fallback；TASK_HISTORY/MIXED intent 下受 rerank type boost 保护 |
+| authority | 按 scope/type 过滤；PREFERENCE/SEMANTIC_FACT/PROCEDURE/EXPERIENCE intent 下受对应 type boost |
+| keyword | BM25 负分归一化到 [0, 1]；按查询 token 重叠排序 |
+| vector | mock 命中，仅作为 channel 之一，未成为 vNext retrieval 唯一实现 |
+
+### Regression
+
+```text
+Stage 1 Formation / Working Reducer / Episode Enrichment / Boundary / Reflection：
+  tests/test_vnext_stage1_scenarios.py PASS，Stage 1 DoD 保持成立。
+Retrieval 核心组件：
+  Batch 2/3/4/5 retrieval tests、intent router、context budget、fusion reranker PASS。
+Entrypoints：
+  tests/test_vnext_entrypoints.py 8 PASS。
+No production Safety/Legacy source code changed outside the retrieval path.
+```
+
+### Remaining Risks
+
+- Scenario 使用 `intent_hint` 强制 intent 是因为自然中文 regex 覆盖不足；router 正则质量提升是独立优化，不在本 Batch。
+- `test_retrieval_log_persisted` 仍因 Windows pytest tmp ACL 环境基线问题未执行（非本 Batch 引入）。
+- Context budget 对 WORKING 记忆的保护依赖 rerank type boost 使其进入 top_k；BudgetManager 目前仍把 WORKING 层记忆当长期记忆按 token 预算排序，未使用 `ContextService.is_hard_protected_memory`；当前 scenario 下 boost 已能保证其保留，如需更强保护需独立 Batch 决策。
+
+### Decisions
+
+```text
+1. Batch 5 不扩展 IntentRouter 正则；用 intent_hint 保证 scenario 稳定性。
+2. 通过 VNextReranker 单次调用 intent_type_boosts 参数实现 intent-aware type boost，不改变默认行为和现有测试。
+3. 允许显式 MIXED intent_hint，使 mixed scenario 可测。
+4. Keyword BM25 负分在 executor 内按 query 归一化，保持对既有接口最小侵入。
+```
+
+### Not Done
+
+- Stage 3 Feedback 闭环。
+- Stage 4 Evaluation & Cutover。
+- router 正则自然语言覆盖增强。
+- BudgetManager 对 WORKING/EPISODE 的显式 hard-protection 改造。
+- 真实 Milvus/FAISS backend 集成验证（rank-bm25 / faiss-cpu 未安装）。
+
+### Next Batch Notes
+
+Stage 2 已完成全部 5 个 Batch。下一阶段为 Stage 3 — Feedback 闭环，本 Batch 不会自动开始。任何后续 Batch 启动前需先阅读 VNEXT_PLAN.md 与对应 stage 文档。

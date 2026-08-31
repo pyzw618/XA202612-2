@@ -99,6 +99,7 @@ class ContextService:
             task_id=request.task_id,
             top_k=plan.top_k,
             intent=plan.intent.value,
+            intent_type_boosts=self._intent_type_boosts(plan.intent.value),
         )
 
         # 3. Scope resolution
@@ -186,6 +187,25 @@ class ContextService:
         for rank, channel in enumerate(preferred):
             defaults[channel] = 1.35 - 0.1 * rank
         return defaults
+
+    @staticmethod
+    def _intent_type_boosts(intent: str) -> dict[str, dict[str, float]]:
+        """Intent-aware type boosts that protect structurally important layers.
+
+        These boosts are multipliers on the weighted rerank score (capped at 1.0).
+        They compensate for the deliberately low default weights of WORKING/EPISODE
+        so that state/history queries can keep their primary source memories in
+        the top_k that reaches the context budget.
+        """
+        return {
+            "CURRENT_STATE": {"WORKING": 2.0},
+            "TASK_HISTORY": {"EPISODE": 2.0},
+            "PREFERENCE": {"PREFERENCE": 1.5},
+            "SEMANTIC_FACT": {"SEMANTIC": 1.5},
+            "PROCEDURE": {"PROCEDURAL": 1.5},
+            "EXPERIENCE": {"EPISODIC": 1.5},
+            "MIXED": {"WORKING": 1.5, "EPISODE": 1.5},
+        }
 
     @staticmethod
     def extract_working_state(

@@ -563,6 +563,29 @@ def _long_term_memory_from_legacy(
     )
 
 
+def _normalize_keyword_scores(raw_results: list[SearchResult]) -> list[SearchResult]:
+    """Min-max normalize BM25 scores into [0, 1].
+
+    BM25Okapi can return negative scores when a term appears in more than half
+    of the indexed documents (negative IDF).  The vNext ``RetrievedMemory`` schema
+    requires a non-negative score, and downstream RRF weights expect comparable
+    positive values, so we normalize the raw BM25 scores per query.
+    """
+    if not raw_results:
+        return []
+    scores = [float(r.score) for r in raw_results]
+    min_score = min(scores)
+    max_score = max(scores)
+    if max_score == min_score:
+        # All results have the same signal; treat them as equally relevant.
+        return [r.model_copy(update={"score": 1.0}) for r in raw_results]
+    normalized: list[SearchResult] = []
+    for result, raw_score in zip(raw_results, scores):
+        norm_score = (raw_score - min_score) / (max_score - min_score)
+        normalized.append(result.model_copy(update={"score": norm_score}))
+    return normalized
+
+
 def build_keyword_executor(keyword_search: Any) -> Any:
     """Execute BM25 independently of the Legacy hybrid fusion path."""
 
@@ -579,8 +602,11 @@ def build_keyword_executor(keyword_search: Any) -> Any:
             )
         except Exception:
             return []
+        # BM25 raw scores may be negative when IDF is negative; normalize to [0, 1]
+        # so downstream Pydantic constraints and RRF weights remain valid.
+        normalized_results = _normalize_keyword_scores(raw_results)
         results: list[RetrievedMemory] = []
-        for result in raw_results:
+        for result in normalized_results:
             converted = _search_result_to_retrieved_memory(
                 result,
                 tenant_id=request.tenant_id,

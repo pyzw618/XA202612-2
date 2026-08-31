@@ -11,7 +11,12 @@ from memoryhub.adapter.vnext_api import router as vnext_router
 from memoryhub.application.canonical_write import CanonicalWriteService
 from memoryhub.application.episode_service import EpisodeService
 from memoryhub.application.event_gateway import EventGateway
+
+# Rollout read boundary required by the vNext search/context entrypoints.
+from memoryhub.application.rollout_service import RolloutController
+from memoryhub.application.shadow_read_service import RolloutReadService, ShadowReadService
 from memoryhub.application.working_service import WorkingService
+from memoryhub.config import VNextConfig
 from memoryhub.core.memory_write import MemoryWriteService
 from memoryhub.domain.contracts import (
     EpisodeEventContract,
@@ -25,6 +30,7 @@ from memoryhub.domain.contracts import (
     WorkingSnapshot,
 )
 from memoryhub.domain.long_term import LongTermAuthorityFacade
+from memoryhub.observability.trace_store import TraceStore
 from memoryhub.storage.authority_repository import AuthorityRepository
 from memoryhub.storage.database import Database, KnowledgeRepository, PreferenceRepository
 from memoryhub.storage.models import EventRow, IdempotencyRecordRow, WorkingStateRow
@@ -414,6 +420,14 @@ def _test_app_with_retrieval(
 ) -> FastAPI:
     app = _test_app(write_service)
     app.state.retrieval_service = retrieval_service
+    # The vNext /search and /context endpoints delegate to RolloutReadService.
+    # In these tests we want to exercise the vNext path directly, so fix the
+    # rollout controller to vnext mode and provide the required shadow service.
+    controller = RolloutController(VNextConfig(mode="vnext"), db=write_service.db)
+    shadow = ShadowReadService(trace_store=TraceStore(), reflection_service=object())
+    app.state.rollout_read_service = RolloutReadService(
+        controller=controller, shadow_read=shadow
+    )
     return app
 
 
@@ -449,7 +463,11 @@ def test_vnext_search_returns_consistent_ids_and_trace() -> None:
     assert "m-entry-1" in ids
     assert "m-entry-2" in ids
     assert "vector" in body["retrieval_plan"]["enabled_channels"]
-    assert len(body["activations"]) == 2
+    # Batch 4 records both RECALLED and IN_CONTEXT activations, so two memories
+    # produce four activation rows in total.
+    assert len(body["activations"]) == 4
+    activated_ids = {a["memory_id"] for a in body["activations"]}
+    assert activated_ids == {"m-entry-1", "m-entry-2"}
     db.close()
 
 
@@ -502,6 +520,7 @@ def test_legacy_search_delegates_to_vnext_retrieval_service() -> None:
     response = client.post(
         "/api/memory/search",
         json={"user_id": "user-entry", "query": "report format", "top_k": 5},
+        headers={"X-MemoryHub-Tenant": "tenant-entry", "X-MemoryHub-User": "user-entry"},
     )
     assert response.status_code == 200, response.text
     body = response.json()

@@ -128,7 +128,7 @@ class IntentRouter:
         """Score the query and return an explainable intent decision."""
         scores = self._rule_scores(query, current_goal=current_goal, current_step=current_step)
 
-        if intent_hint is not None and intent_hint is not RetrievalIntent.MIXED:
+        if intent_hint is not None:
             # A caller-supplied hint is strong evidence; use it as the primary
             # intent while still exposing the rule scores for diagnostics.
             return self._build(
