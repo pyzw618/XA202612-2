@@ -280,7 +280,6 @@ def test_scenario_b_task_history_returns_episode() -> None:
             task_id="task-1",
             scope_level=MemoryScope.TASK,
             scope="TASK:task-1",
-            intent_hint=RetrievalIntent.TASK_HISTORY,
         )
     )
 
@@ -330,7 +329,6 @@ def test_scenario_c_preference_authority_beats_vector() -> None:
             query="我平时用 Maven 还是 Gradle",
             scope_level=MemoryScope.GLOBAL,
             scope="GLOBAL",
-            intent_hint=RetrievalIntent.PREFERENCE,
         )
     )
 
