@@ -922,15 +922,25 @@ def create_app(
         # Build it only after the legacy retriever is available so vector is a
         # real channel rather than an accidentally omitted startup dependency.
         from memoryhub.adapter.retrieval_executor import build_channel_executors
+        from memoryhub.application.evolution_service import EvolutionService
         from memoryhub.application.feedback_service import UtilityFeedbackShadow
         from memoryhub.application.retrieval_service import RetrievalService
         from memoryhub.retrieval.planner import RetrievalPlanner
+        from memoryhub.storage.memory_metadata import MemoryLineageRepository
         from memoryhub.storage.vnext_repositories import (
             ActivationRepository,
             RetrievalLogRepository,
         )
 
         channel_executors = build_channel_executors(app.state)
+        lineage_repository = MemoryLineageRepository(db)
+        app.state.lineage_repository = lineage_repository
+        evolution_service = EvolutionService(
+            authority_facade=authority_facade,
+            lineage_repository=lineage_repository,
+            db=db,
+        )
+        app.state.evolution_service = evolution_service
         app.state.retrieval_service = RetrievalService(
             planner=RetrievalPlanner(available_channels=list(channel_executors)),
             channel_executors=channel_executors,
@@ -940,6 +950,7 @@ def create_app(
             trace_store=app.state.trace_store,
             authority_repository=authority_repository,
             db=db,
+            evolution_service=evolution_service,
         )
         app.state.sync_service = sync_service
         app.state.projection_outbox_worker = projection_outbox_worker

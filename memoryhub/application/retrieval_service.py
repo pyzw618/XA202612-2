@@ -30,6 +30,7 @@ from memoryhub.application.feedback_service import (
 from memoryhub.domain.contracts import (
     Activation,
     ActivationStatus,
+    EvolutionStatus,
     RetrievalIntent,
 )
 from memoryhub.retrieval.intent_router import IntentRouter, RoutedIntent
@@ -37,6 +38,7 @@ from memoryhub.retrieval.planner import RetrievalPlan, RetrievalPlanner
 from memoryhub.retrieval.scope_resolver import ScopeResolver
 from memoryhub.storage.authority_repository import AuthorityRepository
 from memoryhub.storage.memory_metadata import MemoryProjectionOutboxRepository
+from memoryhub.storage.vnext_repositories import CandidateRepository
 
 ChannelExecutor = Callable[
     [MemoryRetrievalRequest, RetrievalPlan, str],
@@ -88,6 +90,7 @@ class RetrievalService:
         db: Any | None = None,
         usage_feedback_service: Any | None = None,
         score_updater: UtilityStabilityUpdater | None = None,
+        evolution_service: Any | None = None,
     ) -> None:
         self.intent_router = intent_router or IntentRouter()
         self.planner = planner or RetrievalPlanner()
@@ -115,6 +118,7 @@ class RetrievalService:
         self.score_updater = score_updater or UtilityStabilityUpdater(
             trace_store=trace_store
         )
+        self.evolution_service = evolution_service
 
     def retrieve(
         self,
@@ -321,7 +325,7 @@ class RetrievalService:
         return result
 
     def record_feedback_event(self, event: FeedbackEvent) -> dict[str, object]:
-        """Validate and attribute a feedback event without updating memory scores."""
+        """Validate, attribute and optionally evolve memory based on a feedback event."""
         if self.retrieval_log_repository is None or self.activation_repository is None:
             return {"feedback_id": event.feedback_id, "status": "unavailable"}
         log = self.retrieval_log_repository.get(retrieval_log_id=event.retrieval_id)
@@ -368,6 +372,8 @@ class RetrievalService:
         if shadow is None or not hasattr(shadow, "record_event"):
             return {"feedback_id": event.feedback_id, "status": "unavailable"}
         result = shadow.record_event(event, used_memory_ids=used)
+        rejected_memories: list[str] = []
+        evolution_results: list[dict[str, object]] = []
         for feedback_id in result.get("feedback_ids", []):
             item = next(
                 (value for value in shadow.feedback if value.feedback_id == feedback_id),
@@ -375,12 +381,85 @@ class RetrievalService:
             )
             if item is None or self.authority_repository is None:
                 continue
+
+            # Authority path: update scores and, if the memory exists, apply
+            # an evolution signal.  Missing/inactive memories are ignored here
+            # so that feedback on Candidates is handled separately below.
             try:
+                current = self.authority_repository.get(
+                    tenant_id=item.tenant_id,
+                    user_id=item.user_id,
+                    memory_id=item.memory_id,
+                    include_inactive=True,
+                )
+                if current is not None and current.evolution_status is EvolutionStatus.DELETED:
+                    rejected_memories.append(item.memory_id)
+                    continue
                 self.score_updater.update_authority(item, self.authority_repository)
+                if current is not None and self.evolution_service is not None:
+                    updated = self.authority_repository.get(
+                        tenant_id=item.tenant_id,
+                        user_id=item.user_id,
+                        memory_id=item.memory_id,
+                        include_inactive=True,
+                    )
+                    if updated is not None:
+                        evo_result = self.evolution_service.apply_feedback_signal(
+                            item, updated
+                        )
+                        if evo_result.action not in {"NOOP", "REJECTED"}:
+                            evolution_results.append(
+                                {
+                                    "memory_id": item.memory_id,
+                                    "action": evo_result.action,
+                                    "previous_status": (
+                                        evo_result.previous_envelope.evolution_status.value
+                                        if evo_result.previous_envelope
+                                        else ""
+                                    ),
+                                    "new_status": (
+                                        evo_result.new_envelope.evolution_status.value
+                                        if evo_result.new_envelope
+                                        else ""
+                                    ),
+                                }
+                            )
             except (KeyError, ValueError):
-                # A missing/inactive legacy memory cannot be resurrected by feedback.
-                continue
-        return {"feedback_id": event.feedback_id, "status": "accepted", **result}
+                pass
+
+            # Candidate feedback path: strong negative moves Candidate to REVIEW.
+            if self.db is not None and self._is_negative_feedback(item):
+                try:
+                    candidate_repo = CandidateRepository(self.db)
+                    candidate = candidate_repo.get(
+                        tenant_id=item.tenant_id,
+                        user_id=item.user_id,
+                        candidate_id=item.memory_id,
+                    )
+                    if candidate is not None and candidate.status in {
+                        "ACCUMULATING",
+                        "CONFIRMED",
+                    }:
+                        candidate_repo.transition(
+                            tenant_id=item.tenant_id,
+                            user_id=item.user_id,
+                            candidate_id=item.memory_id,
+                            status="REVIEW",
+                        )
+                except (KeyError, ValueError):
+                    pass
+
+        response: dict[str, object] = {
+            "feedback_id": event.feedback_id,
+            "status": "accepted",
+            **result,
+        }
+        if rejected_memories:
+            response["rejected_memory_ids"] = rejected_memories
+            response["rejected_reason"] = "memory_deleted"
+        if evolution_results:
+            response["evolution"] = evolution_results
+        return response
 
     def _enqueue_repair(self, memory: RetrievedMemory) -> None:
         """Enqueue a high-priority projection repair without failing retrieval."""
@@ -622,6 +701,16 @@ class RetrievalService:
             self.trace_store.record(span)
         except Exception:
             pass
+
+    @staticmethod
+    def _is_negative_feedback(item: Any) -> bool:
+        from memoryhub.application.feedback_service import FeedbackType
+
+        feedback_type = getattr(item, "feedback_type", None)
+        return feedback_type in {
+            FeedbackType.EXPLICIT_NEGATIVE,
+            FeedbackType.USER_CORRECTION,
+        }
 
     @staticmethod
     def _plan_to_dict(plan: RetrievalPlan, routed: RoutedIntent) -> dict[str, Any]:

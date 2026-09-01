@@ -46,7 +46,7 @@ Batch 4 — Fusion / Rerank / Context Budget
 Batch 5 — Retrieval Scenario Tests & Legacy Comparison
 
 Current Target:
-Stage 3 Batch 3 — Utility / Stability Update
+Stage 3 Batch 4 — Memory Evolution & Safeguards
 ```
 
 ---
@@ -57,7 +57,7 @@ Stage 3 Batch 3 — Utility / Stability Update
 |---|---|---|---|
 | Stage 1 | Formation 实化 | DONE | 全部 5 个 Batch + Independent Review Repair 完成 |
 | Stage 2 | Retrieval 实化 | DONE | 全部 5 个 Batch + Closure Fix 1–5 完成 |
-| Stage 3 | Feedback 闭环 | IN PROGRESS | Batch 3 — Utility / Stability Update |
+| Stage 3 | Feedback 闭环 | IN PROGRESS | Batch 4 — Memory Evolution & Safeguards 完成 |
 | Stage 4 | Evaluation & Cutover | NOT STARTED | 暂不执行 |
 
 状态仅允许：
@@ -110,7 +110,7 @@ DONE
 | Batch 1 | Activation Completion — USED | DONE | 2026-08-31 |
 | Batch 2 | Feedback Event & Attribution | DONE | 2026-09-01 |
 | Batch 3 | Utility / Stability Update | DONE | 2026-09-01 |
-| Batch 4 | Memory Evolution & Safeguards | NOT STARTED | 暂不执行 |
+| Batch 4 | Memory Evolution & Safeguards | DONE | 2026-09-01 |
 | Batch 5 | Feedback Scenario Tests & Stage 3 Validation | NOT STARTED | 暂不执行 |
 
 ---
@@ -2902,3 +2902,206 @@ Legacy feedback route: preserved.
 ### Next Batch Notes
 
 Stage 3 Batch 3 已完成。下一授权 Batch 为 Batch 4 — Memory Evolution & Safeguards；本次不自动开始。
+
+---
+
+## Stage 3 Batch 4 — Memory Evolution & Safeguards
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+在 Batch 3 的 bounded utility/stability 更新基础上，把反馈信号真正作用于 Memory Evolution 状态（ACTIVE ↔ DORMANT / REVIEW），并补齐 safeguards：
+
+- 显式 negative / correction 把 ACTIVE 推入 REVIEW。
+- 长期低 utility + 低 stability 把 ACTIVE 推入 DORMANT。
+- 强 positive feedback 把 DORMANT 恢复为 ACTIVE。
+- 负反馈把 Candidate（ACCUMULATING / CONFIRMED）推入 REVIEW。
+- DELETED / forget 后的 Memory 不会被反馈复活。
+- 跨 tenant/user 反馈被 scope 校验拒绝。
+- 同一 feedback_id 在进程内幂等。
+
+### Reconnaissance Findings
+
+- 当前真实实现：
+  - `EvolutionStatus` 已存在 ACTIVE / DORMANT / SUPERSEDED / ARCHIVED / DELETED；本 Batch 新增 `REVIEW`。
+  - `EvolutionService` 已有 `evolve()` 决策路径，但尚未接收 feedback-derived signal。
+  - `MemoryLineageRepository` 已存在，但 `EvolutionService` 未注入 lineage repository。
+  - `RetrievalService.record_feedback_event()` 在 Batch 3 已接入 `UtilityStabilityUpdater`，但更新后没有把 score 变化反馈给 evolution。
+  - Candidate 负反馈迁移逻辑被包在 authority try 块内部，导致 memory_id 不在 Authority 时 Candidate 路径被跳过。
+- 与 stage 文档一致的部分：
+  - EvolutionService 作为 Authority 状态机入口，优先复用而非新建框架。
+  - Feedback 不直接 delete，终端状态（DELETED）拒绝 signal。
+  - Lineage 作为 audit trail 记录。
+- 与 stage 文档不一致的部分：
+  - 原先未区分 "显式 negative 直接 REVIEW" 与 "低分 DORMANT" 的优先级；测试期望低分优先 DORMANT，因此调整规则顺序。
+- 复用的现有组件：
+  - `EvolutionService` / `EvolutionStatus` / `LineageRelation`
+  - `MemoryLineageRepository` / `LongTermAuthorityFacade`
+  - `RetrievalService` / `UtilityFeedbackShadow` / `UtilityStabilityUpdater`
+  - `CandidateRepository`
+  - `ForgetService`
+- 实际影响范围：
+  - `memoryhub/domain/contracts.py`（`REVIEW`、新 lineage relation）
+  - `memoryhub/domain/evolution.py`（允许 ACTIVE→REVIEW/DORMANT 等迁移）
+  - `memoryhub/application/evolution_service.py`（lineage 持久化 + `apply_feedback_signal`）
+  - `memoryhub/application/retrieval_service.py`（更新后调用 evolution + Candidate 路径外置）
+  - `memoryhub/app.py`（装配 `MemoryLineageRepository` 与 `EvolutionService`）
+  - `tests/test_vnext_feedback_evolution.py`
+
+### Changes
+
+- `memoryhub/domain/contracts.py`：
+  - `EvolutionStatus` 增加 `REVIEW`。
+  - `LineageRelation` 增加 `DEACTIVATED_BY` / `REACTIVATED_BY` / `REVIEWED_BY`。
+- `memoryhub/domain/evolution.py`：
+  - `ALLOWED_EVOLUTION_TRANSITIONS` 允许 ACTIVE→REVIEW、REVIEW→ACTIVE 等迁移。
+- `memoryhub/application/evolution_service.py`：
+  - 注入 `MemoryLineageRepository` 与 `db`。
+  - 新增 `_persist_lineage()` / `_record_lineage_in_session()`，在 `_apply_replace()` / `_apply_coexist()` / `_apply_status_transition()` 后写入 lineage。
+  - 新增 `apply_feedback_signal()`：按 feedback type + 当前状态 + 更新后分数决定目标状态；DELETED 返回 REJECTED；feedback_id 在进程内幂等。
+  - 调整 ACTIVE 状态判断顺序：utility<0.2 且 stability<0.2 时优先 DORMANT；非低分时显式 negative/correction 才 REVIEW。
+- `memoryhub/application/retrieval_service.py`：
+  - `__init__` 增加 `evolution_service` 注入。
+  - `record_feedback_event()` 在 score update 后读取最新 envelope 并调用 `apply_feedback_signal()`。
+  - 将 Candidate 负反馈 → REVIEW 的路径从 authority try 块中移出，单独捕获异常；memory_id 不在 Authority 时仍可用 Candidate 路径。
+- `memoryhub/app.py`：
+  - 装配 `MemoryLineageRepository` 与 `EvolutionService` 并注入 `RetrievalService`。
+- `tests/test_vnext_feedback_evolution.py`：
+  - 新增 8 个测试覆盖 ACTIVE→REVIEW、ACTIVE→DORMANT、DORMANT→ACTIVE、Candidate→REVIEW、DELETED 拒绝、跨 tenant 隔离、feedback 幂等、lineage 持久化。
+  - 扩展 `_authority()` helper 支持 `tenant_id` / `user_id`。
+  - 补全 `ForgetRequest` 的 `request_id`、`idempotency_key`、`dry_run=False`、`confirm=True`，并传入 `high_risk_authorized=True`。
+
+### Files Touched
+
+```text
+memoryhub/domain/contracts.py
+memoryhub/domain/evolution.py
+memoryhub/application/evolution_service.py
+memoryhub/application/retrieval_service.py
+memoryhub/app.py
+tests/test_vnext_feedback_evolution.py
+docs/vnext/PROGRESS.md
+```
+
+（核心源码 6 个文件，符合单 Batch ≤8 限制。）
+
+### Behavior Before
+
+```text
+FeedbackEvent
+→ UtilityFeedbackShadow attribution
+→ UtilityStabilityUpdater.update_authority() 改分数
+→ 结束
+
+EvolutionService 不参与 feedback 闭环；Candidate 负反馈无法被处理；
+DELETED memory 的反馈只被阻止更新，但不返回明确拒绝原因。
+```
+
+### Behavior After
+
+```text
+FeedbackEvent
+→ scope / retrieval log / selected_memory 校验
+→ UtilityFeedbackShadow attribution
+→ UtilityStabilityUpdater.update_authority() 改分数
+→ 读取最新 envelope
+→ EvolutionService.apply_feedback_signal()
+   ACTIVE + utility<0.2 & stability<0.2       → DORMANT
+   ACTIVE + explicit negative / correction    → REVIEW
+   DORMANT + explicit positive / confirmation → ACTIVE
+   DELETED                                    → REJECTED
+→ 有状态迁移时写入 MemoryLineage (REVIEWED_BY / DEACTIVATED_BY / REACTIVATED_BY)
+→ 负 feedback 同时尝试 CandidateRepository.transition(..., status="REVIEW")
+→ 返回 accepted + evolution + rejected_memory_ids（如适用）
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_vnext_feedback_evolution.py` | PASS (8), FAIL 0, SKIP 0 |
+| `tests/test_vnext_stage1_scenarios.py` | PASS (6) |
+| `tests/test_vnext_batch5_retrieval_scenarios.py` | PASS (11) |
+| `tests/test_vnext_feedback_service.py` | PASS (8) |
+| `tests/test_vnext_activation_used.py` | PASS (8) |
+| `tests/test_vnext_evolution.py` | PASS (7) |
+| Stage 3 Batch 4 + Stage 1/2/3 回归合计 | PASS (50), FAIL 0, SKIP 0 |
+| `ruff check memoryhub/application/evolution_service.py memoryhub/application/retrieval_service.py tests/test_vnext_feedback_evolution.py` | PASS |
+
+### Evidence
+
+- `test_explicit_negative_feedback_moves_active_to_review_and_writes_lineage`：EXPLICIT_NEGATIVE 在 utility=0.5/stability=0.5 时产生 `REVIEWED_BY` lineage，Authority 状态变为 `REVIEW`。
+- `test_low_scores_move_active_to_dormant`：EXPLICIT_NEGATIVE 在 utility=0.25/stability=0.25 时更新后均低于 0.2，状态变为 `DORMANT`。
+- `test_positive_feedback_reactivates_dormant_memory`：EXPLICIT_POSITIVE 使 DORMANT → ACTIVE，生成 `REACTIVATED_BY` lineage。
+- `test_negative_feedback_moves_candidate_to_review`：USER_CORRECTION 使 `ACCUMULATING` Candidate 变为 `REVIEW`，且该 Candidate 不存在于 Authority。
+- `test_feedback_on_deleted_memory_is_rejected`：ForgetService 删除后，feedback 返回 `rejected_memory_ids=["m1"]`，`rejected_reason="memory_deleted"`，状态保持 DELETED，utility 未被更新。
+- `test_cross_tenant_feedback_does_not_evolve_other_tenant_memory`：tenant-2 反馈被 scope 校验拒绝，tenant-1 的 m1 保持 ACTIVE。
+- `test_feedback_evolution_is_idempotent`：同一 feedback_id 重放第二次不产生新的 evolution 结果。
+- `test_existing_evolve_path_persists_lineage`：原有 formation/consolidation 路径（REINFORCE / SUPERSEDE）也写入 lineage。
+
+### Feedback Attribution Evidence
+
+- 仍复用 Batch 2/3 归因：explicit feedback 强归因；多 Memory outcome 弱归因；未 USED 不参与 outcome attribution。
+- `RetrievalService.record_feedback_event()` 先用 retrieval log 的 `selected_memory_ids` 校验 memory 是否真实进入 context；未进入者拒绝。
+- 跨 tenant / user / project / task / session scope 不匹配直接拒绝。
+
+### Score Update Evidence
+
+- `UtilityStabilityUpdater` 在 `RetrievalService` 中先于 evolution signal 执行；分数 bounded 到 `[0.0, 1.0]`。
+- EXPLICIT_NEGATIVE 权重 `(-0.15, -0.15)`，使 `0.25/0.25` 的 memory 落入 `<0.2` 阈值，触发 DORMANT。
+- 同一 `feedback_id` 在 updater 与 evolution service 中均为进程内幂等。
+
+### Scope Verification
+
+- Authority 更新与 Candidate 更新均按 `(tenant_id, user_id, id)` 查询。
+- `record_feedback_event()` 在 attribution 前校验 retrieval log 的 tenant/user 与 event 一致。
+- 跨 tenant 反馈在 scope 校验阶段即被拒绝，不会到达 updater/evolution。
+
+### Regression
+
+```text
+Stage 1 Formation design: unchanged; Stage 1 scenario tests passed.
+Stage 2 Retrieval architecture: unchanged; Batch 5 scenario tests passed.
+Activation / Retrieval Log / Agent / MCP entrypoints: unchanged; activation tests passed.
+Safety / Forget / Quarantine: no policy or gate changed; forget service still requires high_risk authorization.
+candidate-only: unchanged.
+Legacy feedback route: preserved.
+```
+
+### Remaining Risks
+
+- evolution service 与 score updater 的幂等集合仍为进程内状态；跨进程 durable feedback idempotency ledger 尚未实现。
+- lineage 写入异常被静默忽略（audit-only），生产需监控 lineage 丢失情况。
+- `REVIEW` 状态目前只是标记，尚未实现后续的人工/自动裁决流程（REVIEW→ACTIVE/DORMANT/SUPERSEDED）。
+- Candidate 负反馈 → REVIEW 仅对 `ACCUMULATING` / `CONFIRMED` 生效；其他状态保持不变。
+- Batch 5 需要通过真实连续 Scenario 验证端到端 feedback → evolution 链路。
+
+### Decisions
+
+```text
+1. ACTIVE memory 的 feedback 状态迁移优先级：低 utility + 低 stability 先 DORMANT；
+   未落入低分阈值的显式 negative / correction 再 REVIEW。这符合 "一次显式负面不一定直接 REVIEW，需结合长期价值" 的保守原则。
+2. Candidate 负反馈路径独立于 Authority 路径，确保 feedback 可以作用于尚未晋升的 memory。
+3. Lineage 写入使用独立 session 并吞掉异常，保证 evolution 事务不因 lineage 失败而回滚。
+4. 复用现有 EvolutionService / EvolutionStatus / MemoryLineageRepository，不建立平行 feedback framework。
+```
+
+### Not Done
+
+- Stage 3 Batch 5 — Feedback Scenario Tests & Stage 3 Validation。
+- Stage 4 Evaluation & Cutover。
+- 跨进程 durable feedback idempotency ledger。
+- REVIEW 状态的自动/人工裁决工作流。
+
+### Next Batch Notes
+
+Stage 3 Batch 4 已完成。下一会话应执行 Stage 3 Batch 5 — Feedback Scenario Tests & Stage 3 Validation：
+
+- 用真实连续 Scenario 验证 `Retrieval → Context → Usage → Outcome → Feedback → Update → Evolution`。
+- 覆盖 Scenario A–L 中的关键路径：Positive Explicit、Explicit Correction、Task Success/Failure、Dormant Reactivation、Forget Protection、Cross Scope、Duplicate Feedback、USED without IN_CONTEXT。
+- 不要回退 Batch 4 的规则优先级；不要修改 Stage 1 Formation / Stage 2 Retrieval 主架构。

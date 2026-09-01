@@ -50,6 +50,7 @@ class EvolutionStatus(_ContractEnum):
 
     ACTIVE = "ACTIVE"
     DORMANT = "DORMANT"
+    REVIEW = "REVIEW"
     SUPERSEDED = "SUPERSEDED"
     ARCHIVED = "ARCHIVED"
     DELETED = "DELETED"
@@ -144,6 +145,9 @@ class LineageRelation(_ContractEnum):
     SUPERSEDES = "SUPERSEDES"
     COEXISTS_WITH = "COEXISTS_WITH"
     DELETED_BY = "DELETED_BY"
+    DEACTIVATED_BY = "DEACTIVATED_BY"
+    REACTIVATED_BY = "REACTIVATED_BY"
+    REVIEWED_BY = "REVIEWED_BY"
 
 
 def _utc_now() -> datetime:

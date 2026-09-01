@@ -28,6 +28,8 @@ class EvolutionTransitionError(EvolutionError):
 ALLOWED_EVOLUTION_TRANSITIONS: dict[str, frozenset[str]] = {
     EvolutionStatus.ACTIVE.value: frozenset(
         {
+            EvolutionStatus.REVIEW.value,
+            EvolutionStatus.DORMANT.value,
             EvolutionStatus.SUPERSEDED.value,
             EvolutionStatus.ARCHIVED.value,
             EvolutionStatus.DELETED.value,
@@ -36,6 +38,16 @@ ALLOWED_EVOLUTION_TRANSITIONS: dict[str, frozenset[str]] = {
     EvolutionStatus.DORMANT.value: frozenset(
         {
             EvolutionStatus.ACTIVE.value,
+            EvolutionStatus.REVIEW.value,
+            EvolutionStatus.ARCHIVED.value,
+            EvolutionStatus.DELETED.value,
+        }
+    ),
+    EvolutionStatus.REVIEW.value: frozenset(
+        {
+            EvolutionStatus.ACTIVE.value,
+            EvolutionStatus.DORMANT.value,
+            EvolutionStatus.SUPERSEDED.value,
             EvolutionStatus.ARCHIVED.value,
             EvolutionStatus.DELETED.value,
         }
