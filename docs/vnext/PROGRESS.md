@@ -3105,3 +3105,98 @@ Stage 3 Batch 4 已完成。下一会话应执行 Stage 3 Batch 5 — Feedback S
 - 用真实连续 Scenario 验证 `Retrieval → Context → Usage → Outcome → Feedback → Update → Evolution`。
 - 覆盖 Scenario A–L 中的关键路径：Positive Explicit、Explicit Correction、Task Success/Failure、Dormant Reactivation、Forget Protection、Cross Scope、Duplicate Feedback、USED without IN_CONTEXT。
 - 不要回退 Batch 4 的规则优先级；不要修改 Stage 1 Formation / Stage 2 Retrieval 主架构。
+
+## Stage 3 Batch 5 — Feedback Scenario Tests & Stage 3 Validation
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+用真实连续服务链验证 `Retrieval → Context → Usage → Outcome → Feedback → Update → Evolution`，覆盖 Batch 5 规定的关键反馈、安全、scope 与幂等场景。
+
+### Changes
+
+- 新增 `tests/test_vnext_feedback_scenarios.py`。
+- 复用现有 `RetrievalService`、`RetrievalLogRepository`、`ActivationRepository`、`UtilityFeedbackShadow`、`UtilityStabilityUpdater`、`EvolutionService` 与 `ForgetService`。
+- 未修改生产源码、Stage 1 Formation 或 Stage 2 Retrieval 主架构。
+
+### Files Touched
+
+```text
+tests/test_vnext_feedback_scenarios.py
+docs/vnext/PROGRESS.md
+```
+
+### Behavior Before
+
+已有 Batch 1–4 的 focused unit/component tests，但缺少专门的连续 Feedback Scenario 套件，未系统验证 Retrieval 到 Evolution 的完整闭环。
+
+### Behavior After
+
+新增 6 个真实连续测试，覆盖 Scenario A–L 的关键路径：正向显式反馈、纠错、单/多 memory outcome、无关失败、memory-caused failure、重复 feedback、DORMANT reactivation、Forget protection、cross-project isolation 与 USED without IN_CONTEXT。
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `tests/test_vnext_feedback_scenarios.py` | PASS (6), FAIL 0, SKIP 0 |
+| Stage 3 focused + scenario + Stage 1/2 regression selection | PASS (55), FAIL 0, SKIP 0, ERROR 1 |
+| Ruff on new scenario test | PASS |
+| compileall on new scenario test | PASS |
+| `git diff --check` | PASS |
+
+The single regression error is the pre-existing Windows pytest `tmp_path` ACL failure in `test_app_wires_usage_feedback_shadow_to_retrieval_service`; it occurs during fixture setup with `PermissionError`, not in an assertion or application path.
+
+### Evidence
+
+- Retrieval responses persisted retrieval log IDs and activation rows before usage feedback.
+- Explicit usage promoted selected/in-context memories to `USED`; non-selected project memory was returned as `untrusted`.
+- Task success updated only the two explicitly USED memories among ten in-context memories.
+- Task failure with no USED memory produced no attribution or score penalty.
+- Negative/correction feedback changed lifecycle to `REVIEW` without hard delete.
+- DORMANT positive feedback reactivated the memory; forgotten memory feedback was rejected with `memory_deleted`.
+- Duplicate feedback replay left utility/stability unchanged on the second submission.
+
+### Feedback Attribution Evidence
+
+- Explicit feedback was strongly attributed to the selected memory.
+- Outcome feedback was attributed only to activations already marked `USED`.
+- Multiple in-context but unused memories were not strengthened.
+- `IN_CONTEXT` alone did not imply `USED`.
+
+### Score Update Evidence
+
+- Score changes were produced by the existing bounded `UtilityStabilityUpdater`.
+- Utility and stability remained bounded; no recall-only update was introduced.
+- Duplicate feedback did not produce a second score update.
+
+### Scope Verification
+
+- Retrieval Log and activation checks retained tenant/user/query scope.
+- Project A feedback changed only the Project A memory; Project B was not selected or updated.
+- Forget remained behind the existing explicit confirmation and high-risk authorization gate.
+- No feedback path bypassed deleted-memory protection.
+
+### Regression
+
+```text
+Stage 1 Formation design: unchanged.
+Stage 2 Retrieval architecture: unchanged.
+Activation / Retrieval Log / Agent / MCP entrypoints: unchanged.
+Legacy feedback route: unchanged.
+```
+
+### Remaining Risks
+
+- The existing Windows pytest temporary-directory ACL issue still prevents one app-wiring test from setting up in this environment.
+- Feedback and evolution idempotency remains process-local; a durable cross-process ledger is not implemented.
+- `REVIEW` still has no downstream human/automatic adjudication workflow.
+- The Agent `/step` fallback to the first three cards remains weak evidence when explicit `used_memory_ids` are omitted.
+
+### Next Batch Notes
+
+Stage 3 Batch 5 is complete. Do not automatically enter Stage 4; evaluation, benchmark, shadow/canary and cutover remain outside this Batch.
