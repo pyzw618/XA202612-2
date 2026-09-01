@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -115,6 +117,150 @@ class UtilityUpdateProposal(BaseModel):
     baseline_utility: float = Field(ge=0.0, le=1.0)
     proposed_utility: float = Field(ge=0.0, le=1.0)
     reason_codes: list[str] = Field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class ScoreUpdate:
+    """Auditable bounded score transition derived from one attributed feedback."""
+
+    feedback_id: str
+    tenant_id: str
+    user_id: str
+    memory_id: str
+    old_utility: float
+    new_utility: float
+    old_stability: float
+    new_stability: float
+    reason: str
+
+
+FEEDBACK_SCORE_WEIGHTS: dict[FeedbackType, tuple[float, float]] = {
+    FeedbackType.EXPLICIT_POSITIVE: (0.10, 0.08),
+    FeedbackType.USER_CONFIRMATION: (0.08, 0.06),
+    FeedbackType.TASK_SUCCESS: (0.05, 0.04),
+    FeedbackType.PARTIAL_SUCCESS: (0.02, 0.01),
+    FeedbackType.TASK_FAILURE: (-0.03, -0.04),
+    FeedbackType.EXPLICIT_NEGATIVE: (-0.15, -0.15),
+    FeedbackType.USER_CORRECTION: (-0.15, -0.15),
+    FeedbackType.UNKNOWN: (0.0, 0.0),
+}
+
+
+class UtilityStabilityUpdater:
+    """Apply conservative, idempotent score changes to one memory store."""
+
+    def __init__(self, *, trace_store: TraceStore | None = None) -> None:
+        self.trace_store = trace_store or TraceStore()
+        self._applied_feedback_ids: set[str] = set()
+        self.updates: list[ScoreUpdate] = []
+
+    def _delta(self, item: UtilityFeedback) -> tuple[float, float]:
+        utility, stability = FEEDBACK_SCORE_WEIGHTS.get(
+            item.feedback_type or FeedbackType.UNKNOWN, (0.0, 0.0)
+        )
+        confidence = item.confidence
+        return utility * confidence, stability * confidence
+
+    def update_candidate(self, item: UtilityFeedback, repository: Any) -> ScoreUpdate:
+        """Update a candidate by tenant/user/id; missing candidates are rejected."""
+        if item.feedback_id in self._applied_feedback_ids:
+            return next(update for update in self.updates if update.feedback_id == item.feedback_id)
+        current = repository.get(
+            tenant_id=item.tenant_id, user_id=item.user_id, candidate_id=item.memory_id
+        )
+        if current is None:
+            raise KeyError("candidate not found")
+        delta_utility, delta_stability = self._delta(item)
+        update = self._make_update(
+            item,
+            current.utility,
+            current.stability,
+            delta_utility,
+            delta_stability,
+        )
+        repository.update_scores(
+            tenant_id=item.tenant_id,
+            user_id=item.user_id,
+            candidate_id=item.memory_id,
+            utility=update.new_utility,
+            stability=update.new_stability,
+        )
+        return self._remember(update)
+
+    def update_authority(self, item: UtilityFeedback, repository: Any) -> ScoreUpdate:
+        """Update Authority metadata without changing lifecycle status or content."""
+        if item.feedback_id in self._applied_feedback_ids:
+            return next(update for update in self.updates if update.feedback_id == item.feedback_id)
+        current = repository.get(
+            tenant_id=item.tenant_id,
+            user_id=item.user_id,
+            memory_id=item.memory_id,
+            include_inactive=True,
+        )
+        if current is None:
+            raise KeyError("authority memory not found")
+        delta_utility, delta_stability = self._delta(item)
+        update = self._make_update(
+            item,
+            current.utility,
+            current.stability,
+            delta_utility,
+            delta_stability,
+        )
+        repository.save(
+            current.model_copy(
+                update={
+                    "utility": update.new_utility,
+                    "stability": update.new_stability,
+                    "content_version": current.content_version + 1,
+                }
+            )
+        )
+        return self._remember(update)
+
+    def _make_update(
+        self,
+        item: UtilityFeedback,
+        old_utility: float,
+        old_stability: float,
+        delta_utility: float,
+        delta_stability: float,
+    ) -> ScoreUpdate:
+        return ScoreUpdate(
+            feedback_id=item.feedback_id,
+            tenant_id=item.tenant_id,
+            user_id=item.user_id,
+            memory_id=item.memory_id,
+            old_utility=old_utility,
+            new_utility=min(1.0, max(0.0, old_utility + delta_utility)),
+            old_stability=old_stability,
+            new_stability=min(1.0, max(0.0, old_stability + delta_stability)),
+            reason=(item.feedback_type or FeedbackType.UNKNOWN).value,
+        )
+
+    def _remember(self, update: ScoreUpdate) -> ScoreUpdate:
+        self._applied_feedback_ids.add(update.feedback_id)
+        self.updates.append(update)
+        self.trace_store.record(
+            TraceSpan(
+                span_id=f"span-score-{update.feedback_id}",
+                trace_id=update.feedback_id,
+                kind=TraceSpanKind.RETRIEVAL,
+                category=TraceCategory.RETRIEVAL,
+                layer="UTILITY_STABILITY_UPDATE",
+                tenant_id=update.tenant_id,
+                user_id=update.user_id,
+                ids={"feedback_id": update.feedback_id, "memory_id": update.memory_id},
+                classification={"reason": update.reason, "shadow_only": False},
+                scores={
+                    "old_utility": update.old_utility,
+                    "new_utility": update.new_utility,
+                    "old_stability": update.old_stability,
+                    "new_stability": update.new_stability,
+                },
+            )
+        )
+        return update
 
 
 class UtilityFeedbackShadowReport(BaseModel):
@@ -412,5 +558,7 @@ __all__ = [
     "UtilityFeedback",
     "UtilityFeedbackShadow",
     "UtilityFeedbackShadowReport",
+    "UtilityStabilityUpdater",
+    "ScoreUpdate",
     "UtilityUpdateProposal",
 ]

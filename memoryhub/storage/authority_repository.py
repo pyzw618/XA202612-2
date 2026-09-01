@@ -409,6 +409,7 @@ class AuthorityRepository:
             evolution_status=status_map.get(memory.status, EvolutionStatus.DORMANT),
             confidence=float(memory.confidence),
             utility=0.0,
+            stability=0.0,
             projection_version=projection_version or 0,
             evidence_refs=[
                 str(item.get("evidence_id", "legacy"))

@@ -274,6 +274,7 @@ class LongTermEnvelope(GovernedModel):
     evolution_status: EvolutionStatus = EvolutionStatus.ACTIVE
     confidence: float = Field(ge=0.0, le=1.0)
     utility: float = Field(ge=0.0, le=1.0)
+    stability: float = Field(default=0.0, ge=0.0, le=1.0)
     valid_from: datetime | None = None
     valid_to: datetime | None = None
     projection_version: int = Field(default=0, ge=0)

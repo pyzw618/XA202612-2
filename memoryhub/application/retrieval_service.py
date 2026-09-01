@@ -22,7 +22,11 @@ from memoryhub.adapter.vnext_schemas import (
     RetrievedMemory,
 )
 from memoryhub.application.context_service import ContextAssemblyResult, ContextService
-from memoryhub.application.feedback_service import FeedbackEvent, UsageKind
+from memoryhub.application.feedback_service import (
+    FeedbackEvent,
+    UsageKind,
+    UtilityStabilityUpdater,
+)
 from memoryhub.domain.contracts import (
     Activation,
     ActivationStatus,
@@ -83,6 +87,7 @@ class RetrievalService:
         authority_repository: AuthorityRepository | None = None,
         db: Any | None = None,
         usage_feedback_service: Any | None = None,
+        score_updater: UtilityStabilityUpdater | None = None,
     ) -> None:
         self.intent_router = intent_router or IntentRouter()
         self.planner = planner or RetrievalPlanner()
@@ -107,6 +112,9 @@ class RetrievalService:
         self.retrieval_log_repository = retrieval_log_repository
         self.trace_store = trace_store
         self.usage_feedback_service = usage_feedback_service
+        self.score_updater = score_updater or UtilityStabilityUpdater(
+            trace_store=trace_store
+        )
 
     def retrieve(
         self,
@@ -360,6 +368,18 @@ class RetrievalService:
         if shadow is None or not hasattr(shadow, "record_event"):
             return {"feedback_id": event.feedback_id, "status": "unavailable"}
         result = shadow.record_event(event, used_memory_ids=used)
+        for feedback_id in result.get("feedback_ids", []):
+            item = next(
+                (value for value in shadow.feedback if value.feedback_id == feedback_id),
+                None,
+            )
+            if item is None or self.authority_repository is None:
+                continue
+            try:
+                self.score_updater.update_authority(item, self.authority_repository)
+            except (KeyError, ValueError):
+                # A missing/inactive legacy memory cannot be resurrected by feedback.
+                continue
         return {"feedback_id": event.feedback_id, "status": "accepted", **result}
 
     def _enqueue_repair(self, memory: RetrievedMemory) -> None:
@@ -530,7 +550,11 @@ class RetrievalService:
                     "required_types": [memory_type.value for memory_type in plan.required_types],
                     "channel_metrics": assembly.trace.get("channel_metrics", {}),
                     "selected_memory_ids": list(assembly.context.relevant_memory_ids),
-                    "project_id": request.scope.split(":", 1)[1] if request.scope.startswith("PROJECT:") else "",
+                    "project_id": (
+                        request.scope.split(":", 1)[1]
+                        if request.scope.startswith("PROJECT:")
+                        else ""
+                    ),
                     "task_id": request.task_id,
                     "session_id": request.session_id,
                     "scope": request.scope,

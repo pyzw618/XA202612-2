@@ -30,6 +30,8 @@ from .feedback_service import (
     UtilityFeedback,
     UtilityFeedbackShadow,
     UtilityFeedbackShadowReport,
+    UtilityStabilityUpdater,
+    ScoreUpdate,
     UtilityUpdateProposal,
 )
 from .formation_worker import FormationProcessResult, FormationWorker
@@ -74,6 +76,8 @@ __all__ = [
     "UtilityFeedback",
     "UtilityFeedbackShadow",
     "UtilityFeedbackShadowReport",
+    "UtilityStabilityUpdater",
+    "ScoreUpdate",
     "UtilityUpdateProposal",
     "DualReadComparisonReport",
     "DualReadDifference",

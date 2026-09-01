@@ -6,10 +6,19 @@ from memoryhub.application.feedback_service import (
     FeedbackType,
     UsageKind,
     UtilityFeedbackShadow,
+    UtilityStabilityUpdater,
 )
 from memoryhub.application.retrieval_service import RetrievalService
-from memoryhub.domain.contracts import LifecycleLayer, MemoryScope, MemoryType
+from memoryhub.domain.contracts import (
+    LifecycleLayer,
+    LongTermEnvelope,
+    MemoryScope,
+    MemoryType,
+)
 from memoryhub.observability.trace_store import TraceStore
+from memoryhub.storage.authority_repository import AuthorityRepository
+from memoryhub.storage.database import Database
+from memoryhub.storage.vnext_repositories import CandidateRepository
 
 
 def test_usage_shadow_distinguishes_all_five_kinds_and_is_redacted() -> None:
@@ -161,3 +170,88 @@ def test_multiple_used_memories_receive_weak_outcome_attribution() -> None:
     assert len(shadow.feedback) == 2
     assert all(item.confidence == 0.5 for item in shadow.feedback)
     assert all(item.utility_signal == 0.25 for item in shadow.feedback)
+
+
+def test_candidate_score_update_is_bounded_and_idempotent() -> None:
+    db = Database(":memory:")
+    db.init_schema()
+    repository = CandidateRepository(db)
+    repository.create(
+        candidate_id="candidate-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        memory_type="PREFERENCE",
+        normalized_key="format",
+        claim={"format": "DOCX"},
+        scope_level="PROJECT",
+        scope="PROJECT:reporting",
+        utility=0.98,
+        stability=0.98,
+    )
+    item = UtilityFeedbackShadow().record_feedback(
+        feedback_id="fb-correction:candidate-1",
+        usage_id="usage-1",
+        trace_id="trace-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        memory_id="candidate-1",
+        usage_kind=UsageKind.CORRECTION,
+        accepted=False,
+        utility_signal=-1.0,
+        feedback_type=FeedbackType.USER_CORRECTION,
+    )
+    updater = UtilityStabilityUpdater()
+    first = updater.update_candidate(item, repository)
+    second = updater.update_candidate(item, repository)
+    current = repository.get(
+        tenant_id="tenant-1", user_id="user-1", candidate_id="candidate-1"
+    )
+    assert first == second
+    assert current is not None
+    assert current.utility == 0.83
+    assert current.stability == 0.83
+    assert len(updater.updates) == 1
+
+
+def test_authority_feedback_updates_scores_and_writes_audit_trace() -> None:
+    db = Database(":memory:")
+    db.init_schema()
+    authority = AuthorityRepository(db)
+    authority.save(
+        LongTermEnvelope(
+            tenant_id="tenant-1",
+            user_id="user-1",
+            memory_id="memory-1",
+            memory_type=MemoryType.PREFERENCE,
+            normalized_key="format",
+            content={"text": "DOCX"},
+            scope_level=MemoryScope.GLOBAL,
+            scope="GLOBAL",
+            confidence=0.9,
+            utility=0.5,
+            stability=0.5,
+            evidence_refs=["event-1"],
+        )
+    )
+    traces = TraceStore()
+    shadow = UtilityFeedbackShadow(trace_store=traces)
+    item = shadow.record_feedback(
+        feedback_id="fb-positive:memory-1",
+        usage_id="usage-1",
+        trace_id="trace-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        memory_id="memory-1",
+        usage_kind=UsageKind.OUTCOME,
+        accepted=True,
+        utility_signal=1.0,
+        feedback_type=FeedbackType.EXPLICIT_POSITIVE,
+    )
+    update = UtilityStabilityUpdater(trace_store=traces).update_authority(item, authority)
+    current = authority.get(
+        tenant_id="tenant-1", user_id="user-1", memory_id="memory-1"
+    )
+    assert current is not None
+    assert (current.utility, current.stability) == (0.6, 0.58)
+    assert update.old_utility == 0.5
+    assert any(span.layer == "UTILITY_STABILITY_UPDATE" for span in traces.records)

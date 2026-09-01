@@ -792,6 +792,31 @@ class CandidateRepository:
             session.flush()
             return self._view(row)
 
+    def update_scores(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        candidate_id: str,
+        utility: float,
+        stability: float,
+    ) -> CandidateView:
+        """Apply already-bounded scores within the candidate's scope."""
+        with self.db.session() as session:
+            row = (
+                session.query(MemoryCandidateRow)
+                .filter_by(
+                    tenant_id=tenant_id, user_id=user_id, candidate_id=candidate_id
+                )
+                .one_or_none()
+            )
+            if row is None:
+                raise KeyError("candidate not found")
+            row.utility = min(1.0, max(0.0, float(utility)))
+            row.stability = min(1.0, max(0.0, float(stability)))
+            session.flush()
+            return self._view(row)
+
     @staticmethod
     def _view(row: MemoryCandidateRow) -> CandidateView:
         return CandidateView(

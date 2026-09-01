@@ -57,7 +57,7 @@ Stage 3 Batch 3 — Utility / Stability Update
 |---|---|---|---|
 | Stage 1 | Formation 实化 | DONE | 全部 5 个 Batch + Independent Review Repair 完成 |
 | Stage 2 | Retrieval 实化 | DONE | 全部 5 个 Batch + Closure Fix 1–5 完成 |
-| Stage 3 | Feedback 闭环 | IN PROGRESS | Batch 1 — Activation Completion: USED |
+| Stage 3 | Feedback 闭环 | IN PROGRESS | Batch 3 — Utility / Stability Update |
 | Stage 4 | Evaluation & Cutover | NOT STARTED | 暂不执行 |
 
 状态仅允许：
@@ -109,7 +109,7 @@ DONE
 |---|---|---|---|
 | Batch 1 | Activation Completion — USED | DONE | 2026-08-31 |
 | Batch 2 | Feedback Event & Attribution | DONE | 2026-09-01 |
-| Batch 3 | Utility / Stability Update | NOT STARTED | 暂不执行 |
+| Batch 3 | Utility / Stability Update | DONE | 2026-09-01 |
 | Batch 4 | Memory Evolution & Safeguards | NOT STARTED | 暂不执行 |
 | Batch 5 | Feedback Scenario Tests & Stage 3 Validation | NOT STARTED | 暂不执行 |
 
@@ -2782,3 +2782,123 @@ MCP/entrypoint regression: PASS 9, FAIL 0, SKIP 0.
 ### Next Batch Notes
 
 Stage 3 Batch 2 is complete. The next authorized batch is Batch 3 — Utility / Stability Update. Do not start it automatically.
+
+---
+
+## Stage 3 Batch 3 — Utility / Stability Update
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+将已完成 attribution 的 FeedbackEvent 通过集中式、确定性、bounded 规则作用于
+Candidate / Authority 的 utility 与 stability；不改变 Activation、Retrieval、Formation
+或 Evolution 状态机。
+
+### Changes
+
+- `LongTermEnvelope` 增加向后兼容的 bounded `stability` 字段；legacy Authority 回退值为 `0.0`。
+- `UtilityStabilityUpdater` 复用现有 `UtilityFeedback`，集中定义各类反馈权重并执行 clamp。
+- CandidateRepository 增加 tenant/user-scoped `update_scores()`，支持负反馈降低分数。
+- `RetrievalService.record_feedback_event()` 在 attribution 成功后更新对应 Authority metadata；不修改内容、生命周期状态或删除状态。
+- updater 以 `feedback_id` 幂等，并通过 TraceStore 记录 old/new utility/stability、reason 与 memory。
+- 保留 `UtilityFeedbackShadow` 及既有 Feedback API/MCP 入口，不建立平行反馈框架。
+
+### Files Touched
+
+```text
+memoryhub/application/feedback_service.py
+memoryhub/application/retrieval_service.py
+memoryhub/application/__init__.py
+memoryhub/domain/contracts.py
+memoryhub/storage/authority_repository.py
+memoryhub/storage/vnext_repositories.py
+tests/test_vnext_feedback_service.py
+docs/vnext/PROGRESS.md
+```
+
+### Behavior Before
+
+```text
+Feedback attribution → UtilityFeedbackShadow / UtilityUpdateProposal
+→ shadow-only；Candidate / Authority utility 与 stability 不变。
+```
+
+### Behavior After
+
+```text
+Feedback attribution
+→ UtilityStabilityUpdater
+→ bounded old score → new score
+→ Candidate 或 Authority 的 tenant/user-scoped 更新
+→ score update trace
+```
+
+`TASK_FAILURE` 仍只有在 USED attribution 后才会产生有限负向分数变化；不会 hard delete，
+不会自动改变 ACTIVE/DORMANT/SUPERSEDED 状态。
+
+### Tests
+
+| Test | Result |
+|---|---|
+| Batch 3 feedback/activation/evolution focused tests | PASS (25), FAIL 0, SKIP 0 |
+| Candidate/consolidation/entrypoint/retrieval regression | PASS (33), FAIL 0, SKIP 0 |
+| Ruff on changed source/tests | PASS |
+| compileall on changed source/tests | PASS |
+| git diff --check | PASS |
+
+另有一个既存失败未计入 Batch 3 PASS：
+`test_activation_is_unique_per_tenant_query_memory_version` 仍期待 Batch 1 之前的重复
+插入 `IntegrityError`，与当前已完成的 Activation upsert 设计冲突；本 Batch 未回退该行为。
+
+### Evidence
+
+- Candidate correction 从 `0.98/0.98` bounded 更新为 `0.83/0.83`，重复同一 feedback 只产生一个更新。
+- Authority explicit positive 从 `0.50/0.50` 更新为 `0.60/0.58`，并生成 `UTILITY_STABILITY_UPDATE` trace。
+- Candidate 与 Authority 使用各自存储路径，未将两类记录混写。
+- 25 个反馈、USED、Evolution 基线测试通过；33 个 Candidate/Consolidation/Entrypoint/Retrieval 回归测试通过。
+
+### Feedback Attribution Evidence
+
+- 仍复用 Batch 2 attribution：explicit feedback 强归因，多 Memory outcome 弱归因，未 USED 不参与 outcome attribution。
+- 更新只消费 `UtilityFeedback`，不会把 RECALLED 或 IN_CONTEXT 直接当作有效反馈。
+
+### Score Update Evidence
+
+- 权重集中于 `FEEDBACK_SCORE_WEIGHTS`。
+- 所有新分数 clamp 到 `[0.0, 1.0]`。
+- correction/explicit negative 权重大于 confirmation、strong outcome、weak outcome。
+- 更新 trace 同时记录 old/new utility 与 stability。
+- `feedback_id` 在 updater 内幂等；Authority 更新通过递增 content version 保持现有写入契约。
+
+### Scope Verification
+
+- Candidate 更新按 `tenant_id + user_id + candidate_id` 查询。
+- Authority 更新按 `tenant_id + user_id + memory_id` 查询。
+- 既有 `RetrievalService.record_feedback_event()` 先校验 retrieval log、tenant/user、project/task/session 与 selected memory。
+- 未修改 Forget、Safety、Quarantine 或跨 scope 规则。
+
+### Regression
+
+```text
+Stage 1 Formation design: unchanged.
+Stage 2 Retrieval architecture: unchanged.
+Activation / Retrieval Log / Agent / MCP entrypoints: unchanged.
+Evolution status machine: unchanged; Batch 4 remains pending.
+Legacy feedback route: preserved.
+```
+
+### Remaining Risks
+
+- updater 的 applied feedback 集合仍为进程内状态；跨进程 durable feedback idempotency ledger 尚未实现。
+- Authority stability 通过 vNext envelope metadata 承载，旧 legacy rows 默认 stability 为 `0.0`。
+- Batch 3 未实现 ACTIVE/DORMANT 演化、Forget replay protection 或 Scenario A-L；这些属于 Batch 4/5。
+- 管理环境 pytest 临时目录 ACL 仍可能阻塞依赖 `tmp_path` 的测试。
+
+### Next Batch Notes
+
+Stage 3 Batch 3 已完成。下一授权 Batch 为 Batch 4 — Memory Evolution & Safeguards；本次不自动开始。
