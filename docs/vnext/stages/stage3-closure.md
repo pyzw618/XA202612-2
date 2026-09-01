@@ -1109,6 +1109,7 @@ Stage 3 Closure 只有全部关键条件满足才可声明 DONE。
 16. Scope / Forget / Safety 不允许被绕过。
 17. 单个 Fix Batch 原则上修改不超过 8 个核心源码文件。
 18. SKIP 不计 PASS。
+19. 完成当前Batch的时候，提交一下当前的git
 
 完成后必须输出：
 

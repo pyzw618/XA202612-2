@@ -159,6 +159,32 @@ def test_scenarios_a_and_c_positive_and_single_used_success() -> None:
     assert updated is not None and updated.utility > 0.5 and updated.stability > 0.5
 
 
+def test_scenario_c_single_used_task_success_is_positive() -> None:
+    db = Database(":memory:")
+    db.init_schema()
+    _save_authority(db, "single-success", utility=0.5, stability=0.5)
+    service, _ = _service(db, [_memory("single-success")])
+
+    result = service.retrieve(_request("scenario-c"))
+    _used(service, result.response.retrieval_log_id, ["single-success"])
+    response = service.record_feedback_event(
+        _feedback(
+            result.response.retrieval_log_id,
+            "fb-c",
+            ["single-success"],
+            FeedbackType.TASK_SUCCESS,
+        ).model_copy(update={"outcome": "SUCCESS"})
+    )
+
+    assert response["attribution"] == "strong"
+    updated = AuthorityRepository(db).get(
+        tenant_id="tenant-1", user_id="user-1", memory_id="single-success"
+    )
+    assert updated is not None
+    assert updated.utility > 0.5
+    assert updated.stability > 0.5
+
+
 def test_scenario_b_correction_is_reviewable_without_hard_delete() -> None:
     db = Database(":memory:")
     db.init_schema()
@@ -177,6 +203,18 @@ def test_scenario_b_correction_is_reviewable_without_hard_delete() -> None:
     assert current.evolution_status is EvolutionStatus.REVIEW
     assert current.content["text"] == "content for database"
     assert response["conflict_evidence_ids"]
+
+    replacement = current.model_copy(
+        update={
+            "content": {"text": "content for database corrected"},
+            "content_version": current.content_version + 1,
+            "evidence_refs": response["conflict_evidence_ids"],
+        }
+    )
+    evolved = service.evolution_service.evolve(replacement)
+    assert evolved.action == "SUPERSEDE"
+    lineage = MemoryLineageRepository(db).list_for_memory("database", "PREFERENCE")
+    assert lineage[-1].transition_action == "SUPERSEDES"
 
 
 def test_scenarios_d_and_e_only_used_memories_receive_outcome_feedback() -> None:
@@ -199,11 +237,20 @@ def test_scenarios_d_and_e_only_used_memories_receive_outcome_feedback() -> None
     assert all(scores[index].utility == 0.5 for index in range(10) if index not in {1, 7})
 
     unrelated = service.retrieve(_request("scenario-e", task_id="network-task"))
-    response = service.record_feedback_event(
-        _feedback(unrelated.response.retrieval_log_id, "fb-e", ["m1"], FeedbackType.TASK_FAILURE, task_id="network-task")
+    for outcome in ("TIMEOUT", "NETWORK_ERROR"):
+        response = service.record_feedback_event(
+            _feedback(
+                unrelated.response.retrieval_log_id,
+                f"fb-e-{outcome}",
+                ["m1"],
+                FeedbackType.TASK_FAILURE,
+                task_id="network-task",
+            ).model_copy(update={"outcome": outcome})
+        )
+        assert response["attributed_memory_ids"] == []
+    unchanged = AuthorityRepository(db).get(
+        tenant_id="tenant-1", user_id="user-1", memory_id="m1"
     )
-    assert response["attributed_memory_ids"] == []
-    unchanged = AuthorityRepository(db).get(tenant_id="tenant-1", user_id="user-1", memory_id="m1")
     assert unchanged is not None and unchanged.utility > 0.5
 
 
@@ -226,14 +273,35 @@ def test_scenarios_f_and_g_negative_cause_and_duplicate_replay() -> None:
     after_failure = AuthorityRepository(db).get(tenant_id="tenant-1", user_id="user-1", memory_id="procedure")
     assert after_failure is not None and after_failure.utility < 0.8
 
-    second = service.retrieve(_request("scenario-g1", task_id="task-g1"))
-    _used(service, second.response.retrieval_log_id, ["procedure"], task_id="task-g1")
-    event = _feedback(second.response.retrieval_log_id, "fb-g", ["procedure"], FeedbackType.EXPLICIT_POSITIVE, task_id="task-g1")
-    service.record_feedback_event(event)
-    once = AuthorityRepository(db).get(tenant_id="tenant-1", user_id="user-1", memory_id="procedure")
+    for index in range(1, 4):
+        episode = service.retrieve(
+            _request(f"scenario-g{index}", task_id=f"task-g{index}")
+        )
+        _used(
+            service,
+            episode.response.retrieval_log_id,
+            ["procedure"],
+            task_id=f"task-g{index}",
+        )
+        event = _feedback(
+            episode.response.retrieval_log_id,
+            f"fb-g-{index}",
+            ["procedure"],
+            FeedbackType.TASK_SUCCESS,
+            task_id=f"task-g{index}",
+        ).model_copy(update={"outcome": "SUCCESS"})
+        service.record_feedback_event(event)
+
+    once = AuthorityRepository(db).get(
+        tenant_id="tenant-1", user_id="user-1", memory_id="procedure"
+    )
     assert once is not None
-    service.record_feedback_event(event)
-    twice = AuthorityRepository(db).get(tenant_id="tenant-1", user_id="user-1", memory_id="procedure")
+    recreated_service, _ = _service(db, [_memory("procedure")])
+    replay = recreated_service.record_feedback_event(event)
+    assert replay["status"] == "idempotent"
+    twice = AuthorityRepository(db).get(
+        tenant_id="tenant-1", user_id="user-1", memory_id="procedure"
+    )
     assert twice is not None and twice.utility == once.utility and twice.stability == once.stability
 
 

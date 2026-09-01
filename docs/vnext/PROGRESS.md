@@ -3533,3 +3533,127 @@ Windows pytest tmp_path ACL: one setup ERROR remains in the activation app-wirin
 ### Next Fix Batch Notes
 
 Fix Batch 3 已完成。本次不自动进入 Fix Batch 4；下一批仅在重新授权后执行 Scenario / Regression / Final Closure Verification。
+
+## Stage 3 Closure Fix Batch 4 — Scenario / Regression / Final Closure Verification
+
+### Status
+
+```text
+DONE
+```
+
+### Reconnaissance Findings
+
+- Fix Batch 1–3 的 attribution、usage evidence、durable feedback claim、current-state evolution 与 replacement-evidence 逻辑在当前代码中仍存在且 focused tests 通过。
+- 历史 Scenario C 使用 `EXPLICIT_POSITIVE`，未真实提交 `TASK_SUCCESS`；Scenario E 未覆盖 `TIMEOUT` / `NETWORK_ERROR`；Scenario G 未跨三个 Episode；Scenario K 未跨 service recreate。
+- Scenario B 已能持久化 correction evidence 并驱动有证据的 replacement，但 correction payload 不包含新 Candidate 内容，现有 Formation 链路不会凭反馈自动合成 Candidate。
+- 未新增 Repository、Schema 或 Contract；复用现有 RetrievalService、FeedbackEvent、ActivationRepository、FeedbackIdempotencyRepository、EvidenceRepository、EvolutionService 与 MemoryLineageRepository。
+
+### Changes
+
+- 补充真实 Scenario C：单个 USED memory + `TASK_SUCCESS` + `SUCCESS` outcome。
+- 补充真实 Scenario E：`TIMEOUT` 与 `NETWORK_ERROR` 均保持无归因、无 negative score update。
+- 将 Scenario G 扩展为跨三个独立 task / retrieval episode 的 `TASK_SUCCESS`，并验证 service recreate 后重复 feedback 为 durable idempotent no-op。
+- 将 Scenario B 扩展为使用持久化 correction evidence 驱动 `SUPERSEDE`，并验证 lineage。
+
+### Files Touched
+
+```text
+tests/test_vnext_feedback_scenarios.py
+docs/vnext/PROGRESS.md
+```
+
+现有用户对 `docs/vnext/stages/stage3-closure.md` 的提交规则修改保持不变，未由本 Batch 扩展其内容。
+
+### Behavior Before
+
+```text
+Scenario C = explicit positive
+Scenario E = unknown failure only
+Scenario G = one episode / in-process duplicate
+Scenario B = correction review + evidence, without replacement verification
+```
+
+### Behavior After
+
+```text
+Scenario C = real TASK_SUCCESS attribution
+Scenario E = TIMEOUT and NETWORK_ERROR neutral no-op
+Scenario G = three episodes plus recreated-service replay no-op
+Scenario B = correction evidence is consumed by an evidence-gated replacement and lineage assertion
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| Stage 3 focused feedback / activation / evolution selection, excluding known ACL fixture | PASS (37), FAIL 0, SKIP 0, DESELECTED 1 |
+| Stage 1 scenarios + Stage 2 retrieval scenarios + vNext entrypoints | PASS (25), FAIL 0, SKIP 0 |
+| `compileall` changed scenario tests | PASS |
+| `git diff --check` | PASS |
+| Stage 2 retrieval recall regression | FAIL (recall `0.8333333333333334`) |
+| Ruff on changed scenario test | FAIL (15 pre-existing formatting/import/line-length findings in the file; no production source changed) |
+
+### Exact PASS / FAIL / SKIP / ERROR Counts
+
+```text
+Focused Batch 4 selection: PASS 37 / FAIL 0 / SKIP 0 / ERROR 0 / DESELECTED 1
+Stage 1 + Stage 2 targeted regression: PASS 25 / FAIL 0 / SKIP 0 / ERROR 0
+Stage 2 recall regression: PASS 0 / FAIL 1 / SKIP 0 / ERROR 0
+Default activation-inclusive run: PASS 27 / FAIL 0 / SKIP 0 / ERROR 1
+```
+
+The single ERROR is the existing Windows pytest `tmp_path` `.lock` ACL failure in the app-wiring fixture.
+
+### Attribution Evidence
+
+- Single USED + real `TASK_SUCCESS` produces strong attribution and increases utility/stability.
+- Multiple Used Memories remain weak attribution through the existing shadow rules.
+- `TIMEOUT` and `NETWORK_ERROR` produce no attributed memory and no score mutation.
+- `IN_CONTEXT` without USED remains excluded from outcome attribution.
+
+### Idempotency Evidence
+
+- Scenario G recreates `RetrievalService` against the same database and replays the same feedback ID.
+- The replay returns `idempotent`; Authority utility/stability remain unchanged.
+- No new in-memory-only idempotency mechanism was introduced.
+
+### Usage Evidence
+
+- Scenario tests continue to call explicit `record_usage_feedback()` with retrieval IDs and memory IDs.
+- USED is only recorded after the existing retrieval-log selection and Repository `included_in_context` checks.
+- No Top-N automatic USED behavior was introduced.
+
+### Evolution Evidence
+
+- Scenario B consumes persisted correction evidence before replacement and verifies `SUPERSEDE` lineage.
+- Existing ACTIVE / DORMANT / REVIEW, deleted-memory protection, and current-score evolution tests remain passing.
+
+### Scope / Safety Verification
+
+- Existing cross-project, cross-tenant, deleted-memory, Forget, and selected-but-not-context tests remain passing.
+- No Scope, Forget, Safety, Retrieval, or Formation production module was changed.
+- Windows temp ACL remains an environment limitation and was not bypassed through business code.
+
+### Regression
+
+```text
+Stage 1 targeted regression: passed.
+Stage 2 targeted scenario / entrypoint regression: passed.
+Stage 3 focused regression: passed, excluding the known ACL fixture.
+Stage 2 recall regression: existing failure remains at 0.8333333333333334.
+Windows pytest tmp_path ACL: one setup ERROR remains.
+Independent Stage 2 Closure Final Review artifact: still not present; READY FOR STAGE 3 not independently evidenced.
+```
+
+### Remaining Risks
+
+- Explicit correction still does not synthesize a new Candidate / Formation payload from feedback alone; a full correction → new Candidate → replacement E2E flow requires an upstream correction contract and is outside this minimal test-only batch.
+- Feedback claim, score update, evolution and completion are not one atomic database transaction.
+- Lineage failures remain observable only when a TraceStore is injected.
+- Stage 2 recall failure and Windows pytest ACL error remain unresolved.
+- Ruff findings in the legacy scenario file remain; they were not broadened into unrelated formatting work.
+
+### Next Fix Batch Notes
+
+Fix Batch 4 is complete. No next Fix Batch or Stage 4 work is started automatically. Stage 3 final closure still requires an independent Stage 2 Closure Final Review with `READY FOR STAGE 3`, plus review of the remaining recall and environment evidence.
