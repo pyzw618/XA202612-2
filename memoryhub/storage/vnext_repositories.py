@@ -7,6 +7,7 @@ canonical application services built in later S1/S2 tasks.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -16,6 +17,7 @@ from memoryhub.domain.episode import hash_resume_token, resume_token_matches
 from memoryhub.storage.database import Database
 from memoryhub.storage.models import (
     EpisodeEventRow,
+    IdempotencyRecordRow,
     MemoryActivationRow,
     MemoryCandidateRow,
     MemoryEvidenceRow,
@@ -127,6 +129,11 @@ class ActivationView:
     content_version: int
     status: str = "RECALLED"
     included_in_context: bool = False
+    retrieval_id: str = ""
+    project_id: str = ""
+    session_id: str = ""
+    usage_source: str = ""
+    usage_confidence: float | None = None
     used_at: datetime | None = None
 
 
@@ -924,6 +931,9 @@ class ActivationRepository:
         reranked_score: float,
         content_version: int,
         included_in_context: bool = False,
+        retrieval_id: str = "",
+        project_id: str = "",
+        session_id: str = "",
     ) -> ActivationView:
         """Upsert an activation row so retrieval progression stays one row per memory."""
         with self.db.session() as session:
@@ -944,6 +954,9 @@ class ActivationRepository:
                 existing.initial_score = initial_score
                 existing.reranked_score = reranked_score
                 existing.included_in_context = included_in_context
+                existing.retrieval_id = retrieval_id or existing.retrieval_id
+                existing.project_id = project_id
+                existing.session_id = session_id
                 session.flush()
                 return self._view(existing)
             row = MemoryActivationRow(
@@ -960,6 +973,9 @@ class ActivationRepository:
                 reranked_score=reranked_score,
                 content_version=content_version,
                 included_in_context=included_in_context,
+                retrieval_id=retrieval_id,
+                project_id=project_id,
+                session_id=session_id,
             )
             session.add(row)
             session.flush()
@@ -995,6 +1011,11 @@ class ActivationRepository:
         user_id: str,
         query_id: str,
         memory_id: str,
+        retrieval_id: str = "",
+        project_id: str = "",
+        session_id: str = "",
+        usage_source: str = "agent",
+        confidence: float = 1.0,
         used_at: datetime | None = None,
     ) -> tuple[ActivationView, bool]:
         """Promote the latest activation to USED; idempotent for the same event.
@@ -1016,9 +1037,16 @@ class ActivationRepository:
             )
             if row is None:
                 raise KeyError(f"activation not found for {memory_id}")
+            if not row.included_in_context:
+                raise ValueError(f"activation for {memory_id} was not included in context")
             if row.status == "USED" and row.used_at is not None:
                 return self._view(row), False
             row.status = "USED"
+            row.retrieval_id = retrieval_id or row.retrieval_id
+            row.project_id = project_id or row.project_id
+            row.session_id = session_id or row.session_id
+            row.usage_source = usage_source
+            row.usage_confidence = confidence
             row.used_at = used_at or datetime.now(timezone.utc)
             session.flush()
             return self._view(row), True
@@ -1034,8 +1062,73 @@ class ActivationRepository:
             content_version=row.content_version,
             status=row.status,
             included_in_context=bool(row.included_in_context),
+            retrieval_id=row.retrieval_id or "",
+            project_id=row.project_id or "",
+            session_id=row.session_id or "",
+            usage_source=row.usage_source or "",
+            usage_confidence=row.usage_confidence,
             used_at=row.used_at,
         )
+
+
+class FeedbackIdempotencyRepository:
+    """Durable, tenant-scoped feedback replay protection."""
+
+    _PREFIX = "feedback:"
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    def claim(self, *, tenant_id: str, user_id: str, feedback_id: str, request_hash: str) -> bool:
+        """Claim a feedback event exactly once; existing claims are no-ops."""
+        from sqlalchemy.exc import IntegrityError
+
+        key = f"{self._PREFIX}{feedback_id}"
+        with self.db.session() as session:
+            existing = (
+                session.query(IdempotencyRecordRow)
+                .filter_by(tenant_id=tenant_id, idempotency_key=key)
+                .one_or_none()
+            )
+            if existing is not None:
+                if existing.user_id != user_id or existing.request_hash != request_hash:
+                    raise ValueError("feedback idempotency conflict")
+                return False
+            try:
+                session.add(
+                    IdempotencyRecordRow(
+                        idempotency_record_id=(
+                            "feedback-"
+                            + hashlib.sha256(
+                                f"{tenant_id}:{feedback_id}".encode("utf-8")
+                            ).hexdigest()[:55]
+                        ),
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        idempotency_key=key,
+                        request_hash=request_hash,
+                        status="ACCEPTED",
+                        trace_id=feedback_id,
+                    )
+                )
+                session.flush()
+            except IntegrityError:
+                session.rollback()
+                return False
+        return True
+
+    def complete(self, *, tenant_id: str, feedback_id: str) -> None:
+        with self.db.session() as session:
+            row = (
+                session.query(IdempotencyRecordRow)
+                .filter_by(
+                    tenant_id=tenant_id,
+                    idempotency_key=f"{self._PREFIX}{feedback_id}",
+                )
+                .one_or_none()
+            )
+            if row is not None:
+                row.status = "COMMITTED"
 
 
 @dataclass(frozen=True, slots=True)

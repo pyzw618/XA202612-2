@@ -145,6 +145,26 @@ FEEDBACK_SCORE_WEIGHTS: dict[FeedbackType, tuple[float, float]] = {
     FeedbackType.UNKNOWN: (0.0, 0.0),
 }
 
+# Task failure is not evidence against a memory unless the caller explicitly
+# attributes the failure to that memory.  Keep the classification small and
+# deterministic: external/unknown causes are neutral, while only an explicit
+# memory-cause marker can reach the existing TASK_FAILURE negative weight.
+_EXTERNAL_FAILURE_OUTCOMES = {
+    "TIMEOUT",
+    "NETWORK_ERROR",
+    "RATE_LIMIT",
+    "EXTERNAL_SERVICE_FAILURE",
+    "PERMISSION_DENIED",
+    "INFRA_FAILURE",
+    "EXTERNAL_FAILURE",
+}
+_MEMORY_CAUSED_FAILURE_OUTCOMES = {
+    "MEMORY_CAUSED",
+    "MEMORY_ERROR",
+    "WRONG_MEMORY",
+    "INCORRECT_MEMORY",
+}
+
 
 class UtilityStabilityUpdater:
     """Apply conservative, idempotent score changes to one memory store."""
@@ -315,7 +335,14 @@ class UtilityFeedbackShadow:
             signal, accepted = 0.2, True
         elif event.feedback_type is FeedbackType.TASK_FAILURE:
             attributable = [m for m in requested if m in used_memory_ids]
-            signal, accepted = -0.2, False
+            outcome = event.outcome.strip().upper()
+            if outcome in _MEMORY_CAUSED_FAILURE_OUTCOMES:
+                signal, accepted = -0.2, False
+            else:
+                # A used memory only proves usage, not causality.  In
+                # particular, infrastructure and unknown failures must not
+                # create negative memory feedback.
+                signal, accepted, attributable = 0.0, False, []
         else:
             signal, accepted, attributable = 0.0, False, []
         if event.feedback_type in {

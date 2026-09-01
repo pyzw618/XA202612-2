@@ -399,11 +399,9 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
                 "tags": list(getattr(memory, "tags", [])),
             }
         )
-    used_ids = (
-        body.used_memory_ids
-        if body.used_memory_ids
-        else [card["memory_id"] for card in cards[:3]]
-    )
+    # Missing explicit usage evidence must remain IN_CONTEXT, not be guessed
+    # from ranking position.
+    used_ids = list(body.used_memory_ids)
 
     if retrieval_service is not None and retrieval_log_id and used_ids:
         retrieval_service.record_usage_feedback(

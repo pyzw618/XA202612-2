@@ -7,6 +7,8 @@ and maintain cross-scope isolation.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from memoryhub.adapter.vnext_schemas import (
     ForgetRequest,
     MemoryRetrievalRequest,
@@ -21,6 +23,7 @@ from memoryhub.application.feedback_service import (
 from memoryhub.application.forget_service import ForgetService
 from memoryhub.application.retrieval_service import RetrievalService
 from memoryhub.domain.contracts import (
+    EvolutionAction,
     EvolutionStatus,
     LifecycleLayer,
     LineageRelation,
@@ -491,3 +494,49 @@ def test_existing_evolve_path_persists_lineage():
     records = lineage.list_for_memory("m1", "PREFERENCE")
     assert len(records) == 2
     assert records[-1].transition_action == LineageRelation.SUPERSEDES.value
+
+
+def test_evolution_uses_persisted_current_scores_not_feedback_signal():
+    db = Database(":memory:")
+    db.init_schema()
+    authority = AuthorityRepository(db)
+    current = LongTermEnvelope(
+        tenant_id="tenant-1", user_id="user-1", memory_id="m1",
+        memory_type=MemoryType.PREFERENCE, normalized_key="preference:format",
+        content={"text": "PDF"}, scope_level=MemoryScope.GLOBAL, scope="GLOBAL",
+        confidence=0.9, utility=0.75, stability=0.10,
+        evidence_refs=["event-1"],
+    )
+    authority.save(current)
+    service = EvolutionService(LongTermAuthorityFacade(authority))
+    item = SimpleNamespace(
+        feedback_id="fb-current-state",
+        feedback_type=FeedbackType.TASK_FAILURE,
+        utility_signal=-0.15,
+    )
+
+    assert service._feedback_target_status(item, current) is None
+
+
+def test_supersede_requires_replacement_evidence():
+    db = Database(":memory:")
+    db.init_schema()
+    authority = AuthorityRepository(db)
+    service = EvolutionService(LongTermAuthorityFacade(authority))
+    first = LongTermEnvelope(
+        tenant_id="tenant-1", user_id="user-1", memory_id="m1",
+        memory_type=MemoryType.PREFERENCE, normalized_key="preference:format",
+        content={"text": "PDF"}, scope_level=MemoryScope.GLOBAL, scope="GLOBAL",
+        confidence=0.9, utility=0.5, evidence_refs=["event-1"],
+    )
+    service.evolve(first)
+    replacement = first.model_copy(
+        update={"content": {"text": "DOCX"}, "content_version": 2, "evidence_refs": []}
+    )
+
+    result = service.evolve(replacement)
+
+    assert result.action == EvolutionAction.REVIEW.value
+    assert authority.get(
+        tenant_id="tenant-1", user_id="user-1", memory_id="m1"
+    ).evolution_status is EvolutionStatus.ACTIVE

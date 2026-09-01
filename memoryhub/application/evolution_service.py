@@ -27,6 +27,9 @@ from memoryhub.domain.evolution import (
     validate_evolution,
 )
 from memoryhub.domain.long_term import LongTermAuthorityFacade
+from memoryhub.observability.trace_models import TraceSpan, TraceSpanKind
+from memoryhub.observability.trace_policy import TraceCategory
+from memoryhub.observability.trace_store import TraceStore
 
 
 class EvolutionServiceError(EvolutionError):
@@ -66,10 +69,12 @@ class EvolutionService:
         authority_facade: LongTermAuthorityFacade,
         lineage_repository: Any | None = None,
         db: Any | None = None,
+        trace_store: TraceStore | None = None,
     ) -> None:
         self.authority_facade = authority_facade
         self.lineage_repository = lineage_repository
         self.db = db
+        self.trace_store = trace_store
         self._applied_feedback_ids: set[str] = set()
 
     def evolve(self, incoming: LongTermEnvelope) -> EvolutionResult:
@@ -91,6 +96,17 @@ class EvolutionService:
         decision_input = existing or chain_sibling
 
         action = decide_evolution_action(incoming, decision_input)
+
+        # A replacement must carry an explicit evidence reference.  Without
+        # one, keep the old version reviewable instead of silently superseding
+        # it based on content/version shape alone.
+        if action is EvolutionAction.SUPERSEDE and not incoming.evidence_refs:
+            return EvolutionResult(
+                action=EvolutionAction.REVIEW.value,
+                new_envelope=incoming,
+                previous_envelope=existing,
+                lineage=None,
+            )
 
         if action is EvolutionAction.REVIEW:
             return EvolutionResult(
@@ -164,7 +180,10 @@ class EvolutionService:
         from memoryhub.application.feedback_service import FeedbackType
 
         feedback_type = getattr(item, "feedback_type", None)
-        utility = getattr(item, "utility_signal", 0.0)
+        # The updater has already persisted the new score before this method
+        # is called.  Evolution decisions must use that current state, never
+        # the feedback delta/signal itself.
+        utility = getattr(current, "utility", 0.0)
         stability = getattr(current, "stability", 0.0)
 
         # Long-term low value + low stability demotes to DORMANT first.
@@ -338,8 +357,27 @@ class EvolutionService:
                 )
                 session.commit()
         except Exception:
-            # Lineage is audit-only; never fail the evolution transaction.
-            pass
+            # Lineage is audit-only; never fail the evolution transaction, but
+            # make the loss observable instead of reporting a silent success.
+            if self.trace_store is not None:
+                self.trace_store.record(
+                    TraceSpan(
+                        span_id=f"span-lineage-error-{new_envelope.memory_id}-{new_envelope.content_version}",
+                        trace_id=f"lineage-{new_envelope.memory_id}",
+                        kind=TraceSpanKind.EVOLUTION,
+                        layer="LINEAGE_PERSISTENCE",
+                        category=TraceCategory.EVOLUTION,
+                        tenant_id=new_envelope.tenant_id,
+                        user_id=new_envelope.user_id,
+                        ids={"memory_id": new_envelope.memory_id},
+                        classification={
+                            "outcome": "ERROR",
+                            "reason": "lineage_persistence_failed",
+                            "transition_action": relation.value,
+                        },
+                        status="FAILED",
+                    )
+                )
 
     def _record_lineage_in_session(
         self,

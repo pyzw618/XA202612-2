@@ -8,6 +8,8 @@ budget management and traceability.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 import uuid
 from collections.abc import Callable
@@ -24,6 +26,7 @@ from memoryhub.adapter.vnext_schemas import (
 from memoryhub.application.context_service import ContextAssemblyResult, ContextService
 from memoryhub.application.feedback_service import (
     FeedbackEvent,
+    FeedbackType,
     UsageKind,
     UtilityStabilityUpdater,
 )
@@ -38,7 +41,11 @@ from memoryhub.retrieval.planner import RetrievalPlan, RetrievalPlanner
 from memoryhub.retrieval.scope_resolver import ScopeResolver
 from memoryhub.storage.authority_repository import AuthorityRepository
 from memoryhub.storage.memory_metadata import MemoryProjectionOutboxRepository
-from memoryhub.storage.vnext_repositories import CandidateRepository
+from memoryhub.storage.vnext_repositories import (
+    CandidateRepository,
+    EvidenceRepository,
+    FeedbackIdempotencyRepository,
+)
 
 ChannelExecutor = Callable[
     [MemoryRetrievalRequest, RetrievalPlan, str],
@@ -119,6 +126,9 @@ class RetrievalService:
             trace_store=trace_store
         )
         self.evolution_service = evolution_service
+        self.feedback_idempotency = (
+            FeedbackIdempotencyRepository(db) if db is not None else None
+        )
 
     def retrieve(
         self,
@@ -301,6 +311,11 @@ class RetrievalService:
                     user_id=user_id,
                     query_id=query_id,
                     memory_id=memory_id,
+                    retrieval_id=retrieval_id,
+                    project_id=log.plan.get("project_id", ""),
+                    session_id=log.plan.get("session_id", ""),
+                    usage_source=usage_source,
+                    confidence=confidence,
                     used_at=datetime.now(timezone.utc),
                 )
                 result["marked"].append(memory_id)
@@ -335,6 +350,27 @@ class RetrievalService:
                 "status": "rejected",
                 "reason": "scope_mismatch_or_retrieval_not_found",
             }
+        if self.feedback_idempotency is not None:
+            request_hash = hashlib.sha256(
+                json.dumps(
+                    event.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+            ).hexdigest()
+            try:
+                claimed = self.feedback_idempotency.claim(
+                    tenant_id=event.tenant_id,
+                    user_id=event.user_id,
+                    feedback_id=event.feedback_id,
+                    request_hash=request_hash,
+                )
+            except ValueError:
+                return {
+                    "feedback_id": event.feedback_id,
+                    "status": "rejected",
+                    "reason": "feedback_idempotency_conflict",
+                }
+            if not claimed:
+                return {"feedback_id": event.feedback_id, "status": "idempotent"}
         selected = set(log.plan.get("selected_memory_ids", []))
         recorded_scope = {
             "project_id": log.plan.get("project_id", ""),
@@ -374,6 +410,7 @@ class RetrievalService:
         result = shadow.record_event(event, used_memory_ids=used)
         rejected_memories: list[str] = []
         evolution_results: list[dict[str, object]] = []
+        correction_evidence_ids: list[str] = []
         for feedback_id in result.get("feedback_ids", []):
             item = next(
                 (value for value in shadow.feedback if value.feedback_id == feedback_id),
@@ -395,6 +432,25 @@ class RetrievalService:
                 if current is not None and current.evolution_status is EvolutionStatus.DELETED:
                     rejected_memories.append(item.memory_id)
                     continue
+                if (
+                    event.feedback_type is FeedbackType.USER_CORRECTION
+                    and self.db is not None
+                    and current is not None
+                ):
+                    evidence, _ = EvidenceRepository(self.db).record(
+                        evidence_id=f"feedback-evidence-{event.feedback_id}-{item.memory_id}",
+                        tenant_id=event.tenant_id,
+                        user_id=event.user_id,
+                        memory_id=item.memory_id,
+                        memory_type=current.memory_type.value,
+                        event_id=event.feedback_id,
+                        source_hash=hashlib.sha256(
+                            event.outcome.encode("utf-8")
+                        ).hexdigest(),
+                        content_ref=f"feedback:{event.feedback_id}",
+                        source_type="EXPLICIT_CORRECTION",
+                    )
+                    correction_evidence_ids.append(evidence.evidence_id)
                 self.score_updater.update_authority(item, self.authority_repository)
                 if current is not None and self.evolution_service is not None:
                     updated = self.authority_repository.get(
@@ -459,6 +515,12 @@ class RetrievalService:
             response["rejected_reason"] = "memory_deleted"
         if evolution_results:
             response["evolution"] = evolution_results
+        if correction_evidence_ids:
+            response["conflict_evidence_ids"] = correction_evidence_ids
+        if self.feedback_idempotency is not None:
+            self.feedback_idempotency.complete(
+                tenant_id=event.tenant_id, feedback_id=event.feedback_id
+            )
         return response
 
     def _enqueue_repair(self, memory: RetrievedMemory) -> None:
@@ -579,6 +641,11 @@ class RetrievalService:
                         initial_score=activation.initial_score,
                         reranked_score=activation.reranked_score,
                         content_version=memory.content_version,
+                        project_id=(
+                            request.scope.split(":", 1)[1]
+                            if request.scope.startswith("PROJECT:") else ""
+                        ),
+                        session_id=request.session_id,
                         included_in_context=activation.included_in_context,
                     )
                 except Exception:

@@ -151,6 +151,46 @@ def test_task_failure_without_used_memory_is_not_attributed() -> None:
     assert shadow.feedback == []
 
 
+def test_task_failure_external_or_unknown_outcome_is_neutral_even_when_used() -> None:
+    for outcome in ("TIMEOUT", "NETWORK_ERROR", "UNKNOWN_FAILURE"):
+        shadow = UtilityFeedbackShadow()
+        result = shadow.record_event(
+            FeedbackEvent(
+                feedback_id=f"fb-neutral-{outcome}",
+                tenant_id="tenant-1",
+                user_id="user-1",
+                retrieval_id="retrieval-1",
+                memory_ids=["memory-1"],
+                feedback_type=FeedbackType.TASK_FAILURE,
+                outcome=outcome,
+            ),
+            used_memory_ids={"memory-1"},
+        )
+
+        assert result["attribution"] == "none"
+        assert shadow.feedback == []
+
+
+def test_task_failure_explicitly_caused_by_memory_is_attributed() -> None:
+    shadow = UtilityFeedbackShadow()
+    result = shadow.record_event(
+        FeedbackEvent(
+            feedback_id="fb-memory-caused",
+            tenant_id="tenant-1",
+            user_id="user-1",
+            retrieval_id="retrieval-1",
+            memory_ids=["memory-1"],
+            feedback_type=FeedbackType.TASK_FAILURE,
+            outcome="MEMORY_CAUSED",
+        ),
+        used_memory_ids={"memory-1"},
+    )
+
+    assert result["attribution"] == "strong"
+    assert len(shadow.feedback) == 1
+    assert shadow.feedback[0].utility_signal < 0
+
+
 def test_multiple_used_memories_receive_weak_outcome_attribution() -> None:
     shadow = UtilityFeedbackShadow()
     result = shadow.record_event(

@@ -176,6 +176,7 @@ def test_scenario_b_correction_is_reviewable_without_hard_delete() -> None:
     assert current is not None
     assert current.evolution_status is EvolutionStatus.REVIEW
     assert current.content["text"] == "content for database"
+    assert response["conflict_evidence_ids"]
 
 
 def test_scenarios_d_and_e_only_used_memories_receive_outcome_feedback() -> None:
@@ -214,7 +215,12 @@ def test_scenarios_f_and_g_negative_cause_and_duplicate_replay() -> None:
     first = service.retrieve(_request("scenario-f"))
     _used(service, first.response.retrieval_log_id, ["procedure"])
     negative = service.record_feedback_event(
-        _feedback(first.response.retrieval_log_id, "fb-f", ["procedure"], FeedbackType.TASK_FAILURE)
+        _feedback(
+            first.response.retrieval_log_id,
+            "fb-f",
+            ["procedure"],
+            FeedbackType.TASK_FAILURE,
+        ).model_copy(update={"outcome": "MEMORY_CAUSED"})
     )
     assert negative["attribution"] == "strong"
     after_failure = AuthorityRepository(db).get(tenant_id="tenant-1", user_id="user-1", memory_id="procedure")

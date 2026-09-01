@@ -237,6 +237,13 @@ class Database:
                 "updated_at": "DATETIME",
                 "expires_at": "DATETIME",
             },
+            "memory_activations": {
+                "retrieval_id": "VARCHAR(64)",
+                "project_id": "VARCHAR(128) NOT NULL DEFAULT ''",
+                "session_id": "VARCHAR(128) NOT NULL DEFAULT ''",
+                "usage_source": "VARCHAR(64)",
+                "usage_confidence": "FLOAT",
+            },
             "observability_audits": {
                 "tenant_id": "VARCHAR(64) DEFAULT ''",
                 "user_id": "VARCHAR(64) DEFAULT ''",

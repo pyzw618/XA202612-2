@@ -939,6 +939,7 @@ def create_app(
             authority_facade=authority_facade,
             lineage_repository=lineage_repository,
             db=db,
+            trace_store=app.state.trace_store,
         )
         app.state.evolution_service = evolution_service
         app.state.retrieval_service = RetrievalService(

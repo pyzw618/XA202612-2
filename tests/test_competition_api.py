@@ -276,7 +276,7 @@ def test_agent_step_extracts_memory_from_raw_dialogue_and_retrieves_it(client):
     assert second.json()["written_event_ids"] == []
     summaries = [item["summary"] for item in second.json()["candidate_memories"]]
     assert "项目材料默认使用中文。" in summaries
-    assert second.json()["used_memory_ids"]
+    assert second.json()["used_memory_ids"] == []
 
 
 def test_long_demo_builds_memory_across_one_multi_turn_session(client):

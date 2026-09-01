@@ -7,6 +7,8 @@ and rejection of memories that never made it into context.
 
 from __future__ import annotations
 
+import pytest
+
 from memoryhub.adapter.vnext_schemas import MemoryRetrievalRequest, RetrievedMemory
 from memoryhub.application.feedback_service import (
     FeedbackEvent,
@@ -26,6 +28,7 @@ from memoryhub.storage.database import Database
 from memoryhub.storage.models import MemoryActivationRow
 from memoryhub.storage.vnext_repositories import (
     ActivationRepository,
+    FeedbackIdempotencyRepository,
     RetrievalLogRepository,
 )
 
@@ -159,6 +162,9 @@ def test_record_usage_feedback_promotes_to_used():
         row = session.query(MemoryActivationRow).filter_by(memory_id="m1").one()
         assert row.status == ActivationStatus.USED.value
         assert row.used_at is not None
+        assert row.retrieval_id == result.response.retrieval_log_id
+        assert row.usage_source == "agent.step"
+        assert row.usage_confidence == 1.0
 
     used_usages = [u for u in shadow.usages if u.outcome_code == "USED"]
     assert len(used_usages) == 1
@@ -222,6 +228,60 @@ def test_record_usage_feedback_rejects_not_in_context():
     assert feedback["marked"] == []
     assert feedback["untrusted"] == ["m2"]
     assert feedback["rejected"] == []
+
+
+def test_activation_repository_rejects_selected_activation_not_in_context():
+    db = Database(":memory:")
+    db.init_schema()
+    repo = ActivationRepository(db)
+    repo.record(
+        activation_id="act-selected",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        query_id="query-1",
+        memory_id="m1",
+        task_id="task-1",
+        intent="PREFERENCE",
+        status="SELECTED",
+        rank=1,
+        initial_score=0.9,
+        reranked_score=0.9,
+        content_version=1,
+        included_in_context=False,
+    )
+
+    with pytest.raises(ValueError, match="not included in context"):
+        repo.mark_used(
+            tenant_id="tenant-1",
+            user_id="user-1",
+            query_id="query-1",
+            memory_id="m1",
+        )
+
+    assert repo.get(
+        tenant_id="tenant-1", user_id="user-1", query_id="query-1", memory_id="m1"
+    ).status == "SELECTED"
+
+
+def test_feedback_idempotency_survives_repository_recreation():
+    db = Database(":memory:")
+    db.init_schema()
+    first = FeedbackIdempotencyRepository(db)
+    assert first.claim(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        feedback_id="fb-restart",
+        request_hash="hash-1",
+    ) is True
+    first.complete(tenant_id="tenant-1", feedback_id="fb-restart")
+
+    recreated = FeedbackIdempotencyRepository(db)
+    assert recreated.claim(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        feedback_id="fb-restart",
+        request_hash="hash-1",
+    ) is False
 
 
 def test_record_usage_feedback_rejects_cross_tenant():
@@ -308,7 +368,9 @@ def test_record_feedback_event_requires_used_memory_for_task_outcome():
         user_id="user-1",
     )
     attributed = service.record_feedback_event(
-        event.model_copy(update={"feedback_id": "fb-outcome-2"})
+        event.model_copy(
+            update={"feedback_id": "fb-outcome-2", "outcome": "MEMORY_CAUSED"}
+        )
     )
     assert attributed["attribution"] == "strong"
     assert attributed["attributed_memory_ids"] == ["m1"]

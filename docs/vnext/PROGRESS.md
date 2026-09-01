@@ -46,7 +46,7 @@ Batch 4 — Fusion / Rerank / Context Budget
 Batch 5 — Retrieval Scenario Tests & Legacy Comparison
 
 Current Target:
-Stage 3 Batch 4 — Memory Evolution & Safeguards
+Stage 3 Closure Fix Batch 1 — Attribution Correctness
 ```
 
 ---
@@ -3200,3 +3200,336 @@ Legacy feedback route: unchanged.
 ### Next Batch Notes
 
 Stage 3 Batch 5 is complete. Do not automatically enter Stage 4; evaluation, benchmark, shadow/canary and cutover remain outside this Batch.
+
+## Stage 3 Closure Fix Batch 1 — Attribution Correctness
+
+### Status
+
+```text
+DONE
+```
+
+### Objective
+
+修复 `TASK_FAILURE` 被无条件视为 Memory 负反馈的问题。只有明确标记为 Memory-caused 的失败才允许进入既有负向分数路径；外部失败和未知失败保持 neutral/no-op。
+
+### Changes
+
+- `UtilityFeedbackShadow.record_event()` 增加小范围、确定性的 failure outcome 分类。
+- `TIMEOUT`、`NETWORK_ERROR`、`RATE_LIMIT`、`EXTERNAL_SERVICE_FAILURE`、`PERMISSION_DENIED`、`INFRA_FAILURE`、`EXTERNAL_FAILURE` 及未知 outcome 不产生 Memory 归因。
+- `MEMORY_CAUSED`、`MEMORY_ERROR`、`WRONG_MEMORY`、`INCORRECT_MEMORY` 才保留现有 `TASK_FAILURE` 有限负向信号。
+- Explicit Positive / Negative、TASK_SUCCESS、多 Memory weak attribution 和 USED 门槛保持不变。
+
+### Files Touched
+
+```text
+memoryhub/application/feedback_service.py
+tests/test_vnext_feedback_service.py
+tests/test_vnext_feedback_scenarios.py
+tests/test_vnext_activation_used.py
+docs/vnext/PROGRESS.md
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| Stage 3 feedback/activation/evolution focused selection | PASS (24), FAIL 0, SKIP 0, ERROR 0 |
+| Stage 1/2 targeted regression selection | PASS (34), FAIL 0, SKIP 0, ERROR 1 |
+| `ruff check memoryhub/application/feedback_service.py` | PASS |
+| `ruff check` touched tests | FAIL (19 pre-existing format/import findings in `tests/test_vnext_feedback_scenarios.py`) |
+
+### Exact PASS / FAIL / SKIP / ERROR Counts
+
+```text
+Primary focused run: PASS 24 / FAIL 0 / SKIP 0 / ERROR 0
+Regression run:      PASS 34 / FAIL 0 / SKIP 0 / ERROR 1 / DESELECTED 0
+Current broad review run: PASS 38 / FAIL 1 / SKIP 0 / ERROR 8
+Current broad review failure: `tests/test_vnext_retrieval_eval.py::test_recall_is_perfect_for_expected_memories` (recall=0.8333333333333334)
+```
+
+### Attribution Evidence
+
+- `TASK_FAILURE + TIMEOUT` and `TASK_FAILURE + NETWORK_ERROR` with a USED memory produce `attribution=none` and no `UtilityFeedback`.
+- Unknown failure outcome also produces no strong negative attribution.
+- `TASK_FAILURE + MEMORY_CAUSED` remains strongly attributed and keeps the existing bounded negative update path.
+- The stale activation assertion was corrected from `TIMEOUT` to `MEMORY_CAUSED`, testing causal attribution instead of unconditional negativity.
+
+### Idempotency Evidence
+
+本 Batch 未修改幂等机制。现有进程内重复反馈测试通过；跨 service restart 的 durable idempotency 仍属于后续 Closure Batch。
+
+### Usage Evidence
+
+本 Batch 未修改 Usage / Activation。`IN_CONTEXT`、`USED`、显式 `used_memory_ids` 和 Agent Top-N fallback 保持原状，属于后续 Batch。
+
+### Evolution Evidence
+
+本 Batch 未修改 Evolution。只有被新归因规则接受的 feedback 才继续进入既有 score/evolution 链路；Evolution current-state 修复属于后续 Batch。
+
+### Scope / Safety Verification
+
+本 Batch 未改变 scope、Forget 或 Safety gate。既有 cross-tenant/cross-scope 校验路径保持不变。
+
+### Regression
+
+- Stage 3 feedback/evolution/activation 业务测试通过。
+- Stage 1/2 targeted regression 的业务断言通过。
+- 1 个既有 `tmp_path` setup ERROR：Windows pytest 无法创建临时目录 lock 文件，与本 Batch 代码无关。
+- 当前场景测试 lint 仍有 19 个格式/导入问题；未通过格式化扩大本 Batch 范围。
+- 当前 broad review run 复现 Stage 2 recall 失败 1 个，及 Windows `tmp_path` ACL ERROR 8 个；均非本 Batch 归因逻辑失败。
+- 未运行或修改 Stage 4。
+
+### Remaining Risks
+
+- Feedback 幂等仍是进程内，尚未跨重启持久化。
+- USED 强制 `IN_CONTEXT`、Agent 自动 Top-3 USED、Usage Evidence 持久化尚未处理。
+- Evolution current-state、replacement evidence 和 Scenario 完整收口尚未处理。
+- Windows pytest ACL 仍阻塞依赖 `tmp_path` 的完整回归证据。
+
+### Next Fix Batch Notes
+
+Fix Batch 1 已完成。下一授权 Batch 为 Fix Batch 2 — Durable Feedback & Usage Evidence；本次不自动开始。
+
+## Stage 3 Closure Fix Batch 2 — Durable Feedback & Usage Evidence
+
+### Status
+
+```text
+DONE
+```
+
+### Reconnaissance Findings
+
+- `ActivationRepository.mark_used()` 原先只按 tenant/user/query/memory 查找，未检查 `included_in_context`，存在 SELECTED 直接提升为 USED 的底层缺口。
+- Agent `/step` 原先在缺少 `used_memory_ids` 时自动选择前 3 条 Memory，形成猜测性 USED 证据。
+- `usage_source`、`confidence` 和 retrieval 关联只在调用参数中经过，未落入 Activation 持久化记录。
+- Feedback 幂等原先依赖 `UtilityFeedbackShadow` / `UtilityStabilityUpdater` / `EvolutionService` 的进程内集合。
+- 复用了现有 `IdempotencyRecordRow`，未建立平行幂等表或 Feedback Framework。
+
+### Changes
+
+- 扩展 `MemoryActivationRow` 与兼容迁移，保存 `retrieval_id`、project/session scope、`usage_source` 和 `usage_confidence`。
+- 扩展 `ActivationRepository`：写入 Usage Evidence，并在 `mark_used()` 的 Repository 边界强制要求 `included_in_context=true`。
+- 新增基于现有 `IdempotencyRecordRow` 的 `FeedbackIdempotencyRepository`，以 tenant + namespaced feedback ID 持久化 claim/complete，支持服务重建后的 replay no-op 与 payload conflict 拒绝。
+- `RetrievalService.record_usage_feedback()` 传递并持久化 Usage Evidence；`record_feedback_event()` 接入持久化幂等检查。
+- 移除 Agent `/step` 缺少显式 `used_memory_ids` 时的 Top-3 自动 USED。
+- 更新相关测试，明确 selected-but-not-context 拒绝、Usage Evidence 持久化和 Repository 重建后的幂等行为。
+
+### Files Touched
+
+```text
+memoryhub/storage/models.py
+memoryhub/storage/database.py
+memoryhub/storage/vnext_repositories.py
+memoryhub/application/retrieval_service.py
+memoryhub/adapter/agent_api.py
+tests/test_vnext_activation_used.py
+tests/test_competition_api.py
+docs/vnext/PROGRESS.md
+```
+
+### Behavior Before
+
+```text
+SELECTED + included_in_context=false → mark_used() 可直接写 USED
+Agent 无 used_memory_ids → 自动前 3 条 USED
+Usage Evidence 参数 → 不持久化
+服务重建 → feedback_id 可能再次计分
+```
+
+### Behavior After
+
+```text
+SELECTED + included_in_context=false → Repository 拒绝
+Agent 无 used_memory_ids → 保持 IN_CONTEXT，不产生 USED
+USED → 持久化 retrieval/scope/source/confidence/used_at
+已完成 feedback replay → durable idempotent no-op
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| Stage 3 activation/feedback/evolution selection excluding known ACL fixture | PASS (34), FAIL 0, SKIP 0, DESELECTED 1 |
+| Full Stage 3 selection including app wiring fixture | PASS 34, FAIL 0, SKIP 0, ERROR 1 |
+| `python -m compileall -q memoryhub tests/test_vnext_activation_used.py` | PASS |
+| Ruff on Batch 2 source and activation test files | PASS |
+| `git diff --check` | PASS |
+| `test_recall_is_perfect_for_expected_memories` | FAIL (recall 0.8333333333333334) |
+
+### Attribution Evidence
+
+本 Batch 未修改 Attribution 规则。`TASK_FAILURE` 的 outcome-aware neutral / memory-caused 分类保持 Batch 1 行为；`IN_CONTEXT` 仍不等于 USED，Task Outcome 仍只读取已标记 USED 的 Activation。
+
+### Idempotency Evidence
+
+- Feedback 使用现有 `idempotency_records` 表并以 `feedback:` namespace 隔离 EventGateway key。
+- 已完成记录在 Repository 重建后再次 claim 返回 no-op。
+- 同一 feedback payload 的重复处理不会再次进入 score/evolution 链路。
+- 不同 user 或不同 payload 复用同一 tenant/feedback ID 会返回 conflict。
+- 当前 claim/score/evolution/complete 仍跨多个既有 service session；崩溃恢复的完整原子事务仍是后续风险，未扩展为本 Batch 的新框架。
+
+### Usage Evidence
+
+- `mark_used()` 已在 Repository 边界检查 `included_in_context`。
+- `record_usage_feedback()` 持久化 retrieval ID、project/session scope、usage source、confidence 和 used timestamp。
+- Agent `/step` 不再对缺少显式 usage evidence 的响应执行 Top-3 USED。
+- 显式 `used_memory_ids` 仍沿用原有 Retrieval Log、scope 和 Activation 校验路径。
+
+### Evolution Evidence
+
+本 Batch 未修改 EvolutionService、EvolutionStatus 或状态转换规则；Feedback 只有在现有 Attribution 路径产生实际反馈后才继续进入既有 score/evolution 链路。
+
+### Scope / Safety Verification
+
+- Activation Usage Evidence 继续按 tenant/user/query/memory 查询。
+- Retrieval Log 的 tenant/user/project/task/session 校验保持不变。
+- Forget、Safety、Quarantine 和 negative feedback hard-delete 边界未修改。
+- Stage 2 Recall 失败未通过放宽断言或修改 Retrieval 模块处理。
+
+### Regression
+
+- Stage 3 业务回归（排除 Windows `tmp_path` fixture）：34 passed，0 failed，0 skipped，1 deselected。
+- 完整 Stage 3 选择：34 passed，0 failed，0 skipped，1 error；Error 是既有 Windows pytest `.lock` 创建 PermissionError。
+- Stage 2 retrieval evaluation 的历史失败仍可复现：1 failed，recall=0.8333333333333334。
+- Competition/Safety 依赖 `tmp_path` 的测试仍受同一 ACL 环境问题影响，未修改业务代码绕过。
+- Stage 4 未运行、未修改。
+
+### Remaining Risks
+
+- Idempotency claim、score update、evolution 和 complete 尚未合并到单一数据库事务；跨进程崩溃窗口仍需后续专门处理。
+- Usage Evidence 已持久化，但 AgentUsageTrace 的内存 shadow 仍不是完整长期 Usage Ledger。
+- Windows pytest 临时目录 ACL 仍阻塞部分真实 API/Safety 回归证据。
+- Stage 2 Closure Final Review 独立 `READY FOR STAGE 3` 证据仍缺失。
+
+### Next Fix Batch Notes
+
+Fix Batch 2 已完成。下一授权 Batch 为 Fix Batch 3 — Evolution Correctness & Replacement Evidence；本次不自动开始。
+
+## Stage 3 Closure Fix Batch 3 — Evolution Correctness & Replacement Evidence
+
+### Status
+
+```text
+DONE
+```
+
+### Reconnaissance Findings
+
+- Review 中“Evolution 使用错误反馈 signal 判断状态”的问题仍存在：`_feedback_target_status()` 读取 `item.utility_signal`，而不是更新后的 Authority `current.utility`。
+- Lineage 写入异常仍被 `except Exception: pass` 静默吞掉，主业务成功不代表审计链完整。
+- `SUPERSEDE` 原先只依据内容/版本变化，没有 replacement evidence 前置约束。
+- Explicit Correction 原先只能把旧 Memory 推入 `REVIEW`，没有持久化可追踪的 correction/conflict evidence。
+- 复用了现有 `EvidenceRepository`、`MemoryLineageRepository`、`TraceStore` 和 `LongTermEnvelope.evidence_refs`，未新增数据库表或重写 Conflict/Feedback Framework。
+
+### Changes
+
+- `EvolutionService` 使用已持久化的 `current.utility` / `current.stability` 做状态判断。
+- `EvolutionService.evolve()` 对缺少 `evidence_refs` 的 SUPERSEDE 请求降级为 `REVIEW`，避免无证据替换。
+- Lineage 持久化失败仍不阻断主业务，但写入 EVOLUTION trace，标记 `LINEAGE_PERSISTENCE` / `FAILED`，不再静默。
+- Explicit Correction 复用 `EvidenceRepository` 持久化 redacted correction evidence，并在反馈响应返回 `conflict_evidence_ids`。
+- 生产装配将共享 `TraceStore` 注入 `EvolutionService`。
+- 新增 current-state 与 replacement-evidence 回归测试，并补充 Scenario B 的 evidence 断言。
+
+### Files Touched
+
+```text
+memoryhub/application/evolution_service.py
+memoryhub/application/retrieval_service.py
+memoryhub/app.py
+tests/test_vnext_feedback_evolution.py
+tests/test_vnext_feedback_scenarios.py
+docs/vnext/PROGRESS.md
+```
+
+### Behavior Before
+
+```text
+feedback signal → Evolution 状态判断
+lineage 写入异常 → 静默忽略
+无 evidence 的新版本 → 可直接 SUPERSEDE
+Explicit Correction → REVIEW，但无持久化 correction evidence
+```
+
+### Behavior After
+
+```text
+score update → 读取 current utility/stability → Evolution 状态判断
+lineage 写入异常 → 可观察 EVOLUTION trace，主业务保持可用
+无 replacement evidence → REVIEW，不 SUPERSEDE
+Explicit Correction → REVIEW + redacted conflict evidence reference
+```
+
+### Tests
+
+| Test | Result |
+|---|---|
+| Stage 3 evolution/scenario/feedback focused selection | PASS (26), FAIL 0, SKIP 0 |
+| Stage 3 + Stage 1/2 scenario targeted selection | PASS (43), FAIL 0, SKIP 0 |
+| Full activation-inclusive selection | PASS (36), FAIL 0, SKIP 0, ERROR 1 |
+| `ruff check` changed source files | PASS |
+| `compileall` changed source/tests | PASS |
+| `git diff --check` | PASS |
+| `test_recall_is_perfect_for_expected_memories` | FAIL (recall `0.8333333333333334`) |
+
+### Exact PASS / FAIL / SKIP / ERROR Counts
+
+```text
+Primary focused run: PASS 43 / FAIL 0 / SKIP 0 / ERROR 0
+Full activation-inclusive run: PASS 36 / FAIL 0 / SKIP 0 / ERROR 1
+Recall regression: PASS 0 / FAIL 1 / SKIP 0 / ERROR 0
+```
+
+### Attribution Evidence
+
+- Existing outcome-aware attribution remains unchanged.
+- `TASK_FAILURE` only produces a negative signal for explicit memory-caused outcomes.
+- Unknown/external failure remains no-op.
+- `IN_CONTEXT` is still insufficient for outcome attribution; only `USED` activations participate.
+
+### Idempotency Evidence
+
+- Existing durable feedback claim via `IdempotencyRecordRow` remains unchanged.
+- Same feedback replay remains a no-op across service recreation tests.
+- Evolution/updater process-local applied-id sets remain a known non-atomic crash-window risk; this Batch did not introduce a parallel ledger.
+
+### Usage Evidence
+
+- No Usage/Activation behavior was changed in this Batch.
+- Existing `IN_CONTEXT` gate, explicit `used_memory_ids` requirement, persisted usage evidence and no Top-N auto-USED behavior remain covered by prior regression tests.
+
+### Evolution Evidence
+
+- Current-state regression proves `utility=0.75`, `stability=0.10` with negative signal does not become DORMANT solely because of the signal.
+- Low-score ACTIVE → DORMANT and DORMANT → ACTIVE existing tests remain passing.
+- SUPERSEDE without evidence now returns REVIEW and leaves the existing ACTIVE version unchanged.
+- Explicit Correction persists a tenant/user-scoped evidence reference while retaining the old memory content and avoiding hard delete.
+
+### Scope / Safety Verification
+
+- Evidence persistence uses event tenant/user and the already validated retrieval scope.
+- DELETED memory protection, cross-tenant feedback rejection, Forget authorization and Safety gates were not bypassed or changed.
+- No Legacy Retrieval path was modified.
+
+### Regression
+
+```text
+Stage 1 scenario regression: passed.
+Stage 2 Batch 5 scenario regression: passed.
+Stage 3 feedback/evolution/activation regression: passed, excluding one environment setup error.
+Stage 2 retrieval evaluation: existing recall failure remains at 0.8333333333333334.
+Windows pytest tmp_path ACL: one setup ERROR remains in the activation app-wiring test.
+```
+
+### Remaining Risks
+
+- Conflict evidence is now persisted as a redacted evidence reference; creation of a new fact/Candidate still requires an upstream correction payload and is not synthesized from feedback alone.
+- `SUPERSEDED` replacement lineage is guarded by `evidence_refs`, but a full explicit correction → new Candidate → replacement E2E scenario remains for the next verification batch.
+- Lineage failures are observable only when a TraceStore is injected; existing direct callers without one retain no external sink.
+- Feedback claim, score update and evolution are not one atomic database transaction.
+- Existing Windows pytest ACL ERROR and Stage 2 recall FAIL remain unresolved.
+
+### Next Fix Batch Notes
+
+Fix Batch 3 已完成。本次不自动进入 Fix Batch 4；下一批仅在重新授权后执行 Scenario / Regression / Final Closure Verification。
