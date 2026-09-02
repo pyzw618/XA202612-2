@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from memoryhub.adapter.schemas import MemoryEvent, SafetyAction, SourceType
+from memoryhub.adapter.schemas import MemoryEvent, SafetyAction, SourceType, _deep_thaw_json
 from memoryhub.core.safety.gate import SafetyWriteGate
 from memoryhub.domain.contracts import MemoryEventContract
 
@@ -45,7 +45,7 @@ class SafetyPolicyAdapter:
             return event.model_copy(update={"policy_action": "DROP"})
 
         safe_event = approved.safe_event
-        new_payload = dict(safe_event.payload)
+        new_payload = _deep_thaw_json(dict(safe_event.payload))
         if safe_event.text:
             new_payload["text"] = safe_event.text
         if safe_event.redactions:

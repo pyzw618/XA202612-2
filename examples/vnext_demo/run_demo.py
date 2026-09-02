@@ -333,10 +333,19 @@ def _search(runtime: DemoRuntime, request_id: str, **overrides: Any) -> dict[str
 
 
 def scenario_formation(output_dir: Path) -> dict[str, Any]:
-    runtime = _make_runtime(output_dir, formation_mode="candidate-only")
+    runtime = _make_runtime(output_dir, formation_mode="authority")
     try:
-        result = _write(runtime, _event(_load_fixture("event_start_report.json")))
+        raw = _load_fixture("event_start_report.json")
+        raw["payload"] = {**raw["payload"], "explicit_long_term": True}
+        result = _write(runtime, _event(raw))
         task = _run_task(runtime, result)
+        second_raw = {
+            **raw,
+            "session_id": "demo_session_002",
+            "turn_id": "turn_002",
+        }
+        second_result = _write(runtime, _event(second_raw))
+        _run_task(runtime, second_result)
         working = WorkingStateRepository(runtime.db).get(
             tenant_id=TENANT_ID, user_id=USER_ID, task_id="task-demo_session_001"
         )
@@ -345,16 +354,20 @@ def scenario_formation(output_dir: Path) -> dict[str, Any]:
         )
         if working is None or candidate is None:
             raise RuntimeError("formation state was not persisted")
+        memories = runtime.authority.list(tenant_id=TENANT_ID, user_id=USER_ID)
         return {
             "scenario": "formation",
             "redacted": True,
             "formation": {
-                "event_count": 1,
+                "event_count": 2,
                 "working_state_version": working.version,
                 "goal_hash": _stable_hash(working.state.get("current_goal")),
                 "candidate_count": len(task.candidate_ids),
                 "candidate_status": candidate.status,
-                "authority_memory_count": 0,
+                "authority_memory_count": len(memories),
+                "formation_status": (
+                    "AUTHORITY_PROMOTED" if memories else "CANDIDATE_STAGED"
+                ),
                 "task_status": task.status.value,
             },
         }

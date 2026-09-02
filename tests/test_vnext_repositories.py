@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.exc import IntegrityError
 
 from memoryhub.storage.database import Database
 from memoryhub.storage.models import Base
@@ -267,9 +266,10 @@ def test_activation_is_unique_per_tenant_query_memory_version(db: Database) -> N
         reranked_score=0.8,
         content_version=1,
     )
-    repository.record(activation_id="activation-1", **kwargs)
-    with pytest.raises(IntegrityError):
-        repository.record(activation_id="activation-duplicate", **kwargs)
+    first = repository.record(activation_id="activation-1", **kwargs)
+    # ActivationRepository intentionally upserts per (tenant, user, query, memory, version).
+    duplicate = repository.record(activation_id="activation-duplicate", **kwargs)
+    assert duplicate.activation_id == first.activation_id
     newer = repository.record(
         activation_id="activation-2", **{**kwargs, "content_version": 2}
     )
@@ -277,4 +277,6 @@ def test_activation_is_unique_per_tenant_query_memory_version(db: Database) -> N
         activation_id="activation-3", **{**kwargs, "tenant_id": "tenant-b", "user_id": "user-b"}
     )
     assert newer.content_version == 2
+    assert newer.activation_id != first.activation_id
     assert other_tenant.tenant_id == "tenant-b"
+    assert other_tenant.activation_id != first.activation_id

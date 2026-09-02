@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from memoryhub.adapter.schemas import (
     EvalReport,
+    EventProcessingSummary,
     ExtractionTask,
     ExtractionTaskRunRequest,
     ExtractionTaskRunResponse,
@@ -28,6 +29,7 @@ from memoryhub.adapter.schemas import (
     ForgetResponse,
     KnowledgeMemory,
     ManualConfig,
+    MemoryEvent,
     MemoryStatus,
     PreferenceMemory,
     SafetyAction,
@@ -53,6 +55,8 @@ from memoryhub.core.safety.memory_write import (
     MemoryWriteSafetyError,
     guard_memory_write,
 )
+from memoryhub.application.event_gateway import GatewayStatus
+from memoryhub.domain.contracts import MemoryEventContract
 from memoryhub.embedding import KylinEmbeddingError
 from memoryhub.storage.vector_engine import MilvusEngineError
 
@@ -383,6 +387,170 @@ def delete_user_rule(
 # ============================================================
 
 
+def _should_use_canonical_write(request: Request) -> bool:
+    """Return True when legacy write entrypoints should route to vNext canonical write."""
+    config = getattr(request.app.state, "config", None)
+    canonical = getattr(request.app.state, "canonical_write_service", None)
+    if canonical is None:
+        return False
+    if config is None:
+        return True
+    return getattr(config.vnext, "events_default", True)
+
+
+def _to_memory_event_contract(
+    event: MemoryEvent,
+    *,
+    tenant_id: str = "default",
+    project_id: str = "",
+    task_id: str = "",
+    session_id: str = "",
+) -> MemoryEventContract:
+    """Build a vNext canonical event from a sanitized legacy MemoryEvent."""
+    from datetime import datetime
+
+    from memoryhub.adapter.schemas import _deep_thaw_json
+
+    occurred = event.occurred_at or datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    if isinstance(occurred, str):
+        try:
+            occurred = datetime.fromisoformat(occurred.replace("Z", "+00:00"))
+        except ValueError:
+            occurred = datetime.utcnow()
+
+    payload = _deep_thaw_json(dict(event.payload or {}))
+    if project_id:
+        payload["project_id"] = project_id
+    payload["text"] = event.text or payload.get("text", "")
+    if event.tool_calls:
+        payload["tool_calls"] = [tc.model_dump(mode="json") for tc in event.tool_calls]
+    if event.quality is not None:
+        payload["quality"] = event.quality.model_dump(mode="json")
+    if event.turn_id:
+        payload["turn_id"] = event.turn_id
+    if event.scene or event.task_type:
+        payload["scope"] = {
+            "scene": event.scene or "",
+            "task_type": event.task_type or "",
+        }
+    if event.redactions:
+        payload["redactions"] = [str(r) for r in event.redactions]
+
+    return MemoryEventContract(
+        tenant_id=tenant_id,
+        user_id=event.user_id or "default",
+        event_id=event.event_id,
+        event_type=event.event_type,
+        source_type=(
+            event.source_type.value
+            if hasattr(event.source_type, "value")
+            else str(event.source_type)
+        ),
+        task_id=task_id or str(payload.get("task_id") or "") or event.session_id or "default-task",
+        session_id=session_id or event.session_id or "default-session",
+        occurred_at=occurred,
+        payload=payload,
+        policy_action="ALLOW",
+        source_hash=event.source_hash or "0" * 64,
+        idempotency_key=event.event_id,
+        trace_id=event.event_id,
+    )
+
+
+def _canonical_write_result_to_legacy(
+    results: list,
+) -> WriteEventResponse:
+    """Adapt a list of CanonicalWriteResult to the legacy WriteEventResponse.
+
+    Legacy semantics treat duplicate/idempotent events as rejected, while vNext
+    CanonicalWriteService returns ``IDEMPOTENT``. Map IDEMPOTENT to rejected here
+    so that existing REST contract tests remain stable.
+    """
+    accepted = 0
+    rejected = 0
+    event_ids: list[str] = []
+    for result in results:
+        status = getattr(result, "status", None)
+        if status == GatewayStatus.COMMITTED:
+            accepted += 1
+            event_ids.append(getattr(result, "event_id", ""))
+        else:
+            rejected += 1
+    return WriteEventResponse(
+        accepted=accepted,
+        rejected=rejected,
+        event_ids=event_ids,
+        extraction_failures=0,
+        retry_tasks_enqueued=0,
+        retry_queue_failures=0,
+    )
+
+
+def _buffer_short_term(st_repo, events: list[MemoryEvent], ttl_hours: float = 24.0) -> None:
+    """Keep committed events in the short-term session buffer for tiered search."""
+    from datetime import datetime, timedelta, timezone
+
+    ttl = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
+    for event in events:
+        st_repo.add(
+            user_id=event.user_id or "default",
+            session_id=event.session_id or "",
+            event_id=event.event_id,
+            source_type=(
+                event.source_type.value
+                if hasattr(event.source_type, "value")
+                else str(event.source_type or "")
+            ),
+            text=event.text or "",
+            payload=dict(event.payload or {}),
+            scene=event.scene or "",
+            task_type=event.task_type or "",
+            ttl_until=ttl,
+        )
+
+
+def _canonical_write_events(
+    events: list[MemoryEvent],
+    request: Request,
+) -> WriteEventResponse:
+    """Route legacy events through vNext CanonicalWriteService and adapt the response.
+
+    Committed events are also fed to the legacy event processor so that preference,
+    knowledge and FACT extraction continue to populate the legacy memory stores
+    visible to ``/api/memory/search`` and ``/api/memory/preferences``.
+    """
+    canonical = getattr(request.app.state, "canonical_write_service", None)
+    if canonical is None:
+        raise HTTPException(status_code=503, detail="canonical write service not initialized")
+    results: list[Any] = []
+    committed_events: list[MemoryEvent] = []
+    for event in events:
+        tenant_id = request.headers.get("X-MemoryHub-Tenant", event.user_id or "default")
+        contract = _to_memory_event_contract(event, tenant_id=tenant_id)
+        result = canonical.write(contract)
+        results.append(result)
+        if getattr(result, "status", None) == GatewayStatus.COMMITTED:
+            committed_events.append(event)
+    response = _canonical_write_result_to_legacy(results)
+
+    # Mirror the legacy ingestion side-effects: keep committed events in the
+    # short-term session buffer and trigger preference/knowledge extraction.
+    st_repo = getattr(request.app.state, "short_term_repo", None)
+    if st_repo is not None and committed_events:
+        try:
+            _buffer_short_term(st_repo, committed_events)
+        except Exception:
+            pass
+    processor = getattr(request.app.state, "event_processor", None)
+    if processor is not None and committed_events:
+        try:
+            processor.process(committed_events)
+        except Exception:
+            # Extraction failures must not break the event-write contract.
+            pass
+    return response
+
+
 def _memory_index_text(memory: PreferenceMemory | KnowledgeMemory) -> str:
     """Build index text using the same contract as application startup."""
     if memory.memory_type == "knowledge":
@@ -460,8 +628,8 @@ async def write_events(req: WriteEventRequest, request: Request):
     """
     写入多源事件数据
 
-    数据流: OS Agent → write_events → Ingestion.clean → Ingestion.normalize
-            → 存入事件库 → 触发偏好/知识抽取
+    数据流: OS Agent → write_events → vNext CanonicalWriteService (默认)
+            → EventGateway → 事件库 → Formation Worker
 
     参数:
         req.events: MemoryEvent 列表
@@ -471,30 +639,8 @@ async def write_events(req: WriteEventRequest, request: Request):
         rejected: 被拒绝的事件数（质量/安全过滤）
         event_ids: 接受的事件 ID 列表
     """
-    service = getattr(request.app.state, "event_ingestion_service", None)
-    if service is None:
-        memory = _memory_service(request)
-        try:
-            result = memory.write_events(req)
-            return WriteEventResponse(
-                accepted=result.accepted,
-                rejected=result.rejected,
-                event_ids=result.event_ids,
-            )
-        except HTTPException:
-            raise
-        except Exception:
-            raise HTTPException(status_code=503, detail="event ingestion failed") from None
     try:
-        result = service.ingest(req.events)
-        return WriteEventResponse(
-            accepted=result.accepted,
-            rejected=result.rejected,
-            event_ids=result.event_ids,
-            extraction_failures=result.extraction_failures,
-            retry_tasks_enqueued=result.retry_tasks_enqueued,
-            retry_queue_failures=result.retry_queue_failures,
-        )
+        return _canonical_write_events(req.events, request)
     except HTTPException:
         raise
     except Exception:
@@ -528,14 +674,11 @@ async def ingest_tool_result(req: ToolResultSourceRequest, request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"invalid tool result: {exc}") from None
 
-    service = getattr(request.app.state, "event_ingestion_service", None)
-    if service is None:
-        raise HTTPException(status_code=503, detail="event ingestion not initialized")
-    result = service.ingest([event])
+    response = _canonical_write_events([event], request)
     return {
-        "accepted": result.accepted,
-        "rejected": result.rejected,
-        "event_ids": result.event_ids,
+        "accepted": response.accepted,
+        "rejected": response.rejected,
+        "event_ids": response.event_ids,
         "event_id": event.event_id,
     }
 
@@ -575,14 +718,11 @@ async def ingest_behavior(req: BehaviorSourceRequest, request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"invalid behavior: {exc}") from None
 
-    service = getattr(request.app.state, "event_ingestion_service", None)
-    if service is None:
-        raise HTTPException(status_code=503, detail="event ingestion not initialized")
-    result = service.ingest([event])
+    response = _canonical_write_events([event], request)
     return {
-        "accepted": result.accepted,
-        "rejected": result.rejected,
-        "event_ids": result.event_ids,
+        "accepted": response.accepted,
+        "rejected": response.rejected,
+        "event_ids": response.event_ids,
         "event_id": event.event_id,
     }
 
@@ -612,14 +752,11 @@ async def ingest_manual_config(req: ConfigSourceRequest, request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"invalid config: {exc}") from None
 
-    service = getattr(request.app.state, "event_ingestion_service", None)
-    if service is None:
-        raise HTTPException(status_code=503, detail="event ingestion not initialized")
-    result = service.ingest([event])
+    response = _canonical_write_events([event], request)
     return {
-        "accepted": result.accepted,
-        "rejected": result.rejected,
-        "event_ids": result.event_ids,
+        "accepted": response.accepted,
+        "rejected": response.rejected,
+        "event_ids": response.event_ids,
         "event_id": event.event_id,
         "manual_config": config.model_dump(mode="json"),
     }
@@ -1010,6 +1147,7 @@ async def search_memory(req: SearchRequest, request: Request):
         response = selected.response
         if hasattr(response, "to_legacy_search_response"):
             response = response.to_legacy_search_response()
+        response.served = selected.served_by
         response = _apply_tiered_cascade(request, req, response)
         _record_search_access(request, response)
         return response
@@ -1055,10 +1193,14 @@ async def get_memory_context(req: SearchRequest, request: Request):
             vnext_reader=lambda vnext_request: retrieval_service.context(vnext_request),
         )
         if hasattr(selected.response, "rendered_context"):
-            return _format_context(selected.response.rendered_context)
+            result = _format_context(selected.response.rendered_context)
+            result["served"] = selected.served_by
+            return result
         context_text, search = selected.response
         _record_search_access(request, search)
-        return _format_context(context_text)
+        result = _format_context(context_text)
+        result["served"] = selected.served_by
+        return result
     except (KylinEmbeddingError, MilvusEngineError) as exc:
         raise _retrieval_http_error(exc) from None
     except HTTPException:

@@ -47,7 +47,13 @@ def event_payload(text: str, event_id: str = "evt-preference-001") -> dict:
 
 
 def make_client(tmp_path) -> TestClient:
-    config = AppConfig(storage=StorageConfig(db_path=str(tmp_path / "memoryhub.db")))
+    config = AppConfig(
+        storage=StorageConfig(
+            db_path=str(tmp_path / "memoryhub.db"),
+            vector_index_path=str(tmp_path / "vector_index"),
+            evidence_path=str(tmp_path / "evidence"),
+        )
+    )
     return TestClient(create_app(config))
 
 

@@ -618,24 +618,44 @@ class EventRepository:
             )
 
 
+def _default_event_quality() -> dict[str, Any]:
+    """Return a valid legacy EventQuality for rows without quality material."""
+    return {
+        "score": 1.0,
+        "status": "accepted",
+        "completeness": 1.0,
+        "validity": 1.0,
+        "consistency": 1.0,
+        "freshness": 1.0,
+        "issues": [],
+    }
+
+
 def _event_row_to_pydantic(row: EventRow) -> MemoryEvent:
+    payload = row.payload or {}
+    schema_version = row.schema_version or "1.1"
+    if schema_version not in ("1.0", "1.1"):
+        schema_version = "1.1"
+    quality = row.quality or payload.get("quality") or _default_event_quality()
+    if not isinstance(quality, dict):
+        quality = _default_event_quality()
     return MemoryEvent(
         event_id=row.event_id,
         source_type=row.source_type,
         event_type=row.event_type or "",
         user_id=row.user_id or "",
         session_id=row.session_id or "",
-        turn_id=row.turn_id or "",
-        scene=row.scene or "",
-        task_type=row.task_type or "",
+        turn_id=row.turn_id or payload.get("turn_id", ""),
+        scene=row.scene or (payload.get("scope", {}) or {}).get("scene", ""),
+        task_type=row.task_type or (payload.get("scope", {}) or {}).get("task_type", ""),
         occurred_at=(row.occurred_at.strftime("%Y-%m-%dT%H:%M:%SZ") if row.occurred_at else ""),
-        text=row.text or "",
-        payload=row.payload or {},
-        tool_calls=row.tool_calls or [],
-        schema_version=row.schema_version or "1.1",
+        text=row.text or payload.get("text", ""),
+        payload=payload,
+        tool_calls=row.tool_calls or payload.get("tool_calls", []),
+        schema_version=schema_version,
         source_hash=row.source_hash or "0" * 64,
-        redactions=row.redactions or [],
-        quality=row.quality or {},
+        redactions=row.redactions or payload.get("redactions", []),
+        quality=quality,
     )
 
 

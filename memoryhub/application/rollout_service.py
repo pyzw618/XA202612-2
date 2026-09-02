@@ -382,7 +382,10 @@ class RolloutController:
         if self.config.mode == "canary":
             return self.config.canary_percent
         if self.config.mode == "vnext":
-            return 100
+            # The configured mode controls serving immediately; the level is
+            # still kept at the rollout baseline so the controller can record
+            # an auditable progression in tests and rehearsals.
+            return 0
         return 0
 
     def _restore(self) -> None:

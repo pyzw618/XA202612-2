@@ -18,8 +18,9 @@ runtime:
 # ==================== vNext 链路切流 ====================
 vnext:
   # legacy | shadow | dual-read | canary | vnext
-  # 默认 legacy；切换必须经过对应 Gate 和回滚演练。
-  mode: legacy
+  # 第二阶段默认 vNext 主链路：读路径直接返回 RetrievalService 结果。
+  # legacy / shadow / dual-read / canary 仍可显式配置用于回滚或观测。
+  mode: vnext
   # 仅 canary 模式允许 5/25/50/100；其他模式必须为 0。
   canary_percent: 0
   # 生产环境必须保持 Policy 前置和 Authority 单写。
@@ -31,6 +32,11 @@ vnext:
   allow_policy_bypass: false
   # 保留兼容读回滚窗口，不代表允许第二个 Authority writer。
   allow_legacy_read_fallback: true
+  # Formation 默认沉淀到长期 Authority。
+  formation_mode: authority
+  # 标准写路径入口（/api/memory/events 与 /sources/*）默认使用 vNext canonical write。
+  # 标准写入口固定使用 vNext CanonicalWriteService。
+  events_default: true
 
 # ==================== 存储配置 ====================
 storage:

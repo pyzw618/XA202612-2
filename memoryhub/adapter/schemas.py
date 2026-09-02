@@ -1617,6 +1617,8 @@ class SearchResponse(BaseModel):
     facts: list[FactMemory] = Field(default_factory=list)
     latency_ms: float = 0.0
     total_count: int = 0
+    # Identifies the reader that produced this compatibility-shaped response.
+    served: str = "legacy"
 
 
 class MemoryContextResponse(BaseModel):

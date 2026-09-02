@@ -276,6 +276,7 @@ class MemoryRetrievalResponse(APIModel):
             facts=facts,
             latency_ms=round(latency_ms, 2),
             total_count=self.total_count,
+            served="vnext",
         )
 
 

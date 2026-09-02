@@ -288,6 +288,20 @@ class VectorStore:
             with open(meta_file, "r", encoding="utf-8") as f:
                 meta = json.load(f)
 
+            loaded_dimension = meta.get("dimension")
+            if loaded_dimension is not None and loaded_dimension != self.dimension:
+                # Dimension mismatch: the configured embedding dimension has changed
+                # (or a stale index from another configuration is present). Treat as
+                # load failure so init_index builds a fresh index with the configured
+                # dimension; stale vectors cannot be searched with a different model.
+                logger.warning(
+                    "vector_store dimension mismatch: configured=%s, loaded=%s; rebuilding",
+                    self.dimension,
+                    loaded_dimension,
+                )
+                self.index = None
+                return False
+
             self.dimension = meta["dimension"]
             self._next_id = meta["next_id"]
             self.id_map = {int(k): v for k, v in meta["id_map"].items()}

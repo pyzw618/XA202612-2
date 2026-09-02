@@ -344,6 +344,7 @@ memoryhub status
 | 节                 | 关键字段                                                              |
 |--------------------|----------------------------------------------------------------------|
 | `runtime`          | `mode`（production / development / test）、`allow_fallback`           |
+| `vnext`            | `mode`、`formation_mode`、`events_default`、`canary_percent`、`policy_required`、`authority_single_writer`、`allow_legacy_read_fallback` |
 | `storage`          | `db_path`、`vector_index_path`、`evidence_path`、`cache_max_size`    |
 | `retrieval`        | `default_top_k`、`candidate_multiplier`、`max_query_chars`、`target_p95_ms`、`vector_weight` / `keyword_weight` / `metadata_weight` |
 | `llm`              | `api_base`、`api_key`、`model`、`temperature`、`max_tokens`、`fact_extraction_timeout_seconds` |
@@ -351,6 +352,22 @@ memoryhub status
 | `vector_engine`    | `provider`（milvus / faiss / milvus_mock）、`app_id`、`host`、`port`、`collection`、`dimension`、`search_timeout_ms`、`so_path` |
 | `safety`           | `rule_set_id` / `rule_set_version`、`policy`、`auto_mask`、`reject_on_detect`、`key_store`、`audit`、`quarantine`、`user_rules` |
 | `app`              | `debug`、`log_level`、`host`、`port`                                  |
+
+### vNext 第二阶段默认配置
+
+MemoryHub vNext 默认启用主链路：
+
+- `vnext.mode=vnext`：`/api/memory/search`、`/api/memory/context` 和 Agent 适配层直接返回 vNext `RetrievalService` 结果，不再执行 dual-read。
+- `vnext.formation_mode=authority`：Formation 默认将通过门禁的结果沉淀到长期 Authority，并产生 `AUTHORITY_PROMOTED` 事件。
+- `vnext.events_default=true`：`/api/memory/events`、`/api/memory/sources/tool_result|behavior|config` 等标准写入口统一使用 vNext `CanonicalWriteService`。
+
+仍可显式配置 `legacy`、`shadow`、`dual-read` 或 `canary` 做回滚/观测；`allow_legacy_read_fallback` 只用于 vNext 读失败时的只读兜底。标准写入口不再回退到 legacy `EventIngestionService`。
+
+```bash
+MEMORYHUB_VNEXT_EVENTS_DEFAULT=false
+# 或整体切回 legacy 模式
+MEMORYHUB_VNEXT_MODE=legacy
+```
 
 ### 环境变量
 

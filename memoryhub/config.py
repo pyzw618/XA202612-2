@@ -79,7 +79,7 @@ class RuntimeConfig:
 class VNextConfig:
     """Explicit vNext rollout mode and safety invariants."""
 
-    mode: str = "legacy"
+    mode: str = "vnext"
     canary_percent: int = 0
     policy_required: bool = True
     authority_single_writer: bool = True
@@ -89,7 +89,11 @@ class VNextConfig:
     observation_window_requests: int = 1
     # Formation is deliberately fail-closed for Authority.  Candidate-only is
     # the first production-safe mode; shadow keeps the orchestration read-only.
-    formation_mode: str = "candidate-only"
+    formation_mode: str = "authority"
+    # When true, legacy write entrypoints (/api/memory/events and /sources/*)
+    # route to the vNext canonical write path by default.  Can be overridden
+    # to false independently of vnext.mode to keep a legacy write rollback.
+    events_default: bool = True
 
     def __post_init__(self) -> None:
         if self.mode not in _VNEXT_MODES:
@@ -109,6 +113,7 @@ class VNextConfig:
             "authority_single_writer",
             "allow_policy_bypass",
             "allow_legacy_read_fallback",
+            "events_default",
         ):
             if type(getattr(self, field_name)) is not bool:
                 raise ValueError(f"vnext.{field_name} must be a boolean")
@@ -759,6 +764,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
         ("MEMORYHUB_VNEXT_AUTHORITY_SINGLE_WRITER", "authority_single_writer"),
         ("MEMORYHUB_VNEXT_ALLOW_POLICY_BYPASS", "allow_policy_bypass"),
         ("MEMORYHUB_VNEXT_LEGACY_READ_FALLBACK", "allow_legacy_read_fallback"),
+        ("MEMORYHUB_VNEXT_EVENTS_DEFAULT", "events_default"),
     ):
         if env_name in os.environ:
             raw_value = os.environ[env_name].lower()

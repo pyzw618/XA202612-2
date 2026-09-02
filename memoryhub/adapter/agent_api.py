@@ -11,7 +11,9 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
+from memoryhub.adapter.api import _to_memory_event_contract
 from memoryhub.adapter.schemas import (
+    EventProcessingSummary,
     ForgetRequest,
     KnowledgeMemory,
     KnowledgeType,
@@ -217,54 +219,6 @@ def _events_from_replay(body: ReplayRequest) -> list[MemoryEvent]:
     return events
 
 
-def _to_memory_event_contract(
-    event: MemoryEvent,
-    *,
-    tenant_id: str = "default",
-    project_id: str = "",
-    task_id: str = "",
-    session_id: str = "",
-) -> Any:
-    """Build a vNext canonical event from a sanitized legacy MemoryEvent."""
-    from datetime import datetime
-
-    from memoryhub.domain.contracts import MemoryEventContract
-
-    occurred = event.occurred_at or datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-    if isinstance(occurred, str):
-        try:
-            occurred = datetime.fromisoformat(occurred.replace("Z", "+00:00"))
-        except ValueError:
-            occurred = datetime.utcnow()
-
-    payload = dict(event.payload or {})
-    if project_id:
-        payload["project_id"] = project_id
-    payload["text"] = event.text or payload.get("text", "")
-    if event.tool_calls:
-        payload["tool_calls"] = [tc.model_dump(mode="json") for tc in event.tool_calls]
-
-    return MemoryEventContract(
-        tenant_id=tenant_id,
-        user_id=event.user_id or "default",
-        event_id=event.event_id,
-        event_type=event.event_type,
-        source_type=(
-            event.source_type.value
-            if hasattr(event.source_type, "value")
-            else str(event.source_type)
-        ),
-        task_id=task_id or str(payload.get("task_id") or "") or event.session_id or "default-task",
-        session_id=session_id or event.session_id or "",
-        occurred_at=occurred,
-        payload=payload,
-        policy_action="ALLOW",
-        source_hash=event.source_hash or "0" * 64,
-        idempotency_key=event.event_id,
-        trace_id=event.event_id,
-    )
-
-
 @router.post("/replay")
 async def replay_conversation(body: ReplayRequest, request: Request):
     if body.schema_version != "conversation-replay/1.0":
@@ -281,15 +235,51 @@ async def replay_conversation(body: ReplayRequest, request: Request):
         warnings = []
 
     written_event_ids: list[str] = []
-    processing = None
+    committed_events: list[MemoryEvent] = []
+    processing: EventProcessingSummary | None = None
     replay_tenant_id = request.headers.get("X-MemoryHub-Tenant", "default")
     if body.execute:
         for event in safe_events:
             result = canonical.write(_to_memory_event_contract(event, tenant_id=replay_tenant_id))
             if result.status == GatewayStatus.COMMITTED:
                 written_event_ids.append(event.event_id)
+                committed_events.append(event)
+        if processor is not None and committed_events:
+            processing = processor.process(committed_events)
 
     session_id = body.session_id or (safe_events[0].session_id if safe_events else "")
+    retrieval_results: dict[str, Any] | None = None
+    retrieval_service = getattr(request.app.state, "retrieval_service", None)
+    rollout = getattr(request.app.state, "rollout_read_service", None)
+    query = next(
+        (
+            str(turn.get("retrieval_query") or turn.get("user_message") or "")
+            for turn in reversed(body.turns)
+            if turn.get("retrieval_query") or turn.get("user_message")
+        ),
+        safe_events[-1].text if safe_events else "",
+    )
+    if retrieval_service is not None and rollout is not None and query:
+        tenant_id = request.headers.get("X-MemoryHub-Tenant", "default")
+        retrieval_request = MemoryRetrievalRequest(
+            request_id=f"agent-replay-{session_id or 'session'}-{hash(query) & 0xFFFFFFFF:08x}",
+            tenant_id=tenant_id,
+            user_id=safe_events[-1].user_id if safe_events else "default",
+            query=query,
+            session_id=session_id,
+            page_size=8,
+        )
+        selected = rollout.read(
+            retrieval_request,
+            legacy_reader=lambda _request: None,
+            vnext_reader=lambda value: retrieval_service.search(value),
+        )
+        retrieval_results = {
+            "response": selected.response.model_dump(mode="json")
+            if hasattr(selected.response, "model_dump")
+            else selected.response,
+            "served": getattr(selected, "served_by", "vnext"),
+        }
     return {
         "schema_version": body.schema_version,
         "session_id": session_id,
@@ -298,6 +288,8 @@ async def replay_conversation(body: ReplayRequest, request: Request):
         "written_event_ids": written_event_ids,
         "used_memory_ids": body.used_memory_ids,
         "processing": processing.model_dump(mode="json") if processing else None,
+        "retrieval": retrieval_results,
+        "served": retrieval_results["served"] if retrieval_results else "vnext",
         "warnings": warnings,
     }
 
@@ -307,12 +299,12 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
     """Execute one scripted turn against the real event and retrieval pipeline."""
     processor = getattr(request.app.state, "event_processor", None)
     canonical = getattr(request.app.state, "canonical_write_service", None)
-    retriever = getattr(request.app.state, "retriever", None)
+    legacy_retriever = getattr(request.app.state, "retriever", None)
     retrieval_service = getattr(request.app.state, "retrieval_service", None)
     rollout = getattr(request.app.state, "rollout_read_service", None)
     if canonical is None:
         raise HTTPException(status_code=503, detail="canonical write service not initialized")
-    if retriever is None or retrieval_service is None or rollout is None:
+    if retrieval_service is None or rollout is None:
         raise HTTPException(status_code=503, detail="retrieval service not initialized")
 
     events = [_normalize_event(ev) for ev in body.events]
@@ -326,8 +318,11 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
         raise HTTPException(status_code=503, detail="canonical write service not initialized")
     user_id = safe_events[0].user_id if safe_events else "demo_user"
     step_tenant_id = request.headers.get("X-MemoryHub-Tenant", "default")
+    written_event_ids: list[str] = []
+    committed_events: list[MemoryEvent] = []
+    processing: EventProcessingSummary | None = None
     for event in safe_events:
-        canonical.write(
+        result = canonical.write(
             _to_memory_event_contract(
                 event,
                 tenant_id=step_tenant_id,
@@ -336,7 +331,11 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
                 session_id=body.session_id,
             )
         )
-    written_event_ids = [event.event_id for event in safe_events]
+        if result.status == GatewayStatus.COMMITTED:
+            written_event_ids.append(event.event_id)
+            committed_events.append(event)
+    if processor is not None and committed_events:
+        processing = processor.process(committed_events)
     legacy_request = SearchRequest(
         user_id=user_id,
         query=body.retrieval_query or body.user_message,
@@ -359,44 +358,48 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
     )
     selected = rollout.read(
         vnext_request,
-        legacy_reader=lambda _request: retriever.search(legacy_request),
+        legacy_reader=lambda _request: (
+            legacy_retriever.search(legacy_request)
+            if legacy_retriever is not None
+            else None
+        ),
         vnext_reader=lambda value: retrieval_service.search(value),
     )
     vnext_search_response = selected.response
     retrieval_log_id = getattr(vnext_search_response, "retrieval_log_id", "")
-    search_response = vnext_search_response
-    if hasattr(search_response, "to_legacy_search_response"):
-        search_response = search_response.to_legacy_search_response()
+    if hasattr(vnext_search_response, "to_legacy_search_response"):
+        search_response = vnext_search_response.to_legacy_search_response()
+        selected_memories = vnext_search_response.selected_memories
+    else:
+        # Small compatibility surface for adapter-level test doubles and
+        # explicit legacy rollback modes; production vNext returns the DTO
+        # above and never enters this branch.
+        search_response = vnext_search_response
+        selected_memories = []
     cards = []
-    for result in search_response.results:
-        memory = getattr(retriever, "memory_lookup", {}).get(result.memory_id)
-        if memory is None:
-            continue
-        is_preference = getattr(memory, "memory_type", "") == "preference"
-        title = getattr(memory, "text", "") if is_preference else getattr(memory, "name", "")
-        summary = getattr(memory, "text", "") if is_preference else getattr(memory, "content", "")
-        scope = getattr(memory, "scope", SceneScope())
-        scope_json = (
-            scope.model_dump(mode="json")
-            if hasattr(scope, "model_dump")
-            else {"scope": str(scope)}
-        )
-        level = getattr(getattr(memory, "level", ""), "value", getattr(memory, "level", ""))
-        knowledge_type = getattr(
-            getattr(memory, "knowledge_type", ""), "value", getattr(memory, "knowledge_type", "")
-        )
+    for item in selected_memories:
+        content = dict(item.content or {})
+        memory_type = getattr(item.memory_type, "value", str(item.memory_type)).lower()
+        is_preference = memory_type == "preference"
+        title = content.get("name", item.memory_id) if not is_preference else content.get("text", "")
+        summary = content.get("text", "") if is_preference else content.get("content", "")
+        if not summary:
+            summary = content.get("object_value", "") or content.get("source_text", "")
+        scope_json = {"scope": item.scope, "scope_level": item.scope_level.value}
+        level = getattr(item.layer, "value", str(item.layer)).lower()
+        knowledge_type = content.get("knowledge_type", "")
         cards.append(
             {
-                "memory_id": result.memory_id,
+                "memory_id": item.memory_id,
                 "memory_type": "preference" if is_preference else "knowledge",
                 "knowledge_type": knowledge_type or None,
                 "title": title or "记忆",
-                "summary": summary or result.content,
-                "relevance": result.score,
-                "source": result.source or "MemoryHub",
+                "summary": summary or "",
+                "relevance": item.score,
+                "source": "+".join(item.source_ids) or "MemoryHub",
                 "level": level or "long",
                 "scope": scope_json,
-                "tags": list(getattr(memory, "tags", [])),
+                "tags": list(content.get("tags", [])),
             }
         )
     # Missing explicit usage evidence must remain IN_CONTEXT, not be guessed
@@ -440,13 +443,14 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
         "turn_id": body.turn_id,
         "executed": True,
         "written_event_ids": written_event_ids,
-        "processing": None,
+        "processing": processing.model_dump(mode="json") if processing else None,
         "candidate_memories": cards,
         "used_memory_ids": used_ids,
         "fact_proposals": fact_proposals,
         "tool_calls": generated_tool_calls,
         "write_summary": summary_lines,
         "retrieval_latency_ms": int(search_response.latency_ms),
+        "served": getattr(selected, "served_by", "vnext"),
         "warnings": warnings,
     }
 
