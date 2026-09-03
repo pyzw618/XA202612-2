@@ -11,7 +11,7 @@ use_mock=True 时加载项目内 mock 动态库（libkylin-coreai-embedding-mock
 与真实 SDK 导出相同符号，可在 Windows/Linux 开发机上跑通 ctypes 链路）。
 
 SDK 调用流程（基于 kylin-coreai-embedding C API 公开头文件，
-见 docs/retrieval/2026-08-02_kylin_embedding_sdk_api_signatures.md）：
+见 docs/reference/kylin/kylin-embedding-sdk-api-signatures.md）：
   1. text_embedding_create_session()                     → 创建会话
   2. text_embedding_init_session(session)                → 连接后端
   3. text_embedding_init_model(session, model_name)      → 初始化模型

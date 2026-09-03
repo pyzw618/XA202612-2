@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """FOR-01 ~ FOR-07 遗忘模块专项验收测试。
 
-对应 docs/tests/0811功能性测试/TEST_PLAN.md 6.7 遗忘模块(FOR-01~07)，依据 forget_module_v1.md。
+对应 old/docs/0811功能性测试/TEST_PLAN.md 6.7 遗忘模块(FOR-01~07)，依据 forget_module_v1.md。
 每个测试驱动真实实现：MemoryForgetter / AutoForgetEngine / HealthCalculator /
 Reranker（被动遗忘）/ ForgetRepository，对应用例矩阵列出通过/失败记录。
 """

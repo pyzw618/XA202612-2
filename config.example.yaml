@@ -242,11 +242,6 @@ safety:
 # 调试模式 (生产环境请设为 false)
 debug: false
 
-# 日志级别: DEBUG | INFO | WARNING | ERROR
-log_level: "INFO"
-
-# 服务监听地址
-host: "0.0.0.0"
-
-# 服务监听端口
-port: 8099
+# 注意：服务监听地址/端口不在本文件配置，由 uvicorn 命令行参数控制：
+#   python -m uvicorn memoryhub.app:app --host 127.0.0.1 --port 8099
+# 或使用 scripts/start-memoryhub-service.{sh,ps1}（读取 MEMORYHUB_HOST / MEMORYHUB_PORT）

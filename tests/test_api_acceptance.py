@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """第 7 章 REST API 契约专项验收测试。
 
-对应 docs/tests/0811功能性测试/TEST_PLAN.md 7 REST API 契约测试（API）：
+对应 old/docs/0811功能性测试/TEST_PLAN.md 7 REST API 契约测试（API）：
 覆盖全部端点：正向(200)、参数校验(422)、不存在(404)、稳定错误码。
 user-rules CRUD 由 SEC-15~17 / test_user_rule_api.py 覆盖，此处不重复。
 """

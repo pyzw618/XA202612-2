@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """LIF-01 ~ LIF-03 生命周期模块专项验收测试。
 
-对应 docs/tests/0811功能性测试/TEST_PLAN.md 6.9 生命周期(LIF-01~03)，
-阈值以 docs/design/PROJECT_ANALYSIS.md 生命周期设计与实现为准：
+对应 old/docs/0811功能性测试/TEST_PLAN.md 6.9 生命周期(LIF-01~03)，
+阈值以 old/docs/PROJECT_ANALYSIS.md 生命周期设计与实现为准：
   short→mid: 出现次数≥2 且 quality_score≥0.4
   mid→long:  出现次数≥5 且 confidence≥0.7 且 存在≥3 天
 """

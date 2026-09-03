@@ -670,6 +670,14 @@ def load_config(config_path: str | None = None) -> AppConfig:
     import os
     from pathlib import Path
 
+    # 若项目根目录存在 .env 则加载（已有的真实环境变量优先，不会被覆盖）。
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+    except ImportError:  # python-dotenv 未安装时静默跳过
+        pass
+
     config = AppConfig()
 
     # 尝试从 YAML 配置文件加载

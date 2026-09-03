@@ -8,7 +8,6 @@ dependencies = [
     "uvicorn[standard]>=0.27",
     "sqlalchemy>=2.0",
     "pydantic>=2.5",
-    "pydantic-settings>=2.1",
     "PyYAML>=6.0",
     "faiss-cpu>=1.7",
     "rank-bm25>=0.2",
@@ -27,11 +26,6 @@ dev = [
     "mypy>=1.10",
     "ruff>=0.3",
 ]
-eval = [
-    "pandas>=2.2",
-    "matplotlib>=3.8",
-    "scikit-learn>=1.4",
-]
 
 [project.scripts]
 memoryhub = "memoryhub_cli.cli:main"
@@ -49,7 +43,6 @@ asyncio_mode = "auto"
 
 [tool.setuptools.package-data]
 "memoryhub.safety_rules.data" = ["*.json"]
-"memoryhub.core.fact" = ["predicate_ontology.json"]
 
 [tool.setuptools.package-dir]
 memoryhub_client = "agent-integration/memoryhub_client"

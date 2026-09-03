@@ -1,49 +1,64 @@
-# docs 文档索引
+# 文档索引
 
-Kylin-MemoryHub（XA-202612 赛题）项目文档导航。
+Kylin MemoryHub（XA-202612 赛题）当前有效文档。**本目录只描述项目的最终状态**；历史过程文档（历次重构计划、执行日志、验收快照）统一归档在仓库根目录 `old/`，不作为开发依据。
 
-## 核心文档（根目录，按 main 分支校正 v0.1.0）
+## 入门与总览
 
 | 文档 | 内容 |
-|------|------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 系统架构与模块设计（分层视图 / 数据流 / 统一写入契约） |
-| [INTERFACE.md](INTERFACE.md) | REST 数据契约（Schema 1.1，修改数据结构必须同步更新） |
-| [CONFIGURATION.md](CONFIGURATION.md) | 配置与安全密钥要求 |
-| [PROJECT_ANALYSIS.md](PROJECT_ANALYSIS.md) | 深入浅出讲解（新人入门） |
-| [产品形态与使用方案.md](产品形态与使用方案.md) | 产品形态与使用方案 |
-| [Agent接入设计.md](Agent接入设计.md) | Agent 接入方案（CLI / MCP / OpenCode Plugin 三面契约） |
-| [前端页面规划.md](前端页面规划.md) | 桌面控制台 21 页设计规格（desktop-client 依据） |
-| [毛玻璃侧边栏实现技术报告.md](毛玻璃侧边栏实现技术报告.md) | 毛玻璃侧边栏实现技术报告 |
-| [KYLIN_EMBEDDING_RUNTIME_CONTRACT.md](KYLIN_EMBEDDING_RUNTIME_CONTRACT.md) | 麒麟 Embedding SDK 运行时契约（版本/架构/.so/DBus/768 维） |
-| [MemoryHub_技术报告.md](MemoryHub_技术报告.md) | 项目技术报告 |
-| [REFACTOR_PLAN_V2.md](REFACTOR_PLAN_V2.md) | 核心记忆模块重构计划 V2 |
-| [银河麒麟安装与使用手册.md](银河麒麟安装与使用手册.md) | 银河麒麟安装与使用手册 |
-| [赛题要求.md](赛题要求.md) | 赛题原始要求（XA-202612「OS Agent 记忆优化及高效应用研究」） |
+|---|---|
+| [../README.md](../README.md) | 项目总览、快速开始、仓库结构 |
+| [赛题要求.md](赛题要求.md) | 比赛题目原文（需求基准） |
+| [architecture.md](architecture.md) | 系统架构：分层视图、写入/读取/形成/反馈链路、安全、灰度、可观测性 |
 
-## 测试与验收
+## 使用与运维
 
-| 目录 | 内容 |
-|------|------|
-| [0805数据流测试/](0805数据流测试/) | 数据流测试计划与结果 |
-| [0811功能性测试/](0811功能性测试/) | 功能验收与 TEST_PLAN |
+| 文档 | 内容 |
+|---|---|
+| [api.md](api.md) | REST API 参考（6 组 Router 全部路由 + 核心数据契约） |
+| [configuration.md](configuration.md) | 全部配置键、环境变量、生产门禁、密钥管理 |
+| [deployment.md](deployment.md) | 开发/生产部署、麒麟运行时、DEB 打包、备份恢复、运维脚本 |
+| [evaluation.md](evaluation.md) | 评测体系：数据集、指标、驱动脚本、验收结果 |
+| [development.md](development.md) | 开发指南：环境、测试、代码规范、文档维护约定 |
 
-## vNext 专项（docs/vnext/）
+## Agent 接入与客户端
 
-| 目录 | 内容 |
-|------|------|
-| [vnext/](vnext/) | vNext 统一目录：方案、计划、规范、ADR 与阶段文档 |
+| 文档 | 内容 |
+|---|---|
+| [../agent-integration/README.md](../agent-integration/README.md) | CLI / Python SDK / MCP / OpenCode 插件（接入层权威文档） |
+| [../desktop-client/README.md](../desktop-client/README.md) | Qt 桌面控制台构建与页面说明 |
+| [../packaging/linux/README.md](../packaging/linux/README.md) | 麒麟 DEB 打包与安装 |
 
-## 其他主题目录
+## vNext 规格与契约（docs/vnext/）
 
-| 目录 | 内容 |
-|------|------|
-| [refactor/](refactor/) | 核心记忆模块重构（PHASE_A~I 计划与实施日志） |
-| [retrieval/](retrieval/) | 检索 / 向量引擎 / Kylin 集成技术方案 |
-| [kylin/](kylin/) | 麒麟原生化专项记录（麒麟数据库原生化过程） |
+vNext 是当前默认主链路的权威规范，与实现共同演进：
 
-## 常用入口
+| 文档 | 内容 |
+|---|---|
+| [vnext/VNEXT_PLAN.md](vnext/VNEXT_PLAN.md) | vNext 总体计划（S0–S5 工作分解） |
+| [vnext/design/ADR-vnext-memory-architecture.md](vnext/design/ADR-vnext-memory-architecture.md) | 架构决策记录：Authority 与投影边界 |
+| [vnext/spec/VNEXT_GLOSSARY.md](vnext/spec/VNEXT_GLOSSARY.md) | 术语表 |
+| [vnext/spec/VNEXT_DATA_CONTRACT.md](vnext/spec/VNEXT_DATA_CONTRACT.md) | 数据契约 |
+| [vnext/spec/VNEXT_INTERFACE.md](vnext/spec/VNEXT_INTERFACE.md) | REST 接口规范 |
+| [vnext/spec/VNEXT_STORAGE_SCHEMA.md](vnext/spec/VNEXT_STORAGE_SCHEMA.md) | 存储 Schema |
+| [vnext/spec/VNEXT_EVENT_GATEWAY.md](vnext/spec/VNEXT_EVENT_GATEWAY.md) | 事件网关 |
+| [vnext/spec/VNEXT_AUTHORITY_WRITE.md](vnext/spec/VNEXT_AUTHORITY_WRITE.md) | Authority 单写者 |
+| [vnext/spec/VNEXT_TRACE.md](vnext/spec/VNEXT_TRACE.md) | 脱敏 Trace 契约 |
+| [vnext/spec/VNEXT_MIGRATION.md](vnext/spec/VNEXT_MIGRATION.md) | 迁移与回滚 |
+| [vnext/spec/VNEXT_ROLLOUT.md](vnext/spec/VNEXT_ROLLOUT.md) | 灰度切流 |
+| [vnext/spec/VNEXT_BACKUP_RECOVERY.md](vnext/spec/VNEXT_BACKUP_RECOVERY.md) | 备份与恢复 |
+| [vnext/spec/VNEXT_FAULT_HANDLING.md](vnext/spec/VNEXT_FAULT_HANDLING.md) | 故障处理 |
+| [vnext/spec/VNEXT_DEPLOYMENT.md](vnext/spec/VNEXT_DEPLOYMENT.md) | 部署运维手册 |
+| [vnext/spec/VNEXT_ACCEPTANCE.md](vnext/spec/VNEXT_ACCEPTANCE.md) | 验收标准 |
+| [vnext/spec/VNEXT_GOLDEN_FIXTURES.md](vnext/spec/VNEXT_GOLDEN_FIXTURES.md) | Golden 测试夹具 |
 
-- 新人入门：`PROJECT_ANALYSIS.md`（深入浅出）→ `ARCHITECTURE.md`（架构）
-- 接口与数据契约：`INTERFACE.md`（**修改数据结构必须同步更新**）
-- 部署与验收：`CONFIGURATION.md` + `KYLIN_EMBEDDING_RUNTIME_CONTRACT.md`
-- 测试：`0811功能性测试/TEST_PLAN.md`（计划）、各 `*_ACCEPTANCE_RESULT.md`（验收结果）
+> `docs/vnext/spec/` 中的运维六篇（DEPLOYMENT / BACKUP_RECOVERY / FAULT_HANDLING / MIGRATION / ROLLOUT / ACCEPTANCE）由 `tests/test_vnext_docs.py` 守护：文件缺失或关键命令失效会导致测试失败。
+
+## 参考资料（docs/reference/）
+
+| 文档 | 内容 |
+|---|---|
+| [reference/kylin-embedding-runtime-contract.md](reference/kylin-embedding-runtime-contract.md) | 麒麟 Embedding 运行时契约（部署前逐项核对） |
+| [reference/kylin/kylin-embedding-sdk-api-signatures.md](reference/kylin/kylin-embedding-sdk-api-signatures.md) | kylin-coreai-embedding C API 签名（`embedding/kylin_client.py` 依据） |
+| [reference/kylin/kylin-vector-engine-sdk-api-signatures.md](reference/kylin/kylin-vector-engine-sdk-api-signatures.md) | libkysdk-vector-engine-client C API 签名 |
+| [reference/kylin/milvus-c-api-minimal-interface.md](reference/kylin/milvus-c-api-minimal-interface.md) | Milvus C API 最小接口（`storage/vector_engine/_milvus_ctypes.py` 依据） |
+| [reference/kylin/kylin-environment-handoff-checklist.md](reference/kylin/kylin-environment-handoff-checklist.md) | 麒麟真机环境交接清单 |

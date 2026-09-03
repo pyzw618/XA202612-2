@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """PER-01 ~ PER-04 持久化与恢复专项验收测试。
 
-对应 docs/tests/0811功能性测试/TEST_PLAN.md 6.10 持久化与恢复(PER-01~04)：
-  PER-01  SQLite 表结构与 docs/spec/INTERFACE.md 6.1 对齐
+对应 old/docs/0811功能性测试/TEST_PLAN.md 6.10 持久化与恢复(PER-01~04)：
+  PER-01  SQLite 表结构与 old/docs/INTERFACE.md 6.1 对齐
   PER-02  重启恢复（写入→重建进程→查询，数据不丢）
   PER-03  证据链 JSONL（每 memory_id 一个文件，行格式正确）
   PER-04  向量落盘（FAISS save/load，id_map/reverse_map 一致）
@@ -96,7 +96,7 @@ def test_per_01_schema_has_all_business_tables(db: Database) -> None:
 
 
 def test_per_01_preferences_has_extended_columns(db: Database) -> None:
-    """PER-01b: preferences 表具备 docs/spec/INTERFACE.md 6.1 扩展列"""
+    """PER-01b: preferences 表具备 old/docs/INTERFACE.md 6.1 扩展列"""
     assert PREFERENCE_COLUMNS <= _columns(db, "preferences")
 
 
@@ -119,7 +119,7 @@ def test_per_01_knowledge_has_extended_columns(db: Database) -> None:
 
 
 def test_per_01_events_table_matches_interface(db: Database) -> None:
-    """PER-01d: events 表字段与 docs/spec/INTERFACE.md 6.1 events 契约一致"""
+    """PER-01d: events 表字段与 old/docs/INTERFACE.md 6.1 events 契约一致"""
     columns = _columns(db, "events")
     expected = {
         "event_id",

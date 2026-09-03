@@ -1,7 +1,22 @@
-# 运行时模式（FACT 已并入 knowledge 单一来源，legacy Fact 管线已删除，REFACTOR_PLAN_V2 §4.8）
+# 本地开发配置（生产配置样板见 config.example.yaml，配置说明见 docs/configuration.md）
 runtime:
   mode: development
   allow_fallback: true
+
+# vNext 链路切流（默认 vNext 主链路；回滚/观测模式见 docs/configuration.md）
+vnext:
+  # legacy | shadow | dual-read | canary | vnext
+  mode: vnext
+  canary_percent: 0
+  policy_required: true
+  authority_single_writer: true
+  allow_policy_bypass: false
+  allow_legacy_read_fallback: true
+  rollback_window_minutes: 60
+  observation_window_requests: 1
+  # shadow | candidate-only | authority
+  formation_mode: authority
+  events_default: true
 
 storage:
   db_path: data/memoryhub.db
@@ -79,7 +94,5 @@ safety:
   max_candidates: 2048
   max_findings: 1024
   max_path_chars: 4096
+# 服务监听地址/端口由 uvicorn 命令行参数控制（见 docs/configuration.md），不在本文件配置
 debug: true
-log_level: INFO
-host: 0.0.0.0
-port: 8099

@@ -2,6 +2,21 @@ runtime:
   mode: development
   allow_fallback: true
 
+# vNext 链路切流（默认 vNext 主链路；说明见 docs/configuration.md）
+vnext:
+  # legacy | shadow | dual-read | canary | vnext
+  mode: vnext
+  canary_percent: 0
+  policy_required: true
+  authority_single_writer: true
+  allow_policy_bypass: false
+  allow_legacy_read_fallback: true
+  rollback_window_minutes: 60
+  observation_window_requests: 1
+  # shadow | candidate-only | authority
+  formation_mode: authority
+  events_default: true
+
 storage:
   db_path: data/memoryhub.db
   vector_index_path: data/vector_index
@@ -21,16 +36,18 @@ retrieval:
   cache_ttl_seconds: 300
 
 llm:
-  api_base: https://api.openai.com/v1
+  api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+  # 仅通过 LLM_API_KEY / MEMORYHUB_LLM_API_KEY 环境变量注入，不要把密钥写入文件。
   api_key: ""
-  model: gpt-4o-mini
+  model: qwen-flash
   temperature: 0.1
   max_tokens: 2048
   fact_extraction_timeout_seconds: 1.0
 
 embedding:
   provider: mock
-  dimension: 1024
+  # 麒麟 Embedding SDK 契约固定 768 维（docs/reference/kylin-embedding-runtime-contract.md）
+  dimension: 768
   model_name: mock-embedding
   so_path: ""
   query_timeout_ms: 250
@@ -42,7 +59,7 @@ vector_engine:
   host: 127.0.0.1
   port: 19530
   collection: memoryhub
-  dimension: 1024
+  dimension: 768
   search_timeout_ms: 120
 
 safety:
@@ -94,7 +111,5 @@ safety:
     allow_advanced_regex: false
     detector_cache_size: 256
 
+# 服务监听地址/端口由启动器固定为 127.0.0.1:8099（uvicorn 命令行参数）
 debug: false
-log_level: INFO
-host: 127.0.0.1
-port: 8099

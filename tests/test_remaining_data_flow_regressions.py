@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from memoryhub.adapter.schemas import KnowledgeMemory, KnowledgeType, SceneScope
-from memoryhub.adapter.simulator import OSAgentSimulator
 from memoryhub.config import AppConfig, ExtractionRetryConfig, KnowledgeMergeConfig, RuntimeConfig
 from memoryhub.core.conflict.detector import ConflictDetector
 from memoryhub.core.ingestion.retry import ExtractionRetryRunResult
@@ -172,14 +171,6 @@ def test_conflict_detector_is_owner_and_scope_isolated() -> None:
     right = SimpleNamespace(scene="office", task_type="report", app="")
     assert detector._is_same_scope(left, right) is False
     assert detector._semantic_contradiction("always use markdown", "do not use markdown") is True
-
-
-def test_simulator_emits_complete_ordered_trajectory() -> None:
-    events = OSAgentSimulator(user_id="u1").simulate_task("prepare report")
-    assert [event.turn_id for event in events] == ["1", "2", "3"]
-    assert len({event.session_id for event in events}) == 1
-    assert events[-1].event_type == "task_completed"
-    assert events[-1].payload["success"] is True
 
 
 def test_application_uses_lifespan_instead_of_deprecated_on_event() -> None:

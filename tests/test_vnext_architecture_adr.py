@@ -1,6 +1,6 @@
 from pathlib import Path
 
-ADR = Path(__file__).parents[1] / "docs" / "design" / "adr" / "ADR-vnext-memory-architecture.md"
+ADR = Path(__file__).parents[1] / "docs" / "vnext" / "design" / "ADR-vnext-memory-architecture.md"
 
 
 def test_vnext_architecture_adr_freezes_authority_and_projection_boundaries() -> None:

@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).parents[1]
-DOCS = ROOT / "docs" / "spec"
+DOCS = ROOT / "docs" / "vnext" / "spec"
 AGENT_README = ROOT / "agent-integration" / "README.md"
 
 

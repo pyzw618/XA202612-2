@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """RET-01 ~ RET-09 检索链路专项验收测试。
 
-对应 docs/tests/0811功能性测试/TEST_PLAN.md 6.8 检索链路(RET-01~09)，依据 docs/spec/INTERFACE.md 5.2、
-docs/spec/ARCHITECTURE.md 3/8、docs/tests/0805数据流测试/DATA_FLOW_UPDATE.md。
+对应 old/docs/0811功能性测试/TEST_PLAN.md 6.8 检索链路(RET-01~09)，依据 old/docs/INTERFACE.md 5.2、
+old/docs/ARCHITECTURE.md 3/8、old/docs/0805数据流测试/DATA_FLOW_UPDATE.md。
 单元级驱动 HybridRetriever / MilvusHybridRetriever / Reranker / SearchCache /
 KeywordSearcher / VectorSearcher；API 级驱动 /search 与 /context。
 """
