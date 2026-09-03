@@ -16,6 +16,7 @@
 - [项目概览](#项目概览)
 - [核心能力](#核心能力)
 - [系统架构](#系统架构)
+- [vNext 统一链路](#vnext-统一链路)
 - [仓库结构](#仓库结构)
 - [环境要求](#环境要求)
 - [快速开始](#快速开始)
@@ -84,6 +85,7 @@ MemoryHub 是为 **银河麒麟 OS / openKylin** 上运行的 AI Agent 提供的
 │  FastAPI 应用（memoryhub/app.py）                            │
 │  ├ /api/memory/*        标准 REST 路由                      │
 │  ├ /api/memory/v2/*     谱系 / 证据 / 投影管理              │
+│  ├ /api/memory/vnext/*  vNext 统一写入 / 检索 / 恢复 / 灰度 │
 │  ├ /api/memory/admin/*  管理后台（UI 驱动）                  │
 │  └ /api/agent/*         Agent 演示适配层（step / replay）   │
 └────────────────────────────────────────────────────────────┘
@@ -200,6 +202,7 @@ MemoryHub 是为 **银河麒麟 OS / openKylin** 上运行的 AI Agent 提供的
 ├── tests/                           # 后端测试（≈70 用例，按功能域命名 *_acceptance）
 ├── examples/                        # 演示 / 集成示例（demo_workspace / run_qwen_agent.py）
 ├── docs/                            # 设计 / 验收 / 接口文档
+│   ├── vnext/                       # vNext 方案、规范、ADR、阶段文档
 ├── config.example.yaml              # 生产配置示例（含全部安全密钥占位）
 ├── .env.example                     # 环境变量示例
 ├── pyproject.toml                   # 项目元数据 + 工具链配置
@@ -208,6 +211,21 @@ MemoryHub 是为 **银河麒麟 OS / openKylin** 上运行的 AI Agent 提供的
 ```
 
 ---
+
+## vNext 统一链路
+
+MemoryHub vNext 是面向生产 OS Agent 的新一代统一记忆链路，覆盖规范事件写入、工作记忆 / 情景 / 长期记忆的 Formation、检索、精准遗忘与灰度切流。核心入口为 `POST /api/memory/vnext/events`（统一写入）和 `POST /api/memory/vnext/search` / `POST /api/memory/vnext/context`（统一检索），CLI / MCP / SDK / OpenCode 最终都委托到这组契约。
+
+| 能力 | vNext 入口 | 说明 |
+|------|-----------|------|
+| 统一写入 | `POST /api/memory/vnext/events` | 规范 Memory / Working / Episode / Authority 事件；`CanonicalWriteService` 处理 Formation |
+| 统一检索 | `POST /api/memory/vnext/search` | 融合短期 / 中期 / 长期结果 |
+| 上下文 | `POST /api/memory/vnext/context` | 生成可直接注入 prompt 的记忆上下文 |
+| 任务恢复 | `GET /api/memory/vnext/tasks/{task_id}/resume` | 跨会话恢复任务状态 |
+| 精准遗忘 | `POST /api/memory/vnext/forget` | NL 意图解析 → 候选预览 → 执行删除 + 审计 |
+| 灰度切流 | `/api/memory/vnext/rollout/*` | 0→100% 渐进切流、观测与一键回滚 |
+
+配置节 `vnext.*` 控制链路模式（`legacy` / `shadow` / `dual-read` / `vnext` / `canary`）、Formation 策略和只读兜底。详细设计、规范、ADR 与阶段文档见 [`docs/vnext/`](docs/vnext/)。
 
 ## 环境要求
 
@@ -361,7 +379,7 @@ MemoryHub vNext 默认启用主链路：
 - `vnext.formation_mode=authority`：Formation 默认将通过门禁的结果沉淀到长期 Authority，并产生 `AUTHORITY_PROMOTED` 事件。
 - `vnext.events_default=true`：`/api/memory/events`、`/api/memory/sources/tool_result|behavior|config` 等标准写入口统一使用 vNext `CanonicalWriteService`。
 
-仍可显式配置 `legacy`、`shadow`、`dual-read` 或 `canary` 做回滚/观测；`allow_legacy_read_fallback` 只用于 vNext 读失败时的只读兜底。标准写入口不再回退到 legacy `EventIngestionService`。
+仍可显式配置 `legacy`、`shadow`、`dual-read` 或 `canary` 做回滚/观测；`allow_legacy_read_fallback` 只用于 vNext 读失败时的只读兜底。标准写入口不再回退到 legacy `EventIngestionService`。详细设计、配置项语义与灰度策略见 [`docs/vnext/spec/VNEXT_ROLLOUT.md`](docs/vnext/spec/VNEXT_ROLLOUT.md) 与 [`docs/vnext/VNEXT_PLAN.md`](docs/vnext/VNEXT_PLAN.md)。
 
 ```bash
 MEMORYHUB_VNEXT_EVENTS_DEFAULT=false
@@ -411,6 +429,7 @@ MEMORYHUB_QUARANTINE_KEY=<base64 32-byte>
 | `memoryhub/adapter/agent_api.py`          | `/api/agent`          | Agent 演示适配层           |
 | `memoryhub/adapter/management_api.py`     | `/api/memory`         | 后台管理接口（UI 驱动）    |
 | `memoryhub/adapter/memory_v2_api.py`      | `/api/memory/v2`      | 谱系 / 证据 / 投影         |
+| `memoryhub/adapter/vnext_api.py`          | `/api/memory/vnext`   | vNext 统一写入 / 检索 / 任务恢复 / 灰度 |
 
 ### 主要端点
 
@@ -484,6 +503,30 @@ MEMORYHUB_QUARANTINE_KEY=<base64 32-byte>
 | DELETE | `/api/agent/demo-data`                              | 重置演示数据                                            |
 | POST | `/api/memory/evaluate/{task_name}`                   | 触发评测（retrieval / latency / preference / conflict）|
 | GET  | `/api/memory/evaluate/reports`                       | 历史评测报告                                            |
+
+### vNext 统一接口
+
+vNext 是生产推荐的统一入口，契约定义在 `memoryhub/adapter/vnext_schemas.py`，详细说明见 [`docs/vnext/spec/VNEXT_INTERFACE.md`](docs/vnext/spec/VNEXT_INTERFACE.md)。
+
+| 方法 | 路径 | 用途 |
+|------|------|------|
+| POST | `/api/memory/vnext/events` | 统一写入事件 / Working / Episode / Authority |
+| POST | `/api/memory/vnext/search` | 统一检索 |
+| POST | `/api/memory/vnext/context` | 统一生成上下文 |
+| GET  | `/api/memory/vnext/tasks/{task_id}` | 查询任务状态 |
+| GET  | `/api/memory/vnext/tasks/{task_id}/resume` | 任务恢复 |
+| POST | `/api/memory/vnext/forget` | 执行精准遗忘 |
+| GET  | `/api/memory/vnext/forget/{record_id}` | 单条遗忘详情 |
+| GET  | `/api/memory/vnext/forget` | 遗忘列表 |
+| POST | `/api/memory/vnext/diagnostics` | 诊断（管理权限） |
+| POST | `/api/memory/vnext/dashboard/{view}` | Dashboard 查询 |
+| GET  | `/api/memory/vnext/rollout` | 查询当前灰度级别 |
+| POST | `/api/memory/vnext/rollout/advance` | 推进灰度 |
+| POST | `/api/memory/vnext/rollout/observe` | 上报观测指标 |
+| POST | `/api/memory/vnext/rollout/rollback` | 回滚 |
+| POST | `/api/memory/vnext/feedback` | 反馈 |
+
+当 `vnext.mode=vnext` 时，`/api/memory/search`、`/api/memory/context` 等 legacy 入口内部路由到 vNext 检索服务；`vnext.events_default=true` 时，标准写入口统一走 `CanonicalWriteService`。
 
 ### 错误模型
 
