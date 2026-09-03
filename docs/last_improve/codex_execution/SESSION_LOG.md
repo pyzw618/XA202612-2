@@ -35,7 +35,7 @@
 - Restored task: `S0-01 IN_PROGRESS`
 - Initial reconciliation: 状态文件与当前代码一致；无生产文件被覆盖。
 - Completed changes: 新增 vNext 正交枚举、旧值映射、术语表和 10 个契约测试。
-- Files changed: `memoryhub/domain/__init__.py`, `memoryhub/domain/contracts.py`, `docs/spec/VNEXT_GLOSSARY.md`, `tests/test_vnext_contracts.py`
+- Files changed: `memoryhub/domain/__init__.py`, `memoryhub/domain/contracts.py`, `docs/vnext/spec/VNEXT_GLOSSARY.md`, `tests/test_vnext_contracts.py`
 - Validation run: `python -m pytest tests/test_vnext_contracts.py -q` → 10 passed；1 个既有 pytest 配置警告。
 - Task status changes: `S0-01 IN_PROGRESS`，等待旧契约回归和 lint 后验收。
 - Decisions added: `DEC-20260822-002`
@@ -50,12 +50,12 @@
 - Restored task: `S0-01 IN_PROGRESS`
 - Initial reconciliation: 新增产物、测试和状态文件存在；未修改旧事件/写入路径。
 - Completed changes: 以组合测试完成 S0-01 验收；将任务置为 DONE；领取关键路径最小 READY 任务 S0-02。
-- Files changed: `memoryhub/domain/*`, `docs/spec/VNEXT_GLOSSARY.md`, `tests/test_vnext_contracts.py`, `docs/last_improve/codex_execution/*`
+- Files changed: `memoryhub/domain/*`, `docs/vnext/spec/VNEXT_GLOSSARY.md`, `tests/test_vnext_contracts.py`, `docs/last_improve/codex_execution/*`
 - Validation run: `python -m pytest tests/test_vnext_contracts.py tests/test_ingestion_schema.py -q` → 31 passed；ruff → passed；`test_memory_write_contract_schema.py` 的 2 个 tmp_path 用例因主机 pytest 临时目录权限错误未执行，失败证据已保留。
 - Task status changes: `S0-01 IN_PROGRESS → DONE`; `S0-02 TODO → IN_PROGRESS`
 - Decisions added: 无新增；沿用 `DEC-20260822-002`
 - Blockers: S0-01 无 blocker；主机 pytest tmp_path 权限是后续回归环境问题，尚未阻断 vNext 任务。
-- Exact next step: 读取现有模块边界，编写并校验 `docs/design/adr/ADR-vnext-memory-architecture.md`。
+- Exact next step: 读取现有模块边界，编写并校验 `docs/vnext/design/ADR-vnext-memory-architecture.md`。
 
 ## Checkpoint 2026-08-22-04
 
@@ -65,7 +65,7 @@
 - Restored task: `S0-02 IN_PROGRESS`
 - Initial reconciliation: 现有 REST fallback、Hybrid/Milvus 检索、MemoryWriteService/DomainMemoryWriter、Outbox 和 legacy 表均已核对。
 - Completed changes: 新增架构 ADR 与 3 个可执行边界测试；S0-02 验收通过。
-- Files changed: `docs/design/adr/ADR-vnext-memory-architecture.md`, `tests/test_vnext_architecture_adr.py`, `docs/last_improve/codex_execution/*`
+- Files changed: `docs/vnext/design/ADR-vnext-memory-architecture.md`, `tests/test_vnext_architecture_adr.py`, `docs/last_improve/codex_execution/*`
 - Validation run: ADR + vNext contract tests → 13 passed；ruff → passed；1 个既有 pytest 配置警告。
 - Task status changes: `S0-02 IN_PROGRESS → DONE`; `S0-03 TODO → IN_PROGRESS`
 - Decisions added: `DEC-20260822-003`
@@ -80,7 +80,7 @@
 - Restored task: `S0-03 IN_PROGRESS`
 - Initial reconciliation: 现有旧 Pydantic DTO 未被修改；新契约独立位于 domain 层。
 - Completed changes: 新增 vnext/v1 核心数据对象、JSON fixture、数据契约文档和 extra/version/round-trip 测试；S0-03 验收通过。
-- Files changed: `memoryhub/domain/contracts.py`, `memoryhub/domain/__init__.py`, `docs/spec/VNEXT_DATA_CONTRACT.md`, `tests/fixtures/vnext/minimal_contracts.json`, `tests/test_vnext_contracts.py`
+- Files changed: `memoryhub/domain/contracts.py`, `memoryhub/domain/__init__.py`, `docs/vnext/spec/VNEXT_DATA_CONTRACT.md`, `tests/fixtures/vnext/minimal_contracts.json`, `tests/test_vnext_contracts.py`
 - Validation run: vNext + ingestion + safety → 58 passed；ruff → passed；1 个既有 pytest 配置警告。
 - Task status changes: `S0-03 IN_PROGRESS → DONE`; `S0-04 TODO → IN_PROGRESS`
 - Decisions added: `DEC-20260822-004`
@@ -95,7 +95,7 @@
 - Restored task: `S0-04 IN_PROGRESS`
 - Initial reconciliation: 旧 `SearchRequest/Response`、Write/Forget DTO、agent-integration REST 映射已读取；旧入口未改动。
 - Completed changes: 新增 vnext/v1 API DTO、接口文档、兼容响应适配和契约测试；S0-04 验收通过。
-- Files changed: `memoryhub/adapter/vnext_schemas.py`, `docs/spec/VNEXT_INTERFACE.md`, `tests/test_vnext_interface.py`
+- Files changed: `memoryhub/adapter/vnext_schemas.py`, `docs/vnext/spec/VNEXT_INTERFACE.md`, `tests/test_vnext_interface.py`
 - Validation run: vNext interface + contract + ingestion → 38 passed；ruff → passed；1 个既有 pytest 配置警告。
 - Task status changes: `S0-04 IN_PROGRESS → DONE`; `S0-05 TODO → IN_PROGRESS`
 - Decisions added: `DEC-20260822-005`
@@ -110,7 +110,7 @@
 - Restored task: `S0-05 IN_PROGRESS`
 - Initial reconciliation: `Database._ensure_compatible_schema()` 和既有 provenance migration 已读取；确认没有统一版本迁移框架，默认 DB 不存在。
 - Completed changes: 新增只读 `scripts/migrate_vnext.py`、迁移契约文档、3 个扫描/不变性测试和 dry-run 报告；S0-05 验收通过。
-- Files changed: `scripts/migrate_vnext.py`, `docs/spec/VNEXT_MIGRATION.md`, `tests/test_vnext_migration.py`, `evaluation/results/vnext_migration/dry_run.json`
+- Files changed: `scripts/migrate_vnext.py`, `docs/vnext/spec/VNEXT_MIGRATION.md`, `tests/test_vnext_migration.py`, `evaluation/results/vnext_migration/dry_run.json`
 - Validation run: migration tests → 3 passed；ruff → passed；CLI dry-run → exit 0，missing database explicit。
 - Task status changes: `S0-05 IN_PROGRESS → DONE`; `S0-06 TODO → IN_PROGRESS`
 - Decisions added: `DEC-20260822-006`
@@ -155,7 +155,7 @@
 - Restored task: `S0-08 IN_PROGRESS`
 - Initial reconciliation: 已确认现有 minimal fixture 只覆盖正常对象，缺少 S0-08 要求的冲突/敏感/重复/过期/删除/降级场景。
 - Completed changes: 新增 `golden_scenarios.json`、SHA-256 清单、Golden 规范和 6 项边界契约测试；覆盖七类场景；S0 Gate 组合验证通过。
-- Files changed: `tests/fixtures/vnext/golden_scenarios.json`, `tests/fixtures/vnext/SHA256SUMS.txt`, `tests/test_vnext_golden_fixtures.py`, `docs/spec/VNEXT_GOLDEN_FIXTURES.md`, `docs/last_improve/codex_execution/*`
+- Files changed: `tests/fixtures/vnext/golden_scenarios.json`, `tests/fixtures/vnext/SHA256SUMS.txt`, `tests/test_vnext_golden_fixtures.py`, `docs/vnext/spec/VNEXT_GOLDEN_FIXTURES.md`, `docs/last_improve/codex_execution/*`
 - Validation run: Golden 6 passed；Golden + contract + interface 23 passed；S0 Gate suite 44 passed；ruff passed；SHA-256 match。
 - Task status changes: `S0-08 IN_PROGRESS → DONE`; `S0 Gate TODO → PASS`; `S1-01 TODO → READY`
 - Decisions added: 无；沿用 `DEC-20260822-004/005` 的 vnext/v1 与 Candidate/敏感隔离边界。
@@ -170,7 +170,7 @@
 - Restored task: `S1-01 READY`
 - Initial reconciliation: 已读取 S1-01 任务卡、现有 SQLAlchemy models、Database additive schema helper 和 projection metadata。
 - Completed changes: 新增 `working_states`、`task_episodes`、`episode_events`、`memory_candidates`、`memory_activations`、`retrieval_logs`、`idempotency_records`；扩展 Event/Evidence/Lineage/Outbox governance/version/projection 字段；新增 additive schema 文档与 3 项测试；修复 repeated `init_schema()` engine dispose。
-- Files changed: `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `tests/test_vnext_storage_schema.py`, `docs/spec/VNEXT_STORAGE_SCHEMA.md`, `docs/last_improve/codex_execution/*`
+- Files changed: `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `tests/test_vnext_storage_schema.py`, `docs/vnext/spec/VNEXT_STORAGE_SCHEMA.md`, `docs/last_improve/codex_execution/*`
 - Validation run: schema 3 passed；legacy additive upgrade passed；old write contract capture 1 passed；storage database/models/tests ruff passed；host tmp_path regression failure preserved。
 - Task status changes: `S1-01 READY → DONE`; `S1-02 TODO → READY`
 - Decisions added: `DEC-20260822-009`
@@ -269,7 +269,7 @@
 - Branch/HEAD before B03 commit: dev-remem / 5032c61f93bb16a724d6d9acb5be1269ae7cb2a9
 - Restored task/batch: S1-03 IN_PROGRESS / B03 IN_PROGRESS
 - Completed changes: 完成 S1-03 Event Gateway；修复 SQLite 并发跨表读偏差；补足 MASK fail-closed、Scope-before-Policy、tenant idempotency、global Event ID、atomic commit、Evidence/Frequency 不变和并发回归；同步更新 S1-01/S1-02/S1-03 证据与批次治理状态。
-- Files changed: memoryhub/application/__init__.py, memoryhub/application/event_gateway.py, memoryhub/storage/database.py, memoryhub/storage/models.py, memoryhub/storage/vnext_repositories.py, docs/spec/VNEXT_EVENT_GATEWAY.md, docs/spec/VNEXT_STORAGE_SCHEMA.md, tests/test_vnext_event_gateway.py, tests/test_vnext_repositories.py, tests/test_vnext_storage_schema.py, docs/last_improve/codex_execution/*
+- Files changed: memoryhub/application/__init__.py, memoryhub/application/event_gateway.py, memoryhub/storage/database.py, memoryhub/storage/models.py, memoryhub/storage/vnext_repositories.py, docs/vnext/spec/VNEXT_EVENT_GATEWAY.md, docs/vnext/spec/VNEXT_STORAGE_SCHEMA.md, tests/test_vnext_event_gateway.py, tests/test_vnext_repositories.py, tests/test_vnext_storage_schema.py, docs/last_improve/codex_execution/*
 - Validation run: Event Gateway 11 passed；受影响 vNext 回归 45 passed；Safety Pipeline 46 passed；Safety Contract + Safe Errors 31 passed；legacy write capture 1 passed、2 deselected；ruff、compileall、git diff --check passed。Safety Gate/Audit/Memory Write 文件系统用例因主机 pytest 临时目录权限记录 PARTIAL，无 B03 业务断言失败。
 - Task status changes: S1-03 IN_PROGRESS → DONE；B03 IN_PROGRESS → DONE；B04 TODO → READY。
 - Decisions added: DEC-20260822-013
@@ -555,7 +555,7 @@
 - Completed changes: Authority-first Forget tombstone/state machine; durable idempotent Forget management routes; tenant-scoped redacted diagnostics API; additive Forget schema migration; vNext API documentation; focused tests.
 - Validation: B14 affected suite 43 passed; safety/isolation/write-bypass risk suite 58 passed; ruff/compileall/diff-check passed. Full suite PARTIAL at unrelated `tests/test_api_acceptance.py::test_api_02_events_write_round_trip` retrieval assertion.
 - Task status changes: S4-04 TODO → DONE; S4-05 TODO → DONE; S4-06 TODO → DONE; B14 READY → DONE; B15 TODO → READY.
-- Files changed: `memoryhub/application/forget_service.py`, `memoryhub/application/diagnostic_service.py`, `memoryhub/adapter/vnext_api.py`, `memoryhub/app.py`, `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `docs/spec/VNEXT_INTERFACE.md`, `tests/test_vnext_forget_diagnostics.py`, and B14 continuity files.
+- Files changed: `memoryhub/application/forget_service.py`, `memoryhub/application/diagnostic_service.py`, `memoryhub/adapter/vnext_api.py`, `memoryhub/app.py`, `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `docs/vnext/spec/VNEXT_INTERFACE.md`, `tests/test_vnext_forget_diagnostics.py`, and B14 continuity files.
 - Commit plan: stage only B14 source/tests/documentation/continuity artifacts; create exactly one local commit titled `feat(vnext): complete B14 s4 forget diagnostics` with trailer `Batch-ID: B14`; do not push, amend, rebase, or enter B15.
 - Hard stop: after read-only verification of the single B14 commit, hand off `docs/last_improve/codex_batches/B15_s4_reliability_gate.md` and stop.
 
@@ -644,7 +644,7 @@
 
 - Started: 2026-08-25 +08:00; Ended: in progress.
 - Restored task: `S5-09 IN_PROGRESS`; completed documentation and executable verification, then claimed `S5-10`.
-- Completed changes: added `docs/spec/VNEXT_DEPLOYMENT.md`, `VNEXT_BACKUP_RECOVERY.md`, `VNEXT_FAULT_HANDLING.md`, `VNEXT_ACCEPTANCE.md`; updated `agent-integration/README.md`; added `tests/test_vnext_docs.py`.
+- Completed changes: added `docs/vnext/spec/VNEXT_DEPLOYMENT.md`, `VNEXT_BACKUP_RECOVERY.md`, `VNEXT_FAULT_HANDLING.md`, `VNEXT_ACCEPTANCE.md`; updated `agent-integration/README.md`; added `tests/test_vnext_docs.py`.
 - Validation: `pytest tests/test_vnext_docs.py tests/test_vnext_demo.py -q` → `16 passed`; CLI/MCP/SDK import commands exit 0; scoped ruff/compileall passed.
 - Task status changes: S5-09 IN_PROGRESS → DONE; S5-10 TODO → IN_PROGRESS.
 - Boundary: S5-09 docs finalized; no work outside B18.
@@ -654,7 +654,7 @@
 
 - Started: 2026-08-25 +08:00; Ended: pending single local commit and read-only verification.
 - Restored task: `S5-10 IN_PROGRESS`; completed demo package and final acceptance.
-- Completed changes: added `examples/vnext_demo/` fixtures, `run_demo.py`, `tests/test_vnext_demo.py`, `docs/spec/VNEXT_ACCEPTANCE.md`; updated all continuity files to mark S5/P0/P1/Release Gate PASS.
+- Completed changes: added `examples/vnext_demo/` fixtures, `run_demo.py`, `tests/test_vnext_demo.py`, `docs/vnext/spec/VNEXT_ACCEPTANCE.md`; updated all continuity files to mark S5/P0/P1/Release Gate PASS.
 - Validation: B18 focused/affected suite 341 passed; safety/contract/error suite passed; scoped ruff/compileall passed; demo runner exited 0; output redacted.
 - Task status changes: S5-10 IN_PROGRESS → DONE; B18 IN_PROGRESS → DONE.
 - Gate status changes: S5/P0/P1/Release Gate TODO → PASS.

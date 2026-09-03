@@ -118,4 +118,4 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-memoryhub-service.ps1
 
 - 发现安全/隐私零容忍故障：立即停止扩流并回滚读路径
 - 记录 trace_id、request_id 和审计 ID
-- 依据 `docs/spec/VNEXT_TRACE.md` 和 `EVIDENCE.md` 形成事件报告
+- 依据 `docs/vnext/spec/VNEXT_TRACE.md` 和 `EVIDENCE.md` 形成事件报告

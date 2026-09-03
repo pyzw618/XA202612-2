@@ -95,7 +95,7 @@
 - 状态变更：S6-04 `IN_PROGRESS` → `DONE`。
 - 主要改动：固定演示脚本覆盖 `formation`、证据固化、Scope、`retrieval`、`resume`、`forget` 与 `all`；所有 SQLite/JSON 输出遵守 `--output-dir`，默认写入系统临时目录；报告只保留脱敏 ID/hash、计数、分类、解释和状态元数据。
 - 验收证据：使用 `.venv` 模块命令逐条重放六个场景及 `all`，生成七个 JSON 报告和 `demo.db`；自动化演示测试函数通过；文档测试 `11 passed`；Formation Worker/P0 `19 passed`；Retrieval/Scope `65 passed`；安全、Policy、租户、Forget `145 passed, 4 skipped`；S6-02/S6-03 受影响回归已执行；`ruff check`、`compileall`、`git diff --check` 通过。
-- 验收材料：`docs/spec/VNEXT_ACCEPTANCE.md` 已勾选 S6-04 Release Gate；旧读兼容窗口登记为 2026-08-26 至 2026-09-25（Asia/Shanghai），负责人 Mr.X，最终下线日期 2026-09-26，登记状态 `REGISTERED`。
+- 验收材料：`docs/vnext/spec/VNEXT_ACCEPTANCE.md` 已勾选 S6-04 Release Gate；旧读兼容窗口登记为 2026-08-26 至 2026-09-25（Asia/Shanghai），负责人 Mr.X，最终下线日期 2026-09-26，登记状态 `REGISTERED`。
 - 限制：宿主机 pytest 临时目录和既有 `tests/security` 权限仍会报告 `WinError 5`；既有 `tests/test_vnext_entrypoints.py` 的 rollout helper 缺装配、`tests/test_vnext_formation_eval.py` 的内存仓库签名不兼容未在本阶段修复，均不涉及本阶段变更文件。未修改 P2 或上述既有问题。
 - 提交 SHA：本次提交生成后以 `HEAD` 核对（禁止 amend/rebase）。
 - 补充工作结论：S6-01 至 S6-04 均已完成；后续仅按兼容窗口复核并执行旧读下线，不再扩展补充阶段能力。

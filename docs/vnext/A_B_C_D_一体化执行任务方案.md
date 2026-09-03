@@ -156,11 +156,11 @@ memoryhub/
 
 | ID | 任务与主要动作 | 交付物/建议路径 | 依赖 | 角色 | 人日 | 验收标准 |
 |---|---|---|---|---|---:|---|
-| S0-01 | 冻结 Layer、Type、Formation Status、Evolution Status、Action、Activation、Scope、Intent 枚举；建立旧值映射表 | `docs/spec/VNEXT_GLOSSARY.md`、`memoryhub/domain/contracts.py` | 无 | Tech Lead + BE-A | 1.5 | 不再用单一 `level` 同时表达生命周期与类型；7 类 Intent 唯一 |
-| S0-02 | 编写架构决策记录，明确 Authority/Projection、Canonical Path、模块禁止依赖与兼容策略 | `docs/design/adr/ADR-vnext-memory-architecture.md` | S0-01 | Tech Lead | 1 | ADR 评审通过；列出明确的禁止调用关系 |
-| S0-03 | 定义 vNext Pydantic 契约：Event、Working Patch/Snapshot、Episode Event/Snapshot、Candidate、Long-Term Envelope、Evidence、Lineage、Activation | `memoryhub/domain/contracts.py`、`docs/spec/VNEXT_DATA_CONTRACT.md` | S0-01 | BE-A | 3 | 所有对象含 tenant/user、schema/content version、时间与治理字段；JSON fixture 校验通过 |
-| S0-04 | 定义统一 API vNext 契约和兼容响应：write、retrieve、resume、forget、diagnostic | `docs/spec/VNEXT_INTERFACE.md`、`adapter/vnext_schemas.py` | S0-03 | BE-A + Client | 2 | 错误码、幂等、部分降级、Authority 校验模式、分页和版本均有定义 |
-| S0-05 | 设计数据迁移与回滚，明确新增表、扩展列、旧值映射、存疑数据处理 | `docs/spec/VNEXT_MIGRATION.md`、`scripts/migrate_vnext.py --dry-run` 骨架 | S0-03 | BE-B | 2 | 支持 dry-run；输出 count/hash/tenant/scope/invalid/review 报告；不做不可逆删除 |
+| S0-01 | 冻结 Layer、Type、Formation Status、Evolution Status、Action、Activation、Scope、Intent 枚举；建立旧值映射表 | `docs/vnext/spec/VNEXT_GLOSSARY.md`、`memoryhub/domain/contracts.py` | 无 | Tech Lead + BE-A | 1.5 | 不再用单一 `level` 同时表达生命周期与类型；7 类 Intent 唯一 |
+| S0-02 | 编写架构决策记录，明确 Authority/Projection、Canonical Path、模块禁止依赖与兼容策略 | `docs/vnext/design/ADR-vnext-memory-architecture.md` | S0-01 | Tech Lead | 1 | ADR 评审通过；列出明确的禁止调用关系 |
+| S0-03 | 定义 vNext Pydantic 契约：Event、Working Patch/Snapshot、Episode Event/Snapshot、Candidate、Long-Term Envelope、Evidence、Lineage、Activation | `memoryhub/domain/contracts.py`、`docs/vnext/spec/VNEXT_DATA_CONTRACT.md` | S0-01 | BE-A | 3 | 所有对象含 tenant/user、schema/content version、时间与治理字段；JSON fixture 校验通过 |
+| S0-04 | 定义统一 API vNext 契约和兼容响应：write、retrieve、resume、forget、diagnostic | `docs/vnext/spec/VNEXT_INTERFACE.md`、`adapter/vnext_schemas.py` | S0-03 | BE-A + Client | 2 | 错误码、幂等、部分降级、Authority 校验模式、分页和版本均有定义 |
+| S0-05 | 设计数据迁移与回滚，明确新增表、扩展列、旧值映射、存疑数据处理 | `docs/vnext/spec/VNEXT_MIGRATION.md`、`scripts/migrate_vnext.py --dry-run` 骨架 | S0-03 | BE-B | 2 | 支持 dry-run；输出 count/hash/tenant/scope/invalid/review 报告；不做不可逆删除 |
 | S0-06 | 建立 Feature Flag 与链路模式：legacy、shadow、dual-read、canary、vnext | `memoryhub/config.py`、`config.example.yaml` | S0-02 | BE-B | 1.5 | 各模式可启动；production 默认不能静默降级或绕过 Policy |
 | S0-07 | 固化基线：全量测试、检索指标、延迟、写旁路扫描、当前数据统计 | `evaluation/results/vnext_baseline/` | 无 | QA/Eval | 2 | 报告记录 commit、配置、模型/索引版本、数据集 hash 与测试结果 |
 | S0-08 | 建立 vNext Golden fixtures 和契约测试 | `tests/fixtures/vnext/`、`tests/test_vnext_contracts.py` | S0-03、S0-04 | QA/Eval | 2 | 覆盖正常、冲突、敏感、重复、过期版本、删除与降级响应 |
@@ -269,7 +269,7 @@ memoryhub/
 
 | ID | 任务与主要动作 | 交付物/建议路径 | 依赖 | 角色 | 人日 | 验收标准 |
 |---|---|---|---|---|---:|---|
-| S5-01 | 统一五类 Trace 的关联、采样、脱敏和保留策略 | `observability/`、`docs/spec/VNEXT_TRACE.md` | S2-09、S3-08、S4-08 | QA/Eval | 3 | trace/task/event/memory/query ID 可串联；高风险/错误/Forget 全采样；普通正文不落 Trace |
+| S5-01 | 统一五类 Trace 的关联、采样、脱敏和保留策略 | `observability/`、`docs/vnext/spec/VNEXT_TRACE.md` | S2-09、S3-08、S4-08 | QA/Eval | 3 | trace/task/event/memory/query ID 可串联；高风险/错误/Forget 全采样；普通正文不落 Trace |
 | S5-02 | 建立四层 Benchmark 数据与 Runner：Formation、Retrieval、Infrastructure、E2E | `evaluation/datasets/vnext_*`、`evaluation/run_vnext_eval.py` | S2-10、S3-10、S4-07 | QA/Eval | 6 | 固定数据版本、标注说明、随机种子、模型/Prompt/权重版本；一条命令产出报告 |
 | S5-03 | 执行四系统对照与消融：No Memory、Flat RAG、Original、vNext | `evaluation/results/vnext_final/` | S5-02 | QA/Eval | 5 | 同模型、工具权限、预算；报告均值、方差、置信区间和中间指标；一次只移除一个机制 |
 | S5-04 | 实现最小四页 Dashboard：Explorer、Evolution、Retrieval Debugger、Benchmark | `desktop-client/` | S4-06、S5-01、S5-02 | Client/UX | 8 | 四页互相跳转；可查看 Evidence/Lineage/版本/Activation/分数/预算；默认脱敏且有权限审计 |

@@ -110,7 +110,7 @@ MemoryHub vNext **S0～S5 的历史验收保持通过；S6-04 最终验收在本
 | 最终下线日期 | 2026-09-26（Asia/Shanghai） |
 | 负责人 | Mr.X（Git 发布身份：111974179+Weirdo-1224@users.noreply.github.com） |
 | 登记状态 | REGISTERED；窗口期间保留 legacy read、Authority 单写和只读回滚 |
-| 依据 | `docs/spec/VNEXT_ROLLOUT.md`、`docs/spec/VNEXT_MIGRATION.md`、S6-04 验收记录 |
+| 依据 | `docs/vnext/spec/VNEXT_ROLLOUT.md`、`docs/vnext/spec/VNEXT_MIGRATION.md`、S6-04 验收记录 |
 
 Release 只有在上方三个未完成项全部勾选，且登记状态仍为 `REGISTERED` 时才可勾选完成。
 
@@ -152,6 +152,6 @@ Release 只有在上方三个未完成项全部勾选，且登记状态仍为 `R
 ## 发布建议
 
 1. 在银河麒麟真机执行 `evaluation/run_vnext_eval.py --suite all` 性能验收。
-2. 按 `docs/spec/VNEXT_ROLLOUT.md` 执行 5%→25%→50%→100% 灰度切流。
+2. 按 `docs/vnext/spec/VNEXT_ROLLOUT.md` 执行 5%→25%→50%→100% 灰度切流。
 3. 切流期间每日执行 `scripts/repair_projections.py --dry-run` 与 `tests/test_forget_semantic.py`。
 4. 旧读取兼容窗口已登记为 2026-08-26 至 2026-09-25，最终下线日期为 2026-09-26；窗口期结束前由负责人复核并执行下线。

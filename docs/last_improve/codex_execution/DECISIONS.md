@@ -9,7 +9,7 @@
 - Status: ACTIVE
 - Decision: Trace is an independently expiring, redacted diagnostic projection with five categories (FORMATION, EVOLUTION, RETRIEVAL, FORGET, INFRASTRUCTURE); normal production sampling is deterministic at 10%, while high-risk/error/denied/Forget is mandatory. Dashboard is management-authorized, tenant/user scoped and aggregates Benchmark data without per-query samples.
 - Evidence/reason: S5 focused association, redaction, retention, Forget and Dashboard authorization tests passed. This preserves traceability without making observability a second Authority store or exposing raw body/query text.
-- Affected files/contracts: `memoryhub/observability/`, `docs/spec/VNEXT_TRACE.md`, `DashboardService`, vNext dashboard route, B17 feedback/usage trace consumers.
+- Affected files/contracts: `memoryhub/observability/`, `docs/vnext/spec/VNEXT_TRACE.md`, `DashboardService`, vNext dashboard route, B17 feedback/usage trace consumers.
 - Alternatives considered: always persist all normal spans; expose raw diagnostic/benchmark samples in Dashboard; both rejected for retention/privacy reasons.
 - Compatibility/migration impact: direct/test `TraceStore` defaults to 100% sampling for legacy diagnostic expectations; application wiring explicitly supplies the production policy. No Authority/Evidence/Lineage data is migrated or changed.
 - Rollback: remove the app-level TraceStore/Dashboard route wiring while retaining historical Authority data; no diagnostic purge affects business data.
@@ -35,7 +35,7 @@
 - Status: ACTIVE
 - Decision: vNext 使用独立的 Lifecycle Layer、Memory Type、Formation Status、Evolution Status、Evolution Action、Activation、Scope 和七类 Retrieval Intent；旧 `short/mid/long` 只允许通过兼容映射进入 Layer。
 - Evidence/reason: 改进方案明确要求 Layer/Type/Status/Activation 正交；现有 `MemoryLevel` 同时被旧 API/测试使用，直接重命名会破坏兼容性。
-- Affected files/contracts: `memoryhub/domain/contracts.py`, `docs/spec/VNEXT_GLOSSARY.md`, 后续 S0-03/S0-04 vNext 契约
+- Affected files/contracts: `memoryhub/domain/contracts.py`, `docs/vnext/spec/VNEXT_GLOSSARY.md`, 后续 S0-03/S0-04 vNext 契约
 - Alternatives considered: 直接修改现有 `MemoryLevel`；被拒绝，因为会破坏现有接口且无法表达 Candidate/Activation/Scope。
 - Compatibility/migration impact: 旧 adapter 可继续接受 `short/mid/long`，迁移层显式转换；未知/`pending` 状态不自动升级为 ACTIVE。
 - Rollback: 关闭 vNext adapter/Feature Flag，保留旧 `memoryhub.adapter.schemas` 路径；新领域模块可独立回退。
@@ -48,7 +48,7 @@
 - Status: ACTIVE
 - Decision: Authority Store 是唯一业务事实源；Vector/BM25/Cache 是可删除可重建 Projection；所有写入和检索入口分别委托 Canonical Write/Retrieval Service；适配层不得复制算法或直写长期表/索引。
 - Evidence/reason: 当前仓库已有 DomainMemoryWriter 的 Evidence/Lineage/Outbox 写链和 Hybrid/Milvus 检索实现，但 REST fallback、旧表和兼容 DTO 仍并存；ADR 将迁移事实与目标边界分开。
-- Affected files/contracts: `docs/design/adr/ADR-vnext-memory-architecture.md`, 后续 S0-03～S5-10 代码和接口
+- Affected files/contracts: `docs/vnext/design/ADR-vnext-memory-architecture.md`, 后续 S0-03～S5-10 代码和接口
 - Alternatives considered: Vector 作为 Authority、各入口各自写入、Reflection 直接写长期表、大爆炸替换；均会破坏版本、租户、Forget 或回滚证据。
 - Compatibility/migration impact: legacy/shadow/dual-read/canary/vnext 逐级切换；回滚切读路径，不回滚已正确提交的 Authority 数据。
 - Rollback: 使用旧兼容读取/Formation 开关；Projection 由 Authority 重建并切换别名。
@@ -61,7 +61,7 @@
 - Status: ACTIVE
 - Decision: vNext 数据对象统一使用 `vnext/v1`、独立 `schema_version/content_version`、tenant/user 和 Policy/retention/sensitivity/actor/time 治理字段；Evidence 只保存 `content_ref`，Candidate 明确是普通检索隔离的 staging。
 - Evidence/reason: S0-03 fixture 与 58 项契约/旧 ingestion/safety 回归通过；改进方案要求 Schema、正文治理和 Candidate 默认隔离。
-- Affected files/contracts: `memoryhub/domain/contracts.py`, `docs/spec/VNEXT_DATA_CONTRACT.md`, `tests/fixtures/vnext/minimal_contracts.json`
+- Affected files/contracts: `memoryhub/domain/contracts.py`, `docs/vnext/spec/VNEXT_DATA_CONTRACT.md`, `tests/fixtures/vnext/minimal_contracts.json`
 - Alternatives considered: 复用旧 `MemoryEvent`/`MemoryLevel` 或在各模块复制 DTO；被拒绝，因为旧对象缺少 vNext 生命周期、版本、Scope 和治理组合，复制会产生漂移。
 - Compatibility/migration impact: 旧 adapter DTO 保持不变；后续 S0-04 负责显式适配到 vnext/v1。
 - Rollback: 关闭 vNext DTO adapter，继续使用旧 `adapter.schemas`；新契约文件不改变已有数据库。
@@ -74,7 +74,7 @@
 - Status: ACTIVE
 - Decision: vnext/v1 API 统一使用 request_id/trace_id；写入与 Forget 使用 idempotency_key；Forget 默认 dry-run 且执行必须 confirm；Retrieval 支持 EVENTUAL/AUTHORITY_CHECKED 和显式部分降级；旧 SearchResponse 只能由兼容形状适配。
 - Evidence/reason: API 契约测试 38 项通过；现有 REST/MCP/CLI/SDK 仍透传旧 DTO，必须先冻结统一边界再在 S1/S3 收敛入口。
-- Affected files/contracts: `memoryhub/adapter/vnext_schemas.py`, `docs/spec/VNEXT_INTERFACE.md`, 后续 REST/MCP/CLI/SDK adapters
+- Affected files/contracts: `memoryhub/adapter/vnext_schemas.py`, `docs/vnext/spec/VNEXT_INTERFACE.md`, 后续 REST/MCP/CLI/SDK adapters
 - Alternatives considered: 让各入口自行拼 Context/处理 Forget 或复制搜索算法；被拒绝，因为会违反 S0-02 Authority 单写和统一 Retrieval 决策。
 - Compatibility/migration impact: `LegacySearchCompatibilityResponse` 保留旧字段；vNext 结果额外带 content_version、trace_id 和可解释降级信息。
 - Rollback: 兼容入口继续返回旧 shape；关闭 vNext feature flag，不改变既有业务数据。
@@ -87,7 +87,7 @@
 - Status: ACTIVE
 - Decision: S0-05 只提供 SQLite read-only dry-run；不 bootstrap、不建表、不写 Authority、不删除旧数据。缺 tenant/Scope/Evidence 的记录进入 REVIEW，deleted 记录只规划为 Tombstone；实际 apply、备份、checkpoint 和 Projection 重建放到 S5-06。
 - Evidence/reason: 现有数据库初始化是 `create_all + additive _ensure_compatible_schema`，默认数据库当前不存在；迁移测试与 CLI dry-run 通过并生成显式 missing-database 报告。
-- Affected files/contracts: `scripts/migrate_vnext.py`, `docs/spec/VNEXT_MIGRATION.md`, `evaluation/results/vnext_migration/dry_run.json`, S5-06
+- Affected files/contracts: `scripts/migrate_vnext.py`, `docs/vnext/spec/VNEXT_MIGRATION.md`, `evaluation/results/vnext_migration/dry_run.json`, S5-06
 - Alternatives considered: 在 dry-run 中调用 `Database.init_schema()` 或直接写迁移表；被拒绝，因为预演会产生副作用且无法证明原库未变。
 - Compatibility/migration impact: 旧表保持不变；报告记录稳定 hash/tenant/scope/review，后续 apply 必须以报告和备份为输入。
 - Rollback: S0-05 无 apply，无需数据回滚；S5-06 使用 checkpoint/兼容读/索引别名回滚，禁止直接删除旧表。
@@ -126,7 +126,7 @@
 - Status: ACTIVE
 - Decision: S1-01 采用 additive/idempotent SQLite schema：新表由 `Base.metadata.create_all()` 创建，既有表由兼容迁移补列/索引；新 vNext 表 tenant/user 必填，旧扩展列在兼容窗口允许 NULL；不删除 legacy 表/列。
 - Evidence/reason: 任务方案要求 short/mid 不直接升级为 Working/Episode，且迁移可重复；测试发现重复 init 需要先 dispose 旧 engine 才能在 Windows 正确释放 SQLite 锁。
-- Affected files/contracts: `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `docs/spec/VNEXT_STORAGE_SCHEMA.md`, S1-02 repositories and S4/S5 migrations
+- Affected files/contracts: `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `docs/vnext/spec/VNEXT_STORAGE_SCHEMA.md`, S1-02 repositories and S4/S5 migrations
 - Alternatives considered: 直接重命名旧表、物理合表、不可逆 ALTER/drop；均会破坏兼容读、回滚和旧数据证据，拒绝。
 - Compatibility/migration impact: 新表独立承载 Working/Episode/Candidate/Activation/Retrieval/Idempotency；Event/Evidence/Lineage/Outbox 增量增加 governance/version/projection 字段。
 - Rollback: 设置 `vnext.mode=legacy`，保留新增表供诊断；不删除新表，后续 apply/回滚需另行备份演练。
@@ -178,7 +178,7 @@
 - Status: ACTIVE
 - Decision: Event Gateway 只提交 Policy 返回的治理事件；REVIEW/DROP/未净化 MASK fail-closed 且不创建 Event/IdempotencyRecord。幂等键按 `(tenant_id, idempotency_key)`，Event ID 按其全局主键约束检查；唯一键竞争在事务回滚后重读，统一返回 IDEMPOTENT/CONFLICT。
 - Evidence/reason: S1-03 定向 11 tests passed；并发重复提交产生 1 个 Event/IdempotencyRecord，7 次重试为 IDEMPOTENT；敏感 payload 未进入拒绝路径的存储记录；既有 Evidence/Frequency 在重复提交后保持不变。数据库约束与 Gateway 的检查范围必须一致，避免并发或跨租户 Event ID 竞争泄漏 IntegrityError。
-- Affected files/contracts: `memoryhub/application/event_gateway.py`, `tests/test_vnext_event_gateway.py`, `docs/spec/VNEXT_EVENT_GATEWAY.md`
+- Affected files/contracts: `memoryhub/application/event_gateway.py`, `tests/test_vnext_event_gateway.py`, `docs/vnext/spec/VNEXT_EVENT_GATEWAY.md`
 - Alternatives considered: 只依赖读前检查；被拒绝，因为并发提交可同时通过检查并在唯一键处失败。允许 MASK 原 payload 直接提交；被拒绝，因为会把未净化正文写入 Authority。
 - Compatibility/migration impact: 仅影响 vNext Event Gateway；legacy EventIngestionService 保持不变。拒绝结果仍为安全元数据，不保存正文。
 - Rollback: 关闭 vNext Gateway/Feature Flag，保留已提交 Authority rows；不删除新表。
@@ -217,7 +217,7 @@
 - Status: ACTIVE
 - Decision: Agent Usage/Utility feedback remains a redacted Shadow projection; migration applies only fully validated legacy rows into the existing Preference/Knowledge Authority adapter and leaves uncertain rows in REVIEW; dual-read always returns legacy output; rollout advances only through observed 5/25/50/100 levels with zero Policy/cross-tenant/Forget/error hard gates and an auditable rollback window.
 - Evidence/reason: B17 focused/affected validation passed; Shadow and rollout artifacts contain IDs, hashes, counts, classifications and audit metadata only. This preserves Authority single-write, prevents feedback from rewriting正文/状态, and makes each cutover reversible.
-- Affected files/contracts: `memoryhub/application/feedback_service.py`, `scripts/migrate_vnext.py`, `memoryhub/application/shadow_read_service.py`, `memoryhub/application/rollout_service.py`, `docs/spec/VNEXT_MIGRATION.md`, `docs/spec/VNEXT_ROLLOUT.md`.
+- Affected files/contracts: `memoryhub/application/feedback_service.py`, `scripts/migrate_vnext.py`, `memoryhub/application/shadow_read_service.py`, `memoryhub/application/rollout_service.py`, `docs/vnext/spec/VNEXT_MIGRATION.md`, `docs/vnext/spec/VNEXT_ROLLOUT.md`.
 - Alternatives considered: direct feedback writes, silent promotion of REVIEW data, returning vNext during dual-read, or skipping rollout levels; all rejected because they weaken governance, privacy or rollback evidence.
 - Compatibility/migration impact: legacy reads remain the dual-read business result; migrated rows retain old tables and can be reviewed from checkpoint/hash/backup; rollout changes read/Formation flags only.
 - Rollback: switch the read path to legacy (or a lower observed canary level) and retain Authority data; restore the pre-apply database from the explicit backup if a migration transaction is externally judged invalid.

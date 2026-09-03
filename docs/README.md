@@ -27,14 +27,11 @@ Kylin-MemoryHub（XA-202612 赛题）项目文档导航。
 | [0805数据流测试/](0805数据流测试/) | 数据流测试计划与结果 |
 | [0811功能性测试/](0811功能性测试/) | 功能验收与 TEST_PLAN |
 
-## vNext 专项（docs/MemoryHub vNext/ + 子目录）
+## vNext 专项（docs/vnext/）
 
 | 目录 | 内容 |
 |------|------|
-| [MemoryHub vNext/](MemoryHub vNext/) | MemoryHub vNext A_B_C_D 一体化改进方案 |
-| [spec/](spec/) | vNext 规范与契约（VNEXT_GLOSSARY / DATA_CONTRACT / INTERFACE / MIGRATION / STORAGE_SCHEMA / EVENT_GATEWAY / AUTHORITY_WRITE 等） |
-| [design/adr/](design/adr/) | vNext 架构决策记录（ADR） |
-| [last_improve/](last_improve/) | 改进执行任务方案与 codex 批次文档 |
+| [vnext/](vnext/) | vNext 统一目录：方案、计划、规范、ADR 与阶段文档 |
 
 ## 其他主题目录
 

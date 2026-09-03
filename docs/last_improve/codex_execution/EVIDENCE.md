@@ -19,7 +19,7 @@
 
 ## S5-06 checkpoint
 
-- Deliverables: extended `scripts/migrate_vnext.py`, migration tests, and `docs/spec/VNEXT_MIGRATION.md` apply/rollback contract.
+- Deliverables: extended `scripts/migrate_vnext.py`, migration tests, and `docs/vnext/spec/VNEXT_MIGRATION.md` apply/rollback contract.
 - Focused command: `.venv\Scripts\python.exe -m pytest tests/test_vnext_migration.py -q` → `4 passed`.
 - Static/CLI: migration ruff and compileall passed; `.venv\Scripts\python.exe scripts/migrate_vnext.py --dry-run --report evaluation/results/vnext_migration/dry_run.json` exited 0 with `read_only_scan=true`, `no_irreversible_delete=true`, and `uncertain_data_never_promoted_to_active_global=true`.
 - Apply evidence: a controlled legacy SQLite database applied one eligible row, left one tenant/scope/evidence-incomplete row unchanged in REVIEW, created backup and checkpoint, preserved old tables, and produced `APPLIED_WITH_REVIEW`; no delete/revival path exists.
@@ -37,7 +37,7 @@
 
 ## S5-08 and B17 final acceptance
 
-- Deliverables: `memoryhub/application/rollout_service.py`, `memoryhub/config.py`, `config.example.yaml`, `evaluation/run_vnext_rollout.py`, `evaluation/results/vnext_shadow/rollout.json`, `docs/spec/VNEXT_ROLLOUT.md`, and `tests/test_vnext_rollout.py`.
+- Deliverables: `memoryhub/application/rollout_service.py`, `memoryhub/config.py`, `config.example.yaml`, `evaluation/run_vnext_rollout.py`, `evaluation/results/vnext_shadow/rollout.json`, `docs/vnext/spec/VNEXT_ROLLOUT.md`, and `tests/test_vnext_rollout.py`.
 - Focused command: `.venv\Scripts\python.exe -m pytest tests/test_vnext_rollout.py tests/test_vnext_feature_flags.py -q` → `16 passed`.
 - Final affected command: B17 S5-05～S5-08 plus Formation/Retrieval/Authority/Projection/Forget/write-bypass regression → `101 passed`.
 - Final risk command: `.venv\Scripts\python.exe -m pytest tests/test_safety_pipeline.py tests/test_safety_contract.py tests/test_safe_errors.py tests/test_vnext_forget_diagnostics.py -q` → `80 passed`.
@@ -54,7 +54,7 @@
 
 ## S5-01 checkpoint
 
-- Deliverables: `memoryhub/observability/trace_policy.py`, upgraded `trace_models.py`/`trace_store.py`, app/Retrieval/Forget wiring, `docs/spec/VNEXT_TRACE.md`, and extended `tests/test_vnext_formation_trace.py`.
+- Deliverables: `memoryhub/observability/trace_policy.py`, upgraded `trace_models.py`/`trace_store.py`, app/Retrieval/Forget wiring, `docs/vnext/spec/VNEXT_TRACE.md`, and extended `tests/test_vnext_formation_trace.py`.
 - Command: `.venv\\Scripts\\python.exe -m pytest tests/test_vnext_formation_trace.py tests/test_vnext_formation_shadow.py tests/test_vnext_retrieval_service.py tests/test_vnext_forget_diagnostics.py tests/test_vnext_reliability.py -q` → `38 passed`.
 - Static: `.venv\\Scripts\\python.exe -m ruff check memoryhub/observability memoryhub/application/retrieval_service.py memoryhub/application/forget_service.py memoryhub/app.py tests/test_vnext_formation_trace.py` → passed; compileall and `git diff --check` passed.
 - Acceptance: five typed chains are queryable by trace/task/event/memory/query identifiers; normal production sampling is deterministic at 10%, while high-risk/error/denied/Forget paths are 100%; raw body/query/payload/claim/excerpt/embedding fields are rejected recursively; expiration purge only removes Trace projection records.
@@ -501,7 +501,7 @@
   ```
 - Result: PASS
 - Summary: 10 passed；覆盖正交维度、7 类 Intent 唯一性、旧 level/type/status 映射、未知值 fail-closed、Scope 顺序和 Formation/Evolution 分离。环境产生 1 个既有 `asyncio_mode` 未识别警告。
-- Artifact/report/trace: `memoryhub/domain/contracts.py`, `docs/spec/VNEXT_GLOSSARY.md`, `tests/test_vnext_contracts.py`
+- Artifact/report/trace: `memoryhub/domain/contracts.py`, `docs/vnext/spec/VNEXT_GLOSSARY.md`, `tests/test_vnext_contracts.py`
 - Follow-up: 运行旧事件/写入 Schema 回归及 lint；通过后完成 S0-01。
 
 ### S0-01 checkpoint: regression/lint attempt
@@ -529,7 +529,7 @@
   ```
 - Result: PASS
 - Summary: 31 tests passed；ruff passed。唯一警告为现有 pytest 配置 `asyncio_mode` 未识别。S0-01 验收项逐条满足：正交枚举、7 类 Intent 唯一、旧值显式映射、未知值 fail-closed、术语文档存在。
-- Artifact/report/trace: `memoryhub/domain/contracts.py`, `docs/spec/VNEXT_GLOSSARY.md`, `tests/test_vnext_contracts.py`
+- Artifact/report/trace: `memoryhub/domain/contracts.py`, `docs/vnext/spec/VNEXT_GLOSSARY.md`, `tests/test_vnext_contracts.py`
 - Follow-up: `S0-02` 已领取；开始架构 ADR。
 
 ## S0-02
@@ -545,7 +545,7 @@
   ```
 - Result: PASS
 - Summary: 13 tests passed；ruff passed；1 个既有 `asyncio_mode` 配置警告。ADR 已按当前代码事实记录现有写入、检索、Projection 和兼容边界，并冻结禁止调用关系与 rollout/rollback 语义。
-- Artifact/report/trace: `docs/design/adr/ADR-vnext-memory-architecture.md`, `tests/test_vnext_architecture_adr.py`
+- Artifact/report/trace: `docs/vnext/design/ADR-vnext-memory-architecture.md`, `tests/test_vnext_architecture_adr.py`
 - Follow-up: `S0-03` 已领取，开始实现 vNext 数据契约。
 
 ## S0-03
@@ -561,7 +561,7 @@
   ```
 - Result: PASS
 - Summary: 58 tests passed；ruff passed；1 个既有 `asyncio_mode` 配置警告。核心对象均带 tenant/user、schema/content version、时间与治理字段；fixture 往返和 extra/version 拒绝通过；Evidence 使用 `content_ref`。
-- Artifact/report/trace: `memoryhub/domain/contracts.py`, `docs/spec/VNEXT_DATA_CONTRACT.md`, `tests/fixtures/vnext/minimal_contracts.json`, `tests/test_vnext_contracts.py`
+- Artifact/report/trace: `memoryhub/domain/contracts.py`, `docs/vnext/spec/VNEXT_DATA_CONTRACT.md`, `tests/fixtures/vnext/minimal_contracts.json`, `tests/test_vnext_contracts.py`
 - Follow-up: `S0-04` 已领取，开始 API DTO 契约。
 
 ## S0-04
@@ -577,7 +577,7 @@
   ```
 - Result: PASS
 - Summary: 38 tests passed；ruff passed；1 个既有 `asyncio_mode` 配置警告。Forget 缺 selector/缺 confirm、空 Query 状态检索、部分结果/错误码、旧响应形状适配均有测试。
-- Artifact/report/trace: `memoryhub/adapter/vnext_schemas.py`, `docs/spec/VNEXT_INTERFACE.md`, `tests/test_vnext_interface.py`
+- Artifact/report/trace: `memoryhub/adapter/vnext_schemas.py`, `docs/vnext/spec/VNEXT_INTERFACE.md`, `tests/test_vnext_interface.py`
 - Follow-up: `S0-05` 已领取，开始迁移 dry-run。
 
 ## S0-05
@@ -594,7 +594,7 @@
   ```
 - Result: PASS
 - Summary: 3 tests passed；ruff passed；CLI exit 0。dry-run 报告明确 `database_exists=false`、`source_records=0`、`read_only_scan=true`、`no_irreversible_delete=true`，未把缺失数据库伪造成迁移成功。
-- Artifact/report/trace: `scripts/migrate_vnext.py`, `docs/spec/VNEXT_MIGRATION.md`, `tests/test_vnext_migration.py`, `evaluation/results/vnext_migration/dry_run.json`
+- Artifact/report/trace: `scripts/migrate_vnext.py`, `docs/vnext/spec/VNEXT_MIGRATION.md`, `tests/test_vnext_migration.py`, `evaluation/results/vnext_migration/dry_run.json`
 - Follow-up: apply/真实旧数据演练延后 S5-06；`S0-06` 已领取。
 
 ## S0-06
@@ -656,7 +656,7 @@
   ```
 - Result: PASS；6 定向测试通过；23 项 Golden/数据契约/API 组合回归通过；ruff passed；fixture SHA-256 校验匹配。
 - Summary: `vnext/golden/v1` 覆盖正常 Authority-checked 请求、冲突 Candidate REVIEW、敏感事件 content_ref/REVIEW、重复幂等、旧 API 版本 fail-closed、DELETED 检索隔离和 PARTIAL 降级响应；没有真实 secret/raw sensitive content。
-- Artifact/report/trace: `tests/fixtures/vnext/golden_scenarios.json`, `tests/fixtures/vnext/SHA256SUMS.txt`, `tests/test_vnext_golden_fixtures.py`, `docs/spec/VNEXT_GOLDEN_FIXTURES.md`
+- Artifact/report/trace: `tests/fixtures/vnext/golden_scenarios.json`, `tests/fixtures/vnext/SHA256SUMS.txt`, `tests/test_vnext_golden_fixtures.py`, `docs/vnext/spec/VNEXT_GOLDEN_FIXTURES.md`
 - Follow-up: S0 Gate 核验通过；领取 S1-01。
 
 ## S0 Gate
@@ -685,7 +685,7 @@
   ```
 - Result: PASS；3 schema tests passed；旧写入契约非 tmp_path 用例 1 passed（2 deselected）；storage database/models/tests ruff passed；唯一警告为既有 `asyncio_mode` 未识别。
 - Summary: fresh schema 两次 `init_schema()` 可重复；legacy minimal SQLite 表可增量获得 vNext columns/indexes；tenant/user 字段覆盖 7 张新表；Episode seq、idempotency key、activation version 和 candidate status/formation check 已由约束覆盖；Event/Evidence/Lineage/Outbox 增加治理/版本/投影字段。首次测试暴露并修复重复 init 未 dispose engine 导致 Windows SQLite 文件锁。
-- Artifact/report/trace: `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `tests/test_vnext_storage_schema.py`, `docs/spec/VNEXT_STORAGE_SCHEMA.md`
+- Artifact/report/trace: `memoryhub/storage/models.py`, `memoryhub/storage/database.py`, `tests/test_vnext_storage_schema.py`, `docs/vnext/spec/VNEXT_STORAGE_SCHEMA.md`
 - Follow-up: S1-02 Repository 与事务测试；full old tmp_path regression 的 host permission failure 已保留，不影响本任务专用 schema 证据。
 
 ### S1-01 failed checkpoints
@@ -729,7 +729,7 @@
 - Result: PASS；11 tests passed；ruff passed；唯一警告为既有 pytest 配置 `asyncio_mode` 未识别。
 - Summary: Envelope 类型校验后依次执行 identity、Scope、Policy；REVIEW/DROP 在持久化前停止；MASK 若未改变 payload 则 fail-closed，只有 Policy 返回的净化 payload 才提交；幂等键按 tenant 隔离；Event ID 冲突按数据库全局主键范围检查；唯一键并发竞争回滚后重读为 IDEMPOTENT/CONFLICT，不向调用方泄漏 `IntegrityError`。重复并发提交实测 1 个 COMMITTED、7 个 IDEMPOTENT，Event 与 IdempotencyRecord 各 1 行。
 - Sensitive-data evidence: REVIEW/DROP 与未净化 MASK 均未写 `events` 或 `idempotency_records`；IdempotencyRecord 只保存 request hash、event/trace 引用，不保存 payload；Gateway 无日志/队列写入。
-- Artifact/report/trace: `memoryhub/application/event_gateway.py`, `tests/test_vnext_event_gateway.py`, `docs/spec/VNEXT_EVENT_GATEWAY.md`
+- Artifact/report/trace: `memoryhub/application/event_gateway.py`, `tests/test_vnext_event_gateway.py`, `docs/vnext/spec/VNEXT_EVENT_GATEWAY.md`
 - Follow-up: 运行 S1-03 受影响 vNext 回归、write-bypass/safety 风险测试及批次级验收；未完成前保持 S1-03 IN_PROGRESS。
 
 ## S1-03 regression checkpoint
@@ -1292,7 +1292,7 @@
 ## S4-05 checkpoint
 
 - Status: DONE; vNext Forget execute/status/history routes provide explicit confirmation, high-risk management authorization, tenant/user isolation and idempotent replay.
-- Implementation: `memoryhub/adapter/vnext_api.py`, `memoryhub/application/forget_service.py`, `docs/spec/VNEXT_INTERFACE.md`.
+- Implementation: `memoryhub/adapter/vnext_api.py`, `memoryhub/application/forget_service.py`, `docs/vnext/spec/VNEXT_INTERFACE.md`.
 - Evidence: focused Forget tests 3 passed; high-risk request without authorization failed closed; duplicate idempotency key persisted one Forget row.
 
 ## S4-06 checkpoint
@@ -1320,7 +1320,7 @@
 
 ## S5-09 checkpoint
 
-- Deliverables: `docs/spec/VNEXT_DEPLOYMENT.md`, `docs/spec/VNEXT_BACKUP_RECOVERY.md`, `docs/spec/VNEXT_FAULT_HANDLING.md`, `docs/spec/VNEXT_ACCEPTANCE.md`, updated `agent-integration/README.md`, and `tests/test_vnext_docs.py`.
+- Deliverables: `docs/vnext/spec/VNEXT_DEPLOYMENT.md`, `docs/vnext/spec/VNEXT_BACKUP_RECOVERY.md`, `docs/vnext/spec/VNEXT_FAULT_HANDLING.md`, `docs/vnext/spec/VNEXT_ACCEPTANCE.md`, updated `agent-integration/README.md`, and `tests/test_vnext_docs.py`.
 - Focused command: `.venv\Scripts\python.exe -m pytest tests/test_vnext_docs.py tests/test_vnext_demo.py -q` → `16 passed`.
 - Executable verification:
   - `python -m memoryhub_cli.cli --help` → exit 0
@@ -1332,7 +1332,7 @@
 
 ## S5-10 checkpoint
 
-- Deliverables: `examples/vnext_demo/` with redacted fixtures (`event_start_report.json`, `event_use_docx.json`, `event_repeat_docx.json`, `event_markdown_global.json`), deterministic `run_demo.py`, `tests/test_vnext_demo.py`, and `docs/spec/VNEXT_ACCEPTANCE.md`.
+- Deliverables: `examples/vnext_demo/` with redacted fixtures (`event_start_report.json`, `event_use_docx.json`, `event_repeat_docx.json`, `event_markdown_global.json`), deterministic `run_demo.py`, `tests/test_vnext_demo.py`, and `docs/vnext/spec/VNEXT_ACCEPTANCE.md`.
 - Focused command: `.venv\Scripts\python.exe -m pytest tests/test_vnext_demo.py -q` → `5 passed`.
 - Replay command: `.venv\Scripts\python.exe examples/vnext_demo/run_demo.py --scenario all` → exit 0, output `examples/vnext_demo/output/demo_report.json`.
 - Output redaction: demo report contains only `request_id`, `trace_id`, counts, hashes and audit metadata; no raw content or sensitive Evidence.

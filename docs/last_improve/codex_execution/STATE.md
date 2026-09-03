@@ -512,7 +512,7 @@
 
 ## S5-09 checkpoint — 2026-08-25
 
-- Status: DONE. Added `docs/spec/VNEXT_DEPLOYMENT.md`, `docs/spec/VNEXT_BACKUP_RECOVERY.md`, `docs/spec/VNEXT_FAULT_HANDLING.md`, `docs/spec/VNEXT_ACCEPTANCE.md` and updated `agent-integration/README.md`.
+- Status: DONE. Added `docs/vnext/spec/VNEXT_DEPLOYMENT.md`, `docs/vnext/spec/VNEXT_BACKUP_RECOVERY.md`, `docs/vnext/spec/VNEXT_FAULT_HANDLING.md`, `docs/vnext/spec/VNEXT_ACCEPTANCE.md` and updated `agent-integration/README.md`.
 - REST/CLI/MCP/SDK commands documented and verified executable in clean environment: `memoryhub --help`, `python -m memoryhub_mcp`, `from memoryhub_client import MemoryHubClient`.
 - Deployment, migration, backup/recovery and fault-handling runbooks include executable commands, rollback steps and hard-stop conditions.
 - Evidence: `EVIDENCE.md#s5-09-checkpoint`; focused docs/demo tests 16 passed; ruff/compileall passed.
@@ -522,7 +522,7 @@
 
 - S5-10 DONE. Added `examples/vnext_demo/` with redacted fixtures, deterministic `run_demo.py`, and `tests/test_vnext_demo.py` replayable scenarios.
 - Demo output contains only IDs, hashes, counts and audit metadata; no raw content or sensitive Evidence.
-- `docs/spec/VNEXT_ACCEPTANCE.md` records all 57 tasks, 18 batches and S0/S1/S2/S3/S4/S5/P0/P1/Release Gate PASS.
+- `docs/vnext/spec/VNEXT_ACCEPTANCE.md` records all 57 tasks, 18 batches and S0/S1/S2/S3/S4/S5/P0/P1/Release Gate PASS.
 - B18 acceptance: S5-09 documentation and S5-10 demo/acceptance package meet exit criteria. All tasks and Gates have valid evidence.
 - Final validation: B18 focused tests 16 passed; affected vNext regression 341 passed; safety/contract/error suite passed; ruff, compileall, `git diff --check` passed; demo CLI exited 0.
 - Batch status: B18 DONE; there is no next batch.

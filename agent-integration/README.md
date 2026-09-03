@@ -70,7 +70,7 @@ node agent-integration/plugin/opencode/install_plugin.mjs
 
 ## REST 契约
 
-vNext REST 契约定义在 `memoryhub/adapter/vnext_schemas.py`，文档见 `docs/spec/VNEXT_INTERFACE.md`。
+vNext REST 契约定义在 `memoryhub/adapter/vnext_schemas.py`，文档见 `docs/vnext/spec/VNEXT_INTERFACE.md`。
 
 主要端点：
 
@@ -86,9 +86,9 @@ vNext REST 契约定义在 `memoryhub/adapter/vnext_schemas.py`，文档见 `doc
 
 ## 更多文档
 
-- 部署与运维：`docs/spec/VNEXT_DEPLOYMENT.md`
-- 迁移与回滚：`docs/spec/VNEXT_MIGRATION.md`
-- 备份与恢复：`docs/spec/VNEXT_BACKUP_RECOVERY.md`
-- 故障处理：`docs/spec/VNEXT_FAULT_HANDLING.md`
-- 灰度与回滚：`docs/spec/VNEXT_ROLLOUT.md`
-- Trace 契约：`docs/spec/VNEXT_TRACE.md`
+- 部署与运维：`docs/vnext/spec/VNEXT_DEPLOYMENT.md`
+- 迁移与回滚：`docs/vnext/spec/VNEXT_MIGRATION.md`
+- 备份与恢复：`docs/vnext/spec/VNEXT_BACKUP_RECOVERY.md`
+- 故障处理：`docs/vnext/spec/VNEXT_FAULT_HANDLING.md`
+- 灰度与回滚：`docs/vnext/spec/VNEXT_ROLLOUT.md`
+- Trace 契约：`docs/vnext/spec/VNEXT_TRACE.md`

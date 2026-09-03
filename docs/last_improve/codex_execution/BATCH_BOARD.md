@@ -54,8 +54,8 @@
 
 ## B18 final validation and acceptance — 2026-08-25
 
-- S5-09 DONE: `docs/spec/VNEXT_DEPLOYMENT.md`, `VNEXT_BACKUP_RECOVERY.md`, `VNEXT_FAULT_HANDLING.md`, `VNEXT_ACCEPTANCE.md`, and updated `agent-integration/README.md` provide executable CLI/MCP/SDK commands and ops runbooks.
-- S5-10 DONE: `examples/vnext_demo/` provides fixed, redacted, replayable demo scenarios with deterministic output; `docs/spec/VNEXT_ACCEPTANCE.md` records final Gate PASS.
+- S5-09 DONE: `docs/vnext/spec/VNEXT_DEPLOYMENT.md`, `VNEXT_BACKUP_RECOVERY.md`, `VNEXT_FAULT_HANDLING.md`, `VNEXT_ACCEPTANCE.md`, and updated `agent-integration/README.md` provide executable CLI/MCP/SDK commands and ops runbooks.
+- S5-10 DONE: `examples/vnext_demo/` provides fixed, redacted, replayable demo scenarios with deterministic output; `docs/vnext/spec/VNEXT_ACCEPTANCE.md` records final Gate PASS.
 - S5 Gate / P0 / P1 / Release Gate PASS: all 57 tasks, 18 batches and all Gates have valid evidence; no unresolved security, tenant, data consistency, Forget or rollback blockers.
 
 ## Invariant check
