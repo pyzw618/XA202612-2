@@ -42,43 +42,51 @@
 
 ```mermaid
 graph TB
-    subgraph 接入层
-        A1[OS Agent / CLI / MCP / OpenCode 插件]
-        A2[Qt 桌面控制台]
-        A3[Python SDK]
+    subgraph L1["接入层"]
+        A1["OS Agent · CLI · MCP · OpenCode 插件"]
+        A2["Qt 桌面控制台"]
+        A3["Python SDK"]
     end
-    subgraph REST 适配层["REST 适配层（FastAPI · 6 组 Router）"]
-        B1["/api/memory/vnext — vNext 统一入口"]
-        B2["/api/memory — 标准接口"]
-        B3["/api/agent — Agent 演示适配"]
-        B4["/api/memory 管理类 + /api/memory/v2 溯源"]
-    end
-    subgraph vNext 应用层["vNext 应用层（memoryhub/application/）"]
-        C1[EventGateway 事件网关]
-        C2[CanonicalWrite 统一写入]
-        C3[FormationWorker 记忆形成]
-        C4[Retrieval/Context Service 检索与上下文]
-        C5[Feedback/Evolution 反馈演化]
-        C6[Rollout/Shadow 灰度对照]
-        C7[Forget/Diagnostics 遗忘诊断]
-    end
-    subgraph 领域核心["领域核心（memoryhub/core/）"]
-        D1[摄取流水] --- D2[偏好/知识抽取] --- D3[冲突/遗忘/生命周期] --- D4[安全门禁]
-    end
-    subgraph 存储层
-        E1[(SQLite 事实源<br/>Authority / 谱系 / 证据 / Outbox)]
-        E2[(Milvus / FAISS<br/>向量+稀疏投影)]
-        E3[(Trace / 指标 / 审计)]
-    end
-    F1[麒麟 Embedding SDK<br/>768 维 · ctypes+DBus]
-    F2[OpenAI 兼容 LLM]
 
-    接入层 --> REST 适配层 --> vNext 应用层
-    vNext 应用层 --> 领域核心
-    vNext 应用层 --> 存储层
-    领域核心 --> 存储层
-    F1 -.-> 存储层
-    F2 -.-> 领域核心
+    subgraph L2["REST 适配层（FastAPI · 6 组 Router）"]
+        B1["/api/memory/vnext — vNext 统一入口"]
+        B2["/api/memory — 标准接口（写入默认转发 vNext）"]
+        B3["/api/agent — Agent 演示适配"]
+        B4["/api/memory 管理面 · /api/memory/v2 溯源"]
+    end
+
+    subgraph L3["vNext 应用层（memoryhub/application/）"]
+        C1["EventGateway 事件网关"]
+        C2["CanonicalWrite 统一写入"]
+        C3["FormationWorker 记忆形成"]
+        C4["Retrieval / Context Service 检索与上下文"]
+        C5["Feedback / Evolution 反馈演化"]
+        C6["Rollout / Shadow 灰度对照"]
+        C7["Forget / Diagnostics 遗忘诊断"]
+    end
+
+    subgraph L4["领域层（domain/ 契约 + core/ 领域实现）"]
+        D1["摄取流水"]
+        D2["偏好 / 知识抽取"]
+        D3["冲突 / 遗忘 / 生命周期"]
+        D4["安全门禁"]
+    end
+
+    subgraph L5["存储层"]
+        E1[("SQLite 事实源<br/>Authority · 谱系 · 证据 · Outbox")]
+        E2[("Milvus / FAISS<br/>向量 + 稀疏投影")]
+        E3[("Trace · 指标 · 审计")]
+    end
+
+    F1["麒麟 Embedding SDK<br/>768 维 · ctypes + DBus"]
+    F2["OpenAI 兼容 LLM"]
+
+    L1 --> L2 --> L3
+    L3 --> L4
+    L3 --> L5
+    L4 --> L5
+    F1 -.-> L5
+    F2 -.-> L4
 ```
 
 - **写入**：所有生产写入收敛到 Canonical Write → Authority 单写者（单事务：记忆 + 谱系 + 证据 + Outbox），向量/关键词/缓存经 Projection Outbox 异步投影，SQLite 是唯一事实源。
