@@ -3,11 +3,77 @@ set -eu
 
 python_bin=/opt/memoryhub/venv/bin/python
 health_url=http://127.0.0.1:8099/api/health
+runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+expected_generation_file=/opt/memoryhub/install-generation
+running_generation_file="$runtime_dir/memoryhub-service-generation"
+service_pid_file="$runtime_dir/memoryhub-service.pid"
 
 is_healthy() {
     "$python_bin" -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=1).read()' "$health_url" \
         >/dev/null 2>&1
 }
+
+generation_matches() {
+    [ -r "$expected_generation_file" ] &&
+        [ -r "$running_generation_file" ] &&
+        [ "$(cat "$expected_generation_file")" = "$(cat "$running_generation_file")" ]
+}
+
+is_memoryhub_pid() {
+    pid="$1"
+    [ -r "/proc/$pid/status" ] || return 1
+    [ "$(awk '/^Uid:/ { print $2; exit }' "/proc/$pid/status")" = "$(id -u)" ] || return 1
+    cmdline="$(tr '\000' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+    case "$cmdline" in
+        *"/opt/memoryhub/venv/bin/python -m uvicorn memoryhub.app:app"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+stop_stale_service() {
+    stopped=false
+    if [ -r "$service_pid_file" ]; then
+        pid="$(cat "$service_pid_file" 2>/dev/null || true)"
+        case "$pid" in
+            ''|*[!0-9]*) ;;
+            *)
+                if is_memoryhub_pid "$pid"; then
+                    kill "$pid" 2>/dev/null || true
+                    stopped=true
+                fi
+                ;;
+        esac
+    fi
+
+    # Revisions before generation tracking did not create a PID file.  Scan
+    # only this user's processes and validate the complete MemoryHub command
+    # line before sending a signal.
+    if [ "$stopped" = false ]; then
+        for proc in /proc/[0-9]*; do
+            pid="${proc#/proc/}"
+            if is_memoryhub_pid "$pid"; then
+                kill "$pid" 2>/dev/null || true
+                stopped=true
+            fi
+        done
+    fi
+
+    if [ "$stopped" = true ]; then
+        attempts=0
+        while [ "$attempts" -lt 20 ] && is_healthy; do
+            attempts=$((attempts + 1))
+            sleep 0.1
+        done
+    fi
+    rm -f "$running_generation_file" "$service_pid_file"
+}
+
+# A healthy endpoint is insufficient after an in-place package upgrade: the
+# old Python process can still be alive while its virtual environment has been
+# replaced.  Restart it before any updated module is imported lazily.
+if is_healthy && ! generation_matches; then
+    stop_stale_service
+fi
 
 if ! is_healthy; then
     state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
