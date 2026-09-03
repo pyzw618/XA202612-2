@@ -1,0 +1,6 @@
+# Keep the async runtime stable across in-place graphical upgrades.  A Kylin
+# desktop-session process may remain alive until the application is opened
+# again; changing AnyIO underneath that process can otherwise mix two module
+# versions during a lazy import.  The generation-aware launcher performs the
+# restart, and this constraint provides a second layer of compatibility.
+anyio==4.15.0

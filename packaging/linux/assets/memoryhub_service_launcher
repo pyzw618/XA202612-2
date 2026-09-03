@@ -15,5 +15,17 @@ set -eu
 export MEMORYHUB_CONFIG MEMORYHUB_RUNTIME_MODE MEMORYHUB_RUNTIME_ALLOW_FALLBACK
 export MEMORYHUB_EMBEDDING_PROVIDER MEMORYHUB_VECTOR_ENGINE_PROVIDER MEMORYHUB_DB_PATH
 
+# Record which installed payload owns the running process.  During a graphical
+# package upgrade Kylin may leave the previous desktop-session process alive
+# while /opt/memoryhub/venv is replaced.  The GUI launcher uses these files to
+# detect that state and restart the service before opening the client.
+runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+generation_file=/opt/memoryhub/install-generation
+if [ -d "$runtime_dir" ] && [ -r "$generation_file" ]; then
+    umask 077
+    cat "$generation_file" >"$runtime_dir/memoryhub-service-generation"
+    printf '%s\n' "$$" >"$runtime_dir/memoryhub-service.pid"
+fi
+
 exec /opt/memoryhub/venv/bin/python -m uvicorn memoryhub.app:app \
     --host 127.0.0.1 --port 8099

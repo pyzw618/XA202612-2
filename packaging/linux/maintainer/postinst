@@ -12,6 +12,11 @@ if [ "${1:-configure}" = "configure" ]; then
     "$venv/bin/python" -m pip install --no-index --no-cache-dir \
         --find-links /usr/share/memoryhub/wheelhouse "kylin-memoryhub==@VERSION@"
 
+    # The GUI launcher compares this immutable marker with the marker written
+    # by the running service.  This lets it safely restart a process left alive
+    # by Kylin's graphical package upgrader after the venv was replaced.
+    printf '%s\n' '@VERSION@-@REVISION@' >/opt/memoryhub/install-generation
+
     # Kylin's application-execution control blocks newly installed binaries
     # until they are registered. This is a no-op on Debian/Ubuntu systems.
     if command -v /usr/sbin/kyexectl >/dev/null 2>&1; then

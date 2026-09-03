@@ -46,7 +46,8 @@ mkdir -p "$BUILD_ROOT" "$DIST_DIR" "$STAGE/DEBIAN" "$WHEELHOUSE"
 echo "[1/5] Building Python wheels"
 python3 -m venv "$BUILD_VENV"
 "$BUILD_VENV/bin/python" -m pip install --upgrade pip wheel setuptools
-"$BUILD_VENV/bin/python" -m pip wheel --wheel-dir "$WHEELHOUSE" "$PROJECT_ROOT"
+"$BUILD_VENV/bin/python" -m pip wheel --constraint "$SCRIPT_DIR/constraints.txt" \
+    --wheel-dir "$WHEELHOUSE" "$PROJECT_ROOT"
 project_wheel="$(find "$WHEELHOUSE" -maxdepth 1 -name 'kylin_memoryhub-*.whl' -print -quit)"
 "$BUILD_VENV/bin/python" -c 'import sys, zipfile; required={"memoryhub/safety_rules/data/__init__.py", "memoryhub/safety_rules/data/catalog.json", "memoryhub/safety_rules/data/builtin-1.0.json"}; names=set(zipfile.ZipFile(sys.argv[1]).namelist()); missing=required-names; assert not missing, f"wheel missing resources: {sorted(missing)}"' "$project_wheel"
 
@@ -117,7 +118,8 @@ local service is started for that user. Existing user memory under
 Package version: $VERSION-$REVISION
 EOF
 
-sed "s/@VERSION@/$VERSION/g" "$SCRIPT_DIR/maintainer/postinst" > "$STAGE/DEBIAN/postinst"
+sed -e "s/@VERSION@/$VERSION/g" -e "s/@REVISION@/$REVISION/g" \
+    "$SCRIPT_DIR/maintainer/postinst" > "$STAGE/DEBIAN/postinst"
 install -m 0755 "$SCRIPT_DIR/maintainer/prerm" "$STAGE/DEBIAN/prerm"
 install -m 0755 "$SCRIPT_DIR/maintainer/postrm" "$STAGE/DEBIAN/postrm"
 chmod 0755 "$STAGE/DEBIAN/postinst"
@@ -145,6 +147,7 @@ test -x "$STAGE/usr/bin/memoryhub-client"
 test -x "$STAGE/usr/bin/memoryhub_service_launcher"
 test -x "$STAGE/usr/bin/memoryhub_session_launcher"
 test -x "$STAGE/usr/bin/memoryhub_app_launcher"
+grep -q "$VERSION-$REVISION" "$STAGE/DEBIAN/postinst"
 test ! -e "$STAGE/usr/lib/systemd/user/memoryhub.service"
 test -f "$STAGE/usr/share/memoryhub/opencode/memoryhub.plugin.mjs"
 test -f "$STAGE/usr/share/memoryhub/opencode/skills/memory-awareness/SKILL.md"
