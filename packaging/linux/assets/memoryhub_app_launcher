@@ -16,7 +16,13 @@ is_healthy() {
 generation_matches() {
     [ -r "$expected_generation_file" ] &&
         [ -r "$running_generation_file" ] &&
-        [ "$(cat "$expected_generation_file")" = "$(cat "$running_generation_file")" ]
+        [ "$(cat "$expected_generation_file")" = "$(cat "$running_generation_file")" ] &&
+        [ -r "$service_pid_file" ] || return 1
+    pid="$(cat "$service_pid_file" 2>/dev/null || true)"
+    case "$pid" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    is_memoryhub_pid "$pid"
 }
 
 is_memoryhub_pid() {
@@ -45,18 +51,17 @@ stop_stale_service() {
         esac
     fi
 
-    # Revisions before generation tracking did not create a PID file.  Scan
-    # only this user's processes and validate the complete MemoryHub command
-    # line before sending a signal.
-    if [ "$stopped" = false ]; then
-        for proc in /proc/[0-9]*; do
-            pid="${proc#/proc/}"
-            if is_memoryhub_pid "$pid"; then
-                kill "$pid" 2>/dev/null || true
-                stopped=true
-            fi
-        done
-    fi
+    # Revisions before generation tracking did not create a PID file, and a
+    # failed upgrade can leave more than one launcher-owned service behind.
+    # Always scan every process owned by this user, validate the complete
+    # MemoryHub command line, and stop all matches.
+    for proc in /proc/[0-9]*; do
+        pid="${proc#/proc/}"
+        if is_memoryhub_pid "$pid"; then
+            kill "$pid" 2>/dev/null || true
+            stopped=true
+        fi
+    done
 
     if [ "$stopped" = true ]; then
         attempts=0
@@ -80,12 +85,22 @@ if ! is_healthy; then
     log_dir="$state_home/MemoryHub"
     mkdir -p "$log_dir"
     /usr/bin/memoryhub_session_launcher >>"$log_dir/service.log" 2>&1 &
+    service_pid="$!"
 
     attempts=0
-    while [ "$attempts" -lt 20 ] && ! is_healthy; do
+    while [ "$attempts" -lt 40 ] && ! is_healthy && kill -0 "$service_pid" 2>/dev/null; do
         attempts=$((attempts + 1))
         sleep 0.25
     done
+
+    # Publish the generation marker only after the new process has actually
+    # bound the health endpoint.  This prevents a failed bind from making an
+    # older service appear current on the next launch.
+    if is_healthy && is_memoryhub_pid "$service_pid"; then
+        umask 077
+        cat "$expected_generation_file" >"$running_generation_file"
+        printf '%s\n' "$service_pid" >"$service_pid_file"
+    fi
 fi
 
 exec /usr/bin/memoryhub-client
