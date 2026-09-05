@@ -18,6 +18,7 @@ WHEELHOUSE="$STAGE/usr/share/memoryhub/wheelhouse"
 BUILD_VENV="$BUILD_ROOT/build-venv"
 CLIENT_BUILD="$BUILD_ROOT/desktop-client"
 OUTPUT="$DIST_DIR/${PACKAGE_NAME}_${VERSION}-${REVISION}_${ARCH}.deb"
+WHEEL_CACHE="${MEMORYHUB_WHEEL_CACHE:-}"
 
 test -n "$VERSION" || { echo "Package version is empty" >&2; exit 2; }
 
@@ -44,10 +45,18 @@ rm -rf "$BUILD_ROOT"
 mkdir -p "$BUILD_ROOT" "$DIST_DIR" "$STAGE/DEBIAN" "$WHEELHOUSE"
 
 echo "[1/5] Building Python wheels"
-python3 -m venv "$BUILD_VENV"
-"$BUILD_VENV/bin/python" -m pip install --upgrade pip wheel setuptools
-"$BUILD_VENV/bin/python" -m pip wheel --constraint "$SCRIPT_DIR/constraints.txt" \
-    --wheel-dir "$WHEELHOUSE" "$PROJECT_ROOT"
+if [[ -n "$WHEEL_CACHE" ]]; then
+    test -d "$WHEEL_CACHE" || { echo "Wheel cache does not exist: $WHEEL_CACHE" >&2; exit 2; }
+    python3 -m venv --system-site-packages "$BUILD_VENV"
+    "$BUILD_VENV/bin/python" -m pip wheel --no-index --no-build-isolation \
+        --find-links "$WHEEL_CACHE" --constraint "$SCRIPT_DIR/constraints.txt" \
+        --wheel-dir "$WHEELHOUSE" "$PROJECT_ROOT"
+else
+    python3 -m venv "$BUILD_VENV"
+    "$BUILD_VENV/bin/python" -m pip install --upgrade pip wheel setuptools
+    "$BUILD_VENV/bin/python" -m pip wheel --constraint "$SCRIPT_DIR/constraints.txt" \
+        --wheel-dir "$WHEELHOUSE" "$PROJECT_ROOT"
+fi
 project_wheel="$(find "$WHEELHOUSE" -maxdepth 1 -name 'kylin_memoryhub-*.whl' -print -quit)"
 "$BUILD_VENV/bin/python" -c 'import sys, zipfile; required={"memoryhub/safety_rules/data/__init__.py", "memoryhub/safety_rules/data/catalog.json", "memoryhub/safety_rules/data/builtin-1.0.json"}; names=set(zipfile.ZipFile(sys.argv[1]).namelist()); missing=required-names; assert not missing, f"wheel missing resources: {sorted(missing)}"' "$project_wheel"
 
