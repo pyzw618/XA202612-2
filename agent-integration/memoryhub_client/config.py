@@ -2,10 +2,35 @@
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+
+def current_user_id() -> str:
+    """Return the interactive OS account used to own MemoryHub data.
+
+    Install helpers can run below sudo, so prefer SUDO_USER over root.  The
+    environment-first order also keeps this deterministic in KARE containers.
+    """
+
+    sudo_user = os.getenv("SUDO_USER", "").strip()
+    env_user = (os.getenv("USER", "") or os.getenv("LOGNAME", "")).strip()
+    if env_user == "root" and sudo_user and sudo_user != "root":
+        return sudo_user
+    for candidate in (
+        env_user,
+        os.getenv("USERNAME", "").strip(),
+    ):
+        if candidate:
+            return candidate
+    try:
+        candidate = getpass.getuser().strip()
+    except (OSError, KeyError):
+        candidate = ""
+    return candidate or "default"
 
 
 def _bool(value: object, default: bool) -> bool:
@@ -35,7 +60,7 @@ def _read_json(path: Path) -> dict:
 @dataclass(frozen=True)
 class ClientConfig:
     api_url: str = "http://127.0.0.1:8099"
-    user_id: str = "opencode"
+    user_id: str = field(default_factory=current_user_id)
     tenant_id: str = "default"
     project: str = ""
     scene: str = "code"
@@ -93,7 +118,7 @@ class ClientConfig:
         values.update({key: value for key, value in overrides.items() if value not in (None, "")})
         return cls(
             api_url=str(values.get("api_url") or cls.api_url).rstrip("/"),
-            user_id=str(values.get("user_id") or cls.user_id),
+            user_id=str(values.get("user_id") or current_user_id()),
             tenant_id=str(values.get("tenant_id") or cls.tenant_id),
             project=str(values.get("project") or project_root),
             scene=str(values.get("scene") or cls.scene),

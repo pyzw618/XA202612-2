@@ -1,0 +1,52 @@
+#!/bin/sh
+set -eu
+
+home_dir="${HOME:-}"
+if [ -z "$home_dir" ] || [ ! -d "$home_dir" ]; then
+    home_dir="$(getent passwd "$(id -un)" | cut -d: -f6)"
+fi
+
+agent_shell="/usr/lib/memoryhub/open-agent-shell"
+if [ ! -x "$agent_shell" ]; then
+    echo "memoryhub: Agent launcher is unavailable; reinstall MemoryHub" >&2
+    exit 2
+fi
+
+terminal=""
+for candidate in ukui-terminal mate-terminal gnome-terminal konsole x-terminal-emulator; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+        terminal="$candidate"
+        break
+    fi
+done
+
+if [ "${1:-}" = "--check" ]; then
+    printf 'terminal=%s\nhome=%s\n' "${terminal:-unavailable}" "$home_dir"
+    [ -n "$terminal" ]
+    exit
+fi
+
+if [ -z "$terminal" ]; then
+    echo "memoryhub: no supported graphical terminal was found" >&2
+    exit 2
+fi
+
+case "$terminal" in
+    ukui-terminal)
+        nohup ukui-terminal --working-directory="$home_dir" -e "$agent_shell" >/dev/null 2>&1 &
+        ;;
+    mate-terminal)
+        nohup mate-terminal --working-directory="$home_dir" --command "$agent_shell" >/dev/null 2>&1 &
+        ;;
+    gnome-terminal)
+        nohup gnome-terminal --working-directory="$home_dir" -- "$agent_shell" >/dev/null 2>&1 &
+        ;;
+    konsole)
+        nohup konsole --workdir "$home_dir" -e "$agent_shell" >/dev/null 2>&1 &
+        ;;
+    *)
+        (cd "$home_dir" && nohup "$terminal" -e "$agent_shell" >/dev/null 2>&1 &)
+        ;;
+esac
+
+exit 0

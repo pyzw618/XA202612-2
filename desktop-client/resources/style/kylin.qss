@@ -70,6 +70,7 @@ QLabel#chartEmpty { color: #8B93A2; background: transparent; font-size: 12px; }
 QLabel#inlineBanner { background: #EEF4FF; color: #436B9F; border: 1px solid #D9E6FA; border-radius: 8px; padding: 10px 13px; }
 QLabel#inlineBanner[state="offline"] { background: #FFF5F1; color: #A8553B; border-color: #F2D9D0; }
 QLabel#inlineBanner[state="warning"] { background: #FFF9EC; color: #8D651D; border-color: #F0E0B9; }
+QLabel#inlineBanner[state="success"] { background: #ECFDF3; color: #18794E; border-color: #B7E4C7; }
 QFrame#taskItem { background: #F7F9FC; border: 1px solid transparent; border-radius: 8px; }
 QFrame#taskItem:hover { background: #EEF3FA; border-color: #E1E8F1; }
 QLabel#taskIcon { background: #FFFFFF; border-radius: 8px; }
@@ -108,6 +109,8 @@ QPushButton:disabled { background: #F5F7FA; color: #AAB1BD; border-color: #E8EBF
 QPushButton#primaryButton, QPushButton#primaryBtn { background: #3D78DF; border-color: #3D78DF; color: #FFFFFF; font-weight: 400; }
 QPushButton#primaryButton:hover, QPushButton#primaryBtn:hover { background: #336DCC; }
 QPushButton#secondaryButton { background: #FFFFFF; }
+QPushButton#agentButton { background: #7457D9; border-color: #7457D9; color: #FFFFFF; }
+QPushButton#agentButton:hover { background: #6549C7; }
 QPushButton#dangerBtn { color: #C55135; border-color: #DF9A88; }
 QPushButton#solidDangerBtn { background: #C55135; border-color: #C55135; color: #FFFFFF; }
 QPushButton#textBtn { background: transparent; border: none; color: #3D78DF; padding: 3px 6px; }

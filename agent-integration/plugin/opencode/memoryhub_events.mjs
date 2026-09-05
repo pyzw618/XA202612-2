@@ -16,12 +16,25 @@ export const DEFAULT_CONFIG = {
 
 export function resolveConfig(options = {}, env = process.env) {
   const bool = (key, fallback) => env[key] === undefined ? fallback : !["0", "false", "no", "off"].includes(String(env[key]).toLowerCase())
-  let file = {}
+  let globalFile = {}
+  const configHome = env.XDG_CONFIG_HOME || join(env.HOME || env.USERPROFILE || "", ".config")
+  if (configHome) {
+    try { globalFile = JSON.parse(readFileSync(join(configHome, "memoryhub", "config.json"), "utf8")) } catch {}
+  }
+  let projectFile = {}
   const root = options.projectRoot || options.worktree
   if (root) {
     // Configuration files are optional; plugin loading must remain fail-soft.
-    try { file = JSON.parse(readFileSync(join(root, ".memoryhub", "config.json"), "utf8")) } catch {}
+    try { projectFile = JSON.parse(readFileSync(join(root, ".memoryhub", "config.json"), "utf8")) } catch {}
   }
+  const normalize = (value) => ({
+    ...value,
+    ...(value.api_url && !value.apiUrl ? { apiUrl: value.api_url } : {}),
+    ...(value.user_id && !value.userId ? { userId: value.user_id } : {}),
+    ...(value.task_type && !value.taskType ? { taskType: value.task_type } : {}),
+    ...(value.auto_record !== undefined && value.autoRecord === undefined ? { autoRecord: value.auto_record } : {}),
+  })
+  const file = { ...normalize(globalFile), ...normalize(projectFile) }
   const source = { ...DEFAULT_CONFIG, ...file, ...options }
   const auto = source.autoRecord && typeof source.autoRecord === "object" ? source.autoRecord : {}
   const allowed = env.MEMORYHUB_TOOL_ALLOW || options.toolAllow || file.toolAllow || auto.toolAllow || DEFAULT_CONFIG.toolAllow

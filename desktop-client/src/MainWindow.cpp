@@ -5,11 +5,13 @@
 #include <QHeaderView>
 #include <QImage>
 #include <QLabel>
+#include <QList>
 #include <QListView>
 #include <QLineEdit>
 #include <QPainter>
 #include <QPalette>
 #include <QPushButton>
+#include <QPair>
 #include <QRegion>
 #include <QResizeEvent>
 #include <QScreen>
@@ -102,7 +104,9 @@ QIcon navIcon(const QString &iconPath) {
 
 class UserSwitcherPopup : public QWidget {
 public:
-    explicit UserSwitcherPopup(std::function<void(const QString &)> onSelect, QWidget *parent = nullptr)
+    explicit UserSwitcherPopup(const QList<QPair<QString, QString>> &users,
+                               std::function<void(const QString &)> onSelect,
+                               QWidget *parent = nullptr)
         : QWidget(parent, Qt::Popup | Qt::FramelessWindowHint), m_onSelect(std::move(onSelect)) {
         setAttribute(Qt::WA_TranslucentBackground, true);
         setAttribute(Qt::WA_ShowWithoutActivating, true);
@@ -110,9 +114,11 @@ public:
         auto *layout = new QVBoxLayout(this);
         layout->setContentsMargins(7, 7, 7, 7);
         layout->setSpacing(3);
-        for (const QString &userId : {QString("default"), QString("demo_user")}) {
-            auto *button = new QPushButton(userId, this);
+        for (const auto &user : users) {
+            const QString userId = user.first;
+            auto *button = new QPushButton(user.second, this);
             button->setObjectName("userPopupOption");
+            button->setProperty("userId", userId);
             button->setCheckable(true);
             button->setFixedHeight(36);
             connect(button, &QPushButton::clicked, this, [this, userId]() {
@@ -126,7 +132,7 @@ public:
 
     void setCurrentUser(const QString &userId) {
         for (QPushButton *button : m_options)
-            button->setChecked(button->text() == userId);
+            button->setChecked(button->property("userId").toString() == userId);
     }
 
 protected:
@@ -216,7 +222,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     avatar->setFixedSize(34, 34);
     auto *accountLabels = new QVBoxLayout();
     accountLabels->setSpacing(0);
-    auto *accountCaption = new QLabel("当前用户", account);
+    auto *accountCaption = new QLabel("记忆用户", account);
     accountCaption->setObjectName("accountCaption");
     auto *userSwitcher = new QWidget(account);
     userSwitcher->setObjectName("userSwitcherFrame");
@@ -224,10 +230,16 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     auto *userSwitcherLayout = new QHBoxLayout(userSwitcher);
     userSwitcherLayout->setContentsMargins(10, 0, 4, 0);
     userSwitcherLayout->setSpacing(2);
-    m_userEdit = new QLineEdit("default", userSwitcher);
+    m_userEdit = new QLineEdit(AppContext::instance()->userId(), userSwitcher);
     m_userEdit->setObjectName("userSwitcher");
-    m_userEdit->setToolTip("当前用户 ID（可直接输入，所有请求携带 user_id）");
-    auto *userPopup = new UserSwitcherPopup([this](const QString &userId) {
+    m_userEdit->setReadOnly(true);
+    m_userEdit->setToolTip("当前记忆归属；默认使用登录 Linux 的系统用户");
+    const QString systemUser = AppContext::instance()->systemUserId();
+    const QList<QPair<QString, QString>> userChoices{
+        {systemUser, QString("%1（当前用户）").arg(systemUser)},
+        {AppContext::globalUserId(), QStringLiteral("global（全局用户）")},
+    };
+    auto *userPopup = new UserSwitcherPopup(userChoices, [this](const QString &userId) {
         m_userEdit->setText(userId);
         AppContext::instance()->setUserId(userId);
         refreshCurrentPage();
@@ -267,16 +279,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connectionRow->addWidget(m_statusText, 1);
     accountLay->addLayout(connectionRow);
     sidebarLay->addWidget(account);
-
-    connect(m_userEdit, &QLineEdit::editingFinished, this, [this]() {
-        const QString userId = m_userEdit->text().trimmed();
-        if (userId.isEmpty()) {
-            m_userEdit->setText(AppContext::instance()->userId());
-            return;
-        }
-        AppContext::instance()->setUserId(userId);
-        refreshCurrentPage();
-    });
 
     // ---------------- 右列：顶栏 + 内容栈 ----------------
     auto *right = new QWidget(central);

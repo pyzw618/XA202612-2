@@ -6,6 +6,8 @@
 #include <QList>
 
 class QLabel;
+class QProcess;
+class QPushButton;
 class QWidget;
 class QVBoxLayout;
 class QGridLayout;
@@ -16,7 +18,8 @@ class QFrame;
 namespace QtCharts {
 class QChartView;
 class QPieSeries;
-class QBarSeries;
+class QStackedBarSeries;
+class QValueAxis;
 }
 
 class DashboardPage : public BasePage {
@@ -38,10 +41,13 @@ private:
     void updateActivity(const QJsonArray &items, bool ok);
     void updateTasks();
     void setBanner(const QString &text, const QString &state);
+    void configureOpenCode();
+    void openAgent();
 
     QList<StatCard *> m_statCards;
     QtCharts::QPieSeries *m_pieSeries = nullptr;
-    QtCharts::QBarSeries *m_barSeries = nullptr;
+    QtCharts::QStackedBarSeries *m_barSeries = nullptr;
+    QtCharts::QValueAxis *m_barAxisY = nullptr;
     QLabel *m_banner = nullptr;
     QLabel *m_chartEmpty = nullptr;
     QLabel *m_pieCenter = nullptr;
@@ -58,6 +64,9 @@ private:
     QFrame *m_pieCard = nullptr;
     QFrame *m_activityCard = nullptr;
     QFrame *m_taskCard = nullptr;
+    QPushButton *m_configureButton = nullptr;
+    QPushButton *m_openAgentButton = nullptr;
+    QProcess *m_configProcess = nullptr;
     bool m_narrowLayout = false;
 
     int m_generation = 0;
