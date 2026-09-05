@@ -54,6 +54,9 @@ sudo apt install -y python3 python3-venv python3-pip build-essential cmake \
 bash packaging/linux/build-deb.sh
 # 产物：packaging/linux/dist/kylin-memoryhub_<version>-<revision>_amd64.deb (+ .sha256)
 # 版本号取自 pyproject.toml；可用 MEMORYHUB_PACKAGE_VERSION / MEMORYHUB_PACKAGE_REVISION 覆盖
+
+# 构建机无法访问 PyPI 时，可复用上一版 DEB 中的 wheelhouse：
+MEMORYHUB_WHEEL_CACHE=/path/to/wheelhouse bash packaging/linux/build-deb.sh
 ```
 
 构建流程：生成 Python wheelhouse（离线依赖）→ 编译并测试 Qt 客户端 → 装配 DEB。目标机安装时**无需访问 PyPI**。
