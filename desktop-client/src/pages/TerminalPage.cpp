@@ -7,6 +7,7 @@
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
+#include <QStandardPaths>
 #include <QTextCursor>
 #include <QVBoxLayout>
 
@@ -43,8 +44,8 @@ TerminalPage::TerminalPage(QWidget *parent) : BasePage(parent) {
     auto *label = new QLabel("命令：", this);
     m_cmdCombo = new QComboBox(this);
     m_cmdCombo->setEditable(true);
-    m_cmdCombo->addItem(DEFAULT_SHELL);
     m_cmdCombo->addItem("opencode");
+    m_cmdCombo->addItem(DEFAULT_SHELL);
     m_cmdCombo->addItem("bash");
     m_cmdCombo->addItem("cmd");
     m_cmdCombo->setFixedWidth(240);
@@ -77,8 +78,8 @@ TerminalPage::TerminalPage(QWidget *parent) : BasePage(parent) {
     root->addWidget(m_input);
 
     // 提示
-    append("MemoryHub 内置终端：选择一个命令后点击「启动」。\n"
-           "若使用 opencode，启动后在其界面中输入自然语言即可沉淀记忆。\n"
+    append("MemoryHub 终端：选择一个命令后点击「启动」。\n"
+           "选择 opencode 时会在主目录打开系统终端，以获得完整交互体验。\n"
            "────────────────────────────────────────────\n",
            QColor("#94A3B8"));
 }
@@ -106,6 +107,21 @@ void TerminalPage::startProcess() {
     }
     const QString cmd = m_cmdCombo->currentText().trimmed();
     append(QString("$ %1\n").arg(cmd), QColor("#E2E8F0"));
+
+#ifndef Q_OS_WIN
+    if (cmd == QStringLiteral("opencode")) {
+        const QString launcher = QStandardPaths::findExecutable(QStringLiteral("memoryhub-open-agent"));
+        if (!launcher.isEmpty() && QProcess::startDetached(launcher, {})) {
+            append("已在主目录打开系统终端并启动 OpenCode。\n", QColor("#34D399"));
+            m_stateLabel->setText("已打开");
+            m_stateLabel->setStyleSheet("color:#16A34A;font-size:12px;");
+        } else {
+            append("打开失败：未找到 memoryhub-open-agent，请重新安装最新版 MemoryHub。\n",
+                   QColor("#F87171"));
+        }
+        return;
+    }
+#endif
 
 #ifdef Q_OS_WIN
     m_process->setProcessChannelMode(QProcess::MergedChannels);

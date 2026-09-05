@@ -2,12 +2,15 @@
 
 #include <QDateTime>
 #include <QEvent>
+#include <QFileInfo>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHeaderView>
 #include <QIcon>
 #include <QLabel>
+#include <QLinearGradient>
 #include <QPainter>
+#include <QProcess>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QStyle>
@@ -16,13 +19,16 @@
 #include <QGridLayout>
 #include <QKeyEvent>
 #include <QResizeEvent>
+#include <QStandardPaths>
+#include <QtMath>
 
 #include <QtCharts/QBarCategoryAxis>
-#include <QtCharts/QBarSeries>
 #include <QtCharts/QBarSet>
 #include <QtCharts/QChart>
 #include <QtCharts/QChartView>
 #include <QtCharts/QPieSeries>
+#include <QtCharts/QPieSlice>
+#include <QtCharts/QStackedBarSeries>
 #include <QtCharts/QValueAxis>
 
 #include "../AppContext.h"
@@ -46,6 +52,13 @@ const QColor kWorkflowColor("#7F6BDC");
 const QColor kCaseColor("#3FB6B2");
 const QColor kTemplateColor("#E8A23C");
 const QColor kFactColor("#D15B7E");
+
+QString installedHelper(const QString &name) {
+    const QString found = QStandardPaths::findExecutable(name);
+    if (!found.isEmpty()) return found;
+    const QString systemPath = QStringLiteral("/usr/bin/") + name;
+    return QFileInfo::exists(systemPath) ? systemPath : QString();
+}
 
 QString eventTypeLabel(const QString &raw) {
     if (raw == "agent_response") return "工具轨迹";
@@ -139,12 +152,22 @@ DashboardPage::DashboardPage(QWidget *parent) : BasePage(parent) {
     search->setObjectName("secondaryButton");
     auto *refresh = new QPushButton(QIcon(":/icons/refresh.svg"), "刷新数据", header);
     refresh->setObjectName("primaryButton");
+    m_configureButton = new QPushButton("一键配置", header);
+    m_configureButton->setObjectName("secondaryButton");
+    m_configureButton->setToolTip("为当前 Linux 用户安装或修复 OpenCode 插件配置");
+    m_openAgentButton = new QPushButton("打开 Agent", header);
+    m_openAgentButton->setObjectName("agentButton");
+    m_openAgentButton->setToolTip("在主目录打开系统终端并启动 OpenCode");
     header->actionLayout()->addWidget(m_updateTime);
     header->actionLayout()->addWidget(search);
     header->actionLayout()->addWidget(refresh);
+    header->actionLayout()->addWidget(m_configureButton);
+    header->actionLayout()->addWidget(m_openAgentButton);
     connect(search, &QPushButton::clicked, this,
             []() { AppContext::instance()->navigate("search"); });
     connect(refresh, &QPushButton::clicked, this, &DashboardPage::refresh);
+    connect(m_configureButton, &QPushButton::clicked, this, &DashboardPage::configureOpenCode);
+    connect(m_openAgentButton, &QPushButton::clicked, this, &DashboardPage::openAgent);
     layout->addWidget(header);
 
     m_banner = new QLabel(body);
@@ -186,22 +209,28 @@ DashboardPage::DashboardPage(QWidget *parent) : BasePage(parent) {
     QVBoxLayout *barLayout = nullptr;
     auto *barCard = makeCard(body, "记忆构成对比", "偏好记忆与知识记忆各子类型的绝对数量", &barLayout);
     m_barCard = barCard;
-    m_barSeries = new QtCharts::QBarSeries();
+    m_barSeries = new QtCharts::QStackedBarSeries();
+    m_barSeries->setBarWidth(0.62);
+    m_barSeries->setLabelsVisible(true);
+    m_barSeries->setLabelsPosition(QtCharts::QAbstractBarSeries::LabelsCenter);
     auto *barChart = new QtCharts::QChart();
     barChart->addSeries(m_barSeries);
     barChart->legend()->hide();
     barChart->setBackgroundVisible(false);
     barChart->setMargins(QMargins(4, 4, 4, 4));
+    barChart->setAnimationOptions(QtCharts::QChart::SeriesAnimations);
+    barChart->setAnimationDuration(450);
     auto *axisX = new QtCharts::QBarCategoryAxis();
     axisX->append({"偏好", "工作流", "案例", "模板", "事实"});
     barChart->addAxis(axisX, Qt::AlignBottom);
     m_barSeries->attachAxis(axisX);
-    auto *axisY = new QtCharts::QValueAxis();
-    axisY->setMin(0);
-    axisY->setLabelFormat("%d");
-    axisY->setGridLineColor(QColor("#E8EBF0"));
-    barChart->addAxis(axisY, Qt::AlignLeft);
-    m_barSeries->attachAxis(axisY);
+    m_barAxisY = new QtCharts::QValueAxis();
+    m_barAxisY->setRange(0, 4);
+    m_barAxisY->setTickCount(5);
+    m_barAxisY->setLabelFormat("%d");
+    m_barAxisY->setGridLineColor(QColor("#E8EBF0"));
+    barChart->addAxis(m_barAxisY, Qt::AlignLeft);
+    m_barSeries->attachAxis(m_barAxisY);
     auto *barView = new QtCharts::QChartView(barChart, barCard);
     barView->setRenderHint(QPainter::Antialiasing);
     barView->setMinimumHeight(245);
@@ -216,8 +245,11 @@ DashboardPage::DashboardPage(QWidget *parent) : BasePage(parent) {
     auto *pieChart = new QtCharts::QChart();
     pieChart->addSeries(m_pieSeries);
     pieChart->legend()->setAlignment(Qt::AlignBottom);
+    pieChart->legend()->setLabelColor(QColor("#526174"));
     pieChart->setBackgroundVisible(false);
     pieChart->setMargins(QMargins(2, 2, 2, 2));
+    pieChart->setAnimationOptions(QtCharts::QChart::SeriesAnimations);
+    pieChart->setAnimationDuration(450);
     auto *pieContainer = new QWidget(pieCard);
     auto *pieOverlay = new QGridLayout(pieContainer);
     pieOverlay->setContentsMargins(0, 0, 0, 0);
@@ -403,19 +435,25 @@ void DashboardPage::updateMemoryVisuals() {
         m_statCards[0]->setLoading(false);
         m_pieCenter->setText(QString("%1\n总记忆").arg(total));
         m_barSeries->clear();
-        const struct { int value; const QColor &color; } barValues[] = {
-            {m_pref, kPrefColor},
-            {m_knowWorkflow, kWorkflowColor},
-            {m_knowCase, kCaseColor},
-            {m_knowTemplate, kTemplateColor},
-            {m_knowFact, kFactColor},
+        const struct { int value; const QColor &color; const char *name; } barValues[] = {
+            {m_pref, kPrefColor, "偏好"},
+            {m_knowWorkflow, kWorkflowColor, "工作流"},
+            {m_knowCase, kCaseColor, "案例"},
+            {m_knowTemplate, kTemplateColor, "模板"},
+            {m_knowFact, kFactColor, "事实"},
         };
+        int largest = 0;
         for (int i = 0; i < 5; ++i) {
-            auto *set = new QtCharts::QBarSet(QString::number(i));
+            auto *set = new QtCharts::QBarSet(QString::fromUtf8(barValues[i].name));
             set->setColor(barValues[i].color);
-            set->append(barValues[i].value);
+            for (int category = 0; category < 5; ++category)
+                set->append(category == i ? barValues[i].value : 0);
             m_barSeries->append(set);
+            largest = qMax(largest, barValues[i].value);
         }
+        const int axisMax = qMax(4, static_cast<int>(qCeil(largest * 1.25)));
+        m_barAxisY->setRange(0, axisMax);
+        m_barAxisY->setTickCount(qMin(6, axisMax + 1));
         m_pieSeries->clear();
         if (total == 0) {
             auto *empty = m_pieSeries->append("暂无数据", 1);
@@ -436,7 +474,20 @@ void DashboardPage::updateMemoryVisuals() {
                 auto *slice = m_pieSeries->append(
                     QString("%1 %2 (%3%)").arg(QString::fromUtf8(s.name)).arg(s.value)
                         .arg(qRound(s.value * 100.0 / total)), s.value);
-                slice->setColor(s.color);
+                QLinearGradient gradient(0, 0, 1, 1);
+                gradient.setCoordinateMode(QGradient::ObjectBoundingMode);
+                gradient.setColorAt(0.0, s.color.lighter(118));
+                gradient.setColorAt(1.0, s.color.darker(106));
+                slice->setBrush(gradient);
+                slice->setBorderColor(QColor("#FFFFFF"));
+                slice->setBorderWidth(2);
+                slice->setLabelColor(QColor("#334155"));
+                connect(slice, &QtCharts::QPieSlice::hovered, slice,
+                        [slice](bool hovered) {
+                            slice->setExploded(hovered);
+                            slice->setExplodeDistanceFactor(hovered ? 0.06 : 0.0);
+                            slice->setLabelVisible(hovered);
+                        });
             }
             m_chartEmpty->hide();
             m_pieCenter->show();
@@ -527,4 +578,44 @@ bool DashboardPage::eventFilter(QObject *watched, QEvent *event) {
         }
     }
     return BasePage::eventFilter(watched, event);
+}
+
+void DashboardPage::configureOpenCode() {
+    if (m_configProcess) return;
+    const QString helper = installedHelper(QStringLiteral("memoryhub-configure-opencode"));
+    if (helper.isEmpty()) {
+        setBanner("未找到 OpenCode 配置工具，请重新安装最新版 MemoryHub。", "warning");
+        return;
+    }
+    m_configureButton->setEnabled(false);
+    m_configureButton->setText("配置中…");
+    setBanner("正在为当前 Linux 用户配置 OpenCode 插件…", "info");
+    m_configProcess = new QProcess(this);
+    connect(m_configProcess, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+            [this](int exitCode, QProcess::ExitStatus status) {
+                const QString output = QString::fromUtf8(m_configProcess->readAll()).trimmed();
+                const bool ok = status == QProcess::NormalExit && exitCode == 0;
+                setBanner(ok ? "OpenCode 插件配置完成，可以直接打开 Agent。"
+                             : QString("OpenCode 配置失败：%1").arg(output.isEmpty() ? "请查看系统日志" : output),
+                          ok ? "success" : "warning");
+                m_configProcess->deleteLater();
+                m_configProcess = nullptr;
+                m_configureButton->setText("一键配置");
+                m_configureButton->setEnabled(true);
+            });
+    m_configProcess->setProcessChannelMode(QProcess::MergedChannels);
+    m_configProcess->start(helper, {QStringLiteral("--current-user")});
+}
+
+void DashboardPage::openAgent() {
+    const QString helper = installedHelper(QStringLiteral("memoryhub-open-agent"));
+    if (helper.isEmpty()) {
+        setBanner("未找到 Agent 启动工具，请重新安装最新版 MemoryHub。", "warning");
+        return;
+    }
+    if (!QProcess::startDetached(helper, {})) {
+        setBanner("系统终端启动失败，请确认 UKUI 终端可用。", "warning");
+        return;
+    }
+    setBanner("已在主目录打开系统终端并启动 OpenCode。", "success");
 }

@@ -1,4 +1,5 @@
 #include "api/ApiClient.h"
+#include "AppContext.h"
 
 #include <QAbstractSocket>
 #include <QTcpServer>
@@ -106,6 +107,31 @@ private slots:
         QVERIFY(!result.ok);
         QVERIFY(result.networkError);
         QVERIFY(!result.networkErrorText.isEmpty());
+    }
+
+    void detectsInteractiveLinuxUser() {
+        QProcessEnvironment env;
+        env.insert(QStringLiteral("USER"), QStringLiteral("ethan"));
+        QCOMPARE(AppContext::detectSystemUserId(env, QStringLiteral("/home/ignored")),
+                 QStringLiteral("ethan"));
+    }
+
+    void detectsSudoInvokerInsteadOfRoot() {
+        QProcessEnvironment env;
+        env.insert(QStringLiteral("USER"), QStringLiteral("root"));
+        env.insert(QStringLiteral("SUDO_USER"), QStringLiteral("ethan"));
+        QCOMPARE(AppContext::detectSystemUserId(env, QStringLiteral("/root")),
+                 QStringLiteral("ethan"));
+    }
+
+    void fallsBackToHomeDirectoryName() {
+        const QProcessEnvironment env;
+        QCOMPARE(AppContext::detectSystemUserId(env, QStringLiteral("/home/alice")),
+                 QStringLiteral("alice"));
+    }
+
+    void exposesGlobalMemoryUser() {
+        QCOMPARE(AppContext::globalUserId(), QStringLiteral("global"));
     }
 };
 

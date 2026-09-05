@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+cd "${HOME:-/tmp}"
+
+opencode_bin="$(command -v opencode 2>/dev/null || true)"
+if [ -z "$opencode_bin" ]; then
+    for candidate in "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"; do
+        if [ -x "$candidate" ]; then
+            opencode_bin="$candidate"
+            break
+        fi
+    done
+fi
+
+if [ -n "$opencode_bin" ]; then
+    exec "$opencode_bin"
+fi
+
+printf '\n未找到 OpenCode。请先安装 OpenCode，然后回到 MemoryHub 点击“一键配置”。\n\n'
+exec "${SHELL:-/bin/bash}" -l

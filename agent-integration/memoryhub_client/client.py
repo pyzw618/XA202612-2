@@ -14,6 +14,8 @@ from typing import Any
 
 import httpx
 
+from .config import current_user_id
+
 
 class MemoryHubError(RuntimeError):
     """A stable error returned by the REST transport or MemoryHub API."""
@@ -57,12 +59,12 @@ class MemoryHubClient:
         self,
         base_url: str = "http://127.0.0.1:8099",
         timeout: float = 30.0,
-        user_id: str = "default",
+        user_id: str | None = None,
         client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = float(timeout)
-        self.user_id = user_id
+        self.user_id = (user_id or current_user_id()).strip() or current_user_id()
         self._owns_client = client is None
         self.client = client or httpx.Client(base_url=self.base_url, timeout=self.timeout)
 

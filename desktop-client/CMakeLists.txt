@@ -99,7 +99,7 @@ target_link_libraries(memoryhub-client PRIVATE
 )
 
 enable_testing()
-add_executable(memoryhub-client-api-tests tests/ApiClientTest.cpp src/api/ApiClient.cpp)
+add_executable(memoryhub-client-api-tests tests/ApiClientTest.cpp src/api/ApiClient.cpp src/AppContext.cpp)
 target_include_directories(memoryhub-client-api-tests PRIVATE src)
 target_link_libraries(memoryhub-client-api-tests PRIVATE Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Network Qt5::Test)
 add_test(NAME memoryhub-client-api-tests COMMAND memoryhub-client-api-tests)

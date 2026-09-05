@@ -3,6 +3,7 @@
 // 通过 AppContext::instance() 访问；user_id 变化时发出信号以便各页刷新。
 
 #include <QObject>
+#include <QProcessEnvironment>
 #include <QString>
 #include <functional>
 
@@ -18,6 +19,11 @@ public:
 
     QString userId() const { return m_userId; }
     void setUserId(const QString &id);
+    QString systemUserId() const { return m_systemUserId; }
+    static QString detectSystemUserId(
+        const QProcessEnvironment &environment = QProcessEnvironment::systemEnvironment(),
+        const QString &homePath = QString());
+    static QString globalUserId() { return QStringLiteral("global"); }
 
     QString baseUrl() const { return m_baseUrl; }
     void setBaseUrl(const QString &url);
@@ -36,6 +42,7 @@ private:
 
     static AppContext *s_instance;
     api::ApiClient *m_api = nullptr;
+    QString m_systemUserId;
     QString m_userId;
     QString m_baseUrl;
     std::function<void(const QString &)> m_navigate;

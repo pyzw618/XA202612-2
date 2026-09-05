@@ -24,6 +24,8 @@ if [ "${1:-configure}" = "configure" ]; then
         /usr/sbin/kyexectl -s /usr/bin/memoryhub-client >/dev/null 2>&1 || true
         /usr/sbin/kyexectl -s /usr/bin/memoryhub-mcp >/dev/null 2>&1 || true
         /usr/sbin/kyexectl -s /usr/bin/memoryhub-configure-opencode >/dev/null 2>&1 || true
+        /usr/sbin/kyexectl -s /usr/bin/memoryhub-open-agent >/dev/null 2>&1 || true
+        /usr/sbin/kyexectl -s /usr/lib/memoryhub/open-agent-shell >/dev/null 2>&1 || true
         /usr/sbin/kyexectl -s /usr/bin/memoryhub_service_launcher >/dev/null 2>&1 || true
         /usr/sbin/kyexectl -s /usr/bin/memoryhub_session_launcher >/dev/null 2>&1 || true
         /usr/sbin/kyexectl -s /usr/bin/memoryhub_app_launcher >/dev/null 2>&1 || true
