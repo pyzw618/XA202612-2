@@ -57,16 +57,4 @@ if [ "$(id -u)" -eq 0 ]; then
     chown -R "$target_uid:$target_gid" "$opencode_root" "$config_home/memoryhub"
 fi
 
-if command -v systemctl >/dev/null 2>&1; then
-    if [ "$(id -u)" -eq 0 ]; then
-        runuser -u "$target_user" -- env HOME="$target_home" XDG_RUNTIME_DIR="/run/user/$target_uid" \
-            systemctl --user daemon-reload >/dev/null 2>&1 || true
-        runuser -u "$target_user" -- env HOME="$target_home" XDG_RUNTIME_DIR="/run/user/$target_uid" \
-            systemctl --user enable --now memoryhub.service >/dev/null 2>&1 || true
-    else
-        systemctl --user daemon-reload >/dev/null 2>&1 || true
-        systemctl --user enable --now memoryhub.service >/dev/null 2>&1 || true
-    fi
-fi
-
 echo "MemoryHub OpenCode integration configured for $target_user in $opencode_root"

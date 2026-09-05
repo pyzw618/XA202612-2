@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -61,6 +62,7 @@ from memoryhub.embedding import KylinEmbeddingError
 from memoryhub.storage.vector_engine import MilvusEngineError
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
+logger = logging.getLogger("uvicorn.error")
 
 
 def _memory_service(request: Request) -> Any:
@@ -644,6 +646,7 @@ async def write_events(req: WriteEventRequest, request: Request):
     except HTTPException:
         raise
     except Exception:
+        logger.exception("event ingestion failed")
         raise HTTPException(status_code=503, detail="event ingestion failed") from None
 
 
