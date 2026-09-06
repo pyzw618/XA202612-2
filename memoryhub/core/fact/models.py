@@ -3,12 +3,11 @@
 参考 types.h 和 事实记忆模块设计.md
 """
 
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
-import uuid
-from datetime import datetime, timezone
-
 
 # ─── 固定实体类型（9 类）───────────────────────────────────────────────
 
@@ -121,6 +120,12 @@ class PredicateDef:
     domain: list[str] = field(default_factory=list)   # 适用于哪些 EntityType
     range: list[str] = field(default_factory=list)     # 客体类型
     single_value: bool = True               # True = 单值互斥
+    inverse_of: Optional[str] = None         # 逆关系，如 son_of ↔ father_of
+    symmetric: bool = False                  # 对称关系，如 spouse_of
+    irreflexive: bool = False                # 不允许 A 关系 A
+    object_single_value: bool = False        # 同一客体最多对应一个主体
+    exclusive_with: list[str] = field(default_factory=list)  # 互斥谓词
+    acyclic: bool = False                    # 关系图不允许成环
 
     @staticmethod
     def make_id(name: str) -> str:
@@ -215,6 +220,7 @@ class ConflictResult:
     existing_fact: Optional[Fact] = None    # 冲突/重复时指向已有事实
     reason: str = ""
     resolution: Optional[str] = None        # Resolution 枚举值，LLM 裁决后填入
+    conflict_type: Optional[str] = None     # direct/inverse/symmetric/cardinality/...
 
 
 @dataclass

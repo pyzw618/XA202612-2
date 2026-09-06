@@ -80,6 +80,155 @@
       "domain": ["Organization", "Person"],
       "range": ["Text"],
       "single_value": false
+    },
+    {
+      "predicate_id": "father_of",
+      "canonical_name": "父亲是",
+      "aliases": ["是父亲", "父亲", "爸爸是", "father of"],
+      "domain": ["Person"], "range": ["Person"], "single_value": false,
+      "inverse_of": "son_of", "object_single_value": true,
+      "irreflexive": true, "acyclic": true
+    },
+    {
+      "predicate_id": "son_of",
+      "canonical_name": "儿子是",
+      "aliases": ["是儿子", "儿子", "son of"],
+      "domain": ["Person"], "range": ["Person"], "single_value": true,
+      "inverse_of": "father_of", "irreflexive": true, "acyclic": true
+    },
+    {
+      "predicate_id": "mother_of",
+      "canonical_name": "母亲是",
+      "aliases": ["是母亲", "母亲", "妈妈是", "mother of"],
+      "domain": ["Person"], "range": ["Person"], "single_value": false,
+      "inverse_of": "daughter_of", "object_single_value": true,
+      "irreflexive": true, "acyclic": true
+    },
+    {
+      "predicate_id": "daughter_of",
+      "canonical_name": "女儿是",
+      "aliases": ["是女儿", "女儿", "daughter of"],
+      "domain": ["Person"], "range": ["Person"], "single_value": true,
+      "inverse_of": "mother_of", "irreflexive": true, "acyclic": true
+    },
+    {
+      "predicate_id": "parent_of",
+      "canonical_name": "父母是",
+      "aliases": ["是父母", "家长是", "parent of"],
+      "domain": ["Person"], "range": ["Person"], "single_value": false,
+      "inverse_of": "child_of", "irreflexive": true, "acyclic": true
+    },
+    {
+      "predicate_id": "child_of",
+      "canonical_name": "子女是",
+      "aliases": ["是子女", "孩子是", "child of"],
+      "domain": ["Person"], "range": ["Person"], "single_value": false,
+      "inverse_of": "parent_of", "irreflexive": true, "acyclic": true
+    },
+    {
+      "predicate_id": "spouse_of",
+      "canonical_name": "配偶是",
+      "aliases": ["丈夫是", "妻子是", "爱人是", "spouse of"],
+      "domain": ["Person"], "range": ["Person"], "single_value": true,
+      "symmetric": true, "object_single_value": true, "irreflexive": true
+    },
+    {
+      "predicate_id": "sibling_of",
+      "canonical_name": "兄弟姐妹是",
+      "aliases": ["兄弟是", "姐妹是", "哥哥是", "妹妹是", "sibling of"],
+      "domain": ["Person"], "range": ["Person"], "single_value": false,
+      "symmetric": true, "irreflexive": true
+    },
+    {
+      "predicate_id": "works_for",
+      "canonical_name": "任职于",
+      "aliases": ["就职于", "工作于", "员工属于", "works for"],
+      "domain": ["Person"], "range": ["Organization"], "single_value": false,
+      "inverse_of": "employs", "irreflexive": true
+    },
+    {
+      "predicate_id": "employs",
+      "canonical_name": "雇佣",
+      "aliases": ["员工有", "雇员有", "employs"],
+      "domain": ["Organization"], "range": ["Person"], "single_value": false,
+      "inverse_of": "works_for", "irreflexive": true
+    },
+    {
+      "predicate_id": "member_of",
+      "canonical_name": "成员属于",
+      "aliases": ["隶属于", "是成员", "member of"],
+      "domain": ["Person", "Organization"], "range": ["Organization"],
+      "single_value": false, "inverse_of": "has_member", "irreflexive": true
+    },
+    {
+      "predicate_id": "has_member",
+      "canonical_name": "拥有成员",
+      "aliases": ["成员包括", "由成员组成", "has member"],
+      "domain": ["Organization"], "range": ["Person", "Organization"],
+      "single_value": false, "inverse_of": "member_of", "irreflexive": true
+    },
+    {
+      "predicate_id": "owns",
+      "canonical_name": "拥有",
+      "aliases": ["持有", "所有者是", "owns"],
+      "domain": ["Person", "Organization"],
+      "range": ["Device", "File", "Account", "Organization", "Other"],
+      "single_value": false, "inverse_of": "owned_by", "irreflexive": true
+    },
+    {
+      "predicate_id": "owned_by",
+      "canonical_name": "归属",
+      "aliases": ["属于", "归谁所有", "owned by"],
+      "domain": ["Device", "File", "Account", "Organization", "Other"],
+      "range": ["Person", "Organization"],
+      "single_value": true, "inverse_of": "owns", "irreflexive": true
+    },
+    {
+      "predicate_id": "reports_to",
+      "canonical_name": "汇报给",
+      "aliases": ["上级是", "向其汇报", "reports to"],
+      "domain": ["Person"], "range": ["Person"], "single_value": true,
+      "inverse_of": "manages", "irreflexive": true, "acyclic": true
+    },
+    {
+      "predicate_id": "manages",
+      "canonical_name": "管理",
+      "aliases": ["下属是", "负责管理", "manages"],
+      "domain": ["Person"], "range": ["Person"], "single_value": false,
+      "inverse_of": "reports_to", "object_single_value": true,
+      "irreflexive": true, "acyclic": true
+    },
+    {
+      "predicate_id": "part_of",
+      "canonical_name": "组成部分属于",
+      "aliases": ["是其一部分", "隶属组件", "part of"],
+      "domain": ["Organization", "Software", "File", "Other"],
+      "range": ["Organization", "Software", "File", "Other"],
+      "single_value": false, "inverse_of": "has_part",
+      "irreflexive": true, "acyclic": true
+    },
+    {
+      "predicate_id": "has_part",
+      "canonical_name": "包含组成部分",
+      "aliases": ["包含组件", "由其组成", "has part"],
+      "domain": ["Organization", "Software", "File", "Other"],
+      "range": ["Organization", "Software", "File", "Other"],
+      "single_value": false, "inverse_of": "part_of",
+      "irreflexive": true, "acyclic": true
+    },
+    {
+      "predicate_id": "is_alive",
+      "canonical_name": "健在",
+      "aliases": ["仍健在", "活着", "is alive"],
+      "domain": ["Person"], "range": ["Other"], "single_value": true,
+      "exclusive_with": ["is_deceased"]
+    },
+    {
+      "predicate_id": "is_deceased",
+      "canonical_name": "已故",
+      "aliases": ["去世", "已去世", "is deceased"],
+      "domain": ["Person"], "range": ["Other"], "single_value": true,
+      "exclusive_with": ["is_alive"]
     }
   ]
 }

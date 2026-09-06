@@ -124,6 +124,41 @@ def test_tools_list(running_server):
     for tool in tools:
         assert "description" in tool and "inputSchema" in tool
 
+    by_name = {tool["name"]: tool for tool in tools}
+    fact_description = by_name["memoryhub_propose_facts"]["description"]
+    assert "family/social relations" in fact_description
+    assert "decision_mode" not in by_name["memoryhub_propose_facts"]["inputSchema"]["properties"]
+
+
+def test_fact_mcp_requires_user_confirmation_before_storage(running_server):
+    mcp, _ = running_server
+    response = _call_tool(
+        mcp,
+        "memoryhub_propose_facts",
+        {
+            "user_id": "fact-confirm-user",
+            "source_id": "turn-confirm",
+            "scope_hint": "global",
+            "triples": [{
+                "subject_text": "Joe",
+                "subject_type": "Person",
+                "predicate_text": "使用设备",
+                "object_text": "iPhone",
+                "object_type": "Device",
+                "evidence": "Joe 使用设备 iPhone",
+                "confidence": 0.9,
+            }],
+        },
+    )
+    assert response["result"]["isError"] is False, response
+    text = response["result"]["content"][0]["text"]
+    assert "ACTION_REQUIRED" in text
+    assert "commit/reject" in text
+    assert "收起/采纳" in text
+    assert "驳回" in text
+    assert "是否将该事实写入记忆" in text
+    assert mcp.client.list_facts("fact-confirm-user") == []
+
 
 def test_health(running_server):
     mcp, _ = running_server

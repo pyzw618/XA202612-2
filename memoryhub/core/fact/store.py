@@ -35,7 +35,13 @@ CREATE TABLE IF NOT EXISTS predicates (
     aliases        TEXT DEFAULT '[]',
     domain_types   TEXT DEFAULT '[]',
     range_types    TEXT DEFAULT '[]',
-    single_value   INTEGER DEFAULT 1
+    single_value   INTEGER DEFAULT 1,
+    inverse_of     TEXT,
+    symmetric      INTEGER DEFAULT 0,
+    irreflexive    INTEGER DEFAULT 0,
+    object_single_value INTEGER DEFAULT 0,
+    exclusive_with TEXT DEFAULT '[]',
+    acyclic        INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS facts (
     fact_id          TEXT PRIMARY KEY,
@@ -130,15 +136,39 @@ class FactStore:
                 "ALTER TABLE fact_proposals ADD COLUMN conflict_decision_mode "
                 "TEXT NOT NULL DEFAULT 'user_review'"
             )
+        predicate_columns = {
+            row["name"] for row in self._conn.execute("PRAGMA table_info(predicates)")
+        }
+        predicate_migrations = {
+            "inverse_of": "ALTER TABLE predicates ADD COLUMN inverse_of TEXT",
+            "symmetric": "ALTER TABLE predicates ADD COLUMN symmetric INTEGER DEFAULT 0",
+            "irreflexive": "ALTER TABLE predicates ADD COLUMN irreflexive INTEGER DEFAULT 0",
+            "object_single_value": (
+                "ALTER TABLE predicates ADD COLUMN object_single_value INTEGER DEFAULT 0"
+            ),
+            "exclusive_with": (
+                "ALTER TABLE predicates ADD COLUMN exclusive_with TEXT DEFAULT '[]'"
+            ),
+            "acyclic": "ALTER TABLE predicates ADD COLUMN acyclic INTEGER DEFAULT 0",
+        }
+        for column, sql in predicate_migrations.items():
+            if column not in predicate_columns:
+                self._conn.execute(sql)
         migrations = {
             "memory_type": "ALTER TABLE facts ADD COLUMN memory_type TEXT NOT NULL DEFAULT 'fact'",
             "scope": "ALTER TABLE facts ADD COLUMN scope TEXT NOT NULL DEFAULT 'global'",
             "project_id": "ALTER TABLE facts ADD COLUMN project_id TEXT",
             "user_id": "ALTER TABLE facts ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'",
             "last_accessed_at": "ALTER TABLE facts ADD COLUMN last_accessed_at TEXT",
-            "access_count_30d": "ALTER TABLE facts ADD COLUMN access_count_30d INTEGER NOT NULL DEFAULT 0",
-            "pending_index": "ALTER TABLE facts ADD COLUMN pending_index INTEGER NOT NULL DEFAULT 1",
-            "index_version": "ALTER TABLE facts ADD COLUMN index_version INTEGER NOT NULL DEFAULT 0",
+            "access_count_30d": (
+                "ALTER TABLE facts ADD COLUMN access_count_30d INTEGER NOT NULL DEFAULT 0"
+            ),
+            "pending_index": (
+                "ALTER TABLE facts ADD COLUMN pending_index INTEGER NOT NULL DEFAULT 1"
+            ),
+            "index_version": (
+                "ALTER TABLE facts ADD COLUMN index_version INTEGER NOT NULL DEFAULT 0"
+            ),
         }
         for column, sql in migrations.items():
             if column not in fact_columns:
@@ -363,8 +393,10 @@ class FactStore:
     def upsert_predicate(self, pred: PredicateDef) -> str:
         self._conn.execute(
             """INSERT OR REPLACE INTO predicates
-               (predicate_id, canonical_name, aliases, domain_types, range_types, single_value)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               (predicate_id, canonical_name, aliases, domain_types, range_types,
+                single_value, inverse_of, symmetric, irreflexive,
+                object_single_value, exclusive_with, acyclic)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 pred.predicate_id,
                 pred.canonical_name,
@@ -372,6 +404,12 @@ class FactStore:
                 json.dumps(pred.domain, ensure_ascii=False),
                 json.dumps(pred.range, ensure_ascii=False),
                 int(pred.single_value),
+                pred.inverse_of,
+                int(pred.symmetric),
+                int(pred.irreflexive),
+                int(pred.object_single_value),
+                json.dumps(pred.exclusive_with, ensure_ascii=False),
+                int(pred.acyclic),
             ),
         )
         self._conn.commit()
@@ -405,6 +443,18 @@ class FactStore:
             domain=json.loads(row["domain_types"] or "[]"),
             range=json.loads(row["range_types"] or "[]"),
             single_value=bool(row["single_value"]),
+            inverse_of=row["inverse_of"] if "inverse_of" in row.keys() else None,
+            symmetric=bool(row["symmetric"]) if "symmetric" in row.keys() else False,
+            irreflexive=bool(row["irreflexive"]) if "irreflexive" in row.keys() else False,
+            object_single_value=(
+                bool(row["object_single_value"])
+                if "object_single_value" in row.keys() else False
+            ),
+            exclusive_with=(
+                json.loads(row["exclusive_with"] or "[]")
+                if "exclusive_with" in row.keys() else []
+            ),
+            acyclic=bool(row["acyclic"]) if "acyclic" in row.keys() else False,
         )
 
     def insert_fact(self, fact: Fact) -> str:
@@ -454,7 +504,10 @@ class FactStore:
             """INSERT OR REPLACE INTO fact_evidence
                (evidence_id, fact_id, user_id, source_id, source_text, observed_at)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (evidence_id, fact.fact_id, fact.user_id, fact.source_id, fact.source_text, fact.observed_at),
+            (
+                evidence_id, fact.fact_id, fact.user_id, fact.source_id,
+                fact.source_text, fact.observed_at,
+            ),
         )
         self._conn.commit()
 

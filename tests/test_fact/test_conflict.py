@@ -3,9 +3,10 @@
 """
 
 import pytest
-from memoryhub.core.fact.store import FactStore
+
 from memoryhub.core.fact.conflict import ConflictDetector
-from memoryhub.core.fact.models import Fact, Entity, PredicateDef
+from memoryhub.core.fact.models import Fact, PredicateDef
+from memoryhub.core.fact.store import FactStore
 
 
 def _make_fact(subject_id="entity:org:bytd", predicate_id="headquarters_location",
@@ -135,11 +136,17 @@ class TestConflictDetector:
         detector = ConflictDetector(store_with_predicates)
 
         # 总部在深圳
-        fact1 = _make_fact(predicate_id="headquarters_location", object_id="entity:loc:shenzhen", object_value="深圳")
+        fact1 = _make_fact(
+            predicate_id="headquarters_location",
+            object_id="entity:loc:shenzhen", object_value="深圳",
+        )
         store_with_predicates.insert_fact(fact1)
 
         # 成立时间 1995（不同谓词 → NEW）
-        fact2 = _make_fact(predicate_id="founding_date", object_id="entity:date:1995", object_value="1995年")
+        fact2 = _make_fact(
+            predicate_id="founding_date",
+            object_id="entity:date:1995", object_value="1995年",
+        )
         result = detector.check(fact2)
         assert result.relation == "NEW"
 
@@ -147,11 +154,17 @@ class TestConflictDetector:
         detector = ConflictDetector(store_with_predicates)
 
         # 比亚迪总部在深圳
-        fact1 = _make_fact(subject_id="entity:org:byd", object_id="entity:loc:shenzhen", object_value="深圳")
+        fact1 = _make_fact(
+            subject_id="entity:org:byd",
+            object_id="entity:loc:shenzhen", object_value="深圳",
+        )
         store_with_predicates.insert_fact(fact1)
 
         # 华为总部在深圳（不同主体 → NEW）
-        fact2 = _make_fact(subject_id="entity:org:huawei", object_id="entity:loc:shenzhen", object_value="深圳")
+        fact2 = _make_fact(
+            subject_id="entity:org:huawei",
+            object_id="entity:loc:shenzhen", object_value="深圳",
+        )
         result = detector.check(fact2)
         assert result.relation == "NEW"
 
@@ -169,3 +182,115 @@ class TestConflictDetector:
         f3 = _make_fact(object_id="entity:loc:shanghai", object_value="上海")
         result = detector.check(f3)
         assert result.relation == "CONFLICT"
+
+    def test_inverse_relation_is_duplicate(self, store_with_predicates):
+        store_with_predicates.upsert_predicate(PredicateDef(
+            predicate_id="father_of", canonical_name="父亲是",
+            inverse_of="son_of", single_value=False,
+            object_single_value=True, irreflexive=True,
+        ))
+        store_with_predicates.upsert_predicate(PredicateDef(
+            predicate_id="son_of", canonical_name="儿子是",
+            inverse_of="father_of", single_value=True, irreflexive=True,
+        ))
+        old = _make_fact(
+            subject_id="entity:person:a", predicate_id="son_of",
+            object_id="entity:person:b", object_value="B",
+        )
+        store_with_predicates.insert_fact(old)
+
+        new = _make_fact(
+            subject_id="entity:person:b", predicate_id="father_of",
+            object_id="entity:person:a", object_value="A",
+        )
+        result = ConflictDetector(store_with_predicates).check(new)
+        assert result.relation == "DUPLICATE"
+        assert result.conflict_type == "inverse_equivalent"
+
+    def test_inverse_cardinality_conflict(self, store_with_predicates):
+        store_with_predicates.upsert_predicate(PredicateDef(
+            predicate_id="father_of", canonical_name="父亲是",
+            inverse_of="son_of", single_value=False,
+            object_single_value=True,
+        ))
+        store_with_predicates.upsert_predicate(PredicateDef(
+            predicate_id="son_of", canonical_name="儿子是",
+            inverse_of="father_of", single_value=True,
+        ))
+        store_with_predicates.insert_fact(_make_fact(
+            subject_id="entity:person:b", predicate_id="father_of",
+            object_id="entity:person:a", object_value="A",
+        ))
+        result = ConflictDetector(store_with_predicates).check(_make_fact(
+            subject_id="entity:person:a", predicate_id="son_of",
+            object_id="entity:person:c", object_value="C",
+        ))
+        assert result.relation == "CONFLICT"
+        assert result.conflict_type == "object_cardinality"
+
+    def test_symmetric_relation_is_duplicate(self, store_with_predicates):
+        store_with_predicates.upsert_predicate(PredicateDef(
+            predicate_id="spouse_of", canonical_name="配偶是",
+            symmetric=True, single_value=True, object_single_value=True,
+        ))
+        store_with_predicates.insert_fact(_make_fact(
+            subject_id="entity:person:a", predicate_id="spouse_of",
+            object_id="entity:person:b", object_value="B",
+        ))
+        result = ConflictDetector(store_with_predicates).check(_make_fact(
+            subject_id="entity:person:b", predicate_id="spouse_of",
+            object_id="entity:person:a", object_value="A",
+        ))
+        assert result.relation == "DUPLICATE"
+        assert result.conflict_type == "symmetric_equivalent"
+
+    def test_irreflexive_relation_rejected_for_review(self, store_with_predicates):
+        store_with_predicates.upsert_predicate(PredicateDef(
+            predicate_id="parent_of", canonical_name="父母是", irreflexive=True,
+        ))
+        result = ConflictDetector(store_with_predicates).check(_make_fact(
+            subject_id="entity:person:a", predicate_id="parent_of",
+            object_id="entity:person:a", object_value="A",
+        ))
+        assert result.relation == "CONFLICT"
+        assert result.conflict_type == "irreflexive_violation"
+
+    def test_exclusive_predicates_conflict(self, store_with_predicates):
+        store_with_predicates.upsert_predicate(PredicateDef(
+            predicate_id="is_alive", canonical_name="健在",
+            exclusive_with=["is_deceased"],
+        ))
+        store_with_predicates.upsert_predicate(PredicateDef(
+            predicate_id="is_deceased", canonical_name="已故",
+            exclusive_with=["is_alive"],
+        ))
+        store_with_predicates.insert_fact(_make_fact(
+            subject_id="entity:person:a", predicate_id="is_alive",
+            object_id="entity:other:true", object_value="是",
+        ))
+        result = ConflictDetector(store_with_predicates).check(_make_fact(
+            subject_id="entity:person:a", predicate_id="is_deceased",
+            object_id="entity:other:true", object_value="是",
+        ))
+        assert result.relation == "CONFLICT"
+        assert result.conflict_type == "mutually_exclusive_predicate"
+
+    def test_acyclic_relation_detects_cycle(self, store_with_predicates):
+        store_with_predicates.upsert_predicate(PredicateDef(
+            predicate_id="part_of", canonical_name="属于组成部分",
+            single_value=False, acyclic=True,
+        ))
+        store_with_predicates.insert_fact(_make_fact(
+            subject_id="entity:other:a", predicate_id="part_of",
+            object_id="entity:other:b", object_value="B",
+        ))
+        store_with_predicates.insert_fact(_make_fact(
+            subject_id="entity:other:b", predicate_id="part_of",
+            object_id="entity:other:c", object_value="C",
+        ))
+        result = ConflictDetector(store_with_predicates).check(_make_fact(
+            subject_id="entity:other:c", predicate_id="part_of",
+            object_id="entity:other:a", object_value="A",
+        ))
+        assert result.relation == "CONFLICT"
+        assert result.conflict_type == "relation_cycle"

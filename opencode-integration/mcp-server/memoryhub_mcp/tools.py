@@ -301,13 +301,14 @@ class ToolRegistry:
 
         self._add(
             "memoryhub_propose_facts",
-            "Submit fact triples already extracted by the main Agent. Use this when the user "
-            "explicitly asks to remember a fact; never rewrite failed facts as knowledge. "
-            "user_review stages candidates and agent_autonomous commits admitted facts.",
+            "Submit factual triples extracted by the main Agent. Prefer this tool for user "
+            "profile information (identity, family/social relations, birthday, device, account, "
+            "location, employment, ownership and project role), even when phrased with '我'. "
+            "A preference is only about HOW the Agent should behave. This MCP path always stages "
+            "the fact and requires an explicit commit/reject confirmation; never rewrite a fact "
+            "as preference or knowledge after failure.",
             {
                 "user_id": {"type": "string", "default": default_user},
-                "decision_mode": {"type": "string", "enum": _FACT_MODES},
-                "conflict_decision_mode": {"type": "string", "enum": _FACT_MODES},
                 "source_id": {"type": "string"},
                 "scope_hint": {"type": "string", "enum": ["global", "project"]},
                 "project_id": {"type": "string"},
@@ -569,11 +570,9 @@ class ToolRegistry:
             "source_id": str(args.get("source_id") or "mcp-agent"),
             "scope_hint": str(args.get("scope_hint") or "global"),
             "triples": triples,
+            "decision_mode": "user_review",
+            "conflict_decision_mode": "user_review",
         }
-        if args.get("decision_mode"):
-            payload["decision_mode"] = str(args["decision_mode"])
-        if args.get("conflict_decision_mode"):
-            payload["conflict_decision_mode"] = str(args["conflict_decision_mode"])
         if args.get("project_id"):
             payload["project_id"] = str(args["project_id"])
         try:
@@ -583,12 +582,16 @@ class ToolRegistry:
             if outcome is not None:
                 return outcome
             raise
-        lines = [f"事实候选处理完成：count={len(proposals)}"]
+        lines = [
+            f"ACTION_REQUIRED：发现 {len(proposals)} 条事实候选。",
+            "在调用 memoryhub_decide_facts 前，必须向用户逐条询问是否入库（commit/reject）。",
+            "固定选项：1. 收起/采纳（commit）；2. 驳回（reject）。",
+        ]
         for item in proposals:
             lines.append(
                 f"- [{item.get('proposal_id')}] {item.get('subject')} "
                 f"{item.get('predicate')} {item.get('object')} "
-                f"status={item.get('status')}"
+                f"status={item.get('status')}；请询问：是否将该事实写入记忆？"
             )
         return "\n".join(lines)
 
@@ -608,6 +611,16 @@ class ToolRegistry:
                 f"- [{item.get('proposal_id')}] status={item.get('status')} "
                 f"fact_id={item.get('fact_id') or ''}"
             )
+            task = item.get("decision_task") or {}
+            if item.get("requires_decision") and task:
+                lines.append(
+                    "ACTION_REQUIRED：检测到事实冲突或歧义，不得自行写入。"
+                    f" type={task.get('conflict_type') or task.get('decision_type')}；"
+                    f"reason={task.get('reason')}；"
+                    f"allowed_actions={task.get('allowed_actions')}。"
+                    "请向用户展示新旧信息，提供采用新事实/保留旧事实/合并/并存选项，"
+                    "取得选择后再次调用本工具。"
+                )
         return "\n".join(lines)
 
     def _wrap_forget(self, args: dict) -> str:

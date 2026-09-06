@@ -1436,6 +1436,11 @@ def _persist_fact_proposals(
             user_id=req.user_id,
             decision_mode=decision_mode,
             conflict_decision_mode=conflict_decision_mode,
+            status=(
+                FactProposalStatus.AWAITING_DECISION.value
+                if decision_mode == FactDecisionMode.USER_REVIEW.value
+                else FactProposalStatus.PROPOSED.value
+            ),
         )
         if decision_mode == FactDecisionMode.AGENT_AUTONOMOUS.value:
             decision = FactDecisionInput(
@@ -1446,6 +1451,42 @@ def _persist_fact_proposals(
                 conflict_decision_mode=conflict_decision_mode,
             )
             item.update(_decide_fact_proposal(pipeline, req.user_id, decision))
+        else:
+            item.update({
+                "status": FactProposalStatus.AWAITING_DECISION.value,
+                "requires_decision": True,
+                "decision_task": {
+                    "decision_type": "fact_admission",
+                    "input_text": triple.evidence,
+                    "question": (
+                        f"“{triple.subject_text} {triple.predicate_text} "
+                        f"{triple.object_text}”这条事实是否入库？"
+                    ),
+                    "candidates": [{
+                        "subject": triple.subject_text,
+                        "predicate": triple.predicate_text,
+                        "object": triple.object_text,
+                        "scope": req.scope_hint,
+                        "project_id": req.project_id,
+                        "admission_recommended": admission.should_remember,
+                        "admission_reason": admission.reason,
+                    }],
+                    "allowed_actions": ["commit", "reject"],
+                    "options": [
+                        {
+                            "value": "commit",
+                            "label": "收起/采纳（commit）",
+                            "description": "将该候选事实正式写入记忆",
+                        },
+                        {
+                            "value": "reject",
+                            "label": "驳回（reject）",
+                            "description": "不采纳并丢弃该候选事实",
+                        },
+                    ],
+                    "reason": "事实候选必须由用户确认后才能正式入库",
+                },
+            })
         results.append(item)
     return results
 
@@ -1565,7 +1606,9 @@ def _decide_fact_proposal(pipeline, user_id: str, decision: FactDecisionInput) -
     if requires_decision:
         decision_task = {
             "decision_type": "fact_conflict",
+            "conflict_type": getattr(result, "conflict_type", None),
             "input_text": proposal.raw_triple.evidence,
+            "question": "检测到事实冲突，请选择如何处理新旧事实。",
             "candidates": [
                 {
                     "role": "existing",
@@ -1582,6 +1625,12 @@ def _decide_fact_proposal(pipeline, user_id: str, decision: FactDecisionInput) -
                 },
             ],
             "allowed_actions": ["replace", "keep_old", "merge", "coexist"],
+            "options": [
+                {"value": "replace", "label": "采用新事实", "description": "新事实替代旧事实"},
+                {"value": "keep_old", "label": "保留旧事实", "description": "拒绝新事实"},
+                {"value": "merge", "label": "合并", "description": "合并信息并保留版本记录"},
+                {"value": "coexist", "label": "并存", "description": "两个事实在不同上下文均成立"},
+            ],
             "reason": result.reason,
         }
     return {
@@ -1591,6 +1640,7 @@ def _decide_fact_proposal(pipeline, user_id: str, decision: FactDecisionInput) -
         "relation": result.relation,
         "resolution": result.resolution,
         "reason": result.reason,
+        "conflict_type": getattr(result, "conflict_type", None),
         "conflict_decision_mode": conflict_decision_mode,
         "fact_id": (
             stored_fact.fact_id

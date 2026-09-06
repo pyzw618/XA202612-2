@@ -67,6 +67,8 @@
 | `memoryhub_write_event` | `POST /api/memory/events`（L433） | 写入 MemoryEvent，触发安全过滤+抽取 |
 | `memoryhub_write_preference` | `POST /api/memory/memories/preference`（L888） | 显式写偏好并同步向量索引 |
 | `memoryhub_write_knowledge` | `POST /api/memory/memories/knowledge`（L906） | 显式写知识并同步向量索引 |
+| `memoryhub_propose_facts` | `POST /api/memory/facts/propose` | 提交主 Agent 已提取的事实三元组并请求用户确认 |
+| `memoryhub_decide_facts` | `POST /api/memory/facts/decide` | 执行入库/驳回；归一化歧义或冲突时再次请求裁决 |
 | `memoryhub_forget` | `POST /api/memory/forget`（L949） | 自然语言/精确 ID 精准遗忘 |
 | `memoryhub_list_memories` | `GET /api/memory/preferences`（L701）、`GET /api/memory/knowledge`（L745）、`GET /api/memory/facts`（L478） | 按类型/场景列出记忆 |
 | `memoryhub_get_memory` | `GET /api/memory/preferences/{id}`（L719）、`GET /api/memory/knowledge/{id}`（L765）、`GET /api/memory/facts/{id}`（L492） | 取单条记忆详情 |
@@ -90,7 +92,7 @@
 
 - **检索**：混合检索 + 场景过滤（`context.scene/task_type/app`）+ `memory_types`/
   `min_confidence` 过滤；返回偏好/知识/事实三段的可读摘要（含置信度）。
-- **显式写**：偏好、知识、工具事件三种写入，均先经 Pydantic 契约校验。
+- **显式事实写入**：事实先形成候选，用户确认后才归一化和入库；发生冲突时执行第二次确认。
 - **遗忘**：自然语言指令或精确 memory_id，支持按场景范围与级联删除。
 - **管理**：列出/查看记忆、反馈（更新/确认/拒绝）、冲突查看与解决。
 - **容错**：REST 不可达/超时/业务错误统一转成稳定错误码返回给 LLM（`isError=true`），

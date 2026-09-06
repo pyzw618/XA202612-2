@@ -3,11 +3,15 @@
 把 Kylin-MemoryHub 记忆模块接入 opencode 的两条链路：
 
 - **MCP Server**（`mcp-server/`）：LLM 按需调用 `memoryhub_search`、`memoryhub_write_event`、
-  `memoryhub_forget` 等 12 个工具读写记忆。
+  `memoryhub_forget` 等 14 个工具读写记忆。
 - **Plugin**（`plugin/`）：监听 `session.idle`，自动把 opencode 会话的工具轨迹沉淀为
   MemoryHub `MemoryEvent`，由记忆引擎抽取偏好/知识/事实。
 
 两者都通过 HTTP 访问同一个 MemoryHub REST 服务（`memoryhub/adapter/api.py`）。
+
+显式事实必须走 `memoryhub_propose_facts → 用户确认 → memoryhub_decide_facts`；若提交时
+发现冲突，会再次要求用户选择处理方式。用户画像中的身份、关系、生日、设备、账户、
+地点、任职、所有权和项目角色属于事实，不应作为偏好写入。
 
 ## 快速开始
 
