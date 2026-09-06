@@ -110,3 +110,19 @@ def test_opencode_configurator_installs_cross_kare_mcp_launcher() -> None:
     assert "mcp-user-launcher" in configurator
     assert "/opt/kare-applications/shadow/merge/opt/memoryhub/venv/bin/python" in launcher
     assert "python3 \"$config_helper\"" in configurator
+
+
+def test_desktop_client_has_no_embedded_terminal() -> None:
+    desktop_root = ROOT / "desktop-client"
+    main_window = (desktop_root / "src" / "MainWindow.cpp").read_text(encoding="utf-8")
+    cmake = (desktop_root / "CMakeLists.txt").read_text(encoding="utf-8")
+    resources = (desktop_root / "resources" / "app.qrc").read_text(encoding="utf-8")
+
+    assert "TerminalPage" not in main_window
+    assert 'registerPage("terminal"' not in main_window
+    assert '"内置终端"' not in main_window
+    assert "TerminalPage" not in cmake
+    assert "terminal.svg" not in resources
+    assert not (desktop_root / "src" / "pages" / "TerminalPage.cpp").exists()
+    assert not (desktop_root / "src" / "pages" / "TerminalPage.h").exists()
+    assert not (desktop_root / "resources" / "icons" / "terminal.svg").exists()

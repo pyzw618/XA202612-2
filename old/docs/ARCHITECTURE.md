@@ -556,9 +556,9 @@ sequenceDiagram
 
 ## 11. 前端页面与 API 对应关系
 
-前端实现为 **Qt 5 原生桌面客户端**（`desktop-client/`），按当前 `main` 分支真实代码（`MainWindow.cpp:337-365` 注册 `registerPage(key, group, title, page)`）落地，共 **26 个 pageKey，6 大组**：
+前端实现为 **Qt 5 原生桌面客户端**（`desktop-client/`），按当前代码中的 `registerPage(key, group, title, page)` 落地，共 **27 个 pageKey，6 大组**：
 
-- **总览 / 内置终端**：`dashboard` / `terminal`（共 2）
+- **工作台**：`dashboard` 与 4 个 vNext Dashboard 页面（共 5）；终端统一由总览页“打开 Agent”调用系统终端
 - **记忆管理**：`mem/preference` / `mem/knowledge` / `mem/fact` / `mem/tiers`（共 4）
 - **检索与冲突**：`search` / `conflicts` / `projections`（共 3）
 - **遗忘与生命周期**：`forget/precise|pending|archived|recycle|health|history|settings`（共 7，全部在 `pages/ForgetPages.cpp`）
@@ -569,7 +569,7 @@ sequenceDiagram
 
 ```mermaid
 graph LR
-    subgraph Qt5 桌面客户端（26 pageKey）
+    subgraph Qt5 桌面客户端（27 pageKey）
         P1["📊 总览 Dashboard"]
         P2["🧠 偏好 / 知识 / 事实 / 分层"]
         P3["🔍 检索测试 / 冲突中心 / 投影恢复"]

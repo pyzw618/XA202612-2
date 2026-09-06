@@ -40,7 +40,6 @@
 #include "pages/SearchPage.h"
 #include "pages/ProjectionPage.h"
 #include "pages/SettingsPages.h"
-#include "pages/TerminalPage.h"
 
 namespace {
 QRect visibleBounds(const QImage &image) {
@@ -346,8 +345,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
                  new VNextDashboardPage(VNextDashboardPage::View::RetrievalDebugger, m_stack));
     registerPage("dashboard/benchmark", "vNext Dashboard", "Benchmark",
                  new VNextDashboardPage(VNextDashboardPage::View::Benchmark, m_stack));
-    registerPage("terminal", "内置终端", "opencode 终端", new TerminalPage(m_stack));
-
     registerPage("mem/preference", "记忆管理", "偏好记忆", new PreferencePage(m_stack));
     registerPage("mem/knowledge", "记忆管理", "知识记忆", new KnowledgePage(m_stack));
     registerPage("mem/tiers", "记忆管理", "记忆分层", new MemoryTierPage(m_stack));
@@ -460,8 +457,6 @@ void MainWindow::buildSidebar() {
     addLeaf(g1, "Evolution", "dashboard/evolution", ":/icons/history.svg");
     addLeaf(g1, "Retrieval Debugger", "dashboard/retrieval", ":/icons/search.svg");
     addLeaf(g1, "Benchmark", "dashboard/benchmark", ":/icons/activity.svg");
-    addLeaf(g1, "内置终端", "terminal", ":/icons/terminal.svg");
-
     QTreeWidgetItem *g2 = addGroup("记忆");
     addLeaf(g2, "偏好记忆", "mem/preference", ":/icons/preference.svg");
     addLeaf(g2, "知识记忆", "mem/knowledge", ":/icons/knowledge.svg");

@@ -10,7 +10,7 @@ MemoryHub 后端的可视化控制台，供**人工审计 / 演示 / 调参 / �
 | 分组 | 页面 | 后端接口 |
 |---|---|---|
 | 总览 | Dashboard（统计卡 / 环图 / 柱图 / 事件流 / 系统状态） | `/api/memory/*` |
-| 内置终端 | opencode / shell 终端 | QProcess |
+| Agent 入口 | 总览页“打开 Agent” | 系统终端启动 OpenCode |
 | 记忆管理 | 偏好 / 知识 / 事实（列表·筛选·详情抽屉·版本链·批量删除·事实提案裁决） | `/api/memory/preferences|knowledge|facts` |
 | 检索与冲突 | 检索测试（混合检索 + 上下文预览）、冲突中心（新旧对比 + 裁决） | `/search` `/context` `/conflicts` |
 | 遗忘与生命周期 | 精准遗忘（NL/范围/ID 预览）、待审查队列、归档仓库、回收站、健康度看板、遗忘历史、遗忘设置 | `/forget*` `/memories/*` `/lifecycle/*` |
@@ -91,4 +91,4 @@ src/
 - 审计日志 / 隔离区需 `config.yaml` 中 `safety.audit.enabled` / `safety.quarantine.enabled` 为 `true`，
   否则页面显示"待开启"提示（后端返回 `safety.audit_disabled` / `safety.quarantine_disabled`）。
 - 遗忘设置页的权重 / 阈值为**代码常量**（只读展示）；自动遗忘扫描与生命周期检查可手动触发。
-- 内置终端通过 QProcess 启动所选命令；使用 `opencode` 需先在目标机安装。
+- 控制台不内嵌终端。需要使用 OpenCode 时，在总览页点击“打开 Agent”，由系统终端启动；目标机需先安装 `opencode`。

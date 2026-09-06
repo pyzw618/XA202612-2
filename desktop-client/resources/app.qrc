@@ -3,7 +3,6 @@
         <file>style/kylin.qss</file>
         <file>icons/logo.svg</file>
         <file>icons/dashboard.svg</file>
-        <file>icons/terminal.svg</file>
         <file>icons/preference.svg</file>
         <file>icons/knowledge.svg</file>
         <file>icons/fact.svg</file>
