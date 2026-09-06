@@ -33,10 +33,13 @@
 
 namespace {
 QString tripleText(const QJsonObject &f) {
-    // 后端 fact 返回可能带主语/谓词/宾语文本，或仅 object_value + ids
+    // /facts 兼容接口返回 canonical subject/predicate/object_value；同时兼容旧字段。
     QString s = j::str(f, "subject_text");
     QString p = j::str(f, "predicate_text");
     QString o = j::str(f, "object_value");
+    if (s.isEmpty()) s = j::str(f, "subject");
+    if (p.isEmpty()) p = j::str(f, "predicate");
+    if (o.isEmpty()) o = j::str(f, "object_text");
     if (s.isEmpty()) s = j::str(f, "subject_id");
     if (p.isEmpty()) p = j::str(f, "predicate_id");
     if (o.isEmpty()) o = j::str(f, "object_id");
@@ -415,6 +418,8 @@ void FactPage::openProposeDialog() {
     triple["confidence"] = 1.0;
 
     QJsonObject body;
+    // 列表与总览都按当前用户查询；提交必须使用同一 user_id，不能落入后端默认用户。
+    body["user_id"] = AppContext::instance()->userId();
     body["scope_hint"] = scopeCombo->currentData().toString();
     body["project_id"] = projEdit->text().trimmed().isEmpty() ? QJsonValue() : QJsonValue(projEdit->text().trimmed());
     body["triples"] = QJsonArray{triple};
