@@ -73,7 +73,9 @@ bash packaging/linux/build-deb.sh
 
 桌面重新登录后，MemoryHub 会话服务会自动启动；MemoryHub 会从应用菜单出现，
 OpenCode 会从 `~/.config/opencode/plugins/` 自动发现插件，同时加载同目录下的命令、
-技能和工具。
+技能和工具。“一键配置”还会将 `memoryhub` MCP 合并写入 OpenCode 的全局配置；已有
+配置会保留，改写前的原文件保存为同目录下的 `.memoryhub-backup` 备份。配置完成后
+需要完全退出并重新打开 OpenCode，随后可用 `/mcps` 查看 `memoryhub` 连接状态。
 
 ## 升级与卸载
 
