@@ -213,12 +213,12 @@ flowchart LR
 | **集成方 / 开发者** | MCP / REST / CLI | 一次接入获得完整记忆能力（存储 / 检索 / 生命周期 / 安全）；CLI、MCP、opencode Plugin 三种现成集成可直接复用 |
 | **运维 / 审计** | Qt 桌面控制台 | 记忆全生命周期管理、冲突裁决、候选审核、安全审计验链、隔离区放行、检索质量验证、健康度看板、演示数据工具 |
 
-### 3.4 Qt 桌面控制台 21 页 / 9 大模块
+### 3.4 Qt 桌面控制台
 
 | 分组 | 页面 | 关键交互 |
 | --- | --- | --- |
 | 总览 | Dashboard | 统计卡 / 环图 / 柱图 / 事件流 / 系统状态 |
-| 内置终端 | Terminal（opencode / shell） | `QProcess` 启动子进程 |
+| Agent 入口 | Dashboard“打开 Agent” | 调用系统终端启动 OpenCode，不在控制台内嵌终端 |
 | 记忆管理 | Preference / Knowledge / Fact | 列表 · 筛选 · 详情抽屉 · 版本链 · 批量删除 · 事实提案裁决 |
 | 检索与冲突 | Search / Conflict | 混合检索 + 上下文预览 + 新旧对比 + 人工裁决 |
 | 遗忘与生命周期 | Forget / Pending / Archive / Recycle / Health / Settings | NL 语义遗忘 + 范围 / ID 预览 + 健康度看板 |
@@ -783,7 +783,6 @@ XA202612-2/
 │       └── pages/                     # 21 页
 │           ├── BasePage               # 基类
 │           ├── DashboardPage
-│           ├── TerminalPage
 │           ├── PreferencePage / KnowledgePage / FactPage
 │           ├── MemoryTierPage
 │           ├── SearchPage
