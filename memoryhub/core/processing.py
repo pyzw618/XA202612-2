@@ -19,9 +19,13 @@ from memoryhub.adapter.schemas import (
     SceneScope,
 )
 from memoryhub.core.knowledge.extractor import KnowledgeExtractor
+from memoryhub.core.knowledge.confidence import (
+    KnowledgeConfidenceCalculator,
+    KnowledgeConfidenceFactors,
+)
 from memoryhub.core.knowledge.handler import KnowledgeMemoryHandler
 from memoryhub.core.knowledge.updater import KnowledgeUpdater
-from memoryhub.core.preference.extractor import PreferenceExtractor
+from memoryhub.core.preference.extractor import PreferenceExtractor, build_event_evidence
 from memoryhub.core.preference.handler import PreferenceMemoryHandler
 from memoryhub.core.preference.updater import PreferenceUpdater
 from memoryhub.core.safety import SensitiveDetector
@@ -139,6 +143,9 @@ class EventProcessingCoordinator:
                                 quality_score=event.quality.score,
                                 extract_source="structured_agent_event",
                                 tags=[str(tag) for tag in raw.get("tags", [])],
+                                # 携带事件证据链，让统一四因子公式真正参与计算
+                                # （无证据会落入 baseline，structured_agent_event 仅按质量分派生）
+                                evidences=[build_event_evidence(event)],
                             )
                         )
                 written: list[str] = []
@@ -199,6 +206,9 @@ class EventProcessingCoordinator:
                             confidence=float(raw.get("confidence", 0.9)),
                             success_count=int(raw.get("success_count", 0)),
                             total_count=int(raw.get("total_count", 0)),
+                            # 携带事件证据链，置信度由统一计算器重算（见下方 add 前处理），
+                            # payload 中的裸 confidence 不作为真实置信度落库
+                            evidences=[build_event_evidence(event)],
                         )
                     )
             external_calls = [
@@ -212,6 +222,9 @@ class EventProcessingCoordinator:
             written: list[str] = []
             if knowledge_items:
                 for memory in knowledge_items:
+                    # 写路径强制重算置信度：raw payload confidence 只是占位，
+                    # 统一 KnowledgeConfidenceCalculator 基于事件质量/结构/证据计算
+                    self._recalculate_knowledge_confidence(memory)
                     result_id = self.knowledge_updater.add(
                         memory, skip_write_gate=True
                     )
@@ -225,6 +238,20 @@ class EventProcessingCoordinator:
                     result_id = self.knowledge_handler.apply(decision)
                     if result_id:
                         written.append(result_id)
+                    elif decision.action in {"reject", "review"}:
+                        summary.warnings.append(
+                            "knowledge candidate "
+                            f"{getattr(decision.candidate.payload, 'memory_id', '?')} "
+                            f"dropped: action={decision.action} reason={decision.reason}"
+                        )
+            # 纯对话文本中的客观陈述（"X是Y/X为Y"）确定性抽取为 knowledge(FACT)
+            # （extract_facts 内部规则，无 LLM 不臆造；§4.8.3）
+            for fact in self.knowledge_extractor.extract_facts(events):
+                result_id = self.knowledge_updater.add(
+                    fact, skip_write_gate=True
+                )
+                if result_id:
+                    written.append(result_id)
             summary.knowledge_written.extend(written)
             for result_id in written:
                 stored = self.know_repo.get_by_id(result_id)
@@ -274,6 +301,8 @@ class EventProcessingCoordinator:
                 quality_score=quality_score,
                 extract_source="explicit_feedback",
                 tags=tags,
+                # 携带事件证据链，让统一四因子公式参与计算
+                evidences=[build_event_evidence(event)],
             )
 
         lang_map = {
@@ -330,6 +359,33 @@ class EventProcessingCoordinator:
             )
 
         return prefs
+
+    @staticmethod
+    def _recalculate_knowledge_confidence(memory: KnowledgeMemory) -> None:
+        """结构化知识写路径强制重算置信度（KnowledgeConfidenceCalculator）。
+
+        raw payload 中的 confidence 不作为真实置信度；公式参数取自事件质量、
+        步骤/工具结构以及已挂载的事件证据链。
+        """
+        evidence_count = max(1, len(memory.evidences))
+        support = min(1.0, 0.25 + 0.3 * evidence_count)
+        quality = 0.5
+        for evidence in memory.evidences:
+            try:
+                quality = max(quality, float(getattr(evidence, "weight", 0.0) or 0.0))
+            except (TypeError, ValueError):
+                continue
+        structure = min(1.0, 0.45 + 0.1 * len(memory.steps) + 0.05 * len(memory.tools))
+        memory.confidence = KnowledgeConfidenceCalculator().score(
+            KnowledgeConfidenceFactors(
+                event_quality=quality,
+                completion=1.0,
+                structure=structure,
+                evidence=support,
+                outcome=1.0,
+                consistency=1.0,
+            )
+        )
 
     def _save_preference(self, memory) -> None:
         """Persist through Domain Writer; event processing has no direct repository bypass."""

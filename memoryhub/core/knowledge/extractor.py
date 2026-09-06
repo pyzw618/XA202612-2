@@ -95,6 +95,48 @@ class KnowledgeExtractor:
         {"负责人", "ceo", "founder", "总部", "成立于", "位于", "owner", "headquarters"}
     )
 
+    # 纯对话文本的轻量确定性事实模式："X是Y" / "X为Y"（无 LLM 不臆造，只认显式判断句）
+    _DIALOGUE_FACT_PATTERN = re.compile(
+        r"(?P<subj>[\u4e00-\u9fffA-Za-z0-9]{2,20}?)(?:的)?(?P<pred>是|为)"
+        r"(?P<obj>[\u4e00-\u9fffA-Za-z0-9]{1,20})(?=[。，！？；,.!?;]|$)"
+    )
+    # 主语以主观意愿词结尾时不是客观事实
+    _DIALOGUE_FACT_SKIP_SUBJ_SUFFIXES = (
+        "偏好",
+        "喜欢",
+        "希望",
+        "想要",
+        "习惯",
+        "倾向",
+        "要求",
+        "决定",
+    )
+
+    def _facts_from_dialogue_text(self, text: str) -> list[tuple[str, str, str]]:
+        """从对话文本确定性抽取 (subject, predicate, object) 三元组。"""
+        if not text:
+            return []
+        triples: list[tuple[str, str, str]] = []
+        for match in self._DIALOGUE_FACT_PATTERN.finditer(text):
+            subj = match.group("subj").strip()
+            obj = match.group("obj").strip()
+            if not subj or not obj:
+                continue
+            if subj.endswith(self._DIALOGUE_FACT_SKIP_SUBJ_SUFFIXES):
+                continue  # 主观意愿不是客观事实
+            predicate = match.group("pred")
+            # 谓词归一：主语尾部命中单值谓词集合时剥离为谓词
+            # （"周报负责人是李四" → 周报 / 负责人 / 李四）
+            for keyword in sorted(self._FACT_SINGLE_VALUE_PREDICATES, key=len, reverse=True):
+                if len(keyword) >= 2 and subj.endswith(keyword):
+                    predicate = keyword
+                    stripped = subj[: -len(keyword)]
+                    if stripped:
+                        subj = stripped
+                    break
+            triples.append((subj, predicate, obj))
+        return triples
+
     def extract_facts(self, events: list[MemoryEvent | dict]) -> list[KnowledgeMemory]:
         """从工具调用结果确定性/LLM 提取客观关系事实（knowledge_type=FACT）。
 
@@ -160,6 +202,40 @@ class KnowledgeExtractor:
                             ],
                         )
                     )
+            # 纯对话文本的确定性事实抽取：无外部工具调用时，"X是Y/X为Y"客观陈述
+            # 也可沉淀为 knowledge(FACT)（不臆造：只认显式判断句，LLM 不参与）
+            text = str(self._get_event_field(event, "text", "") or "").strip()
+            for subj, pred, obj in self._facts_from_dialogue_text(text):
+                key = (user_id, subj, pred, obj)
+                if key in seen:
+                    continue
+                seen.add(key)
+                facts.append(
+                    KnowledgeMemory(
+                        user_id=user_id,
+                        knowledge_type=KnowledgeType.FACT,
+                        name=f"{subj} {pred} {obj}",
+                        content=f"{subj} {pred} {obj}",
+                        subject=subj,
+                        predicate=pred,
+                        object_value=obj,
+                        object_type="Other",
+                        single_value=(
+                            True if pred in self._FACT_SINGLE_VALUE_PREDICATES else None
+                        ),
+                        confidence=0.6,
+                        scope=SceneScope(scene=scene, task_type=task_type),
+                        evidences=[
+                            Evidence(
+                                event_id=event_id,
+                                evidence_id=f"{event_id}:dialogue",
+                                content=f"对话文本：{text[:200]}",
+                                source_id=event_id,
+                                source_type=self._evidence_source_type(event),
+                            )
+                        ],
+                    )
+                )
         return facts
 
     def _facts_from_tool_result(self, call, result, adapter) -> list[tuple]:

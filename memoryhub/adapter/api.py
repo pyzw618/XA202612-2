@@ -61,6 +61,8 @@ from memoryhub.domain.contracts import MemoryEventContract
 from memoryhub.embedding import KylinEmbeddingError
 from memoryhub.storage.vector_engine import MilvusEngineError
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 logger = logging.getLogger("uvicorn.error")
 
@@ -1667,14 +1669,17 @@ async def propose_facts(req: FactProposeRequest, request: Request):
     """提交手工三元组，直接写入 knowledge(FACT)（legacy Fact 管线已删除，§4.8.8）。
 
     结构化确定性映射（不经 LLM）：subject/predicate/object → KnowledgeMemory(FACT)。
-    返回已落库的事实列表（fact 风格响应，前端 FactPage 直接展示）。
+    返回 {"created": [...], "failed": [...]}：单条失败（校验不通过/写库异常/回读缺失）
+    不影响其它条，failed 中逐条标注原因，不再静默假成功。
     """
     write_service = getattr(request.app.state, "memory_write_service", None)
     if write_service is None:
         raise HTTPException(status_code=503, detail="memory write service not initialized")
     from memoryhub.adapter.schemas import KnowledgeType, SceneScope
 
-    created = []
+    know_repo = getattr(request.app.state, "know_repo", None)
+    created: list[dict] = []
+    failed: list[dict] = []
     for raw in req.triples:
         triple_data = dict(raw)
         subject = str(triple_data.get("subject_text") or triple_data.get("subject") or "").strip()
@@ -1682,7 +1687,9 @@ async def propose_facts(req: FactProposeRequest, request: Request):
             triple_data.get("predicate_text") or triple_data.get("predicate") or ""
         ).strip()
         obj = str(triple_data.get("object_text") or triple_data.get("object") or "").strip()
+        entry = {"subject": subject, "predicate": predicate, "object": obj}
         if not subject or not predicate or not obj:
+            failed.append({**entry, "reason": "empty subject/predicate/object"})
             continue
         scope = SceneScope(
             scene="*" if req.scope_hint == "global" else "",
@@ -1702,9 +1709,35 @@ async def propose_facts(req: FactProposeRequest, request: Request):
             scope=scope,
             confidence=float(triple_data.get("confidence") or 0.9),
         )
-        write_service.upsert_memory(memory, skip_write_gate=True)
-        created.append(_fact_memory_to_dict(memory))
-    return created
+        try:
+            # upsert_memory 经 Domain Writer 事务写入；失败以抛异常或回读缺失呈现
+            # （无 domain_writer 时 receipt 为 None，repo.save 已执行，故以回读为准）
+            write_service.upsert_memory(memory, skip_write_gate=True)
+            stored = (
+                know_repo.get_by_id(memory.memory_id)
+                if know_repo is not None
+                else memory
+            )
+            if stored is None:
+                failed.append({**entry, "reason": "write not persisted (read-back miss)"})
+                continue
+            created.append(
+                _fact_memory_to_dict(
+                    stored if isinstance(stored, KnowledgeMemory) else memory
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 —— 单条失败不阻断其余三元组
+            logger.warning(
+                "facts/propose: upsert failed for triple %s %s %s: %s",
+                subject,
+                predicate,
+                obj,
+                exc,
+            )
+            failed.append(
+                {**entry, "reason": f"{type(exc).__name__}: {exc}"}
+            )
+    return {"created": created, "failed": failed}
 
 
 def _fact_sha256(subject: str, predicate: str, obj: str) -> str:

@@ -177,3 +177,50 @@ def test_extract_facts_skips_failed_tools_and_empties():
         ],
     )
     assert extractor.extract_facts([event]) == []
+
+
+def test_extract_facts_from_dialogue_text():
+    """纯对话文本中的 "X是Y/X为Y" 客观陈述确定性沉淀为 knowledge(FACT)。"""
+    extractor = KnowledgeExtractor(llm_client=None)
+    event = MemoryEvent(
+        event_id="e3",
+        user_id="u1",
+        source_type="user_behavior",
+        event_type="user_action",
+        text="周报负责人是李四。账单日期是每月7号",
+        occurred_at="2026-08-18T00:00:00Z",
+        source_hash="c" * 64,
+        quality=_QUALITY,
+        payload={"action": "message", "role": "user"},
+        tool_calls=[],
+    )
+    facts = extractor.extract_facts([event])
+    assert facts, "对话文本事实应被确定性抽取"
+    assert all(f.knowledge_type == KnowledgeType.FACT for f in facts)
+
+    owner = next(f for f in facts if f.object_value == "李四")
+    assert owner.subject == "周报"  # "负责人" 归一为谓词
+    assert owner.predicate == "负责人"
+    assert owner.single_value is True
+
+    bill = next(f for f in facts if "每月7号" in f.object_value)
+    assert bill.subject == "账单日期"
+    assert bill.evidences and "对话文本" in bill.evidences[0].content
+
+
+def test_extract_facts_dialogue_skips_subjective_wishes():
+    """主观意愿句（"偏好/希望"结尾主语）不得成为事实。"""
+    extractor = KnowledgeExtractor(llm_client=None)
+    event = MemoryEvent(
+        event_id="e4",
+        user_id="u1",
+        source_type="user_behavior",
+        event_type="user_action",
+        text="用户偏好是简洁输出",
+        occurred_at="2026-08-18T00:00:00Z",
+        source_hash="d" * 64,
+        quality=_QUALITY,
+        payload={"action": "message", "role": "user"},
+        tool_calls=[],
+    )
+    assert extractor.extract_facts([event]) == []

@@ -5,8 +5,10 @@
 """
 
 import json
+import logging
 import re
 from datetime import datetime, timezone
+
 from memoryhub.adapter.schemas import (
     Evidence,
     MemoryEvent,
@@ -17,6 +19,28 @@ from memoryhub.adapter.schemas import (
     SourceType,
 )
 from memoryhub.core.preference.confidence import ConfidenceCalculator
+
+logger = logging.getLogger(__name__)
+
+
+def build_event_evidence(event: MemoryEvent) -> Evidence:
+    """由 MemoryEvent 构造一条证据（写路径共用，保证四因子公式可计算）。"""
+    if event.occurred_at:
+        try:
+            dt = datetime.strptime(event.occurred_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            dt = datetime.now(timezone.utc)
+    else:
+        dt = datetime.now(timezone.utc)
+
+    return Evidence(
+        event_id=getattr(event, "event_id", "") or "",
+        content=f"[{event.event_type.upper()}] Source:{event.source_type.value} Quality:{event.quality.score:.2f}",
+        source_type=event.source_type,
+        timestamp=dt,
+        weight=event.quality.score,
+        decision=None,  # 初始提取的单条事件默认为 None，后续在 ConflictResolver 中标记冲突决策
+    )
 
 
 class PreferenceExtractor:
@@ -140,6 +164,10 @@ class PreferenceExtractor:
             "it may signal a TOOL_PREFERENCE; emit preference_type 'tool_preference' "
             "with action_payload like "
             "{\"action\": \"use_tool\", \"target\": \"<tool_name>\", \"value\": \"<task_type>\"}.\n"
+            "4. Objective verifiable facts MUST NOT be emitted as preferences: statements "
+            "naming specific people, dates, amounts, addresses, statuses or assignments "
+            "(e.g. \"X 的负责人是 Y\", \"账单日期是每月 7 号\", \"金额为 100 元\") are facts, "
+            "not preferences. For such input leave 'implicit_pref' empty.\n"
         )
 
         allowed_types = "|".join([e.value for e in PreferenceType])
@@ -204,9 +232,18 @@ Output JSON format:
 
                 parsed = json.loads(response_text)
                 h_pref = parsed.get("implicit_pref", "")
-                pref_type_str = parsed.get("preference_type", "output_style")
+                pref_type_str = parsed.get("preference_type")
                 action_payload = parsed.get("action_payload", {})
                 extracted_tags = parsed.get("tags", [])
+
+                # 代码侧事后校验：客观事实型陈述不得落入偏好（与 prompt 规则 4 呼应）
+                if h_pref and self._looks_like_objective_fact(h_pref):
+                    logger.warning(
+                        "preference extractor: dropping fact-like candidate %r "
+                        "(objective statements are not preferences)",
+                        h_pref,
+                    )
+                    return []
                 
                 # 增强：从 LLM 输出与原始文本/文本摘要中双重判断 is_global
                 llm_is_global = bool(parsed.get("is_global", False))
@@ -226,10 +263,24 @@ Output JSON format:
 
                 # GVR 质量校验：避免过度具体化或提及临时槽位
                 if len(h_pref) >= 8 and not any(slot in h_pref.lower() for slot in ["price_range", "flight_class", "="]):
+                    pref_type = self._classify_type(pref_type_str)
+                    if pref_type is None:
+                        # 未给/未知 preference_type：丢弃该候选，不再回退 output_style
+                        logger.warning(
+                            "preference extractor: dropping candidate %r with "
+                            "missing/unknown preference_type %r",
+                            h_pref,
+                            pref_type_str,
+                        )
+                        draft_content = h_pref
+                        verifier_feedback = (
+                            f"missing or unknown preference_type: {pref_type_str!r}"
+                        )
+                        continue
                     return [
                         PreferenceMemory(
                             user_id=event.user_id,
-                            preference_type=self._classify_type(pref_type_str),
+                            preference_type=pref_type,
                             text=h_pref,
                             payload=action_payload,
                             scope=SceneScope(
@@ -252,11 +303,37 @@ Output JSON format:
 
         return []
 
-    def _classify_type(self, text: str) -> PreferenceType:
+    # 客观事实型模式：命中即视为事实陈述，不得作为偏好（知识链的 extract_facts 负责沉淀）
+    _FACT_LIKE_PATTERNS = (
+        "负责人是",
+        "负责人为",
+        "的负责人",
+        "日期是",
+        "日期为",
+        "金额为",
+        "金额是",
+        "状态为",
+        "状态是",
+        "地址是",
+        "地址为",
+        "位于",
+        "成立于",
+        "电话是",
+        "邮箱是",
+    )
+
+    @classmethod
+    def _looks_like_objective_fact(cls, text: str) -> bool:
+        return any(pattern in text for pattern in cls._FACT_LIKE_PATTERNS)
+
+    def _classify_type(self, text: str) -> PreferenceType | None:
+        """映射 LLM 输出的 preference_type；未给/未知时返回 None（丢弃候选）。"""
+        if not text:
+            return None
         try:
             return PreferenceType(text)
         except ValueError:
-            return PreferenceType.OUTPUT_STYLE
+            return None
 
     def _extract_tags_from_text(self, text: str) -> list[str]:
         words = re.findall(r"\b\w{3,}\b", text.lower())
@@ -264,19 +341,4 @@ Output JSON format:
         return list(set([w for w in words if w not in stopwords]))[:5]
 
     def _build_evidence(self, event: MemoryEvent) -> Evidence:
-        if event.occurred_at:
-            try:
-                dt = datetime.strptime(event.occurred_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-            except ValueError:
-                dt = datetime.now(timezone.utc)
-        else:
-            dt = datetime.now(timezone.utc)
-
-        return Evidence(
-            event_id=getattr(event, "event_id", "") or "",
-            content=f"[{event.event_type.upper()}] Source:{event.source_type.value} Quality:{event.quality.score:.2f}",
-            source_type=event.source_type,
-            timestamp=dt,
-            weight=event.quality.score,
-            decision=None,  # 初始提取的单条事件默认为 None，后续在 ConflictResolver 中标记冲突决策
-        )
+        return build_event_evidence(event)

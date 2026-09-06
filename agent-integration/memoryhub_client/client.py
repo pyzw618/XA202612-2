@@ -395,10 +395,18 @@ class MemoryHubClient:
                     "extract_source": "explicit_feedback",
                 }
             )
-        if memory_type.startswith("knowledge:"):
+        if memory_type == "knowledge":
+            # 裸 knowledge 无子类型信息：按 fact 处理（客观知识默认沉淀为事实）
+            memory_type = "fact"
+        elif memory_type.startswith("knowledge:"):
             memory_type = memory_type.split(":", 1)[1]
         if memory_type not in {"workflow", "case", "template", "fact"}:
-            raise MemoryHubError("memoryhub.client.invalid_type", f"unsupported memory type: {memory_type}")
+            raise MemoryHubError(
+                "memoryhub.client.invalid_type",
+                f"unsupported memory type: {memory_type!r}; "
+                "use one of: preference, workflow, case, template, fact, "
+                "knowledge (treated as fact), knowledge:<subtype>",
+            )
         return self.write_knowledge(
             {
                 "user_id": user_id,

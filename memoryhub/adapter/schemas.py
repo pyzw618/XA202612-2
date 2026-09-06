@@ -1410,7 +1410,7 @@ class PreferenceMemory(BaseModel):
     is_global: bool = False                # 是否为全局通用偏好（用于跨场景兜底）
 
     # --- 置信度、质量与状态 ---
-    confidence: float = 0.5                # [0, 1] 综合置信度
+    confidence: float = 0.5                # [0, 1] 综合置信度（未计算占位：写路径必须经 ConfidenceCalculator 重算）
     quality_score: float = 1.0             # [0, 1] 来源 MemoryEvent 的质量评分
     extract_source: str = "implicit_inference" # 提取来源: explicit_feedback / implicit_inference
     status: MemoryStatus = MemoryStatus.ACTIVE
@@ -1471,7 +1471,7 @@ class KnowledgeMemory(BaseModel):
     scope: SceneScope = Field(default_factory=SceneScope)
 
     # --- 质量指标 ---
-    confidence: float = 0.0
+    confidence: float = 0.0  # 未计算占位（pydantic 需默认值）：写路径必须经 KnowledgeConfidenceCalculator/Updater 重算
     success_count: int = 0  # 成功复用次数
     total_count: int = 0  # 总调用次数
     status: MemoryStatus = MemoryStatus.ACTIVE

@@ -161,7 +161,9 @@ def _propose(client: TestClient, object_text: str) -> str:
         },
     )
     assert response.status_code == 200
-    return response.json()[0]["fact_id"]
+    body = response.json()
+    assert body["failed"] == []
+    return body["created"][0]["fact_id"]
 
 
 def test_replay_is_read_only_until_execute_and_masks_tool_results(client):
@@ -224,8 +226,9 @@ def test_fact_propose_is_visible_to_same_user_and_dashboard_query(client):
         },
     )
     assert response.status_code == 200
-    fact_id = response.json()[0]["fact_id"]
-    assert response.json()[0]["user_id"] == "ethan"
+    fact_id = response.json()["created"][0]["fact_id"]
+    assert response.json()["created"][0]["user_id"] == "ethan"
+    assert response.json()["failed"] == []
 
     assert test_client.get(
         "/api/memory/facts", params={"user_id": "default", "status": "active"}

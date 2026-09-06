@@ -103,11 +103,22 @@ class ConfidenceCalculator:
         return self.calculate(preference)
 
     def _baseline_confidence(self, preference: PreferenceMemory) -> float:
-        """无证据时的置信度基线：显式反馈置信度高，隐式推断置信度低。"""
+        """无证据时的置信度基线：显式反馈置信度高，隐式推断置信度低。
+
+        structured_agent_event（结构化代理事件）通常带 quality_score：
+        用 0.55 + 0.35 * quality_score 派生基线，避免无证据时被打成恒定 0.5。
+        """
         if preference.extract_source == "explicit_feedback":
             return 0.8
         if preference.extract_source == "implicit_inference":
             return 0.5
+        if preference.extract_source == "structured_agent_event":
+            try:
+                quality = float(getattr(preference, "quality_score", 0.5) or 0.0)
+            except (TypeError, ValueError):
+                quality = 0.0
+            quality = max(0.0, min(1.0, quality))
+            return round(min(0.95, 0.55 + 0.35 * quality), 4)
         return 0.5
 
     def _factor_evidence_count(self, evidence_count: int) -> float:

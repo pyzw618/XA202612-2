@@ -227,6 +227,37 @@ class TestPre02LlmExtraction:
         prefs = extractor.extract(_event("evt_llm_none", text="中性行为描述"))
         assert prefs == []
 
+    def test_llm_unknown_type_dropped_without_output_style_fallback(self) -> None:
+        """未知 preference_type 的候选被丢弃，不再回退 output_style。"""
+        llm = _FakeLLM(responses=[
+            json.dumps({"implicit_pref": "用户偏好某种长期行为习惯描述", "preference_type": "nonsense_type", "action_payload": {}, "tags": []}),
+            json.dumps({"implicit_pref": "用户偏好某种长期行为习惯描述", "preference_type": "nonsense_type", "action_payload": {}, "tags": []}),
+            json.dumps({"implicit_pref": "用户偏好某种长期行为习惯描述", "preference_type": "nonsense_type", "action_payload": {}, "tags": []}),
+        ])
+        extractor = PreferenceExtractor(llm_client=llm)
+        prefs = extractor.extract(_event("evt_llm_unk", text="中性行为描述"))
+        assert prefs == []
+
+    def test_llm_missing_type_dropped(self) -> None:
+        """LLM 未输出 preference_type 时候选被丢弃。"""
+        llm = _FakeLLM(responses=[
+            json.dumps({"implicit_pref": "用户偏好某种长期行为习惯描述", "action_payload": {}, "tags": []}),
+            json.dumps({"implicit_pref": "用户偏好某种长期行为习惯描述", "action_payload": {}, "tags": []}),
+            json.dumps({"implicit_pref": "用户偏好某种长期行为习惯描述", "action_payload": {}, "tags": []}),
+        ])
+        extractor = PreferenceExtractor(llm_client=llm)
+        prefs = extractor.extract(_event("evt_llm_missing_type", text="中性行为描述"))
+        assert prefs == []
+
+    def test_llm_fact_like_candidate_rejected(self) -> None:
+        """客观事实陈述（负责人是 …）不得被 LLM 路径输出为偏好。"""
+        llm = _FakeLLM(responses=[
+            json.dumps({"implicit_pref": "周报负责人是李四", "preference_type": "output_style", "action_payload": {}, "tags": []}),
+        ])
+        extractor = PreferenceExtractor(llm_client=llm)
+        prefs = extractor.extract(_event("evt_llm_fact", text="中性行为描述"))
+        assert prefs == []
+
 
 # ==============================================================================
 # PRE-03 置信度计算
@@ -240,6 +271,17 @@ class TestPre03Confidence:
         implicit = _pref("mem_base_i", extract_source="implicit_inference")
         assert calc.calculate(explicit) == pytest.approx(0.8)
         assert calc.calculate(implicit) == pytest.approx(0.5)
+
+    def test_baseline_structured_agent_event_derives_from_quality(self) -> None:
+        """structured_agent_event 无证据时按 quality_score 派生基线，而非恒定 0.5。"""
+        calc = ConfidenceCalculator()
+        high = _pref("mem_sae_h", extract_source="structured_agent_event")
+        high.quality_score = 1.0
+        low = _pref("mem_sae_l", extract_source="structured_agent_event")
+        low.quality_score = 0.0
+        assert calc.calculate(high) == pytest.approx(0.9)
+        assert calc.calculate(low) == pytest.approx(0.55)
+        assert calc.calculate(high) > calc.calculate(low)
 
     def test_user_behavior_outranks_tool_result(self) -> None:
         calc = ConfidenceCalculator()
