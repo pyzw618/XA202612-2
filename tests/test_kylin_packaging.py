@@ -126,3 +126,13 @@ def test_desktop_client_has_no_embedded_terminal() -> None:
     assert not (desktop_root / "src" / "pages" / "TerminalPage.cpp").exists()
     assert not (desktop_root / "src" / "pages" / "TerminalPage.h").exists()
     assert not (desktop_root / "resources" / "icons" / "terminal.svg").exists()
+
+
+def test_fact_proposal_uses_current_desktop_user_and_canonical_triple_fields() -> None:
+    fact_page = (
+        ROOT / "desktop-client" / "src" / "pages" / "FactPage.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert 'body["user_id"] = AppContext::instance()->userId();' in fact_page
+    assert 'j::str(f, "subject")' in fact_page
+    assert 'j::str(f, "predicate")' in fact_page

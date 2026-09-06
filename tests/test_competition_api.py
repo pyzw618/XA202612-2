@@ -205,6 +205,47 @@ def test_fact_propose_is_idempotent_via_knowledge_fact(client):
     assert {f["object_value"] for f in facts} == {"alice", "bob"}
 
 
+def test_fact_propose_is_visible_to_same_user_and_dashboard_query(client):
+    """桌面提交、事实列表和总览子类型统计必须使用同一 user_id。"""
+    test_client, _ = client
+    response = test_client.post(
+        "/api/memory/facts/propose",
+        json={
+            "user_id": "ethan",
+            "scope_hint": "global",
+            "triples": [
+                {
+                    "subject_text": "MemoryHub",
+                    "predicate_text": "runs_on",
+                    "object_text": "Kylin",
+                    "confidence": 1.0,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    fact_id = response.json()[0]["fact_id"]
+    assert response.json()[0]["user_id"] == "ethan"
+
+    assert test_client.get(
+        "/api/memory/facts", params={"user_id": "default", "status": "active"}
+    ).json() == []
+    facts = test_client.get(
+        "/api/memory/facts", params={"user_id": "ethan", "status": "active"}
+    ).json()
+    assert [item["fact_id"] for item in facts] == [fact_id]
+
+    dashboard_facts = test_client.get(
+        "/api/memory/knowledge",
+        params={
+            "user_id": "ethan",
+            "status": "active",
+            "knowledge_type": "fact",
+        },
+    ).json()
+    assert [item["memory_id"] for item in dashboard_facts] == [fact_id]
+
+
 def test_knowledge_filter_and_forget_preview_do_not_mutate(client):
     test_client, app = client
     workflow = KnowledgeMemory(
