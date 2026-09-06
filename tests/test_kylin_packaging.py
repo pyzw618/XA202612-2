@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import importlib.util
+import json
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,3 +44,69 @@ def test_opencode_configuration_does_not_revive_legacy_systemd_service() -> None
 
     assert "systemctl --user" not in configurator
     assert "memoryhub.service" not in configurator
+
+
+def _load_configure_opencode_module():
+    path = ASSETS / "configure_opencode.py"
+    spec = importlib.util.spec_from_file_location("configure_opencode", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_opencode_configuration_registers_memoryhub_mcp_and_preserves_settings(tmp_path: Path) -> None:
+    module = _load_configure_opencode_module()
+    opencode_root = tmp_path / "opencode"
+    opencode_root.mkdir()
+    config_path = opencode_root / "opencode.jsonc"
+    config_path.write_text(
+        '{\n  // keep the existing provider\n  "provider": {"demo": {}},\n}\n',
+        encoding="utf-8",
+    )
+    launcher = tmp_path / "memoryhub" / "mcp-launcher"
+
+    result = module.register_mcp(opencode_root, launcher, "ethan")
+    config = json.loads(result.read_text(encoding="utf-8"))
+
+    assert config["provider"] == {"demo": {}}
+    assert config["mcp"]["memoryhub"] == {
+        "type": "local",
+        "command": ["/bin/sh", str(launcher)],
+        "environment": {
+            "MEMORYHUB_API_URL": "http://127.0.0.1:8099",
+            "MEMORYHUB_USER_ID": "ethan",
+        },
+        "enabled": True,
+        "timeout": 15000,
+    }
+    assert (opencode_root / "opencode.jsonc.memoryhub-backup").exists()
+
+
+def test_opencode_configuration_refuses_invalid_json_without_overwriting(tmp_path: Path) -> None:
+    module = _load_configure_opencode_module()
+    opencode_root = tmp_path / "opencode"
+    opencode_root.mkdir()
+    config_path = opencode_root / "opencode.jsonc"
+    original = '{"provider": '
+    config_path.write_text(original, encoding="utf-8")
+
+    try:
+        module.register_mcp(opencode_root, tmp_path / "mcp-launcher", "ethan")
+    except SystemExit as error:
+        assert "cannot update invalid OpenCode config" in str(error)
+    else:
+        raise AssertionError("invalid OpenCode configuration was accepted")
+
+    assert config_path.read_text(encoding="utf-8") == original
+    assert not (opencode_root / "opencode.jsonc.memoryhub-backup").exists()
+
+
+def test_opencode_configurator_installs_cross_kare_mcp_launcher() -> None:
+    configurator = (ASSETS / "memoryhub-configure-opencode").read_text(encoding="utf-8")
+    launcher = (ASSETS / "memoryhub-mcp-user-launcher").read_text(encoding="utf-8")
+
+    assert "configure_opencode.py" in configurator
+    assert "mcp-user-launcher" in configurator
+    assert "/opt/kare-applications/shadow/merge/opt/memoryhub/venv/bin/python" in launcher
+    assert "python3 \"$config_helper\"" in configurator

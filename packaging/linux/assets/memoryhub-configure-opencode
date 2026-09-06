@@ -33,6 +33,9 @@ else
 fi
 opencode_root="$config_home/opencode"
 source_root="/usr/share/memoryhub/opencode"
+mcp_launcher="$config_home/memoryhub/mcp-launcher"
+mcp_launcher_template="/usr/lib/memoryhub/mcp-user-launcher"
+config_helper="/usr/lib/memoryhub/configure_opencode.py"
 
 install -d -m 0755 "$opencode_root/plugins" "$opencode_root/commands" \
     "$opencode_root/skills" "$opencode_root/tools" "$config_home/memoryhub"
@@ -41,6 +44,12 @@ install -m 0644 "$source_root/memoryhub_events.mjs" "$opencode_root/plugins/memo
 cp -R "$source_root/commands/." "$opencode_root/commands/"
 cp -R "$source_root/skills/." "$opencode_root/skills/"
 cp -R "$source_root/tools/." "$opencode_root/tools/"
+
+if [ ! -f "$mcp_launcher_template" ]; then
+    echo "memoryhub: MCP launcher template is unavailable; reinstall MemoryHub" >&2
+    exit 2
+fi
+install -m 0755 "$mcp_launcher_template" "$mcp_launcher"
 
 cat > "$config_home/memoryhub/config.json" <<EOF
 {
@@ -52,6 +61,15 @@ cat > "$config_home/memoryhub/config.json" <<EOF
   "mode": "plugin"
 }
 EOF
+
+if [ ! -f "$config_helper" ]; then
+    echo "memoryhub: OpenCode configuration helper is unavailable; reinstall MemoryHub" >&2
+    exit 2
+fi
+python3 "$config_helper" \
+    --opencode-root "$opencode_root" \
+    --launcher "$mcp_launcher" \
+    --user "$target_user"
 
 if [ "$(id -u)" -eq 0 ]; then
     chown -R "$target_uid:$target_gid" "$opencode_root" "$config_home/memoryhub"

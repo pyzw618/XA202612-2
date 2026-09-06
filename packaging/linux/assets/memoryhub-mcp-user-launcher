@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+# Inside KARE the package is mounted at /opt/memoryhub. OpenCode normally runs
+# on the host, where the same package is exposed through KARE's merged shadow.
+if [ "${KARE_APP:-}" = "True" ] && [ -x /opt/memoryhub/venv/bin/python ]; then
+    exec /opt/memoryhub/venv/bin/python -m memoryhub_mcp "$@"
+fi
+for python_bin in \
+    /opt/kare-applications/shadow/merge/opt/memoryhub/venv/bin/python \
+    /var/opt/kare-applications/shadow/upper/opt/memoryhub/venv/bin/python \
+    /opt/memoryhub/venv/bin/python; do
+    if [ -x "$python_bin" ]; then
+        exec "$python_bin" -m memoryhub_mcp "$@"
+    fi
+done
+echo "memoryhub: MCP runtime is unavailable; reinstall MemoryHub" >&2
+exit 127
