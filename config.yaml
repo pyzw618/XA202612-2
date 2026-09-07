@@ -38,9 +38,15 @@ llm:
   temperature: 0.1
   max_tokens: 2048
 embedding:
-  provider: mock
+  # 麒麟环境使用真实 Embedding SDK（libkylin-coreai-embedding.so），输出固定 768 维
+  provider: kylin
   dimension: 768
-  model_name: mock-embedding
+  # 麒麟模型名称（真实 SDK 模式必填）
+  model_name: ensemble-embd_gte-base_uint8-text
+  # 动态库显式路径（kylin 模式，空则按默认路径探测）
+  so_path: "/usr/lib/libkylin-coreai-embedding.so"
+  # 单次推理超时（毫秒）；超时返回稳定错误码 embedding.timeout
+  query_timeout_ms: 250
 safety:
   rule_set_id: kylin-memoryhub.safety
   rule_set_version: '1.0'
