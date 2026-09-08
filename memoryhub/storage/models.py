@@ -116,6 +116,7 @@ class KnowledgeRow(Base):
     # Nullable for legacy rows; vNext Authority writes always bind a tenant.
     tenant_id = Column(String(64), index=True, nullable=True)
     user_id = Column(String(64), index=True)
+    project_id = Column(String(128), index=True, default="")
     memory_type = Column(String(16), default="knowledge")
     knowledge_type = Column(String(32))
     name = Column(String(256))

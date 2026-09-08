@@ -72,7 +72,7 @@ void StatCard::setLoading(bool on) {
         setProperty("state", "loading");
         setToolTip("正在加载");
     }
-    m_number->setText(on ? QStringLiteral("—") : m_number->text());
+    if (on) m_number->setText(QStringLiteral("—"));
     style()->unpolish(this);
     style()->polish(this);
 }

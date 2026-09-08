@@ -102,6 +102,9 @@ SearchPage::SearchPage(QWidget *parent) : BasePage(parent) {
     filterRow->addWidget(m_minConf);
     filterRow->addStretch();
     root->addLayout(filterRow);
+    auto *filterHint = new QLabel("筛选条件由服务端在排序截断前执行；结果保留可追溯来源。", this);
+    filterHint->setWordWrap(true);
+    root->addWidget(filterHint);
 
     // ---- 主内容：左结果 / 右侧栏 ----
     auto *content = new QWidget(this);
@@ -193,6 +196,12 @@ SearchPage::SearchPage(QWidget *parent) : BasePage(parent) {
     connect(m_minConf, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &SearchPage::clearContext);
     for (auto *check : {m_cbPreference, m_cbKnowledge, m_cbFact})
         connect(check, &QCheckBox::toggled, this, &SearchPage::clearContext);
+    const auto refilter = [this]() {
+        if (!m_lastResponse.isEmpty()) renderResults(m_lastResponse);
+    };
+    connect(m_minConf, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, refilter);
+    for (auto *check : {m_cbPreference, m_cbKnowledge, m_cbFact})
+        connect(check, &QCheckBox::toggled, this, refilter);
 }
 
 void SearchPage::clearResults() {
@@ -263,20 +272,32 @@ void SearchPage::runSearch() {
     if (q.isEmpty()) { QMessageBox::information(this, "提示", "请输入查询内容"); return; }
 
     refresh();
+    QJsonArray types;
+    if (m_cbPreference->isChecked()) types.append("preference");
+    if (m_cbKnowledge->isChecked()) types.append("knowledge");
+    if (m_cbFact->isChecked()) types.append("fact");
     m_lastRequest = QJsonObject{{"user_id", AppContext::instance()->userId()},
                                 {"query", q}, {"top_k", m_topK->value()},
+                                {"memory_types", types}, {"min_confidence", m_minConf->value()},
+                                {"scene", m_sceneCombo->currentData().toString()},
+                                {"task_type", m_taskEdit->text().trimmed()},
                                 {"include_provenance", true}};
     m_requestView->setObject(m_lastRequest);
     const int generation = ++m_generation;
     m_searchButton->setEnabled(false);
     m_searchButton->setText("检索中…");
     m_stateView->setState(PageState::Loading, "正在检索", "正在查询真实记忆数据…");
-    const QString provenancePath = api::ApiClient::urlWithQuery(
-        "/api/memory/v2/search",
-        {{"user_id", AppContext::instance()->userId()},
-         {"query", q},
-         {"top_k", QString::number(m_topK->value())},
-         {"include_provenance", "true"}});
+    QList<QPair<QString, QString>> params{{"user_id", AppContext::instance()->userId()},
+                                            {"query", q},
+                                            {"top_k", QString::number(m_topK->value())},
+                                            {"min_confidence", QString::number(m_minConf->value(), 'f', 2)},
+                                            {"scene", m_sceneCombo->currentData().toString()},
+                                            {"task_type", m_taskEdit->text().trimmed()},
+                                            {"include_provenance", "true"}};
+    if (m_cbPreference->isChecked()) params.append(qMakePair(QStringLiteral("memory_types"), QStringLiteral("preference")));
+    if (m_cbKnowledge->isChecked()) params.append(qMakePair(QStringLiteral("memory_types"), QStringLiteral("knowledge")));
+    if (m_cbFact->isChecked()) params.append(qMakePair(QStringLiteral("memory_types"), QStringLiteral("fact")));
+    const QString provenancePath = api::ApiClient::urlWithQuery("/api/memory/v2/search", params);
     AppContext::instance()->api()->getAsync(provenancePath,
         [this, generation](const api::Result &r) {
             if (generation != m_generation) return;
@@ -298,35 +319,15 @@ void SearchPage::runSearch() {
 void SearchPage::renderResults(const QJsonObject &resp) {
     clearResults();
 
-    const auto filterGroup = [this](const QJsonArray &source, const QCheckBox *enabled) {
-        QJsonArray filtered;
-        if (!enabled->isChecked()) return filtered;
-        const QString scene = m_sceneCombo->currentData().toString();
-        const QString taskType = m_taskEdit->text().trimmed();
-        const double minConfidence = m_minConf->value();
-        for (const QJsonValue &value : source) {
-            const QJsonObject item = value.toObject();
-            if (j::num(item, "confidence", 0.0) < minConfidence) continue;
-            const QJsonValue scopeValue = item.value("scope");
-            const QJsonObject scope = scopeValue.toObject();
-            const QString scopeName = scopeValue.isString() ? scopeValue.toString() : j::str(scope, "scope");
-            if (!scene.isEmpty() && j::str(scope, "scene", scopeName) != scene) continue;
-            if (!taskType.isEmpty() && j::str(scope, "task_type") != taskType) continue;
-            filtered.append(item);
-        }
-        return filtered;
-    };
-    // API v2 keeps the provenance-aware retrieval contract compact.  Retain the
-    // existing desktop filters locally so the UI behavior stays compatible.
-    const QJsonArray prefs = filterGroup(j::arr(resp, "preferences"), m_cbPreference);
-    const QJsonArray knows = filterGroup(j::arr(resp, "knowledge"), m_cbKnowledge);
-    const QJsonArray facts = filterGroup(j::arr(resp, "facts"), m_cbFact);
+    const QJsonArray prefs = j::arr(resp, "preferences");
+    const QJsonArray knows = j::arr(resp, "knowledge");
+    const QJsonArray facts = j::arr(resp, "facts");
 
     const int total = prefs.size() + knows.size() + facts.size();
     if (total == 0) {
         auto *empty = new EmptyState();
         empty->setIcon(QIcon(":/icons/search.svg"));
-        empty->setTitle("未检索到相关记忆");
+        empty->setTitle("本次返回结果中无匹配记忆");
         empty->setHint("尝试调整查询词、放宽类型或置信度阈值");
         m_resultsLayout->addWidget(empty, 1);
     } else {

@@ -1451,6 +1451,7 @@ class KnowledgeMemory(BaseModel):
 
     memory_id: str = Field(default_factory=lambda: f"know_{uuid.uuid4().hex[:8]}")
     user_id: str = "default"
+    project_id: str = ""
     memory_type: str = "knowledge"
     knowledge_type: KnowledgeType = KnowledgeType.WORKFLOW
 
@@ -1592,6 +1593,8 @@ class SearchRequest(BaseModel):
     top_k: int = 5
     memory_types: list[str] = Field(default_factory=list)  # 过滤记忆类型
     min_confidence: float = 0.0
+    scenes: list[str] = Field(default_factory=list)
+    task_types: list[str] = Field(default_factory=list)
     level: str = ""  # 记忆分层过滤：short / mid / long（REFACTOR_PLAN_V2 §4.4.3）
     session_id: str = ""  # 会话上下文（短期工作记忆定位）
 

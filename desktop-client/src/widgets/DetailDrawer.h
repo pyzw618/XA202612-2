@@ -16,13 +16,10 @@ public:
     explicit DetailDrawer(QWidget *parent = nullptr);
 
     void open(const QString &title, QWidget *content);
-    void setContent(QWidget *content);
     void closeDrawer();
     bool isOpen() const { return m_open; }
     void setWidth(int w);
 
-    // 标题栏附加按钮（如"编辑""遗忘"）
-    QPushButton *addHeaderButton(const QString &text, const QString &objName = "primaryBtn");
 
 signals:
     void closed();

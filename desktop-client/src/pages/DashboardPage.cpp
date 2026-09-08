@@ -314,7 +314,7 @@ DashboardPage::DashboardPage(QWidget *parent) : BasePage(parent) {
 }
 
 void DashboardPage::beginLoading() {
-    m_pendingRequests = 10;
+    m_pendingRequests = 6;
     m_successfulRequests = 0;
     m_pref = m_know = -1;
     m_knowWorkflow = m_knowCase = m_knowTemplate = m_knowFact = -1;
@@ -351,22 +351,21 @@ void DashboardPage::refresh() {
             updateMemoryVisuals(); finishRequest(r.ok); }, this);
     api->getAsync(query("/api/memory/knowledge", {{"status", "active"}}),
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
-            if (r.ok && r.hasJsonArray()) { m_know = r.jsonArray().size(); m_statCards[2]->setLoading(false); m_statCards[2]->setNumber(QString::number(m_know)); }
+            if (r.ok && r.hasJsonArray()) {
+                const QJsonArray rows = r.jsonArray();
+                m_know = rows.size();
+                m_knowWorkflow = m_knowCase = m_knowTemplate = m_knowFact = 0;
+                for (const QJsonValue &value : rows) {
+                    const QString type = j::str(value.toObject(), "knowledge_type").toLower();
+                    if (type == "workflow") ++m_knowWorkflow;
+                    else if (type == "case") ++m_knowCase;
+                    else if (type == "template") ++m_knowTemplate;
+                    else if (type == "fact") ++m_knowFact;
+                }
+                m_statCards[2]->setLoading(false); m_statCards[2]->setNumber(QString::number(m_know));
+            }
             else m_statCards[2]->setError(r.errorMessage.isEmpty() ? "知识记忆加载失败" : r.errorMessage);
             updateMemoryVisuals(); finishRequest(r.ok); }, this);
-    const struct { const char *arg; int *target; } subtypes[] = {
-        {"workflow", &m_knowWorkflow},
-        {"case", &m_knowCase},
-        {"template", &m_knowTemplate},
-        {"fact", &m_knowFact},
-    };
-    for (const auto &sub : subtypes) {
-        api->getAsync(query("/api/memory/knowledge", {{"status", "active"}, {"knowledge_type", QString::fromUtf8(sub.arg)}}),
-            [this, generation, sub](const api::Result &r) { if (generation != m_generation) return;
-                if (r.ok && r.hasJsonArray()) *sub.target = r.jsonArray().size();
-                else *sub.target = -2;
-                updateMemoryVisuals(); finishRequest(r.ok); }, this);
-    }
     api->getAsync(query("/api/memory/conflicts", {{"status", "pending"}}),
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
             if (r.ok && r.hasJsonArray()) m_conflicts = r.jsonArray().size(); else m_conflicts = -2; updateTasks(); finishRequest(r.ok); }, this);
@@ -409,7 +408,7 @@ void DashboardPage::finishRequest(bool ok) {
     m_updateTime->setText("更新于 " + QDateTime::currentDateTime().toString("HH:mm"));
     if (m_successfulRequests == 0) {
         setBanner("后端当前不可用。界面仍可正常浏览，你可以启动服务后点击“刷新数据”重试。", "offline");
-    } else if (m_successfulRequests < 10) {
+    } else if (m_successfulRequests < 6) {
         setBanner("部分数据暂时无法获取，已保留成功加载的内容。", "warning");
     } else {
         setBanner(QString(), "info");

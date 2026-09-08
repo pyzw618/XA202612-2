@@ -36,12 +36,21 @@ void ApiClient::setUserId(const QString &id) {
     ++m_userGeneration;
 }
 
+void ApiClient::setVNextManagementCredentials(const QString &tenantId, const QString &adminToken) {
+    m_vnextTenantId = tenantId.trimmed();
+    m_vnextAdminToken = adminToken.trimmed();
+}
+
 void ApiClient::applyCommonHeaders(QNetworkRequest *req, bool useUserHeader) const {
     req->setRawHeader("Accept", "application/json");
     if (useUserHeader) {
         // 用户规则接口要求 X-MemoryHub-User，内容为当前 user_id
         req->setRawHeader("X-MemoryHub-User", m_userId.toUtf8());
     }
+    if (!m_vnextTenantId.isEmpty())
+        req->setRawHeader("X-MemoryHub-Tenant", m_vnextTenantId.toUtf8());
+    if (!m_vnextAdminToken.isEmpty())
+        req->setRawHeader("X-MemoryHub-Admin", m_vnextAdminToken.toUtf8());
     if (req->header(QNetworkRequest::ContentTypeHeader).isNull()) {
         req->setHeader(QNetworkRequest::ContentTypeHeader,
                        QVariant(QStringLiteral("application/json")));

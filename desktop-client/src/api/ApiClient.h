@@ -50,6 +50,7 @@ public:
     void setBaseUrl(const QString &url);
     QString userId() const { return m_userId; }
     void setUserId(const QString &id);
+    void setVNextManagementCredentials(const QString &tenantId, const QString &adminToken);
 
     // ---- 同步调用（遗留兼容接口；新页面必须使用异步接口） ----
     // path 以 "/api/..." 或 "/" 开头；useUserHeader 用于需要 X-MemoryHub-User 的接口（用户规则）
@@ -93,6 +94,8 @@ private:
 
     QString m_baseUrl;
     QString m_userId;
+    QString m_vnextTenantId;
+    QString m_vnextAdminToken;
     quint64 m_userGeneration = 0;
     QNetworkAccessManager m_nam;
 };

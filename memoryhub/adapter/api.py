@@ -29,6 +29,7 @@ from memoryhub.adapter.schemas import (
     ForgetRequest,
     ForgetResponse,
     KnowledgeMemory,
+    Evidence,
     ManualConfig,
     MemoryEvent,
     MemoryStatus,
@@ -780,7 +781,8 @@ async def ingest_manual_config(req: ConfigSourceRequest, request: Request):
 def _fact_memory_to_dict(memory: KnowledgeMemory) -> dict:
     """knowledge(FACT) → fact 风格响应（/facts 兼容转发，REFACTOR_PLAN_V2 §4.8.8）。"""
     scope = getattr(memory, "scope", None)
-    scope_name = "global" if getattr(scope, "scene", "") == "*" else "project"
+    project_id = getattr(memory, "project_id", "") or ""
+    scope_name = "project" if project_id else "global"
     return {
         "fact_id": memory.memory_id,
         "memory_id": memory.memory_id,
@@ -792,6 +794,7 @@ def _fact_memory_to_dict(memory: KnowledgeMemory) -> dict:
         "source_text": memory.content,
         "source_id": "",
         "scope": scope_name,
+        "project_id": project_id or None,
         "access_count_30d": memory.access_count_30d,
         "confidence": memory.confidence,
         "status": (
@@ -802,13 +805,13 @@ def _fact_memory_to_dict(memory: KnowledgeMemory) -> dict:
     }
 
 
-def _fact_knowledge_lookup(request: Request, fact_id: str, user_id: str):
+def _fact_knowledge_lookup(request: Request, fact_id: str, user_id: str, project_id: str = ""):
     """knowledge(FACT) 单一来源定位（legacy Fact 体系已删除，REFACTOR_PLAN_V2 §4.8.8）。"""
     know_repo = getattr(request.app.state, "know_repo", None)
     if know_repo is None:
         return None
     memory = know_repo.get_by_id(fact_id)
-    if memory is not None and memory.user_id == user_id and (
+    if memory is not None and memory.user_id == user_id and (not project_id or memory.project_id == project_id) and (
         getattr(memory.knowledge_type, "value", str(memory.knowledge_type)) == "fact"
     ):
         return memory
@@ -821,6 +824,7 @@ async def list_facts(
     user_id: str = "default",
     status: str | None = "active",
     limit: int = Query(default=100, ge=1, le=500),
+    project_id: str = "",
 ):
     """FACT 列表：纯 knowledge(FACT) 单一来源（legacy facts 已并入知识，§4.8.8）。
 
@@ -835,6 +839,8 @@ async def list_facts(
             rows.extend(know_repo.get_by_type(user_id, knowledge_type="fact", status=s))
     else:
         rows = know_repo.get_by_type(user_id, knowledge_type="fact", status=status or "active")
+    if project_id:
+        rows = [m for m in rows if m.project_id == project_id]
     return [_fact_memory_to_dict(m) for m in rows][:limit]
 
 @router.get("/facts/conflicts")
@@ -854,22 +860,22 @@ async def list_fact_conflicts(
     return out[:limit]
 
 @router.get("/facts/{fact_id}")
-async def get_fact(fact_id: str, request: Request, user_id: str = "default"):
-    memory = _fact_knowledge_lookup(request, fact_id, user_id)
+async def get_fact(fact_id: str, request: Request, user_id: str = "default", project_id: str = ""):
+    memory = _fact_knowledge_lookup(request, fact_id, user_id, project_id)
     if memory is None:
         raise HTTPException(status_code=404, detail="fact not found")
     return _fact_memory_to_dict(memory)
 
 @router.get("/facts/{fact_id}/evidence")
-async def get_fact_evidence(fact_id: str, request: Request, user_id: str = "default"):
-    memory = _fact_knowledge_lookup(request, fact_id, user_id)
+async def get_fact_evidence(fact_id: str, request: Request, user_id: str = "default", project_id: str = ""):
+    memory = _fact_knowledge_lookup(request, fact_id, user_id, project_id)
     if memory is None:
         raise HTTPException(status_code=404, detail="fact not found")
     return [e.model_dump(mode="json") for e in memory.evidences]
 
 @router.delete("/facts/{fact_id}")
-async def delete_fact(fact_id: str, request: Request, user_id: str = "default"):
-    memory = _fact_knowledge_lookup(request, fact_id, user_id)
+async def delete_fact(fact_id: str, request: Request, user_id: str = "default", project_id: str = ""):
+    memory = _fact_knowledge_lookup(request, fact_id, user_id, project_id)
     if memory is None:
         raise HTTPException(status_code=404, detail="fact not found")
     write_service = getattr(request.app.state, "memory_write_service", None)
@@ -1642,6 +1648,7 @@ class FactProposeRequest(BaseModel):
     source_id: str = ""
     scope_hint: str = "global"
     project_id: str | None = None
+    evidence: str = ""
     triples: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -1685,7 +1692,15 @@ async def propose_facts(req: FactProposeRequest, request: Request):
     write_service = getattr(request.app.state, "memory_write_service", None)
     if write_service is None:
         raise HTTPException(status_code=503, detail="memory write service not initialized")
-    from memoryhub.adapter.schemas import KnowledgeType, SceneScope
+    from memoryhub.adapter.schemas import KnowledgeType, SceneScope, SourceType
+
+    project_id = str(req.project_id or "").strip()
+    if req.scope_hint not in {"global", "project"}:
+        raise HTTPException(status_code=422, detail="scope_hint must be global or project")
+    if req.scope_hint == "project" and not project_id:
+        raise HTTPException(status_code=422, detail="project_id is required for project scope")
+    if req.scope_hint == "global" and project_id:
+        raise HTTPException(status_code=422, detail="project_id is only valid for project scope")
 
     know_repo = getattr(request.app.state, "know_repo", None)
     created: list[dict] = []
@@ -1706,9 +1721,25 @@ async def propose_facts(req: FactProposeRequest, request: Request):
             task_type="",
             app="",
         )
+        evidence_text = str(triple_data.get("evidence") or triple_data.get("source_text") or req.evidence or "").strip()
+        source_id = str(triple_data.get("source_id") or req.source_id or "").strip()
+        if not evidence_text:
+            failed.append({**entry, "reason": "evidence is required"})
+            continue
+        memory_id = f"know_fact_{_fact_sha256(req.user_id, project_id, subject, predicate, obj)[:24]}"
+        existing = know_repo.get_by_id(memory_id) if know_repo is not None else None
+        new_evidence = Evidence(
+            event_id=source_id or f"fact-proposal:{req.user_id}:{project_id}",
+            content=evidence_text,
+            source_type=SourceType.MANUAL_CONFIG,
+        )
+        evidences = list(existing.evidences) if existing is not None else []
+        if not any(item.content == new_evidence.content and item.event_id == new_evidence.event_id for item in evidences):
+            evidences.append(new_evidence)
         memory = KnowledgeMemory(
-            memory_id=f"know_fact_{_fact_sha256(subject, predicate, obj)[:24]}",
+            memory_id=memory_id,
             user_id=req.user_id,
+            project_id=project_id,
             knowledge_type=KnowledgeType.FACT,
             name=subject,
             content=f"{subject} {predicate} {obj}",
@@ -1718,6 +1749,8 @@ async def propose_facts(req: FactProposeRequest, request: Request):
             object_type=str(triple_data.get("object_type") or "Other"),
             scope=scope,
             confidence=float(triple_data.get("confidence") or 0.9),
+            version=(existing.version + 1) if existing is not None else 1,
+            evidences=evidences,
         )
         try:
             # upsert_memory 经 Domain Writer 事务写入；失败以抛异常或回读缺失呈现
@@ -1750,11 +1783,11 @@ async def propose_facts(req: FactProposeRequest, request: Request):
     return {"created": created, "failed": failed}
 
 
-def _fact_sha256(subject: str, predicate: str, obj: str) -> str:
+def _fact_sha256(*parts: str) -> str:
     import hashlib
 
     return hashlib.sha256(
-        f"{subject}|{predicate}|{obj}".encode("utf-8")
+        "|".join(parts).encode("utf-8")
     ).hexdigest()
 
 

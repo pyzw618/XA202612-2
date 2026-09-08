@@ -361,11 +361,23 @@ void FactPage::openEditDialog(const QJsonObject &fact) {
 }
 
 void FactPage::openProposeDialog() {
+    // Evidence and project scope are part of the persisted fact contract.
     QDialog dlg(this);
+    auto *scope = new QComboBox(&dlg);
+    scope->addItem("global", "global");
+    scope->addItem("project", "project");
+    auto *project = new QLineEdit(&dlg);
+    auto *evidence = new QPlainTextEdit(&dlg);
+    project->setEnabled(false);
+    connect(scope, qOverload<int>(&QComboBox::currentIndexChanged), &dlg,
+            [project](int index) { project->setEnabled(index == 1); });
     dlg.setWindowTitle("手动提交三元组");
     dlg.setMinimumWidth(520);
     auto *form = new QFormLayout(&dlg);
 
+    form->addRow("作用域", scope);
+    form->addRow("项目 ID", project);
+    form->addRow("证据 *", evidence);
     auto *sEdit = new QLineEdit(&dlg);
     sEdit->setPlaceholderText("如：张三");
     form->addRow("主语 *", sEdit);
@@ -375,16 +387,6 @@ void FactPage::openProposeDialog() {
     auto *oEdit = new QLineEdit(&dlg);
     oEdit->setPlaceholderText("如：银河麒麟软件有限公司");
     form->addRow("宾语 *", oEdit);
-    auto *evEdit = new QLineEdit(&dlg);
-    evEdit->setPlaceholderText("支撑该事实的原文证据（可选）");
-    form->addRow("证据", evEdit);
-    auto *scopeCombo = new QComboBox(&dlg);
-    scopeCombo->addItem("全局", "global");
-    scopeCombo->addItem("项目", "project");
-    form->addRow("作用域", scopeCombo);
-    auto *projEdit = new QLineEdit(&dlg);
-    projEdit->setPlaceholderText("project 作用域的项目 ID（可选）");
-    form->addRow("项目 ID", projEdit);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, &dlg);
     buttons->button(QDialogButtonBox::Ok)->setText("提交提案");
@@ -395,8 +397,9 @@ void FactPage::openProposeDialog() {
 
     if (dlg.exec() != QDialog::Accepted) return;
     if (sEdit->text().trimmed().isEmpty() || pEdit->text().trimmed().isEmpty() ||
-        oEdit->text().trimmed().isEmpty()) {
-        QMessageBox::warning(this, "提示", "主语/谓词/宾语均不能为空");
+        oEdit->text().trimmed().isEmpty() || evidence->toPlainText().trimmed().isEmpty() ||
+        (scope->currentData().toString() == "project" && project->text().trimmed().isEmpty())) {
+        QMessageBox::warning(this, "提示", "主语、谓词、宾语和证据均不能为空；项目作用域还必须提供项目 ID。");
         return;
     }
 
@@ -404,14 +407,14 @@ void FactPage::openProposeDialog() {
     triple["subject_text"] = sEdit->text().trimmed();
     triple["predicate_text"] = pEdit->text().trimmed();
     triple["object_text"] = oEdit->text().trimmed();
-    triple["evidence"] = evEdit->text().trimmed();
     triple["confidence"] = 1.0;
+    triple["evidence"] = evidence->toPlainText().trimmed();
 
     QJsonObject body;
     // 列表与总览都按当前用户查询；提交必须使用同一 user_id，不能落入后端默认用户。
     body["user_id"] = AppContext::instance()->userId();
-    body["scope_hint"] = scopeCombo->currentData().toString();
-    body["project_id"] = projEdit->text().trimmed().isEmpty() ? QJsonValue() : QJsonValue(projEdit->text().trimmed());
+    body["scope_hint"] = scope->currentData().toString();
+    if (scope->currentData().toString() == "project") body["project_id"] = project->text().trimmed();
     body["triples"] = QJsonArray{triple};
 
     m_proposeBtn->setEnabled(false);
@@ -437,4 +440,3 @@ void FactPage::openProposeDialog() {
             }
         }, false, this);
 }
-

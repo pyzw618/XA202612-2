@@ -637,8 +637,8 @@ void ForgetPendingPage::batchSetStatus(const QString &status, QPushButton *calle
     body["status"] = status;
     AppContext::instance()->api()->postAsync(
         "/api/memory/memories/status", body,
-        [this, caller, ids](const api::Result &r) {
-            if (caller) caller->setEnabled(true);
+        [this, guard = QPointer<QPushButton>(caller)](const api::Result &r) {
+            if (guard) guard->setEnabled(true);
             if (r.ok) {
                 QMessageBox::information(this, "完成", QString("已处理 %1 / %2 条")
                     .arg(j::integer(r.jsonObject(), "applied")).arg(j::integer(r.jsonObject(), "total")));

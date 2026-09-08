@@ -236,14 +236,17 @@ class MilvusHybridRetriever:
         # 5. 调用 Milvus HybridSearch，召回 top_k * candidate_multiplier 候选
         t0 = time.perf_counter()
         try:
-            fetch_k = max(search_request.top_k * self.config.candidate_multiplier, 1)
+            # The installed vector engines only understand exact scalar filters.
+            # Fetch enough candidates, then apply every request predicate against
+            # authoritative metadata below, before slicing Top-K.
+            fetch_k = max(
+                search_request.top_k * max(self.config.candidate_multiplier, 10), 100
+            )
             assert dense_vector is not None
             engine_filters: dict[str, Any] = {
                 "user_id": search_request.user_id,
                 "status": "active",
             }
-            if len(search_request.memory_types) == 1:
-                engine_filters["memory_type"] = search_request.memory_types[0]
             hits = self.engine.hybrid_search(
                 dense_vector, sparse_terms, fetch_k, filters=engine_filters
             )
@@ -465,6 +468,14 @@ class MilvusHybridRetriever:
                     continue
             confidence = result.metadata.get("confidence")
             if confidence is not None and confidence < request.min_confidence:
+                continue
+            scope = result.metadata.get("scope")
+            if isinstance(scope, dict):
+                if request.scenes and scope.get("scene") not in request.scenes:
+                    continue
+                if request.task_types and scope.get("task_type") not in request.task_types:
+                    continue
+            elif request.scenes or request.task_types:
                 continue
             if self._scope_conflict(result, request):
                 continue

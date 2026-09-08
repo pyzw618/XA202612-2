@@ -124,6 +124,10 @@ class MemoryRetrievalRequest(APIModel):
     active_constraints: list[str] = Field(default_factory=list)
     scope_level: MemoryScope | None = None
     scope: str = ""
+    memory_types: list[str] = Field(default_factory=list)
+    min_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    scenes: list[str] = Field(default_factory=list)
+    task_types: list[str] = Field(default_factory=list)
     intent_hint: RetrievalIntent | None = None
     token_budget: int = Field(default=2000, ge=128, le=1_000_000)
     consistency: ConsistencyMode = ConsistencyMode.EVENTUAL
@@ -153,6 +157,10 @@ class MemoryRetrievalRequest(APIModel):
             user_id=request.user_id or "default",
             query=request.query,
             session_id=request.session_id,
+            memory_types=list(request.memory_types),
+            min_confidence=request.min_confidence,
+            scenes=list(request.scenes),
+            task_types=list(request.task_types),
             scope_level=scope_level,
             scope=scope,
             intent_hint=_legacy_intent_hint(request.level, request.memory_types),
@@ -506,6 +514,12 @@ def legacy_search_request_from_vnext(
         RetrievalIntent.EXPERIENCE: "mid",
     }.get(selected_intent, "long")
     legacy_types = [_legacy_memory_type(memory_type) for memory_type in memory_types or []]
+    if request.memory_types:
+        legacy_types = list(dict.fromkeys(request.memory_types))
+    context = context.model_copy(update={
+        "scene": context.scene or (request.scenes[0] if len(request.scenes) == 1 else ""),
+        "task_type": context.task_type or (request.task_types[0] if len(request.task_types) == 1 else ""),
+    })
     return SearchRequest(
         user_id=request.user_id,
         query=request.query,
@@ -513,7 +527,9 @@ def legacy_search_request_from_vnext(
         project_id=project_id,
         top_k=top_k or request.page_size,
         memory_types=list(dict.fromkeys(legacy_types)),
-        min_confidence=0.0,
+        min_confidence=request.min_confidence,
+        scenes=list(request.scenes),
+        task_types=list(request.task_types),
         level=level,
         session_id=request.session_id,
     )

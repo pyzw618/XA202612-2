@@ -42,6 +42,7 @@ private:
     void loadTable();
     void renderRows();
 
+    bool m_rulesLoaded = false;
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
     QPushButton *m_addBtn = nullptr;

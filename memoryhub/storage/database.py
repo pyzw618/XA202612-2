@@ -125,6 +125,7 @@ class Database:
             },
             "knowledge": {
                 "tenant_id": "VARCHAR(64)",
+                "project_id": "VARCHAR(128) DEFAULT ''",
                 "extra_payload": "JSON",
                 "pending_index": "BOOLEAN DEFAULT 1",
                 "index_version": "INTEGER DEFAULT 0",
@@ -431,6 +432,7 @@ def _know_row_to_pydantic(row: KnowledgeRow) -> KnowledgeMemory:
     return KnowledgeMemory(
         memory_id=row.memory_id,
         user_id=row.user_id,
+        project_id=row.project_id or "",
         knowledge_type=row.knowledge_type,
         name=row.name or "",
         content=row.content,
@@ -935,6 +937,7 @@ class KnowledgeRepository:
                 memory.extra_payload.get("vnext_authority", {}) or {}
             ).get("tenant_id"),
             user_id=memory.user_id,
+            project_id=memory.project_id or "",
             knowledge_type=(
                 memory.knowledge_type.value
                 if hasattr(memory.knowledge_type, "value")

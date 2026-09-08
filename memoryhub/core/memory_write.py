@@ -78,6 +78,7 @@ class MemoryWriteService:
             "content": cls.index_text(memory),
             "confidence": memory.confidence,
             "scope": memory.scope.model_dump(),
+            "project_id": getattr(memory, "project_id", "") or "",
             "status": (
                 memory.status.value
                 if hasattr(memory.status, "value")

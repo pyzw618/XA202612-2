@@ -119,6 +119,17 @@ class RetrievalPlanner:
             layers = self._default_layers_for_intent(routed.intent)
 
         types = list(routed.target_types)
+        if request.memory_types:
+            requested = {str(value).strip().lower() for value in request.memory_types}
+            type_map = {
+                "preference": MemoryType.PREFERENCE,
+                "knowledge": MemoryType.SEMANTIC,
+                "fact": MemoryType.SEMANTIC,
+                "semantic": MemoryType.SEMANTIC,
+                "procedural": MemoryType.PROCEDURAL,
+                "episodic": MemoryType.EPISODIC,
+            }
+            types = list(dict.fromkeys(type_map[value] for value in requested if value in type_map))
         if routed.intent is RetrievalIntent.MIXED and not types:
             types = list(MemoryType)
 
@@ -176,6 +187,14 @@ class RetrievalPlanner:
             filter_map["layers"] = [layer.value for layer in layers]
         if types:
             filter_map["types"] = [memory_type.value for memory_type in types]
+        if request.memory_types:
+            filter_map["requested_types"] = list(request.memory_types)
+        if request.min_confidence > 0:
+            filter_map["min_confidence"] = request.min_confidence
+        if request.scenes:
+            filter_map["scenes"] = list(request.scenes)
+        if request.task_types:
+            filter_map["task_types"] = list(request.task_types)
         if request.tenant_id:
             filter_map["tenant_id"] = request.tenant_id
         if request.user_id:

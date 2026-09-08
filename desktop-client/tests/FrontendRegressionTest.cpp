@@ -8,6 +8,8 @@
 #include "pages/KnowledgePage.h"
 #include "pages/MemoryTierPage.h"
 #include "pages/ConflictPage.h"
+#include "pages/SafetyPages.h"
+#include "widgets/MemoryFilterBar.h"
 #include "widgets/DetailDrawer.h"
 
 #include <QtTest>
@@ -23,6 +25,8 @@
 #include <QTimer>
 #include <QTabWidget>
 #include <QComboBox>
+#include <QCheckBox>
+#include <QDoubleSpinBox>
 
 // Real pages and ApiClient against a local HTTP fixture; no production backend writes.
 class FrontendRegressionTest : public QObject {
@@ -137,6 +141,63 @@ private slots:
             if (label->text() == "Alice") found = true;
         QVERIFY(found);
     }
+    void searchFiltersCachedResultsWithoutRequests() {
+        SearchPage page;
+        QVERIFY(!page.m_sceneCombo->isEnabled());
+        QVERIFY(!page.m_taskEdit->isEnabled());
+        page.m_lastResponse = QJsonObject{{"facts", QJsonArray{
+            QJsonObject{{"object_value", "Alice"}, {"confidence", 0.9}},
+            QJsonObject{{"object_value", "Bob"}, {"confidence", 0.2}}}}};
+        page.renderResults(page.m_lastResponse);
+        page.m_minConf->setValue(0.5);
+        QCOMPARE(page.m_totalLabel->text(), QStringLiteral("结果总数：1"));
+        page.m_cbFact->setChecked(false);
+        QCOMPARE(page.m_totalLabel->text(), QStringLiteral("结果总数：0"));
+        page.m_cbFact->setChecked(true);
+        QCOMPARE(page.m_totalLabel->text(), QStringLiteral("结果总数：1"));
+        QVERIFY(requests.isEmpty());
+    }
+    void userRulesFilterLocallyAndPreserveLoadFailure() {
+        SafetyUserRulesPage page;
+        auto *table = page.findChild<QTableWidget *>();
+        auto *filter = page.findChild<MemoryFilterBar *>();
+        respond = [](const Request &r) {
+            reply(r, "[{\"label\":\"alpha\"},{\"label\":\"beta\"}]");
+        };
+        page.refresh();
+        QTRY_COMPARE(table->rowCount(), 2);
+        filter->searchBox()->setText("alpha");
+        QTRY_COMPARE(table->rowCount(), 1);
+        QCOMPARE(table->item(0, 0)->text(), QStringLiteral("alpha"));
+        QCOMPARE(requests.size(), 1);
+        respond = [](const Request &r) { reply(r, "{}", 503); };
+        page.refresh();
+        QTRY_VERIFY(table->cellWidget(0, 0) != nullptr);
+        QPointer<QWidget> failure(table->cellWidget(0, 0));
+        filter->searchBox()->setText("beta");
+        QTest::qWait(350);
+        QCOMPARE(requests.size(), 2);
+        QVERIFY(failure);
+        QCOMPARE(table->cellWidget(0, 0), failure.data());
+    }
+    void batchStatusSurvivesDestroyedButton() {
+        ForgetPendingPage page;
+        page.m_table->setRowCount(1);
+        auto *check = new QCheckBox;
+        check->setChecked(true);
+        check->setProperty("memoryId", "fact-1");
+        page.m_table->setCellWidget(0, 0, check);
+        auto *button = new QPushButton;
+        respond = nullptr;
+        page.batchSetStatus("active", button);
+        QTRY_COMPARE(requests.size(), 1);
+        const Request update = requests.first();
+        delete button;
+        respond = [](const Request &r) { reply(r, "[]"); };
+        reply(update, "{\"applied\":1,\"total\":1}");
+        QTRY_VERIFY(!messages.isEmpty());
+        QTRY_COMPARE(requests.size(), 4);
+    }
     void preferenceEditDoesNotOverwritePayload() {
         PreferencePage page;
         QJsonObject sent;
@@ -176,7 +237,12 @@ private slots:
         FactPage page;
         bool reloaded = false;
         respond = [response, &reloaded](const Request &r) {
-            if (r.path == "/api/memory/facts/propose") reply(r, response);
+            if (r.path == "/api/memory/facts/propose") {
+                QCOMPARE(r.body.value("scope_hint").toString(), QStringLiteral("global"));
+                QVERIFY(!r.body.contains("project_id"));
+                QVERIFY(!r.body.value("triples").toArray().first().toObject().contains("evidence"));
+                reply(r, response);
+            }
             else { reloaded = true; reply(r, "[]"); }
         };
         QTimer::singleShot(0, this, []() {

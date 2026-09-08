@@ -83,6 +83,7 @@ def _legacy_memory_metadata(memory: Any) -> dict[str, Any]:
         "confidence": float(getattr(memory, "confidence", 0.0) or 0.0),
         "status": getattr(status, "value", status),
         "scope": getattr(memory, "scope", {}),
+        "project_id": getattr(memory, "project_id", "") or "",
     }
 
 
@@ -102,6 +103,8 @@ def _legacy_memory_text(memory: Any) -> str:
 
 def _memory_scope(metadata: dict[str, Any]) -> tuple[MemoryScope, str]:
     raw_scope = metadata.get("scope", "GLOBAL")
+    if metadata.get("project_id") and isinstance(raw_scope, dict):
+        raw_scope = {**raw_scope, "project_id": metadata["project_id"]}
     authority = metadata.get("vnext_authority", {})
     scope_level = metadata.get("scope_level") or authority.get("scope_level")
     if scope_level:
@@ -156,7 +159,14 @@ def _search_result_to_retrieved_memory(
         scope=scope if scope else "GLOBAL",
         content_version=int(content_version) if isinstance(content_version, int) else 1,
         evolution_status=status.value,
-        content={"text": result.content or ""},
+        content={
+            "text": result.content or "",
+            "confidence": metadata.get("confidence"),
+            "scene": (metadata.get("scope") or {}).get("scene", "")
+                if isinstance(metadata.get("scope"), dict) else "",
+            "task_type": (metadata.get("scope") or {}).get("task_type", "")
+                if isinstance(metadata.get("scope"), dict) else "",
+        },
         score=float(result.score),
         score_breakdown=metadata.get("score_breakdown", {}),
         source_ids=[source or result.source or "retriever"],
@@ -545,6 +555,21 @@ def _matches_request_scope(memory: RetrievedMemory, request: MemoryRetrievalRequ
     different scope and rely on later conflict resolution to hide them.
     """
     if memory.tenant_id != request.tenant_id or memory.user_id != request.user_id:
+        return False
+    if request.memory_types:
+        requested = {str(value).strip().lower() for value in request.memory_types}
+        actual = memory.memory_type.value.lower()
+        if actual not in requested and not (
+            actual == "semantic" and requested.intersection({"knowledge", "fact"})
+        ):
+            return False
+    if request.min_confidence > 0:
+        raw_confidence = memory.content.get("confidence")
+        if raw_confidence is not None and float(raw_confidence) < request.min_confidence:
+            return False
+    if request.scenes and str(memory.content.get("scene", "")) not in request.scenes:
+        return False
+    if request.task_types and str(memory.content.get("task_type", "")) not in request.task_types:
         return False
     if request.scope_level is None or not request.scope:
         return True

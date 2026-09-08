@@ -175,7 +175,7 @@ SafetyUserRulesPage::SafetyUserRulesPage(QWidget *parent) : BasePage(parent) {
     m_filterBar->setSearchPlaceholder("搜索规则标签...");
     connect(m_filterBar, &MemoryFilterBar::refreshRequested, this, &SafetyUserRulesPage::onRefresh);
     connect(m_filterBar, &MemoryFilterBar::searchTextChanged, this,
-            [this](const QString &) { onRefresh(); });
+            [this](const QString &) { if (m_rulesLoaded) renderRows(); });
     root->addWidget(m_filterBar);
 
     m_table = new QTableWidget(this);
@@ -201,6 +201,7 @@ void SafetyUserRulesPage::refresh() { onRefresh(); }
 void SafetyUserRulesPage::onRefresh() { loadTable(); }
 
 void SafetyUserRulesPage::loadTable() {
+    m_rulesLoaded = false;
     m_all = QJsonArray();
     m_table->clearSpans();
     m_table->setRowCount(0);
@@ -220,6 +221,7 @@ void SafetyUserRulesPage::loadTable() {
         return;
     }
     m_all = r.jsonArray();
+    m_rulesLoaded = true;
     renderRows();
     }, true, this);
 }

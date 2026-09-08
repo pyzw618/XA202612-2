@@ -44,10 +44,6 @@ void DetailDrawer::setWidth(int w) {
     setMaximumWidth(w);
 }
 
-void DetailDrawer::setContent(QWidget *content) {
-    m_stack->addWidget(content);
-}
-
 void DetailDrawer::open(const QString &title, QWidget *content) {
     m_title->setText(title);
     // 移除之前的 content（若已设置）
@@ -60,13 +56,6 @@ void DetailDrawer::open(const QString &title, QWidget *content) {
     show();
     m_open = true;
     raise();
-}
-
-QPushButton *DetailDrawer::addHeaderButton(const QString &text, const QString &objName) {
-    auto *btn = new QPushButton(text, this);
-    btn->setObjectName(objName);
-    m_headerBtns->addWidget(btn);
-    return btn;
 }
 
 void DetailDrawer::closeDrawer() {
