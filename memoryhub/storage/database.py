@@ -9,11 +9,12 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
-from sqlalchemy import create_engine, func, or_
+from sqlalchemy import and_, create_engine, func, or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from memoryhub.adapter.schemas import (
@@ -32,6 +33,10 @@ from memoryhub.storage.models import (
     Base,
     ConflictRow,
     EventRow,
+    FactBindingRow,
+    FactDecisionRow,
+    FactEntityRow,
+    FactPredicateRow,
     ExtractionTaskRow,
     ForgetRow,
     KnowledgeRow,
@@ -40,6 +45,7 @@ from memoryhub.storage.models import (
     PreferenceRow,
     ShortTermMemoryRow,
 )
+from memoryhub.core.fact.models import Entity, FactBinding, PredicateDef
 
 # ============================================================
 # 数据库管理器
@@ -62,6 +68,10 @@ class Database:
         self.db_path = db_path
         self.engine = None
         self.session_factory = None
+        # Covers semantic prepare + authoritative write for in-process callers.
+        # SQLite BEGIN IMMEDIATE in DomainMemoryWriter supplies the database
+        # level serialization for the commit itself.
+        self.fact_write_lock = threading.RLock()
 
     def init_schema(self) -> None:
         """初始化数据库 schema — 创建所有表。"""
@@ -265,6 +275,10 @@ class Database:
                 "created_at": "DATETIME",
                 "expires_at": "DATETIME",
             },
+            "fact_predicates": {
+                "tenant_id": "VARCHAR(64) NOT NULL DEFAULT '__ontology__'",
+                "user_id": "VARCHAR(64) NOT NULL DEFAULT '__ontology__'",
+            },
         }
         with self.engine.begin() as conn:
             for table, columns in migrations.items():
@@ -298,6 +312,11 @@ class Database:
             # Base.metadata.create_all() creates newly introduced tables on both new
             # and existing SQLite files.  Create their lookup indexes explicitly as
             # well so databases initialized by older releases receive the same plan.
+            # An early migration created an event-only unique index.  One event can
+            # legitimately produce several memories (for example a workflow and a
+            # FACT), so replace it with a memory-aware key before recreating it.
+            conn.exec_driver_sql("DROP INDEX IF EXISTS uq_memory_projection_outbox_event")
+            conn.exec_driver_sql("DROP INDEX IF EXISTS uq_projection_outbox_event_version")
             for index_ddl in (
                 "CREATE INDEX IF NOT EXISTS ix_events_tenant_id "
                 "ON events (tenant_id)",
@@ -320,7 +339,7 @@ class Database:
                 "WHERE idempotency_key IS NOT NULL",
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_projection_outbox_event_version "
                 "ON memory_projection_outbox "
-                "(tenant_id, event_id, content_version, projection_type, operation)",
+                "(tenant_id, event_id, memory_id, content_version, projection_type, operation, payload_hash)",
                 "CREATE INDEX IF NOT EXISTS ix_memory_lineage_memory_type_created_at "
                 "ON memory_lineage (memory_id, memory_type, created_at)",
                 "CREATE INDEX IF NOT EXISTS ix_memory_lineage_root_memory_id "
@@ -333,6 +352,10 @@ class Database:
                 "ON memory_projection_outbox (status, next_retry_at)",
                 "CREATE INDEX IF NOT EXISTS ix_memory_projection_outbox_memory_id_type "
                 "ON memory_projection_outbox (memory_id, memory_type)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_projection_outbox_event "
+                "ON memory_projection_outbox "
+                "(tenant_id, memory_id, memory_type, operation, event_id, payload_hash) "
+                "WHERE event_id IS NOT NULL",
                 "CREATE INDEX IF NOT EXISTS ix_observability_traces_trace_created "
                 "ON observability_traces (trace_id, created_at)",
                 "CREATE INDEX IF NOT EXISTS ix_observability_traces_task_id "
@@ -429,6 +452,12 @@ def _pref_row_to_pydantic(row: PreferenceRow) -> PreferenceMemory:
 
 def _know_row_to_pydantic(row: KnowledgeRow) -> KnowledgeMemory:
     """KnowledgeRow → KnowledgeMemory"""
+    extra_payload = dict(row.extra_payload or {})
+    if row.tenant_id and not (extra_payload.get("vnext_authority") or {}).get("tenant_id"):
+        extra_payload["vnext_authority"] = {
+            **dict(extra_payload.get("vnext_authority", {}) or {}),
+            "tenant_id": row.tenant_id,
+        }
     return KnowledgeMemory(
         memory_id=row.memory_id,
         user_id=row.user_id,
@@ -457,7 +486,7 @@ def _know_row_to_pydantic(row: KnowledgeRow) -> KnowledgeMemory:
         version=row.version or 1,
         parent_id=row.parent_id or "",
         evidences=row.evidences or [],
-        extra_payload=row.extra_payload or {},
+        extra_payload=extra_payload,
         health_score=row.health_score if row.health_score is not None else 1.0,
         stability=row.stability if row.stability is not None else 1.0,
         last_accessed_at=row.last_accessed_at,
@@ -916,6 +945,7 @@ class KnowledgeRepository:
 
     @staticmethod
     def _save(session: Session, memory: KnowledgeMemory) -> None:
+        payload = dict(memory.extra_payload or {})
         existing = session.get(KnowledgeRow, memory.memory_id)
         if existing is not None and memory.version > (existing.version or 1):
             snapshot_id = f"{memory.memory_id}:v{existing.version or 1}"
@@ -934,7 +964,7 @@ class KnowledgeRepository:
         row = KnowledgeRow(
             memory_id=memory.memory_id,
             tenant_id=(
-                memory.extra_payload.get("vnext_authority", {}) or {}
+                payload.get("vnext_authority", {}) or {}
             ).get("tenant_id"),
             user_id=memory.user_id,
             project_id=memory.project_id or "",
@@ -974,7 +1004,7 @@ class KnowledgeRepository:
                 if memory.evidences
                 else []
             ),
-            extra_payload=memory.extra_payload,
+            extra_payload=payload,
             health_score=memory.health_score,
             stability=memory.stability,
             last_accessed_at=memory.last_accessed_at,
@@ -1033,16 +1063,24 @@ class KnowledgeRepository:
                 synchronize_session=False,
             )
 
-    def get_by_id(self, memory_id: str) -> Optional[KnowledgeMemory]:
+    def get_by_id(self, memory_id: str, *, user_id: str = "",
+                  tenant_id: str = "") -> Optional[KnowledgeMemory]:
         """按 ID 查询"""
         with self.db.session() as s:
-            row = s.query(KnowledgeRow).filter(KnowledgeRow.memory_id == memory_id).first()
+            query = s.query(KnowledgeRow).filter(KnowledgeRow.memory_id == memory_id)
+            if user_id:
+                query = query.filter(KnowledgeRow.user_id == user_id)
+            if tenant_id:
+                query = query.filter(or_(KnowledgeRow.tenant_id == tenant_id,
+                                         and_(tenant_id == "default", KnowledgeRow.tenant_id.is_(None))))
+            row = query.first()
             if row is None:
                 return None
             return _know_row_to_pydantic(row)
 
     def get_by_type(
-        self, user_id: str, knowledge_type: str = "", status: str = "active"
+        self, user_id: str, knowledge_type: str = "", status: str = "active",
+        tenant_id: str = ""
     ) -> list[KnowledgeMemory]:
         """按类型查询"""
         with self.db.session() as s:
@@ -1052,6 +1090,9 @@ class KnowledgeRepository:
             )
             if knowledge_type:
                 q = q.filter(KnowledgeRow.knowledge_type == knowledge_type)
+            if tenant_id:
+                q = q.filter(or_(KnowledgeRow.tenant_id == tenant_id,
+                                 and_(tenant_id == "default", KnowledgeRow.tenant_id.is_(None))))
             rows = q.order_by(KnowledgeRow.confidence.desc()).all()
             return [_know_row_to_pydantic(r) for r in rows]
 
@@ -1071,12 +1112,16 @@ class KnowledgeRepository:
             rows = query.order_by(KnowledgeRow.confidence.desc()).all()
             return [_know_row_to_pydantic(r) for r in rows]
 
-    def list_all(self, status: str = "active", user_id: str = "") -> list[KnowledgeMemory]:
+    def list_all(self, status: str = "active", user_id: str = "",
+                 tenant_id: str = "") -> list[KnowledgeMemory]:
         """列出指定状态的全部知识记忆（应用启动时全量加载用）"""
         with self.db.session() as s:
             query = s.query(KnowledgeRow).filter(KnowledgeRow.status == status)
             if user_id:
                 query = query.filter(KnowledgeRow.user_id == user_id)
+            if tenant_id:
+                query = query.filter(or_(KnowledgeRow.tenant_id == tenant_id,
+                                         and_(tenant_id == "default", KnowledgeRow.tenant_id.is_(None))))
             rows = query.order_by(KnowledgeRow.confidence.desc()).all()
             return [_know_row_to_pydantic(r) for r in rows]
 
@@ -1811,3 +1856,364 @@ class MidTermMemoryRepository:
             "last_accessed_at": row.last_accessed_at, "decay_score": row.decay_score,
             "status": row.status, "created_at": row.created_at,
         }
+
+
+class FactSemanticRepository:
+    """SQLAlchemy adapter for fact semantic metadata.
+
+    KnowledgeRow remains the source of truth for the memory itself; these
+    tables only store entity/predicate identity and a binding for deterministic
+    conflict checks.
+    """
+
+    def __init__(self, db: Database):
+        self.db = db
+        self._transaction_state = threading.local()
+
+    @contextmanager
+    def use_session(self, session: Session):
+        """Make semantic reads participate in an enclosing FACT transaction."""
+        previous = getattr(self._transaction_state, "session", None)
+        self._transaction_state.session = session
+        try:
+            yield
+        finally:
+            self._transaction_state.session = previous
+
+    @contextmanager
+    def _read_session(self):
+        session = getattr(self._transaction_state, "session", None)
+        if session is not None:
+            yield session
+            return
+        with self.db.session() as managed:
+            yield managed
+
+    @staticmethod
+    def _entity(row: FactEntityRow) -> Entity:
+        return Entity(row.entity_id, row.canonical_name, row.entity_type,
+                      list(row.aliases or []), row.user_id, row.tenant_id)
+
+    @staticmethod
+    def _predicate(row: FactPredicateRow) -> PredicateDef:
+        return PredicateDef(
+            predicate_id=row.predicate_id, canonical_name=row.canonical_name,
+            aliases=list(row.aliases or []), domain=list(row.domain or []),
+            range=list(row.range or []), single_value=bool(row.single_value),
+            inverse_of=row.inverse_of, symmetric=bool(row.symmetric),
+            irreflexive=bool(row.irreflexive),
+            object_single_value=bool(row.object_single_value),
+            exclusive_with=list(row.exclusive_with or []), acyclic=bool(row.acyclic),
+            tenant_id=row.tenant_id or "__ontology__",
+            user_id=row.user_id or "__ontology__",
+            built_in=(row.tenant_id in (None, "", "__ontology__")),
+            ontology_version=row.ontology_version or "v1",
+        )
+
+    @staticmethod
+    def _binding(row: FactBindingRow) -> FactBinding:
+        """Copy a binding before closing the SQLAlchemy session.
+
+        Returning ORM instances here caused the second fact write to raise
+        ``DetachedInstanceError`` after the session context expired them.
+        Conflict detection only needs these scalar fields, so a frozen DTO is
+        both safer and cheaper than keeping a live session around.
+        """
+        return FactBinding(
+            memory_id=row.memory_id,
+            tenant_id=row.tenant_id,
+            user_id=row.user_id,
+            subject_id=row.subject_id,
+            predicate_id=row.predicate_id,
+            object_id=row.object_id,
+            object_value=row.object_value or "",
+            scope=row.scope or "global",
+            project_id=row.project_id,
+            version=int(row.version or 1),
+            status=row.status or "active",
+        )
+
+    def get_entity(self, entity_id: str, tenant_id: str = "default", user_id: str = "default"):
+        with self._read_session() as s:
+            row = s.query(FactEntityRow).filter_by(
+                entity_id=entity_id, tenant_id=tenant_id, user_id=user_id
+            ).one_or_none()
+            return self._entity(row) if row else None
+
+    def list_entities(self, tenant_id: str, user_id: str, entity_type: str = ""):
+        with self._read_session() as s:
+            q = s.query(FactEntityRow).filter_by(tenant_id=tenant_id, user_id=user_id)
+            if entity_type and entity_type != "Other":
+                q = q.filter_by(entity_type=entity_type)
+            return [self._entity(r) for r in q.order_by(FactEntityRow.entity_id).all()]
+
+    def find_entities(self, text: str, tenant_id: str, user_id: str, entity_type: str = ""):
+        needle = str(text).casefold().strip()
+        return [e for e in self.list_entities(tenant_id, user_id, entity_type)
+                if e.canonical_name.casefold() == needle
+                or any(str(a).casefold() == needle for a in e.aliases)]
+
+    @staticmethod
+    def entity_dict(entity: Entity) -> dict:
+        return {"entity_id": entity.entity_id, "canonical_name": entity.canonical_name,
+                "entity_type": entity.entity_type, "aliases": list(entity.aliases)}
+
+    def save_entity(self, entity: Entity) -> None:
+        with self.db.session() as s:
+            row = s.get(FactEntityRow, entity.entity_id)
+            if row is None:
+                row = FactEntityRow(entity_id=entity.entity_id)
+                s.add(row)
+            elif row.tenant_id != entity.tenant_id or row.user_id != entity.user_id:
+                raise ValueError("fact.entity_id_owner_conflict")
+            row.tenant_id, row.user_id = entity.tenant_id, entity.user_id
+            row.canonical_name, row.entity_type, row.aliases = (
+                entity.canonical_name, entity.entity_type, list(dict.fromkeys(entity.aliases))
+            )
+
+    def add_alias(self, entity_id: str, alias: str, tenant_id: str, user_id: str) -> None:
+        with self.db.session() as s:
+            row = s.query(FactEntityRow).filter_by(
+                entity_id=entity_id, tenant_id=tenant_id, user_id=user_id
+            ).one_or_none()
+            if row is not None and alias not in (row.aliases or []):
+                row.aliases = [*(row.aliases or []), alias]
+
+    def get_predicate(self, predicate_id: str, tenant_id: str | None = None,
+                      user_id: str | None = None):
+        with self._read_session() as s:
+            row = s.get(FactPredicateRow, predicate_id)
+            if row is not None and row.tenant_id not in (None, "", "__ontology__"):
+                if tenant_id is not None and user_id is not None and (
+                    row.tenant_id != tenant_id or row.user_id != user_id
+                ):
+                    return None
+            return self._predicate(row) if row else None
+
+    def list_predicates(self):
+        with self.db.session() as s:
+            return [self._predicate(r) for r in s.query(FactPredicateRow).all()]
+
+    def find_predicates(self, text: str, tenant_id: str | None = None,
+                        user_id: str | None = None):
+        needle = str(text).casefold().strip()
+        with self._read_session() as s:
+            q = s.query(FactPredicateRow)
+            if tenant_id is not None and user_id is not None:
+                q = q.filter(
+                    (FactPredicateRow.tenant_id == "__ontology__")
+                    | ((FactPredicateRow.tenant_id == tenant_id)
+                       & (FactPredicateRow.user_id == user_id))
+                )
+            return [self._predicate(row) for row in q.all()
+                    if row.canonical_name.casefold() == needle
+                    or any(str(a).casefold() == needle for a in (row.aliases or []))]
+
+    @staticmethod
+    def predicate_dict(pred: PredicateDef) -> dict:
+        return {"predicate_id": pred.predicate_id, "canonical_name": pred.canonical_name,
+                "aliases": list(pred.aliases), "single_value": pred.single_value}
+
+    def save_predicate(self, pred: PredicateDef, *, tenant_id: str = "__ontology__",
+                       user_id: str = "__ontology__", built_in: bool = False) -> None:
+        with self.db.session() as s:
+            row = s.get(FactPredicateRow, pred.predicate_id)
+            if row is None:
+                row = FactPredicateRow(predicate_id=pred.predicate_id)
+                s.add(row)
+            elif (
+                (built_in and row.tenant_id not in (None, "", "__ontology__"))
+                or (not built_in and row.tenant_id not in (None, "", tenant_id))
+            ):
+                raise ValueError("fact.predicate_id_owner_conflict")
+            if built_in:
+                tenant_id, user_id = "__ontology__", "__ontology__"
+            row.tenant_id, row.user_id = tenant_id, user_id
+            for field in (
+                "canonical_name", "aliases", "domain", "range", "single_value",
+                "inverse_of", "symmetric", "irreflexive", "object_single_value",
+                "exclusive_with", "acyclic",
+            ):
+                setattr(row, field, getattr(pred, field))
+            row.ontology_version = getattr(pred, "ontology_version", "v1") or "v1"
+
+    def add_predicate_alias(self, predicate_id: str, alias: str,
+                            tenant_id: str | None = None,
+                            user_id: str | None = None) -> None:
+        with self.db.session() as s:
+            row = s.get(FactPredicateRow, predicate_id)
+            if row is None:
+                return
+            if row.tenant_id not in (None, "", "__ontology__"):
+                if tenant_id is None or user_id is None or (
+                    row.tenant_id != tenant_id or row.user_id != user_id
+                ):
+                    return
+            if alias not in (row.aliases or []):
+                row.aliases = [*(row.aliases or []), alias]
+
+    def apply_result(self, session: Session, *, memory, result) -> None:
+        """Apply deferred semantic metadata inside the Knowledge transaction.
+
+        ``FactSemanticService.prepare`` is side-effect free.  The domain writer
+        invokes this method before committing its session, keeping entity,
+        predicate and binding rows in the same transaction as Knowledge,
+        evidence, lineage and projection outbox records.
+        """
+        for operation in result.pending_operations or []:
+            kind = operation.get("kind")
+            if kind == "entity_create":
+                entity = operation["entity"]
+                row = session.get(FactEntityRow, entity.entity_id)
+                if row is None:
+                    row = FactEntityRow(entity_id=entity.entity_id)
+                    session.add(row)
+                elif row.tenant_id != entity.tenant_id or row.user_id != entity.user_id:
+                    raise ValueError("fact.entity_id_owner_conflict")
+                row.tenant_id, row.user_id = entity.tenant_id, entity.user_id
+                row.canonical_name, row.entity_type = entity.canonical_name, entity.entity_type
+                row.aliases = list(dict.fromkeys(entity.aliases))
+            elif kind == "entity_alias":
+                row = session.query(FactEntityRow).filter_by(
+                    entity_id=operation["entity_id"],
+                    tenant_id=operation["tenant_id"],
+                    user_id=operation["user_id"],
+                ).one_or_none()
+                if row is not None and operation["alias"] not in (row.aliases or []):
+                    row.aliases = [*(row.aliases or []), operation["alias"]]
+            elif kind == "predicate_create":
+                pred = operation["predicate"]
+                row = session.get(FactPredicateRow, pred.predicate_id)
+                if row is None:
+                    row = FactPredicateRow(predicate_id=pred.predicate_id)
+                    session.add(row)
+                elif row.tenant_id not in (None, "", operation["tenant_id"]) or row.user_id not in (None, "", operation["user_id"]):
+                    raise ValueError("fact.predicate_id_owner_conflict")
+                row.tenant_id, row.user_id = operation["tenant_id"], operation["user_id"]
+                for field in ("canonical_name", "aliases", "domain", "range", "single_value",
+                              "inverse_of", "symmetric", "irreflexive", "object_single_value",
+                              "exclusive_with", "acyclic"):
+                    setattr(row, field, getattr(pred, field))
+                row.ontology_version = getattr(pred, "ontology_version", "v1") or "v1"
+            elif kind == "predicate_alias":
+                row = session.get(FactPredicateRow, operation["predicate_id"])
+                if row is None:
+                    continue
+                if row.tenant_id in (None, "", "__ontology__"):
+                    continue
+                if row.tenant_id not in (None, "", "__ontology__") and (
+                    row.tenant_id != operation["tenant_id"] or row.user_id != operation["user_id"]
+                ):
+                    raise ValueError("fact.predicate_alias_owner_conflict")
+                if operation["alias"] not in (row.aliases or []):
+                    row.aliases = [*(row.aliases or []), operation["alias"]]
+            elif kind == "predicate_cardinality":
+                row = session.get(FactPredicateRow, operation["predicate_id"])
+                if (
+                    row is None
+                    or row.tenant_id != operation["tenant_id"]
+                    or row.user_id != operation["user_id"]
+                ):
+                    raise ValueError("fact.predicate_cardinality_owner_conflict")
+                if not str(row.ontology_version or "").endswith("-unset"):
+                    if bool(row.single_value) != bool(operation["single_value"]):
+                        raise ValueError("fact.predicate_cardinality_stale")
+                else:
+                    row.single_value = bool(operation["single_value"])
+                    row.ontology_version = "custom/v1"
+
+        row = session.get(FactBindingRow, memory.memory_id)
+        if row is None:
+            row = FactBindingRow(memory_id=memory.memory_id)
+            session.add(row)
+        payload = dict(getattr(memory, "extra_payload", {}) or {})
+        authority = dict(payload.get("vnext_authority", {}) or {})
+        tenant_id = str(getattr(result, "tenant_id", "") or
+                        authority.get("tenant_id") or "default")
+        row.tenant_id, row.user_id = tenant_id, memory.user_id
+        row.subject_id = result.subject_id
+        row.predicate_id = result.predicate_id
+        row.object_id = result.object_id
+        row.object_value = memory.object_value
+        row.scope = str((getattr(result, "scope", "") or
+                         (getattr(memory, "extra_payload", {}) or {})
+                         .get("fact_semantic", {}).get("scope") or "global"))
+        row.project_id = ((getattr(memory, "extra_payload", {}) or {}).get("project_id")
+                          or (row.scope.split(":", 1)[1] if row.scope.startswith("project:") else None))
+        row.version, row.status = int(memory.version or 1), "active"
+
+    def bind(self, memory, *, tenant_id: str, scope: str,
+             subject_id: str, predicate_id: str, object_id: str) -> None:
+        with self.db.session() as s:
+            row = s.get(FactBindingRow, memory.memory_id)
+            if row is None:
+                row = FactBindingRow(memory_id=memory.memory_id)
+                s.add(row)
+            row.tenant_id, row.user_id = tenant_id, memory.user_id
+            row.subject_id, row.predicate_id, row.object_id = subject_id, predicate_id, object_id
+            row.object_value, row.scope = memory.object_value, scope
+            row.project_id = ((getattr(memory, "extra_payload", {}) or {}).get("project_id")
+                              or (scope.split(":", 1)[1] if scope.startswith("project:") else None))
+            row.version, row.status = memory.version, "active"
+
+    def list_bindings(self, user_id: str, tenant_id: str, scope: str):
+        with self._read_session() as s:
+            q = s.query(FactBindingRow).filter_by(user_id=user_id, tenant_id=tenant_id, status="active")
+            if scope.startswith("project:"):
+                q = q.filter(FactBindingRow.scope.in_(["global", scope]))
+            else:
+                q = q.filter(FactBindingRow.scope == "global")
+            rows = q.all()
+            return [self._binding(row) for row in rows]
+
+    def get_binding(self, memory_id: str, tenant_id: str, user_id: str):
+        """Return one active semantic binding for idempotent backfills."""
+        with self.db.session() as s:
+            row = s.query(FactBindingRow).filter_by(
+                memory_id=memory_id, tenant_id=tenant_id, user_id=user_id,
+            ).one_or_none()
+            return self._binding(row) if row is not None else None
+
+    def set_binding_status(self, memory_id: str, status: str,
+                           *, session: Session | None = None) -> None:
+        if session is None:
+            with self.db.session() as s:
+                self.set_binding_status(memory_id, status, session=s)
+            return
+        row = session.get(FactBindingRow, memory_id)
+        if row is not None:
+            row.status = status
+            row.updated_at = datetime.now()
+
+    def save_decision(self, *, decision_id: str, tenant_id: str, user_id: str,
+                      memory_id: str, task_type: str, payload: dict,
+                      expected_version: int = 1) -> None:
+        with self.db.session() as s:
+            row = s.get(FactDecisionRow, decision_id)
+            if row is None:
+                row = FactDecisionRow(decision_id=decision_id)
+                s.add(row)
+            row.tenant_id, row.user_id = tenant_id, user_id
+            row.memory_id, row.task_type = memory_id, task_type
+            row.payload, row.expected_version = payload, expected_version
+            row.status = "pending"
+
+    def list_decisions(self, *, tenant_id: str, user_id: str, status: str = "pending") -> list[dict]:
+        with self.db.session() as s:
+            rows = s.query(FactDecisionRow).filter_by(
+                tenant_id=tenant_id, user_id=user_id, status=status
+            ).order_by(FactDecisionRow.created_at.desc()).all()
+            return [{"decision_id": r.decision_id, "memory_id": r.memory_id,
+                     "task_type": r.task_type, "payload": r.payload or {},
+                     "expected_version": r.expected_version, "status": r.status}
+                    for r in rows]
+
+    def resolve_decision(self, decision_id: str, *, status: str,
+                         result_memory_id: str = "", reason: str = "") -> bool:
+        with self.db.session() as s:
+            row = s.get(FactDecisionRow, decision_id)
+            if row is None:
+                return False
+            row.status, row.result_memory_id, row.reason = status, result_memory_id, reason
+            row.resolved_at = datetime.now()
+            return True

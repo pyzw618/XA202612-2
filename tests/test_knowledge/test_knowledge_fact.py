@@ -76,18 +76,18 @@ def test_fact_duplicate_reinforces_evidence(tmp_path):
     assert stored.object_value == "张三"
 
 
-def test_fact_single_value_conflict_supersedes(tmp_path):
-    """同 S+P 异 O 且 single_value → 旧版归档 + 新版本（parent 链）。"""
+def test_fact_single_value_conflict_waits_for_decision(tmp_path):
+    """同 S+P 异 O 且 single_value → 持久化待裁决任务，不自动覆盖。"""
     _db, know_repo, updater = _setup(tmp_path)
     id1 = updater.add(_fact())
     id2 = updater.add(_fact(object_value="李四"))
     assert id2 != id1
     old = know_repo.get_by_id(id1)
     new = know_repo.get_by_id(id2)
-    assert old.status == MemoryStatus.ARCHIVED
-    assert new.status == MemoryStatus.ACTIVE
-    assert new.parent_id == id1
-    assert new.version > old.version
+    assert old.status == MemoryStatus.ACTIVE
+    assert new.status == MemoryStatus.PENDING
+    assert new.parent_id == ""
+    assert new.extra_payload["fact_decision_task"]["conflict_type"] == "subject_cardinality"
 
 
 def test_fact_multi_value_coexists(tmp_path):

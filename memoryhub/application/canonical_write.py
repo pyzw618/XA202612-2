@@ -455,16 +455,45 @@ class CanonicalWriteService:
         repository = self.authority_facade.repository
         legacy_memory = getattr(repository, "legacy_memory")(envelope)
         receipt = None
+        fact_written = False
         if self.memory_write_service is not None:
-            receipt = self.memory_write_service.upsert_memory(
-                legacy_memory,
-                action=action or self._memory_action(validation.existing, envelope),
-                provenance=self._provenance(event),
-                skip_write_gate=False,
-            )
+            if (getattr(legacy_memory, "knowledge_type", None) is not None and str(
+                getattr(legacy_memory.knowledge_type, "value", legacy_memory.knowledge_type)
+            ) == "fact" and all(getattr(legacy_memory, field, "") for field in ("subject", "predicate", "object_value"))):
+                # FACT promotions must pass the same entity/predicate/conflict
+                # semantics as REST and event ingestion.  The updater delegates
+                # the final row write back to this service's writer, so no second
+                # storage path is introduced.
+                from memoryhub.core.knowledge.updater import KnowledgeUpdater
+                KnowledgeUpdater(write_service=self.memory_write_service).add(
+                    legacy_memory, skip_write_gate=False
+                )
+                fact_written = True
+                stored = self.memory_write_service.know_repo.get_by_id(legacy_memory.memory_id)
+                if stored is not None and getattr(getattr(stored, "status", None), "value", getattr(stored, "status", None)) == "pending":
+                    return envelope, None
+                # KnowledgeUpdater may attach normalized semantic IDs to the
+                # vNext metadata.  Return that persisted envelope so callers
+                # observe the same binding that Authority will read after a
+                # restart.
+                if stored is not None:
+                    stored_authority = (stored.extra_payload or {}).get("vnext_authority")
+                    if isinstance(stored_authority, dict):
+                        envelope = LongTermEnvelope.model_validate(stored_authority)
+            else:
+                receipt = self.memory_write_service.upsert_memory(
+                    legacy_memory,
+                    action=action or self._memory_action(validation.existing, envelope),
+                    provenance=self._provenance(event),
+                    skip_write_gate=False,
+                )
         else:
             repository.save(envelope)
-        self._enqueue_projection_outbox(event, envelope)
+        # DomainMemoryWriter already emitted the authoritative outbox item for
+        # FACT rows.  Enqueueing again here would duplicate projection work and
+        # can violate the event/version uniqueness constraint.
+        if not fact_written:
+            self._enqueue_projection_outbox(event, envelope)
         return envelope, receipt
 
     def _enqueue_projection_outbox(

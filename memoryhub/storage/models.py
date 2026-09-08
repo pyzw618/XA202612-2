@@ -155,6 +155,82 @@ class KnowledgeRow(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
+class FactEntityRow(Base):
+    """Tenant/user scoped entity registry used only for FACT semantics."""
+    __tablename__ = "fact_entities"
+    __table_args__ = (Index("ix_fact_entities_owner_type", "tenant_id", "user_id", "entity_type"),)
+    entity_id = Column(String(96), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, default="default")
+    user_id = Column(String(64), nullable=False, index=True)
+    canonical_name = Column(String(256), nullable=False)
+    entity_type = Column(String(32), nullable=False, default="Other")
+    aliases = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class FactPredicateRow(Base):
+    """Versioned predicate ontology registry."""
+    __tablename__ = "fact_predicates"
+    predicate_id = Column(String(96), primary_key=True)
+    # Built-in ontology rows use the reserved ``__ontology__`` owner.  Custom
+    # predicates/aliases are isolated to the tenant and user that created them.
+    tenant_id = Column(String(64), nullable=False, default="__ontology__", index=True)
+    user_id = Column(String(64), nullable=False, default="__ontology__", index=True)
+    canonical_name = Column(String(256), nullable=False)
+    aliases = Column(JSON, nullable=False, default=list)
+    domain = Column(JSON, nullable=False, default=list)
+    range = Column(JSON, nullable=False, default=list)
+    single_value = Column(Boolean, default=True)
+    inverse_of = Column(String(96), nullable=True)
+    symmetric = Column(Boolean, default=False)
+    irreflexive = Column(Boolean, default=False)
+    object_single_value = Column(Boolean, default=False)
+    exclusive_with = Column(JSON, nullable=False, default=list)
+    acyclic = Column(Boolean, default=False)
+    ontology_version = Column(String(32), default="v1")
+
+
+class FactBindingRow(Base):
+    """Semantic identifiers bound to an existing Knowledge FACT row."""
+    __tablename__ = "fact_bindings"
+    __table_args__ = (
+        Index("ix_fact_bindings_scope", "tenant_id", "user_id", "scope"),
+        UniqueConstraint("memory_id", name="uq_fact_bindings_memory"),
+    )
+    memory_id = Column(String(32), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, default="default")
+    user_id = Column(String(64), nullable=False, index=True)
+    subject_id = Column(String(96), nullable=False)
+    predicate_id = Column(String(96), nullable=False)
+    object_id = Column(String(96), nullable=False)
+    object_value = Column(Text, nullable=False, default="")
+    scope = Column(String(256), nullable=False, default="global")
+    project_id = Column(String(128), nullable=True)
+    version = Column(Integer, nullable=False, default=1)
+    status = Column(String(16), nullable=False, default="active")
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class FactDecisionRow(Base):
+    """Durable user/Agent decision task for ambiguous FACT operations."""
+    __tablename__ = "fact_decisions"
+    __table_args__ = (Index("ix_fact_decisions_owner_status", "tenant_id", "user_id", "status"),)
+    decision_id = Column(String(96), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, default="default")
+    user_id = Column(String(64), nullable=False, index=True)
+    memory_id = Column(String(32), nullable=False)
+    task_type = Column(String(64), nullable=False)
+    payload = Column(JSON, nullable=False, default=dict)
+    expected_version = Column(Integer, nullable=False, default=1)
+    status = Column(String(24), nullable=False, default="pending")
+    result_memory_id = Column(String(32), nullable=True)
+    reason = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.now)
+    resolved_at = Column(DateTime, nullable=True)
+
+
 class KnowledgeVersionRow(Base):
     """Immutable snapshot of a knowledge version before in-place evolution."""
     __tablename__ = "knowledge_versions"
@@ -296,6 +372,7 @@ class MemoryProjectionOutboxRow(Base):
             "memory_type",
             "operation",
             "event_id",
+            "payload_hash",
             unique=True,
             sqlite_where=text("event_id IS NOT NULL"),
         ),

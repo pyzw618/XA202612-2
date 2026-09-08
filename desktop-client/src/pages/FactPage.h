@@ -13,6 +13,7 @@ class DetailDrawer;
 class QPushButton;
 class QWidget;
 class PageStateView;
+class QVBoxLayout;
 
 class FactPage : public BasePage {
     Q_OBJECT
@@ -42,8 +43,11 @@ private:
 
     QWidget *m_content = nullptr;
     PageStateView *m_stateView = nullptr;
+    QWidget *m_candidateContainer = nullptr;
+    QVBoxLayout *m_candidateLayout = nullptr;
 
     QJsonArray m_all;
+    QJsonArray m_candidates;
     int m_generation = 0;
     int m_detailGeneration = 0;
 };

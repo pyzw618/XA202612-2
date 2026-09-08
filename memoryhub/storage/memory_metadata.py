@@ -376,6 +376,36 @@ class MemoryProjectionOutboxRepository:
         if backoff_policy is None:
             backoff_policy = _default_backoff_policy()
         row = session.get(MemoryProjectionOutboxRow, outbox_id)
+        if row is None:
+            # Older schemas enforce a natural-key uniqueness constraint that
+            # does not include the payload hash.  A repeated write of the
+            # same event/version must reuse that row even when its lineage
+            # payload has a newer evidence revision.
+            natural_key = {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "memory_id": memory_id,
+                "memory_type": memory_type,
+                "operation": operation,
+                "event_id": event_id,
+                "content_version": max(1, int(content_version)),
+                "projection_type": projection_type,
+            }
+            row = session.query(MemoryProjectionOutboxRow).filter_by(**natural_key).first()
+            if row is not None and row.payload_hash != payload_hash:
+                row = None
+        if row is None:
+            # Some installations predate content-version in the unique key;
+            # keep their single event projection row idempotent as well.
+            row = session.query(MemoryProjectionOutboxRow).filter_by(
+                tenant_id=tenant_id,
+                memory_id=memory_id,
+                memory_type=memory_type,
+                operation=operation,
+                event_id=event_id,
+            ).first()
+            if row is not None and row.payload_hash != payload_hash:
+                row = None
         now = datetime.now()
         if row is None:
             row = MemoryProjectionOutboxRow(
@@ -408,6 +438,7 @@ class MemoryProjectionOutboxRepository:
             row.priority = priority
             row.max_attempts = max_attempts
             row.backoff_policy = backoff_policy
+            row.content_version = max(row.content_version or 1, int(content_version))
             row.updated_at = now
         return row
 

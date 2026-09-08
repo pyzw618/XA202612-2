@@ -75,6 +75,12 @@ def _requested_project_id(request: MemoryRetrievalRequest) -> str | None:
 def _legacy_memory_metadata(memory: Any) -> dict[str, Any]:
     extra_payload = getattr(memory, "extra_payload", {}) or {}
     authority = extra_payload.get("vnext_authority", {})
+    project_id = str(extra_payload.get("project_id") or "").strip()
+    raw_scope = getattr(memory, "scope", {})
+    if hasattr(raw_scope, "model_dump"):
+        raw_scope = raw_scope.model_dump()
+    if project_id and isinstance(raw_scope, dict):
+        raw_scope = {**raw_scope, "project_id": project_id}
     status = getattr(memory, "status", "ACTIVE")
     return {
         "tenant_id": getattr(memory, "tenant_id", "") or authority.get("tenant_id", "default"),
@@ -82,8 +88,10 @@ def _legacy_memory_metadata(memory: Any) -> dict[str, Any]:
         "memory_type": getattr(memory, "memory_type", "semantic"),
         "confidence": float(getattr(memory, "confidence", 0.0) or 0.0),
         "status": getattr(status, "value", status),
-        "scope": getattr(memory, "scope", {}),
-        "project_id": getattr(memory, "project_id", "") or "",
+        "scope": raw_scope,
+        "scope_level": "project" if project_id else authority.get("scope_level"),
+        "project_id": project_id,
+        "vnext_authority": authority,
     }
 
 

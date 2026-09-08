@@ -45,7 +45,7 @@ def test_tool_surface_and_safe_forget():
             "memoryhub_write_event", "memoryhub_remember", "memoryhub_forget",
             "memoryhub_feedback", "memoryhub_vnext_feedback",
             "memoryhub_resume_task", "memoryhub_knowledge_fact_propose",
+            "memoryhub_decide_facts",
     }
     result = json.loads(registry.call("memoryhub_forget", {"instruction": "old"}))
     assert "preview" in result
-

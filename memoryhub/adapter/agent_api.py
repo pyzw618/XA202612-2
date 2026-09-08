@@ -17,6 +17,7 @@ from memoryhub.adapter.schemas import (
     ForgetRequest,
     KnowledgeMemory,
     KnowledgeType,
+    MemoryStatus,
     MemoryEvent,
     SceneScope,
     SearchRequest,
@@ -463,7 +464,14 @@ async def decide_agent_action(
 ):
     """接收用户裁决，由 Agent 适配层执行相应 MemoryHub 操作。"""
     if body.action_type == "fact_reject":
-        return {"action_id": action_id, "status": "rejected"}
+        from memoryhub.adapter.api import FactDecideRequest, decide_fact
+        payload = body.payload or {}
+        result = await decide_fact(
+            FactDecideRequest(user_id=str(payload.get("user_id", "default")),
+                              memory_id=action_id, action="reject",
+                              reason=str(payload.get("reason", ""))), request
+        )
+        return {"action_id": action_id, **result}
 
     if body.action_type == "fact_commit":
         write_service = getattr(request.app.state, "memory_write_service", None)
@@ -471,6 +479,50 @@ async def decide_agent_action(
             raise HTTPException(status_code=503, detail="memory write service not initialized")
         payload = body.payload or {}
         user_id = str(payload.get("user_id", "default"))
+        # A pending fact decision is resumed through the canonical fact endpoint.
+        fact_repo = getattr(request.app.state, "know_repo", None)
+        tenant_id = request.headers.get("X-MemoryHub-Tenant", "")
+        if fact_repo is not None:
+            try:
+                pending = fact_repo.get_by_id(
+                    action_id, user_id=user_id, tenant_id=tenant_id
+                )
+            except TypeError:
+                pending = fact_repo.get_by_id(action_id)
+        else:
+            pending = None
+        pending_tenant = str(
+            ((getattr(pending, "extra_payload", {}) or {}).get("vnext_authority", {}) or {})
+            .get("tenant_id", "default")
+            or "default"
+        ) if pending is not None else ""
+        if (
+            pending is not None
+            and pending.user_id == user_id
+            and (not tenant_id or pending_tenant == tenant_id)
+            and getattr(pending.status, "value", str(pending.status)) == MemoryStatus.PENDING.value
+        ):
+            from memoryhub.adapter.api import FactDecideRequest, decide_fact
+            result = await decide_fact(
+                FactDecideRequest(
+                    user_id=user_id, memory_id=action_id,
+                    action=str(payload.get("action") or "replace"),
+                    subject=payload.get("subject") or payload.get("subject_text"),
+                    predicate=payload.get("predicate") or payload.get("predicate_text"),
+                    object_value=payload.get("object") or payload.get("object_text"),
+                    subject_id=payload.get("subject_id"),
+                    predicate_id=payload.get("predicate_id"),
+                    object_id=payload.get("object_id"),
+                    scope=payload.get("scope"),
+                    project_id=payload.get("project_id"),
+                    create_new_subject=bool(payload.get("create_new_subject", False)),
+                    create_new_predicate=bool(payload.get("create_new_predicate", False)),
+                    create_new_object=bool(payload.get("create_new_object", False)),
+                    expected_version=payload.get("expected_version"),
+                    reason=str(payload.get("reason", "")),
+                ), request
+            )
+            return {"action_id": action_id, **result}
         memory = KnowledgeMemory(
             user_id=user_id,
             knowledge_type=KnowledgeType.FACT,
@@ -478,8 +530,25 @@ async def decide_agent_action(
             predicate=str(payload.get("predicate") or payload.get("predicate_text") or ""),
             object_value=str(payload.get("object") or payload.get("object_text") or ""),
             object_type=str(payload.get("object_type") or ""),
+            extra_payload={
+                "vnext_authority": {
+                    "tenant_id": request.headers.get("X-MemoryHub-Tenant", "default")
+                }
+            },
         )
-        write_service.upsert_memory(memory, skip_write_gate=True)
+        from memoryhub.core.knowledge.updater import KnowledgeUpdater
+        # Agent decisions are an external write boundary as well; apply the
+        # memory-level gate before semantic resolution so unsafe text cannot
+        # become an entity, predicate, alias, or durable decision payload.
+        from memoryhub.adapter.api import _guarded_memory_write
+        _guarded_memory_write(
+            request,
+            memory,
+            lambda safe_memory: KnowledgeUpdater(write_service=write_service).add(
+                safe_memory, skip_write_gate=True
+            ),
+            operation="explicit_write",
+        )
         return {
             "action_id": action_id,
             "status": "committed",

@@ -479,7 +479,33 @@ class MilvusHybridRetriever:
                 continue
             if self._scope_conflict(result, request):
                 continue
+            scope = result.metadata.get("scope") or {}
+            actual_project = (
+                str(result.metadata.get("project_id") or "").strip()
+                or (str(scope.get("project_id") or "").strip()
+                    if isinstance(scope, dict) else "")
+            )
+            requested_project = str(request.project_id or "").strip()
+            if actual_project and actual_project != requested_project:
+                continue
             filtered.append(result)
+        if request.project_id:
+            project_keys = {
+                (str(item.metadata.get("subject_id") or ""),
+                 str(item.metadata.get("predicate_id") or ""))
+                for item in filtered
+                if str(item.metadata.get("project_id") or "").strip() == request.project_id
+                and item.metadata.get("single_value") is True
+                and item.metadata.get("subject_id") and item.metadata.get("predicate_id")
+            }
+            filtered = [
+                item for item in filtered
+                if not (
+                    not str(item.metadata.get("project_id") or "").strip()
+                    and (str(item.metadata.get("subject_id") or ""),
+                         str(item.metadata.get("predicate_id") or "")) in project_keys
+                )
+            ]
         return filtered
 
     @staticmethod

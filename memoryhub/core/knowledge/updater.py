@@ -24,6 +24,8 @@ from memoryhub.core.knowledge.prompts import (
 )
 from memoryhub.core.memory.evidence import EvidenceMerger
 from memoryhub.core.memory.llm import StructuredLLMAdapter
+from memoryhub.core.fact import FactSemanticService, FactSemanticResult
+from memoryhub.storage.database import FactSemanticRepository
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,13 @@ class KnowledgeUpdater:
             and callable(getattr(llm_client, "generate", None))
             else None
         )
+        self.fact_semantics = None
+        if (self.know_repo is not None and hasattr(self.know_repo, "db")
+                and getattr(self.know_repo.db, "session_factory", None) is not None):
+            self.fact_semantics = FactSemanticService(
+                knowledge_repo=self.know_repo,
+                semantic_repo=FactSemanticRepository(self.know_repo.db),
+            )
 
     def add(
         self, memory: KnowledgeMemory, *, skip_write_gate: bool = False
@@ -67,7 +76,12 @@ class KnowledgeUpdater:
             == KnowledgeType.FACT.value
         ):
             # 事实性知识走 S/P/O 精确匹配，不走文本相似度（REFACTOR_PLAN_V2 §4.8.5）
-            return self._add_fact(memory, skip_write_gate=skip_write_gate)
+            db = getattr(self.know_repo, "db", None)
+            lock = getattr(db, "fact_write_lock", None)
+            if lock is None:
+                return self._add_fact(memory, skip_write_gate=skip_write_gate)
+            with lock:
+                return self._add_fact(memory, skip_write_gate=skip_write_gate)
 
         exact = self.know_repo.get_by_id(memory.memory_id)
         if exact is not None and exact.user_id == memory.user_id:
@@ -196,11 +210,209 @@ class KnowledgeUpdater:
 
     _MAX_FACT_CONFLICT_VERSIONS = 3
 
+    @staticmethod
+    def _attach_fact_semantic(memory: KnowledgeMemory, semantic: FactSemanticResult) -> None:
+        """Keep normalized IDs in both legacy metadata and vNext envelope content."""
+        fact_semantic = {
+            "subject_id": semantic.subject_id,
+            "predicate_id": semantic.predicate_id,
+            "object_id": semantic.object_id,
+            "scope": semantic.scope,
+        }
+        payload = dict(memory.extra_payload or {})
+        payload["fact_semantic"] = fact_semantic
+        authority = payload.get("vnext_authority")
+        if isinstance(authority, dict):
+            authority = dict(authority)
+            authority["content"] = {
+                **dict(authority.get("content", {}) or {}),
+                "fact_semantic": fact_semantic,
+            }
+            payload["vnext_authority"] = authority
+        memory.extra_payload = payload
+
+    @staticmethod
+    def _set_fact_outcome(memory: KnowledgeMemory, outcome: str) -> None:
+        """Expose the semantic write outcome without duplicating fact state."""
+        payload = dict(memory.extra_payload or {})
+        payload["fact_outcome"] = outcome
+        memory.extra_payload = payload
+
+    def _get_owned_fact(self, memory_id: str, *, user_id: str, tenant_id: str):
+        try:
+            return self.know_repo.get_by_id(
+                memory_id, user_id=user_id, tenant_id=tenant_id
+            )
+        except TypeError:
+            return self.know_repo.get_by_id(memory_id)
+
+    def _ensure_pending_fact_id(self, memory: KnowledgeMemory, *, tenant_id: str) -> None:
+        """Keep a pending proposal from overwriting an active deterministic ID.
+
+        Explicit FACT proposals use a stable content hash for idempotency.  A
+        later entity-resolution task may have the same raw triple as an
+        already-active row, so it needs a separate durable proposal ID.
+        """
+        current = self._get_owned_fact(
+            memory.memory_id, user_id=memory.user_id, tenant_id=tenant_id
+        )
+        if current is None:
+            return
+        if getattr(current.status, "value", str(current.status)) != MemoryStatus.ACTIVE.value:
+            return
+        original_id = memory.memory_id
+        suffix = hashlib.sha256(
+            f"{tenant_id}|{memory.user_id}|{original_id}|pending".encode("utf-8")
+        ).hexdigest()[:22]
+        memory.memory_id = f"know_fact_{suffix}"
+        payload = dict(memory.extra_payload or {})
+        payload["fact_origin_id"] = original_id
+        memory.extra_payload = payload
+
     def _add_fact(
         self, memory: KnowledgeMemory, *, skip_write_gate: bool = False
     ) -> str:
+        if self.fact_semantics is not None:
+            # Bind legacy FACT rows once, then use canonical entity/predicate IDs
+            # for all subsequent comparisons.
+            tenant_id = self.fact_semantics._tenant(memory)
+            try:
+                active_facts = self.know_repo.list_all(
+                    status="active", user_id=memory.user_id, tenant_id=tenant_id
+                )
+            except TypeError:
+                active_facts = self.know_repo.list_all(
+                    status="active", user_id=memory.user_id
+                )
+            for old in active_facts:
+                if getattr(old.knowledge_type, "value", str(old.knowledge_type)) == KnowledgeType.FACT.value:
+                    self.fact_semantics.ensure_memory_binding(old)
+            semantic = self.fact_semantics.prepare(memory)
+
+            def validate_fact_transaction(session):
+                """Recheck semantic admission after BEGIN IMMEDIATE is held."""
+                with self.fact_semantics.repository.use_session(session):
+                    checked = self.fact_semantics.prepare(memory)
+                if semantic.relation == "DECISION_REQUIRED":
+                    if checked.relation != "DECISION_REQUIRED":
+                        raise RuntimeError("fact.concurrent_conflict")
+                    return
+                if checked.relation != semantic.relation:
+                    raise RuntimeError("fact.concurrent_conflict")
+                if set(checked.existing_memory_ids) != set(semantic.existing_memory_ids):
+                    raise RuntimeError("fact.concurrent_conflict")
+            if semantic.relation == "DECISION_REQUIRED":
+                self._ensure_pending_fact_id(memory, tenant_id=semantic.tenant_id)
+                memory.status = MemoryStatus.PENDING
+                self._set_fact_outcome(memory, "pending")
+                decision_task = {
+                    **(semantic.decision_task or {}),
+                    "expected_version": memory.version,
+                }
+                memory.extra_payload = {
+                    **dict(memory.extra_payload or {}),
+                    "fact_decision_task": decision_task,
+                }
+                self.write_service.upsert_memory(
+                    memory, action=MemoryDecision.REVIEW,
+                    skip_write_gate=skip_write_gate,
+                    transaction_validator=validate_fact_transaction,
+                )
+                return memory.memory_id
+            self._attach_fact_semantic(memory, semantic)
+            existing = None
+            if semantic.existing_memory_ids:
+                existing = self._get_owned_fact(
+                    semantic.existing_memory_ids[0],
+                    user_id=memory.user_id,
+                    tenant_id=semantic.tenant_id,
+                )
+            if semantic.relation == "CONFLICT":
+                self._ensure_pending_fact_id(memory, tenant_id=semantic.tenant_id)
+                memory.status = MemoryStatus.PENDING
+                self._set_fact_outcome(memory, "pending")
+                hard_constraints = {
+                    "irreflexive_violation", "domain_type_violation",
+                    "range_type_violation", "relation_cycle",
+                }
+                conflict_types = set(semantic.conflict_types or [semantic.conflict_type])
+                allowed_actions = (
+                    ["reject", "keep_old"]
+                    if conflict_types & hard_constraints
+                    else ["replace", "keep_old", "merge", "coexist"]
+                )
+                memory.extra_payload = {
+                    **dict(memory.extra_payload or {}),
+                    "fact_decision_task": {
+                        "decision_type": "fact_conflict",
+                        "allowed_actions": allowed_actions,
+                        "expected_version": memory.version,
+                        "conflict_type": semantic.conflict_type,
+                        "conflict_types": list(semantic.conflict_types or []),
+                        "reason": semantic.reason,
+                        "existing_memory_ids": semantic.existing_memory_ids,
+                        "expected_existing_versions": {
+                            existing_id: int(
+                                getattr(self._get_owned_fact(
+                                    existing_id,
+                                    user_id=memory.user_id,
+                                    tenant_id=semantic.tenant_id,
+                                ), "version", 1)
+                                or 1
+                            )
+                            for existing_id in semantic.existing_memory_ids
+                        },
+                    },
+                }
+                self.write_service.upsert_memory(
+                    memory, action=MemoryDecision.REVIEW,
+                    skip_write_gate=skip_write_gate,
+                    transaction_validator=validate_fact_transaction,
+                )
+                return memory.memory_id
+            if semantic.relation == "DUPLICATE" and existing is not None:
+                reinforced = self._reinforce(existing, memory, add_support=False)
+                self._set_fact_outcome(reinforced, "duplicate")
+                self.write_service.upsert_memory(
+                    reinforced, action=MemoryDecision.REINFORCE,
+                    skip_write_gate=skip_write_gate,
+                    semantic_repo=self.fact_semantics.repository,
+                    semantic_result=semantic,
+                    transaction_validator=validate_fact_transaction,
+                )
+                if getattr(self.write_service, "domain_writer", None) is None:
+                    self.fact_semantics.commit(reinforced, semantic)
+                    self.fact_semantics.bind(reinforced, semantic)
+                return reinforced.memory_id
+            if semantic.relation == "COEXIST":
+                self._set_fact_outcome(memory, "coexist")
+                self.write_service.upsert_memory(
+                    memory, action=MemoryDecision.COEXIST,
+                    skip_write_gate=skip_write_gate,
+                    semantic_repo=self.fact_semantics.repository,
+                    semantic_result=semantic,
+                    transaction_validator=validate_fact_transaction,
+                )
+                if getattr(self.write_service, "domain_writer", None) is None:
+                    self.fact_semantics.commit(memory, semantic)
+                    self.fact_semantics.bind(memory, semantic)
+                return memory.memory_id
+            self._set_fact_outcome(memory, "new")
+            self.write_service.upsert_memory(
+                memory, action=MemoryDecision.NEW,
+                skip_write_gate=skip_write_gate,
+                semantic_repo=self.fact_semantics.repository,
+                semantic_result=semantic,
+                transaction_validator=validate_fact_transaction,
+            )
+            if getattr(self.write_service, "domain_writer", None) is None:
+                self.fact_semantics.commit(memory, semantic)
+                self.fact_semantics.bind(memory, semantic)
+            return memory.memory_id
+
         existing = self._find_best_fact_candidate(memory)
         if existing is None:
+            self._set_fact_outcome(memory, "new")
             self.write_service.upsert_memory(
                 memory,
                 action=MemoryDecision.NEW,
@@ -210,6 +422,7 @@ class KnowledgeUpdater:
         if self._same_fact(existing, memory):
             # 同 S/P/O → 只补证据，不覆盖（REINFORCE）
             reinforced = self._reinforce(existing, memory, add_support=False)
+            self._set_fact_outcome(reinforced, "duplicate")
             self.write_service.upsert_memory(
                 reinforced,
                 action=MemoryDecision.REINFORCE,
@@ -232,6 +445,7 @@ class KnowledgeUpdater:
             )
             return merged.memory_id
         # 多值/未知 → 共存
+        self._set_fact_outcome(memory, "coexist")
         self.write_service.upsert_memory(
             memory,
             action=MemoryDecision.COEXIST,
@@ -609,6 +823,13 @@ class KnowledgeUpdater:
             action=MemoryDecision.REVISE,
             skip_write_gate=skip_write_gate,
         )
+        if self.fact_semantics is not None and getattr(existing.knowledge_type, "value", str(existing.knowledge_type)) == KnowledgeType.FACT.value:
+            self.fact_semantics.set_status(existing.memory_id, "archived")
+            self.fact_semantics.bind(successor, FactSemanticResult("BOUND", **{
+                "subject_id": (successor.extra_payload or {}).get("fact_semantic", {}).get("subject_id", ""),
+                "predicate_id": (successor.extra_payload or {}).get("fact_semantic", {}).get("predicate_id", ""),
+                "object_id": (successor.extra_payload or {}).get("fact_semantic", {}).get("object_id", ""),
+            }))
 
     def _merge(
         self,
