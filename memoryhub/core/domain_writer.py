@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from memoryhub.adapter.schemas import (
     KnowledgeMemory,
     MemoryDecision,
@@ -18,6 +20,7 @@ from memoryhub.storage.memory_metadata import (
     MemoryLineageRepository,
     MemoryProjectionOutboxRepository,
 )
+from memoryhub.storage.models import FactDecisionRow
 
 Memory = PreferenceMemory | KnowledgeMemory
 
@@ -50,13 +53,16 @@ class DomainMemoryWriter:
         provenance: MemoryProvenance | None = None,
         semantic_repo=None,
         semantic_result=None,
+        transaction_validator=None,
     ) -> MemoryWriteReceipt:
         """Write one change atomically and return its receipt."""
         return self.write_batch([
             (memory, action, provenance, semantic_repo, semantic_result)
-        ])[0]
+        ], transaction_validator=transaction_validator)[0]
 
-    def write_batch(self, changes: list[tuple]) -> list[MemoryWriteReceipt]:
+    def write_batch(
+        self, changes: list[tuple], *, transaction_validator=None
+    ) -> list[MemoryWriteReceipt]:
         """Commit several domain changes in one session.
 
         Fact replacement uses this to archive every selected predecessor and
@@ -65,6 +71,17 @@ class DomainMemoryWriter:
         ``write`` unchanged.
         """
         with self.db.session() as session:
+            # Serialize the short authoritative part of FACT writes.  SQLite's
+            # deferred transactions otherwise allow two independently
+            # prepared conflicting facts to both reach ACTIVE state.
+            if any(
+                getattr(getattr(change[0], "knowledge_type", None), "value",
+                        getattr(change[0], "knowledge_type", None)) == "fact"
+                for change in changes
+            ):
+                session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            if transaction_validator is not None:
+                transaction_validator(session)
             receipts = [
                 self._write_one(
                     session,
@@ -105,6 +122,7 @@ class DomainMemoryWriter:
         sensitivity_level = authority.get("sensitivity_level")
 
         repo.save(memory, session=session)
+        self._sync_fact_decision(session, memory, tenant_id=tenant_id, user_id=user_id)
         if semantic_repo is not None and semantic_result is not None:
             semantic_repo.apply_result(session, memory=memory, result=semantic_result)
         elif semantic_repo is not None and memory.memory_type == "knowledge" and self._status(memory) == MemoryStatus.ARCHIVED.value:
@@ -166,6 +184,41 @@ class DomainMemoryWriter:
             outbox_id=outbox.outbox_id,
             provenance=provenance,
         )
+
+    @classmethod
+    def _sync_fact_decision(cls, session, memory: Memory, *, tenant_id: str,
+                            user_id: str) -> None:
+        """Keep a FACT proposal and its durable decision row in one commit."""
+        if getattr(getattr(memory, "knowledge_type", None), "value",
+                   getattr(memory, "knowledge_type", None)) != "fact":
+            return
+        payload = dict(getattr(memory, "extra_payload", {}) or {})
+        task = dict(payload.get("fact_decision_task", {}) or {})
+        if not task:
+            return
+        decision_id = f"fact-decision:{memory.memory_id}"
+        row = session.get(FactDecisionRow, decision_id)
+        if row is None:
+            row = FactDecisionRow(decision_id=decision_id)
+            session.add(row)
+        row.tenant_id = tenant_id or "default"
+        row.user_id = user_id or "default"
+        row.memory_id = memory.memory_id
+        row.task_type = str(task.get("decision_type") or "fact_conflict")
+        row.payload = task
+        row.expected_version = int(task.get("expected_version") or memory.version or 1)
+        resolution = dict(payload.get("fact_decision_resolution", {}) or {})
+        status = cls._status(memory)
+        if status == MemoryStatus.PENDING.value:
+            row.status = "pending"
+            row.result_memory_id = ""
+            row.reason = ""
+            row.resolved_at = None
+        elif resolution:
+            row.status = str(resolution.get("status") or "committed")
+            row.result_memory_id = str(resolution.get("result_memory_id") or "")
+            row.reason = str(resolution.get("reason") or "")
+            row.resolved_at = datetime.now()
 
     @staticmethod
     def _status(memory: Memory) -> str:

@@ -91,17 +91,22 @@ class FactSemanticService:
                 force_new_object: bool = False) -> FactSemanticResult:
         tenant_id = self._tenant(memory)
         user_id = str(memory.user_id or "default")
-        pending_operations: list[dict] = []
-        resolution_field = "subject"
-        try:
-            metadata = dict(getattr(memory, "extra_payload", {}) or {})
-            subject_id = self.entities.normalize(
-                memory.subject, self._entity_type(metadata.get("subject_type", "Other")),
-                user_id=user_id, tenant_id=tenant_id, selected_id=selected_subject_id,
-                force_new=force_new_subject,
-                persist=False, pending_operations=pending_operations,
+        metadata = dict(getattr(memory, "extra_payload", {}) or {})
+        requested_scope = str(metadata.get("fact_requested_scope") or "").casefold()
+        if requested_scope == "project" and not str(metadata.get("project_id") or "").strip():
+            return FactSemanticResult(
+                relation="DECISION_REQUIRED", tenant_id=tenant_id, scope="global",
+                reason="项目事实缺少明确的 project_id",
+                decision_task={
+                    "decision_type": "scope_resolution", "field": "scope",
+                    "allowed_actions": ["select_existing", "reject"],
+                    "candidates": [{"scope": "project"}, {"scope": "global"}],
+                    "reason": "请选择当前项目或明确改为全局事实",
+                },
             )
-            resolution_field = "predicate"
+        pending_operations: list[dict] = []
+        resolution_field = "predicate"
+        try:
             predicate_id = self.predicates.normalize(
                 memory.predicate,
                 selected_id=selected_predicate_id,
@@ -110,11 +115,76 @@ class FactSemanticService:
                 force_new=force_new_predicate,
                 persist=False, pending_operations=pending_operations,
             )
+            predicate = self.repository.get_predicate(predicate_id, tenant_id, user_id)
+            if predicate is None:
+                predicate = next(
+                    (op["predicate"] for op in pending_operations
+                     if op.get("kind") == "predicate_create"
+                     and op["predicate"].predicate_id == predicate_id), None
+                )
+            explicit_cardinality = getattr(memory, "single_value", None)
+            if (
+                predicate is not None
+                and not predicate.built_in
+                and explicit_cardinality is not None
+            ):
+                creating = next(
+                    (op for op in pending_operations
+                     if op.get("kind") == "predicate_create"
+                     and op["predicate"].predicate_id == predicate_id), None
+                )
+                if creating is not None:
+                    creating["predicate"].single_value = bool(explicit_cardinality)
+                    creating["predicate"].ontology_version = "custom/v1"
+                    predicate.single_value = bool(explicit_cardinality)
+                elif str(predicate.ontology_version or "").endswith("-unset"):
+                    pending_operations.append({
+                        "kind": "predicate_cardinality",
+                        "predicate_id": predicate_id,
+                        "single_value": bool(explicit_cardinality),
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                    })
+                    predicate.single_value = bool(explicit_cardinality)
+                elif bool(predicate.single_value) != bool(explicit_cardinality):
+                    raise FactDecisionRequired(
+                        "predicate_cardinality", input_text=memory.predicate,
+                        candidates=[self.repository.predicate_dict(predicate)],
+                        allowed_actions=["keep_old", "reject"],
+                        reason="自定义谓词的 single_value 与已确认约束不一致",
+                    )
+            subject_type = self._entity_type(metadata.get("subject_type", "Other"))
+            object_type = self._entity_type(memory.object_type)
+            if predicate is not None:
+                if subject_type == EntityType.OTHER.value and len(predicate.domain) == 1:
+                    subject_type = predicate.domain[0]
+                if object_type == EntityType.OTHER.value and len(predicate.range) == 1:
+                    object_type = predicate.range[0]
+                if subject_type == EntityType.OTHER.value and len(predicate.domain) > 1:
+                    raise FactDecisionRequired(
+                        "entity_type_resolution", input_text=memory.subject,
+                        candidates=[{"entity_type": value} for value in predicate.domain],
+                        allowed_actions=["select_existing", "reject"],
+                        reason="主体类型存在多个合法候选",
+                    )
+                if object_type == EntityType.OTHER.value and len(predicate.range) > 1:
+                    raise FactDecisionRequired(
+                        "entity_type_resolution", input_text=memory.object_value,
+                        candidates=[{"entity_type": value} for value in predicate.range],
+                        allowed_actions=["select_existing", "reject"],
+                        reason="客体类型存在多个合法候选",
+                    )
+            resolution_field = "subject"
+            subject_id = self.entities.normalize(
+                memory.subject, subject_type,
+                user_id=user_id, tenant_id=tenant_id, selected_id=selected_subject_id,
+                force_new=force_new_subject,
+                persist=False, pending_operations=pending_operations,
+            )
             resolution_field = "object"
             if selected_object_id:
                 object_id = selected_object_id
                 selected_object = self.repository.get_entity(object_id, tenant_id, user_id)
-                object_type = self._entity_type(memory.object_type)
                 if selected_object is None or (
                     object_type != EntityType.OTHER.value
                     and selected_object.entity_type != object_type
@@ -122,7 +192,7 @@ class FactSemanticService:
                     raise ValueError("fact.object_selection_invalid")
             else:
                 object_id = self.entities.normalize(
-                    memory.object_value, self._entity_type(memory.object_type),
+                    memory.object_value, object_type,
                     user_id=user_id, tenant_id=tenant_id,
                     force_new=force_new_object,
                     persist=False, pending_operations=pending_operations,

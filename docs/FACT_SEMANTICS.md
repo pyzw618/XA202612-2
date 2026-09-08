@@ -25,3 +25,27 @@ FACT 仍以 `KnowledgeMemory(knowledge_type=FACT)` 为正式记录，统一通�
 
 迁移脚本 `scripts/migrate_fact_semantics.py` 默认只读扫描，只有显式 `--apply`
 才创建语义绑定；它不改动原有 `memory_id`、证据和历史状态。
+
+## 写入与裁决一致性
+
+FACT 的正式写入必须具备 `DomainMemoryWriter`；缺少事务 writer 时接口返回
+`503 fact.transaction_unavailable`，不会降级为多次独立写入。SQLite 在事实批次
+开始时使用 `BEGIN IMMEDIATE`，同一进程还会覆盖“语义准备到事务提交”的临界区。
+Knowledge、语义绑定、Evidence、Lineage、Projection Outbox 以及待裁决任务的
+创建或终态在同一事务提交。
+
+裁决会重新归一化并重新计算完整冲突集合。`replace` 只归档当前检测确认的直接
+冲突事实；如果任务保存的记录集合、版本或 ACTIVE 状态已经变化，接口返回
+`409 fact.decision_stale`。
+
+## 身份、作用域与自定义谓词
+
+缺少 `X-MemoryHub-Tenant` 时只访问 `default` 租户及兼容的历史 NULL 行，空请求头
+不代表跨租户查询。声明 `scope_hint=project` 却没有 `project_id` 时会建立
+`scope_resolution` 任务；裁决可提供长度不超过 128 的明确项目 ID，或选择 global。
+项目 ID 会同时进入绑定和检索元数据。项目检索中，同一归一化主体、谓词的项目级
+单值事实覆盖 GLOBAL 默认事实，但不会修改 GLOBAL 记录。
+
+自定义谓词在首次明确传入 `single_value` 时固化该租户、用户范围内的基数。后续
+相反声明生成 `predicate_cardinality` 任务。带类型约束的本体谓词仅在 domain/range
+各自只有一个候选时推断缺失实体类型；存在多个候选时要求裁决。

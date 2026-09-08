@@ -188,6 +188,7 @@ class PredicateNormalizer:
             value,
             [value],
             single_value=False,
+            ontology_version="custom/v1-unset",
         )
         if persist:
             try:

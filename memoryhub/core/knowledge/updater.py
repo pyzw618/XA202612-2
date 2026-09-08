@@ -76,7 +76,12 @@ class KnowledgeUpdater:
             == KnowledgeType.FACT.value
         ):
             # 事实性知识走 S/P/O 精确匹配，不走文本相似度（REFACTOR_PLAN_V2 §4.8.5）
-            return self._add_fact(memory, skip_write_gate=skip_write_gate)
+            db = getattr(self.know_repo, "db", None)
+            lock = getattr(db, "fact_write_lock", None)
+            if lock is None:
+                return self._add_fact(memory, skip_write_gate=skip_write_gate)
+            with lock:
+                return self._add_fact(memory, skip_write_gate=skip_write_gate)
 
         exact = self.know_repo.get_by_id(memory.memory_id)
         if exact is not None and exact.user_id == memory.user_id:
@@ -283,6 +288,19 @@ class KnowledgeUpdater:
                 if getattr(old.knowledge_type, "value", str(old.knowledge_type)) == KnowledgeType.FACT.value:
                     self.fact_semantics.ensure_memory_binding(old)
             semantic = self.fact_semantics.prepare(memory)
+
+            def validate_fact_transaction(session):
+                """Recheck semantic admission after BEGIN IMMEDIATE is held."""
+                with self.fact_semantics.repository.use_session(session):
+                    checked = self.fact_semantics.prepare(memory)
+                if semantic.relation == "DECISION_REQUIRED":
+                    if checked.relation != "DECISION_REQUIRED":
+                        raise RuntimeError("fact.concurrent_conflict")
+                    return
+                if checked.relation != semantic.relation:
+                    raise RuntimeError("fact.concurrent_conflict")
+                if set(checked.existing_memory_ids) != set(semantic.existing_memory_ids):
+                    raise RuntimeError("fact.concurrent_conflict")
             if semantic.relation == "DECISION_REQUIRED":
                 self._ensure_pending_fact_id(memory, tenant_id=semantic.tenant_id)
                 memory.status = MemoryStatus.PENDING
@@ -295,9 +313,11 @@ class KnowledgeUpdater:
                     **dict(memory.extra_payload or {}),
                     "fact_decision_task": decision_task,
                 }
-                self.write_service.upsert_memory(memory, action=MemoryDecision.REVIEW,
-                                                  skip_write_gate=skip_write_gate)
-                self.fact_semantics.save_decision(memory, decision_task)
+                self.write_service.upsert_memory(
+                    memory, action=MemoryDecision.REVIEW,
+                    skip_write_gate=skip_write_gate,
+                    transaction_validator=validate_fact_transaction,
+                )
                 return memory.memory_id
             self._attach_fact_semantic(memory, semantic)
             existing = None
@@ -344,36 +364,47 @@ class KnowledgeUpdater:
                         },
                     },
                 }
-                self.write_service.upsert_memory(memory, action=MemoryDecision.REVIEW,
-                                                  skip_write_gate=skip_write_gate)
-                self.fact_semantics.save_decision(memory, memory.extra_payload["fact_decision_task"])
+                self.write_service.upsert_memory(
+                    memory, action=MemoryDecision.REVIEW,
+                    skip_write_gate=skip_write_gate,
+                    transaction_validator=validate_fact_transaction,
+                )
                 return memory.memory_id
             if semantic.relation == "DUPLICATE" and existing is not None:
                 reinforced = self._reinforce(existing, memory, add_support=False)
                 self._set_fact_outcome(reinforced, "duplicate")
-                self.write_service.upsert_memory(reinforced, action=MemoryDecision.REINFORCE,
-                                                  skip_write_gate=skip_write_gate,
-                                                  semantic_repo=self.fact_semantics.repository,
-                                                  semantic_result=semantic)
+                self.write_service.upsert_memory(
+                    reinforced, action=MemoryDecision.REINFORCE,
+                    skip_write_gate=skip_write_gate,
+                    semantic_repo=self.fact_semantics.repository,
+                    semantic_result=semantic,
+                    transaction_validator=validate_fact_transaction,
+                )
                 if getattr(self.write_service, "domain_writer", None) is None:
                     self.fact_semantics.commit(reinforced, semantic)
                     self.fact_semantics.bind(reinforced, semantic)
                 return reinforced.memory_id
             if semantic.relation == "COEXIST":
                 self._set_fact_outcome(memory, "coexist")
-                self.write_service.upsert_memory(memory, action=MemoryDecision.COEXIST,
-                                                  skip_write_gate=skip_write_gate,
-                                                  semantic_repo=self.fact_semantics.repository,
-                                                  semantic_result=semantic)
+                self.write_service.upsert_memory(
+                    memory, action=MemoryDecision.COEXIST,
+                    skip_write_gate=skip_write_gate,
+                    semantic_repo=self.fact_semantics.repository,
+                    semantic_result=semantic,
+                    transaction_validator=validate_fact_transaction,
+                )
                 if getattr(self.write_service, "domain_writer", None) is None:
                     self.fact_semantics.commit(memory, semantic)
                     self.fact_semantics.bind(memory, semantic)
                 return memory.memory_id
             self._set_fact_outcome(memory, "new")
-            self.write_service.upsert_memory(memory, action=MemoryDecision.NEW,
-                                              skip_write_gate=skip_write_gate,
-                                              semantic_repo=self.fact_semantics.repository,
-                                              semantic_result=semantic)
+            self.write_service.upsert_memory(
+                memory, action=MemoryDecision.NEW,
+                skip_write_gate=skip_write_gate,
+                semantic_repo=self.fact_semantics.repository,
+                semantic_result=semantic,
+                transaction_validator=validate_fact_transaction,
+            )
             if getattr(self.write_service, "domain_writer", None) is None:
                 self.fact_semantics.commit(memory, semantic)
                 self.fact_semantics.bind(memory, semantic)

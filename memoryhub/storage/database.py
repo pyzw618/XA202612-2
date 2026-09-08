@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -67,6 +68,10 @@ class Database:
         self.db_path = db_path
         self.engine = None
         self.session_factory = None
+        # Covers semantic prepare + authoritative write for in-process callers.
+        # SQLite BEGIN IMMEDIATE in DomainMemoryWriter supplies the database
+        # level serialization for the commit itself.
+        self.fact_write_lock = threading.RLock()
 
     def init_schema(self) -> None:
         """初始化数据库 schema — 创建所有表。"""
@@ -1860,6 +1865,26 @@ class FactSemanticRepository:
 
     def __init__(self, db: Database):
         self.db = db
+        self._transaction_state = threading.local()
+
+    @contextmanager
+    def use_session(self, session: Session):
+        """Make semantic reads participate in an enclosing FACT transaction."""
+        previous = getattr(self._transaction_state, "session", None)
+        self._transaction_state.session = session
+        try:
+            yield
+        finally:
+            self._transaction_state.session = previous
+
+    @contextmanager
+    def _read_session(self):
+        session = getattr(self._transaction_state, "session", None)
+        if session is not None:
+            yield session
+            return
+        with self.db.session() as managed:
+            yield managed
 
     @staticmethod
     def _entity(row: FactEntityRow) -> Entity:
@@ -1906,14 +1931,14 @@ class FactSemanticRepository:
         )
 
     def get_entity(self, entity_id: str, tenant_id: str = "default", user_id: str = "default"):
-        with self.db.session() as s:
+        with self._read_session() as s:
             row = s.query(FactEntityRow).filter_by(
                 entity_id=entity_id, tenant_id=tenant_id, user_id=user_id
             ).one_or_none()
             return self._entity(row) if row else None
 
     def list_entities(self, tenant_id: str, user_id: str, entity_type: str = ""):
-        with self.db.session() as s:
+        with self._read_session() as s:
             q = s.query(FactEntityRow).filter_by(tenant_id=tenant_id, user_id=user_id)
             if entity_type and entity_type != "Other":
                 q = q.filter_by(entity_type=entity_type)
@@ -1953,7 +1978,7 @@ class FactSemanticRepository:
 
     def get_predicate(self, predicate_id: str, tenant_id: str | None = None,
                       user_id: str | None = None):
-        with self.db.session() as s:
+        with self._read_session() as s:
             row = s.get(FactPredicateRow, predicate_id)
             if row is not None and row.tenant_id not in (None, "", "__ontology__"):
                 if tenant_id is not None and user_id is not None and (
@@ -1969,7 +1994,7 @@ class FactSemanticRepository:
     def find_predicates(self, text: str, tenant_id: str | None = None,
                         user_id: str | None = None):
         needle = str(text).casefold().strip()
-        with self.db.session() as s:
+        with self._read_session() as s:
             q = s.query(FactPredicateRow)
             if tenant_id is not None and user_id is not None:
                 q = q.filter(
@@ -2079,6 +2104,20 @@ class FactSemanticRepository:
                     raise ValueError("fact.predicate_alias_owner_conflict")
                 if operation["alias"] not in (row.aliases or []):
                     row.aliases = [*(row.aliases or []), operation["alias"]]
+            elif kind == "predicate_cardinality":
+                row = session.get(FactPredicateRow, operation["predicate_id"])
+                if (
+                    row is None
+                    or row.tenant_id != operation["tenant_id"]
+                    or row.user_id != operation["user_id"]
+                ):
+                    raise ValueError("fact.predicate_cardinality_owner_conflict")
+                if not str(row.ontology_version or "").endswith("-unset"):
+                    if bool(row.single_value) != bool(operation["single_value"]):
+                        raise ValueError("fact.predicate_cardinality_stale")
+                else:
+                    row.single_value = bool(operation["single_value"])
+                    row.ontology_version = "custom/v1"
 
         row = session.get(FactBindingRow, memory.memory_id)
         if row is None:
@@ -2115,7 +2154,7 @@ class FactSemanticRepository:
             row.version, row.status = memory.version, "active"
 
     def list_bindings(self, user_id: str, tenant_id: str, scope: str):
-        with self.db.session() as s:
+        with self._read_session() as s:
             q = s.query(FactBindingRow).filter_by(user_id=user_id, tenant_id=tenant_id, status="active")
             if scope.startswith("project:"):
                 q = q.filter(FactBindingRow.scope.in_(["global", scope]))

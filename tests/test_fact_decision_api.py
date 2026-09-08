@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,8 @@ def test_single_value_conflict_is_durable_and_replace_is_atomic(client: TestClie
     proposals = client.get("/api/memory/facts/proposals", params={"user_id": "u1"})
     assert proposals.status_code == 200
     assert proposals.json()[0]["memory_id"] == proposal["memory_id"]
+    semantic_repo = FactSemanticRepository(client.app.state.db)
+    assert semantic_repo.list_decisions(tenant_id="default", user_id="u1")
 
     decided = client.post(
         "/api/memory/facts/decide",
@@ -65,6 +68,7 @@ def test_single_value_conflict_is_durable_and_replace_is_atomic(client: TestClie
     )
     assert decided.status_code == 200, decided.text
     assert decided.json()["outcome"] == "replaced"
+    assert semantic_repo.list_decisions(tenant_id="default", user_id="u1") == []
 
     active = client.get(
         "/api/memory/facts", params={"user_id": "u1", "status": "active"}
@@ -155,3 +159,101 @@ def test_entity_resolution_proposal_does_not_overwrite_active_fact(client: TestC
     assert client.get(
         "/api/memory/facts/proposals", params={"user_id": "u1"}
     ).json() == []
+
+
+def test_replace_only_targets_the_conflicting_subject(client: TestClient):
+    company_b_id = ""
+    for subject, value in (("公司A", "北京"), ("公司B", "上海")):
+        result = client.post("/api/memory/facts/propose", json={
+            "user_id": "u1", "triples": [{
+                "subject": subject, "predicate": "总部所在地", "object": value,
+                "subject_type": "Organization", "object_type": "Location",
+                "single_value": True,
+            }],
+        }).json()
+        assert result["created"]
+        if subject == "公司B":
+            company_b_id = result["created"][0]["memory_id"]
+
+    pending = client.post("/api/memory/facts/propose", json={
+        "user_id": "u1", "triples": [{
+            "subject": "公司A", "predicate": "总部所在地", "object": "深圳",
+            "subject_type": "Organization", "object_type": "Location",
+            "single_value": True,
+        }],
+    }).json()["pending"][0]
+    assert len(pending["decision_task"]["existing_memory_ids"]) == 1
+    assert company_b_id not in pending["decision_task"]["existing_memory_ids"]
+
+
+def test_missing_tenant_header_is_default_not_wildcard(client: TestClient):
+    base = {"user_id": "u1", "triples": [{
+        "subject": "默认公司", "predicate": "总部所在地", "object": "北京",
+        "subject_type": "Organization", "object_type": "Location",
+    }]}
+    assert client.post("/api/memory/facts/propose", json=base).json()["created"]
+    other = {"user_id": "u1", "triples": [{
+        **base["triples"][0], "subject": "租户公司", "object": "上海",
+    }]}
+    assert client.post(
+        "/api/memory/facts/propose",
+        headers={"X-MemoryHub-Tenant": "tenant-a"}, json=other,
+    ).json()["created"]
+    rows = client.get("/api/memory/facts", params={"user_id": "u1"}).json()
+    assert [row["subject"] for row in rows] == ["默认公司"]
+
+
+def test_project_scope_without_project_id_is_resumable(client: TestClient):
+    response = client.post("/api/memory/facts/propose", json={
+        "user_id": "u1", "scope_hint": "project", "triples": [{
+            "subject": "项目A", "predicate": "状态", "object": "开发中",
+        }],
+    }).json()
+    proposal = response["pending"][0]
+    assert proposal["decision_task"]["decision_type"] == "scope_resolution"
+    decided = client.post("/api/memory/facts/decide", json={
+        "user_id": "u1", "memory_id": proposal["memory_id"],
+        "action": "select_existing", "scope": "global",
+        "expected_version": proposal["version"],
+    })
+    assert decided.status_code == 200, decided.text
+
+
+def test_custom_predicate_cardinality_is_persistent(client: TestClient):
+    first = client.post("/api/memory/facts/propose", json={
+        "user_id": "u1", "triples": [{
+            "subject": "系统", "predicate": "首选镜像", "object": "镜像A",
+            "single_value": True,
+        }],
+    }).json()
+    assert first["created"]
+    changed = client.post("/api/memory/facts/propose", json={
+        "user_id": "u1", "triples": [{
+            "subject": "系统", "predicate": "首选镜像", "object": "镜像B",
+            "single_value": False,
+        }],
+    }).json()
+    assert changed["pending"][0]["decision_task"]["decision_type"] == "predicate_cardinality"
+
+
+def test_concurrent_single_value_writes_leave_only_one_active(client: TestClient):
+    def submit(value: str):
+        return client.post("/api/memory/facts/propose", json={
+            "user_id": "concurrent-user", "triples": [{
+                "subject": "并发项目", "predicate": "负责人", "object": value,
+                "subject_type": "Other", "object_type": "Person",
+                "single_value": True,
+            }],
+        })
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(submit, ["张三", "李四"]))
+    assert all(response.status_code == 200 for response in responses)
+    active = client.get(
+        "/api/memory/facts", params={"user_id": "concurrent-user", "status": "active"}
+    ).json()
+    pending = client.get(
+        "/api/memory/facts/proposals", params={"user_id": "concurrent-user"}
+    ).json()
+    assert len(active) == 1
+    assert len(pending) == 1

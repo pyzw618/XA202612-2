@@ -141,7 +141,7 @@ class FactConflictDetector:
             reasons = list(dict.fromkeys(item[2] for item in hard))
             return FactConflictResult(
                 "CONFLICT",
-                [*conflict_bindings, *[b for b in related if b not in conflict_bindings]],
+                conflict_bindings,
                 "；".join(reasons),
                 "|".join(types),
                 types,

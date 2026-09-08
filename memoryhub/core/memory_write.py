@@ -72,12 +72,21 @@ class MemoryWriteService:
 
     @classmethod
     def index_metadata(cls, memory: Memory) -> dict[str, Any]:
+        payload = dict(getattr(memory, "extra_payload", {}) or {})
+        authority = dict(payload.get("vnext_authority", {}) or {})
+        fact_semantic = dict(payload.get("fact_semantic", {}) or {})
+        project_id = str(payload.get("project_id") or "").strip()
+        scope = memory.scope.model_dump()
+        if project_id:
+            scope["project_id"] = project_id
         return {
             "memory_type": memory.memory_type,
             "user_id": memory.user_id,
             "content": cls.index_text(memory),
             "confidence": memory.confidence,
-            "scope": memory.scope.model_dump(),
+            "scope": scope,
+            "scope_level": "project" if project_id else authority.get("scope_level", "global"),
+            "project_id": project_id,
             "status": (
                 memory.status.value
                 if hasattr(memory.status, "value")
@@ -89,6 +98,9 @@ class MemoryWriteService:
             "evidence_count": len(getattr(memory, "evidences", []) or []),
             "subject": getattr(memory, "subject", "") or "",
             "predicate": getattr(memory, "predicate", "") or "",
+            "subject_id": fact_semantic.get("subject_id", ""),
+            "predicate_id": fact_semantic.get("predicate_id", ""),
+            "single_value": getattr(memory, "single_value", None),
             "level": getattr(memory, "level", "long") or "long",
             "safety": dict(
                 getattr(memory, "extra_payload", {}).get("safety", {}) or {}
@@ -104,6 +116,7 @@ class MemoryWriteService:
         skip_write_gate: bool = False,
         semantic_repo=None,
         semantic_result=None,
+        transaction_validator=None,
     ):
         """Persist through the safety gate while preserving an explicit domain action.
 
@@ -117,6 +130,7 @@ class MemoryWriteService:
             return self._unsafe_upsert_memory(
                 memory, action=action, provenance=provenance,
                 semantic_repo=semantic_repo, semantic_result=semantic_result,
+                transaction_validator=transaction_validator,
             )
         status = (
             memory.status.value
@@ -130,6 +144,7 @@ class MemoryWriteService:
                 return self._unsafe_upsert_memory(
                     memory, action=action, provenance=provenance,
                     semantic_repo=semantic_repo, semantic_result=semantic_result,
+                    transaction_validator=transaction_validator,
                 )
             from memoryhub.core.safety.memory_write import guard_memory_write
 
@@ -142,6 +157,7 @@ class MemoryWriteService:
                     provenance=provenance,
                     semantic_repo=semantic_repo,
                     semantic_result=semantic_result,
+                    transaction_validator=transaction_validator,
                 ),
                 operation="memory_sync",
                 approved_sink=lambda safe_memory, approved: self._unsafe_upsert_memory(
@@ -156,6 +172,7 @@ class MemoryWriteService:
                     ),
                     semantic_repo=semantic_repo,
                     semantic_result=semantic_result,
+                    transaction_validator=transaction_validator,
                 ),
             )
             if guarded.memory is None:
@@ -166,6 +183,7 @@ class MemoryWriteService:
         return self._unsafe_upsert_memory(
             memory, action=action, provenance=provenance,
             semantic_repo=semantic_repo, semantic_result=semantic_result,
+            transaction_validator=transaction_validator,
         )
 
     def upsert_fact_decision(
@@ -177,16 +195,12 @@ class MemoryWriteService:
         provenance=None,
         semantic_repo=None,
         semantic_result=None,
+        transaction_validator=None,
     ):
         """Commit a FACT successor and its replaced predecessors atomically."""
         replacements = list(replacements or [])
         if self.domain_writer is None:
-            for old in replacements:
-                self.upsert_memory(old, action=MemoryDecision.SUPERSEDE)
-            return self.upsert_memory(
-                memory, action=action, provenance=provenance,
-                semantic_repo=semantic_repo, semantic_result=semantic_result,
-            )
+            raise RuntimeError("fact.transaction_unavailable")
 
         def commit(safe_memory: KnowledgeMemory, approved_provenance=None):
             changes = []
@@ -196,7 +210,9 @@ class MemoryWriteService:
             changes.append((
                 safe_memory, action, approved_provenance, semantic_repo, semantic_result
             ))
-            receipts = self.domain_writer.write_batch(changes)
+            receipts = self.domain_writer.write_batch(
+                changes, transaction_validator=transaction_validator
+            )
             for old in replacements:
                 self.sync_memory(old)
             self.sync_memory(safe_memory)
@@ -241,6 +257,7 @@ class MemoryWriteService:
         semantic_repo=None,
         semantic_result=None,
         provenance=None,
+        transaction_validator=None,
     ):
         """Atomically consume a pending proposal while adding its evidence.
 
@@ -250,24 +267,16 @@ class MemoryWriteService:
         a restart cannot expose both records as active.
         """
         proposal.status = MemoryStatus.DELETED
-        if self.domain_writer is not None:
-            receipts = self.domain_writer.write_batch([
-                (proposal, MemoryDecision.REJECT, provenance, None, None),
-                (reinforced, MemoryDecision.REINFORCE, provenance,
-                 semantic_repo, semantic_result),
-            ])
-            self.sync_memory(proposal)
-            self.sync_memory(reinforced)
-            return receipts[-1]
-        self.upsert_memory(
-            proposal, action=MemoryDecision.REJECT, skip_write_gate=True,
-            provenance=provenance,
-        )
-        return self.upsert_memory(
-            reinforced, action=MemoryDecision.REINFORCE, skip_write_gate=True,
-            provenance=provenance, semantic_repo=semantic_repo,
-            semantic_result=semantic_result,
-        )
+        if self.domain_writer is None:
+            raise RuntimeError("fact.transaction_unavailable")
+        receipts = self.domain_writer.write_batch([
+            (proposal, MemoryDecision.REJECT, provenance, None, None),
+            (reinforced, MemoryDecision.REINFORCE, provenance,
+             semantic_repo, semantic_result),
+        ], transaction_validator=transaction_validator)
+        self.sync_memory(proposal)
+        self.sync_memory(reinforced)
+        return receipts[-1]
 
     def _unsafe_upsert_memory(
         self,
@@ -277,9 +286,17 @@ class MemoryWriteService:
         provenance=None,
         semantic_repo=None,
         semantic_result=None,
+        transaction_validator=None,
     ):
         """Persist first, then project; the domain writer owns authoritative DB writes."""
         repo = self.know_repo if memory.memory_type == "knowledge" else self.pref_repo
+        if (
+            memory.memory_type == "knowledge"
+            and getattr(getattr(memory, "knowledge_type", None), "value",
+                        getattr(memory, "knowledge_type", None)) == "fact"
+            and self.domain_writer is None
+        ):
+            raise RuntimeError("fact.transaction_unavailable")
         receipt = None
         if self.domain_writer is not None:
             receipt = self.domain_writer.write(
@@ -288,6 +305,7 @@ class MemoryWriteService:
                 provenance=provenance,
                 semantic_repo=semantic_repo,
                 semantic_result=semantic_result,
+                transaction_validator=transaction_validator,
             )
         else:
             repo.save(memory)

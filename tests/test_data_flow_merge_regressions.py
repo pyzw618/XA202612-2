@@ -112,6 +112,39 @@ def test_milvus_retriever_preserves_shared_empty_lookup() -> None:
     assert retriever.memory_lookup is lookup
 
 
+def test_project_single_value_fact_shadows_global_result() -> None:
+    retriever = MilvusHybridRetriever.__new__(MilvusHybridRetriever)
+    retriever.memory_lookup = {}
+    request = SearchRequest(user_id="u1", query="负责人", project_id="project-a")
+    common = {
+        "user_id": "u1", "status": "active", "subject_id": "entity-project",
+        "predicate_id": "chief", "single_value": True,
+    }
+    results = [
+        SearchResult(
+            memory_id="global", memory_type="knowledge",
+            metadata={**common, "project_id": "", "scope": {}},
+        ),
+        SearchResult(
+            memory_id="project", memory_type="knowledge",
+            metadata={
+                **common, "project_id": "project-a",
+                "scope": {"project_id": "project-a"},
+            },
+        ),
+        SearchResult(
+            memory_id="foreign-project", memory_type="knowledge",
+            metadata={
+                **common, "project_id": "project-b",
+                "scope": {"project_id": "project-b"},
+            },
+        ),
+    ]
+    assert [
+        item.memory_id for item in retriever._filter_by_context(results, request)
+    ] == ["project"]
+
+
 def test_knowledge_forget_enforces_owner_and_cascades(tmp_path: Path) -> None:
     db, pref_repo, know_repo = make_repositories(tmp_path)
     engine = FakeVectorEngine()
