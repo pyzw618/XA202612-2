@@ -779,6 +779,8 @@ async def ingest_manual_config(req: ConfigSourceRequest, request: Request):
 
 def _fact_memory_to_dict(memory: KnowledgeMemory) -> dict:
     """knowledge(FACT) → fact 风格响应（/facts 兼容转发，REFACTOR_PLAN_V2 §4.8.8）。"""
+    scope = getattr(memory, "scope", None)
+    scope_name = "global" if getattr(scope, "scene", "") == "*" else "project"
     return {
         "fact_id": memory.memory_id,
         "memory_id": memory.memory_id,
@@ -789,6 +791,8 @@ def _fact_memory_to_dict(memory: KnowledgeMemory) -> dict:
         "object_type": memory.object_type,
         "source_text": memory.content,
         "source_id": "",
+        "scope": scope_name,
+        "access_count_30d": memory.access_count_30d,
         "confidence": memory.confidence,
         "status": (
             memory.status.value if hasattr(memory.status, "value") else str(memory.status)
@@ -818,14 +822,20 @@ async def list_facts(
     status: str | None = "active",
     limit: int = Query(default=100, ge=1, le=500),
 ):
-    """FACT 列表：纯 knowledge(FACT) 单一来源（legacy facts 已并入知识，§4.8.8）。"""
+    """FACT 列表：纯 knowledge(FACT) 单一来源（legacy facts 已并入知识，§4.8.8）。
+
+    status 约定：空/"active" → 仅活跃；"all" → 全部状态（前端"全部"筛选用）。
+    """
     know_repo = getattr(request.app.state, "know_repo", None)
     if know_repo is None:
         return []
-    return [
-        _fact_memory_to_dict(m)
-        for m in know_repo.get_by_type(user_id, knowledge_type="fact", status=status or "active")
-    ][:limit]
+    if status == "all":
+        rows: list[KnowledgeMemory] = []
+        for s in ("active", "pending", "archived", "deleted"):
+            rows.extend(know_repo.get_by_type(user_id, knowledge_type="fact", status=s))
+    else:
+        rows = know_repo.get_by_type(user_id, knowledge_type="fact", status=status or "active")
+    return [_fact_memory_to_dict(m) for m in rows][:limit]
 
 @router.get("/facts/conflicts")
 async def list_fact_conflicts(

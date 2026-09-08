@@ -171,10 +171,8 @@ SearchPage::SearchPage(QWidget *parent) : BasePage(parent) {
     auto perfCard = makeCard("性能");
     m_latencyLabel = new QLabel("—", perfCard.first);
     m_totalLabel = new QLabel("—", perfCard.first);
-    m_cacheLabel = new QLabel("—", perfCard.first);
     perfCard.second->addWidget(m_latencyLabel);
     perfCard.second->addWidget(m_totalLabel);
-    perfCard.second->addWidget(m_cacheLabel);
     sideLay->addWidget(perfCard.first);
 
     // 请求 JSON
@@ -227,7 +225,7 @@ void SearchPage::refresh() {
     m_lastRequest = QJsonObject();
     m_lastResponse = QJsonObject();
     m_requestView->setObject(m_lastRequest);
-    for (auto *label : {m_latencyLabel, m_totalLabel, m_cacheLabel}) label->setText("—");
+    for (auto *label : {m_latencyLabel, m_totalLabel}) label->setText("—");
     m_searchButton->setEnabled(true);
     m_searchButton->setText("检索");
     m_stateView->setState(PageState::Empty, "输入查询开始检索", "结果会显示在这里。");
@@ -340,9 +338,6 @@ void SearchPage::renderResults(const QJsonObject &resp) {
 
     m_totalLabel->setText(QString("结果总数：%1").arg(total));
     m_latencyLabel->setText(QString("耗时：%1 ms").arg(j::num(resp, "latency_ms"), 0, 'f', 1));
-    const QJsonValue cache = resp.value("cache_hit");
-    m_cacheLabel->setText(cache.isBool() ? QString("缓存命中：%1").arg(cache.toBool() ? "是" : "否")
-                                         : "缓存命中：接口未提供");
     m_stateView->setState(PageState::Content, QString(), QString());
 }
 
@@ -384,14 +379,6 @@ void SearchPage::renderGroup(const QString &title, const QColor &color, const QJ
         auto *typeTag = new StatusTag();
         typeTag->setMemoryType(j::str(item, "memory_type"));
         metaRow->addWidget(typeTag);
-        // 来源标签
-        const QString source = j::str(item, "source");
-        if (!source.isEmpty()) {
-            auto *srcTag = new StatusTag();
-            srcTag->setTag(source, "statusTag",
-                           source == "vector" ? "active" : (source == "keyword" ? "pending" : "archived"));
-            metaRow->addWidget(srcTag);
-        }
         const QJsonObject provenance = j::obj(m_lastResponse, "provenance")
                                            .value(j::str(item, "memory_id", j::str(item, "fact_id")))
                                            .toObject();

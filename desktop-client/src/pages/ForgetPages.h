@@ -37,6 +37,7 @@ private:
     QJsonObject buildPreviewRequest();
     void renderCandidates(const QList<QString> &ids);
     QList<QString> selectedCandidateIds() const;
+    void filterIdList();
 
     QTabWidget *m_tabs = nullptr;
     // NL tab
@@ -57,7 +58,6 @@ private:
     QPushButton *m_executeBtn = nullptr;
 
     QJsonArray m_prefAll, m_knowAll, m_factAll;
-    QList<QString> m_candidateIds;
     int m_generation = 0;
     int m_pendingLoads = 0;
     bool m_executeInProgress = false;
@@ -81,12 +81,16 @@ private slots:
 
 private:
     void loadTable();
+    void renderTable();
+    void deleteSingle(const QString &id, QPushButton *caller = nullptr);
     QList<QString> selectedIds() const;
 
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
     QPushButton *m_allActive = nullptr;
     QPushButton *m_allArchive = nullptr;
+    QJsonArray m_rows;          // 三类合并缓存（含 __type 标记），搜索本地过滤用
+    QStringList m_loadFailures;
     int m_generation = 0;
 };
 
@@ -105,9 +109,11 @@ private slots:
     void deleteMemory(const QString &type, const QString &id, QPushButton *caller = nullptr);
 
 private:
-    void loadTable();
+    void renderTable();
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
+    QJsonArray m_rows;
+    QStringList m_loadFailures;
     int m_generation = 0;
 };
 
@@ -126,9 +132,11 @@ private slots:
     void hardDelete(const QString &id, QPushButton *caller = nullptr);
 
 private:
-    void loadTable();
+    void renderTable();
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
+    QJsonArray m_rows;
+    QStringList m_loadFailures;
     int m_generation = 0;
 };
 
@@ -142,6 +150,7 @@ public:
 
 private:
     void loadData();
+    void renderData(const QJsonArray &items);
     QVBoxLayout *m_listLayout = nullptr;
     QWidget *m_listContainer = nullptr;
     QLabel *m_warningLabel = nullptr;
@@ -163,8 +172,11 @@ private slots:
     void openDetail(const QJsonObject &record);
 
 private:
+    void renderTable();
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
+    QJsonArray m_records;
+    QStringList m_loadFailures;
     int m_generation = 0;
 };
 
@@ -181,9 +193,11 @@ private slots:
     void runLifecycleCheck(QPushButton *caller = nullptr);
 
 private:
+    void renderSettings(const QJsonObject &s);
     QLabel *m_weightsLabel = nullptr;
     QLabel *m_autoForgetLabel = nullptr;
     QLabel *m_lifecycleLabel = nullptr;
     QLabel *m_resultLabel = nullptr;
+    bool m_runInProgress = false;
     int m_generation = 0;
 };

@@ -1720,6 +1720,7 @@ class ForgetRequest(BaseModel):
 
     user_id: str = "default"
     instruction: str = ""  # 自然语言遗忘指令
+    memory_type: str = ""  # 显式类型限定：preference / knowledge / fact / all；空 = 按指令推断
     target_memory_ids: list[str] = Field(default_factory=list)  # 精确 ID 模式
     target_scope: SceneScope | None = None
     target_project_id: str = ""

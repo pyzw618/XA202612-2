@@ -73,7 +73,6 @@ private slots:
                 if (respond) respond(request);
             });
         });
-        AppContext::instance()->api()->setWaitCursorEnabled(false);
     }
     void init() {
         requests.clear();
@@ -155,7 +154,8 @@ private slots:
         click.start(10);
         page.openEditDialog(QJsonObject{{"memory_id", "pref-1"}, {"text", "keep text"},
                             {"payload", QJsonObject{{"format", "markdown"}}}}, false);
-        QVERIFY(!sent.isEmpty());
+        // 编辑请求已异步化：等待请求到达服务器，而不是立即检查
+        QTRY_VERIFY(!sent.isEmpty());
         QVERIFY(!sent.contains("payload"));
     }
     void factProposeReportsCreatedAndFailed_data() {
@@ -284,13 +284,22 @@ private slots:
         respond = [](const Request &r) {
             reply(r, r.path.startsWith("/api/memory/knowledge/know_fact_1") ? "{}" : "[]");
         };
+        // 单条操作成功后会异步触发列表刷新 GET，与后续 PUT 交错到达；
+        // 断言只认目标 PUT 是否出现，不依赖请求顺序
+        auto knowledgePutSeen = [this]() {
+            for (const Request &r : requests)
+                if (r.path == QByteArray("/api/memory/knowledge/know_fact_1")
+                    && r.body.value("status").toString() == QStringLiteral("active"))
+                    return true;
+            return false;
+        };
         ForgetArchivedPage archived;
         archived.unarchive("fact", "know_fact_1");
-        QCOMPARE(requests.first().path, QByteArray("/api/memory/knowledge/know_fact_1"));
+        QTRY_VERIFY_WITH_TIMEOUT(knowledgePutSeen(), 2000);
         requests.clear();
         ForgetRecyclePage recycle;
         recycle.restore("fact", "know_fact_1");
-        QCOMPARE(requests.first().path, QByteArray("/api/memory/knowledge/know_fact_1"));
+        QTRY_VERIFY_WITH_TIMEOUT(knowledgePutSeen(), 2000);
     }
     void historyDetailUsesOnlyRecordSnapshot() {
         ForgetHistoryPage page;
@@ -311,8 +320,8 @@ private slots:
         KnowledgePage page;
         respond = [](const Request &r) { reply(r, "{\"memory_id\":\"know-1\",\"name\":\"sample\"}"); };
         page.openDetail("know-1");
-        QTest::qWait(30);
-        QVERIFY(!page.findChildren<QTabWidget *>().isEmpty());
+        // 详情已异步化：轮询等待抽屉内容构建完成
+        QTRY_VERIFY(!page.findChildren<QTabWidget *>().isEmpty());
         for (auto *tabs : page.findChildren<QTabWidget *>())
             for (int i = 0; i < tabs->count(); ++i) QVERIFY(tabs->tabText(i) != QStringLiteral("版本历史"));
         QVERIFY(!requests.isEmpty());

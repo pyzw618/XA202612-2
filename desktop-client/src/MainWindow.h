@@ -52,8 +52,6 @@ private:
     QLineEdit *m_userEdit = nullptr;
     QPushButton *m_refreshButton = nullptr;
     QTimer *m_healthTimer = nullptr;
-    bool m_backendOnline = false;
-    bool m_healthChecked = false;
 
     struct PageEntry {
         BasePage *page = nullptr;

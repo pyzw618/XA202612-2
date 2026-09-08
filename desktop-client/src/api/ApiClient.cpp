@@ -101,8 +101,7 @@ Result ApiClient::sendSync(const QString &method, const QString &path,
     QNetworkRequest req((QUrl(full)));   // 双层括号避免 most vexing parse
     applyCommonHeaders(&req, useUserHeader);
 
-    const bool wantCursor = m_waitCursor;
-    if (wantCursor) QApplication::setOverrideCursor(Qt::WaitCursor);
+    QApplication::setOverrideCursor(Qt::WaitCursor);
 
     QNetworkReply *reply = nullptr;
     if (method == QLatin1String("GET")) {
@@ -146,7 +145,7 @@ Result ApiClient::sendSync(const QString &method, const QString &path,
         r = parseReply(reply);
     }
 
-    if (wantCursor) QApplication::restoreOverrideCursor();
+    QApplication::restoreOverrideCursor();
 
     reply->deleteLater();
     if (userGeneration != m_userGeneration) {
@@ -166,14 +165,6 @@ Result ApiClient::post(const QString &path, const QJsonObject &body, bool useUse
                     useUserHeader);
 }
 
-Result ApiClient::postRaw(const QString &path, const QJsonValue &body, bool useUserHeader) {
-    QJsonDocument doc;
-    if (body.isArray()) doc = QJsonDocument(body.toArray());
-    else if (body.isObject()) doc = QJsonDocument(body.toObject());
-    else return Result{false};
-    return sendSync("POST", path, doc.toJson(QJsonDocument::Compact), useUserHeader);
-}
-
 Result ApiClient::patch(const QString &path, const QJsonObject &body, bool useUserHeader) {
     return sendSync("PATCH", path, QJsonDocument(body).toJson(QJsonDocument::Compact),
                     useUserHeader);
@@ -185,10 +176,6 @@ Result ApiClient::put(const QString &path, const QJsonObject &body, bool useUser
 }
 
 Result ApiClient::del(const QString &path, bool useUserHeader) {
-    return sendSync("DELETE", path, QByteArray(), useUserHeader);
-}
-
-Result ApiClient::delNoBody(const QString &path, bool useUserHeader) {
     return sendSync("DELETE", path, QByteArray(), useUserHeader);
 }
 

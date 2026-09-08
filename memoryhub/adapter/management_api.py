@@ -582,6 +582,7 @@ async def list_memories_health(
                 {
                     "memory_id": m.memory_id,
                     "memory_type": "preference",
+                    "content": m.text or "",
                     "health_score": round(calc.calculate(m), 4),
                     "time_decay": round(factors.time_decay, 4),
                     "usage_frequency": round(factors.usage_frequency, 4),
@@ -601,11 +602,19 @@ async def list_memories_health(
     know_repo = getattr(state, "know_repo", None)
     if know_repo is not None:
         for m in know_repo.list_all(status=status, user_id=user_id):
+            # FACT 行由下方 fact 循环单独输出（memory_type=fact），此处跳过避免同一
+            # memory_id 双重计入活跃数/平均健康度/直方图/TopN。
+            kt = str(
+                getattr(getattr(m, "knowledge_type", ""), "value", getattr(m, "knowledge_type", ""))
+            )
+            if kt == "fact":
+                continue
             factors = calc.factors_for(m)
             items.append(
                 {
                     "memory_id": m.memory_id,
                     "memory_type": "knowledge",
+                    "content": (m.name or m.content or ""),
                     "health_score": round(calc.calculate(m), 4),
                     "time_decay": round(factors.time_decay, 4),
                     "usage_frequency": round(factors.usage_frequency, 4),
@@ -635,6 +644,7 @@ async def list_memories_health(
                 {
                     "memory_id": f.memory_id,
                     "memory_type": "fact",
+                    "content": f.object_value or "",
                     "health_score": round(calc.calculate(f), 4),
                     "time_decay": round(factors.time_decay, 4),
                     "usage_frequency": round(factors.usage_frequency, 4),

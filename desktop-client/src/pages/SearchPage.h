@@ -54,7 +54,6 @@ private:
 
     QLabel *m_latencyLabel = nullptr;
     QLabel *m_totalLabel = nullptr;
-    QLabel *m_cacheLabel = nullptr;
     QLabel *m_contextText = nullptr;
     QPushButton *m_copyContextBtn = nullptr;
     QPushButton *m_searchButton = nullptr;

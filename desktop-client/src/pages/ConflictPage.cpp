@@ -62,7 +62,10 @@ ConflictPage::ConflictPage(QWidget *parent) : BasePage(parent) {
     connect(m_prevBtn, &QPushButton::clicked, this, [this]() { loadPage(m_currentPage - 1); });
     connect(m_nextBtn, &QPushButton::clicked, this, [this]() { loadPage(m_currentPage + 1); });
     connect(m_statusCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &ConflictPage::onFilterChanged);
-    connect(m_typeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &ConflictPage::onFilterChanged);
+    // 类型过滤对已拉取数据本地进行，不重新请求
+    connect(m_typeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
+        applyLocalView(m_statusCombo->currentData().toString() == "resolved");
+    });
     filterRow->addWidget(m_statusCombo);
     filterRow->addWidget(m_typeCombo);
     filterRow->addStretch();
@@ -102,7 +105,6 @@ void ConflictPage::loadPage(int page) {
     m_nextBtn->setEnabled(false);
     m_currentPage = qMax(1, page);
     const int generation = ++m_generation;
-    ++m_pendingLoads;
     m_scroll->setEnabled(false);
     m_stateView->setState(PageState::Loading, "正在加载冲突", "正在读取统计与分页数据…");
     m_stateView->clearAction();
@@ -159,38 +161,41 @@ void ConflictPage::loadPage(int page) {
                     (status == "resolved" && decision != "pending") || status.isEmpty())
                     visible.append(v);
             }
-            items = visible;
-            m_total = int(items.size());
-            m_stateView->setState(items.isEmpty() ? PageState::Empty : PageState::Content,
-                                  "暂无冲突", "有偏好、知识或事实写入冲突时会出现在这里。");
-            if (items.isEmpty()) m_stateView->setAction("刷新", [this]() { loadPage(m_currentPage); });
-            renderCards(items);
-            if (resolvedView) {
-                // 已解决视图为全量单页：如实标注不分页，禁用翻页避免缺行错觉
-                m_pageInfo->setText(QString("共 %1 条 · 已解决视图不分页").arg(m_total));
-                m_prevBtn->setEnabled(false);
-                m_nextBtn->setEnabled(false);
-            } else {
-                const int maxPage = qMax(1, (m_total + m_size - 1) / m_size);
-                m_pageInfo->setText(QString("第 %1 / %2 页 · 共 %3 条").arg(m_currentPage).arg(maxPage).arg(m_total));
-                m_prevBtn->setEnabled(m_currentPage > 1);
-                m_nextBtn->setEnabled(m_currentPage < maxPage);
-            }
+            m_cachedItems = visible;
+            applyLocalView(resolvedView);
         }, this);
+}
+
+void ConflictPage::applyLocalView(bool resolvedView) {
+    // 类型下拉对已拉取数据本地过滤；切换类型不再重复请求
+    const QString type = m_typeCombo->currentData().toString();
+    QJsonArray visible;
+    for (const QJsonValue &v : m_cachedItems) {
+        if (!type.isEmpty() && j::str(v.toObject(), "memory_type") != type) continue;
+        visible.append(v);
+    }
+    m_total = int(visible.size());
+    m_stateView->setState(visible.isEmpty() ? PageState::Empty : PageState::Content,
+                          "暂无冲突", "有偏好、知识或事实写入冲突时会出现在这里。");
+    if (visible.isEmpty()) m_stateView->setAction("刷新", [this]() { loadPage(m_currentPage); });
+    renderCards(visible);
+    if (resolvedView) {
+        // 已解决视图为全量单页：如实标注不分页，禁用翻页避免缺行错觉
+        m_pageInfo->setText(QString("共 %1 条 · 已解决视图不分页").arg(m_total));
+        m_prevBtn->setEnabled(false);
+        m_nextBtn->setEnabled(false);
+    } else {
+        const int maxPage = qMax(1, (m_total + m_size - 1) / m_size);
+        m_pageInfo->setText(QString("第 %1 / %2 页 · 共 %3 条").arg(m_currentPage).arg(maxPage).arg(m_total));
+        m_prevBtn->setEnabled(m_currentPage > 1);
+        m_nextBtn->setEnabled(m_currentPage < maxPage);
+    }
 }
 
 void ConflictPage::renderCards(const QJsonArray &items) {
     while (QLayoutItem *item = m_cardsLayout->takeAt(0)) {
         if (QWidget *w = item->widget()) w->deleteLater();
         delete item;
-    }
-    if (items.isEmpty()) {
-        auto *empty = new EmptyState();
-        empty->setIcon(QIcon(":/icons/conflict.svg"));
-        empty->setTitle("暂无冲突");
-        empty->setHint("有偏好/知识写入冲突时会出现在这里");
-        m_cardsLayout->addWidget(empty, 1);
-        return;
     }
     for (const QJsonValue &v : items) buildCard(m_cardsContainer, v.toObject());
     m_cardsLayout->addStretch();
@@ -227,10 +232,12 @@ void ConflictPage::buildCard(QWidget *parent, const QJsonObject &c) {
     newTitle->setStyleSheet("color:#16A34A;font-weight:600;font-size:12px;");
     auto *oldBox = new QLabel(j::str(c, "old_content"));
     oldBox->setWordWrap(true);
+    oldBox->setTextFormat(Qt::PlainText);
     oldBox->setTextInteractionFlags(Qt::TextSelectableByMouse);
     oldBox->setStyleSheet("background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;padding:8px;color:#7F1D1D;");
     auto *newBox = new QLabel(j::str(c, "new_content"));
     newBox->setWordWrap(true);
+    newBox->setTextFormat(Qt::PlainText);
     newBox->setTextInteractionFlags(Qt::TextSelectableByMouse);
     newBox->setStyleSheet("background:#ECFDF5;border:1px solid #A7F3D0;border-radius:6px;padding:8px;color:#065F46;");
     cmp->addWidget(oldTitle, 0, 0);
@@ -239,13 +246,14 @@ void ConflictPage::buildCard(QWidget *parent, const QJsonObject &c) {
     cmp->addWidget(newBox, 1, 1);
     lay->addLayout(cmp);
 
-    // 冲突字段与原因
+    // 冲突字段与原因（记忆内容源自用户/Agent 写入，必须转义防止富文本注入）
     auto *meta = new QLabel();
     meta->setWordWrap(true);
     meta->setTextFormat(Qt::RichText);
     meta->setStyleSheet("color:#6B7280;font-size:12px;");
     meta->setText(QString("冲突字段：<b>%1</b>　原因：%2")
-                      .arg(j::str(c, "conflict_field"), j::str(c, "reason")));
+                      .arg(j::str(c, "conflict_field").toHtmlEscaped(),
+                           j::str(c, "reason").toHtmlEscaped()));
     lay->addWidget(meta);
 
     // 底部操作区
@@ -274,9 +282,15 @@ void ConflictPage::resolveConflict(const QJsonObject &c, const QString &decision
     if (m_writeInProgress) return;
     // 询问原因（可选）
     QDialog dlg(this);
-    dlg.setWindowTitle("解决冲突 · " + decision);
+    dlg.setWindowTitle("记录裁决结论 · " + decision);
     dlg.setMinimumWidth(400);
     auto *form = new QFormLayout(&dlg);
+    // 与后端能力对齐：resolve 只记录裁决结论，不自动落地/合并/拆分记忆内容
+    auto *hint = new QLabel("裁决仅记录处理结论（用于审计与统计），不会自动覆盖、合并或拆分对应记忆；"
+                            "如需修改记忆内容请到对应记忆页操作。", &dlg);
+    hint->setWordWrap(true);
+    hint->setStyleSheet("color:#92400E;font-size:12px;");
+    form->addRow(hint);
     auto *reasonEdit = new QLineEdit(&dlg);
     reasonEdit->setPlaceholderText("处理原因（可选）");
     form->addRow("原因", reasonEdit);

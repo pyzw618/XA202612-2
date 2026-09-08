@@ -72,16 +72,12 @@ MemoryTierPage::MemoryTierPage(QWidget *parent) : BasePage(parent) {
     tabs->addTab(midW, "中期 · 情景");
 
     root->addWidget(tabs, 1);
-
-    m_state = new PageStateView(this);
-    m_state->hide();
-    root->addWidget(m_state);
 }
 
 void MemoryTierPage::refresh() { load(); }
 
 void MemoryTierPage::load() {
-    const int generation = ++m_generation;
+    ++m_generation;  // 使用方（loadShortTerm/loadMidTerm）各自读取 m_generation
     m_short = QJsonArray();
     m_mid = QJsonArray();
     m_shortTable->setRowCount(0);

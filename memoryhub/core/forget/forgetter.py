@@ -200,7 +200,14 @@ class MemoryForgetter:
         else:
             strategy = "semantic"
 
-        memory_type = self._infer_memory_type(instruction)
+        # 显式 memory_type 优先（范围/下拉指定），否则按指令关键词推断
+        explicit_type = (getattr(request, "memory_type", "") or "").strip().lower()
+        if explicit_type in ("", "all"):
+            memory_type = self._infer_memory_type(instruction)
+        elif explicit_type in ("preference", "knowledge", "fact"):
+            memory_type = explicit_type
+        else:
+            memory_type = self._infer_memory_type(instruction)
         keywords = self._extract_keywords(instruction)
 
         # 用户遗忘规则展开（I-13）：若指令命中某条规则主题，并入其关键词，
@@ -414,12 +421,23 @@ class MemoryForgetter:
                 if _matches(p.scope):
                     ids.append(p.memory_id)
 
-        if memory_type in ("knowledge", "all") and self.know_repo is not None:
+        if memory_type in ("knowledge", "fact", "all") and self.know_repo is not None:
             for k in self.know_repo.list_all(status="active", user_id=user_id):
+                if not self._know_matches_type(k, memory_type):
+                    continue
                 if _matches(k.scope):
                     ids.append(k.memory_id)
 
         return ids
+
+    @staticmethod
+    def _know_matches_type(k, memory_type: str) -> bool:
+        """知识行与类型限定匹配：fact 只命中 knowledge(FACT)，knowledge 排除 FACT。"""
+        if memory_type == "all":
+            return True
+        kt = str(getattr(getattr(k, "knowledge_type", ""), "value", getattr(k, "knowledge_type", "")))
+        is_fact = kt == "fact"
+        return is_fact if memory_type == "fact" else not is_fact
 
     def _locate_by_keywords(self, intent: dict, user_id: str) -> list[str]:
         """基于关键词匹配 + 可选语义相似度定位记忆。"""
@@ -441,8 +459,10 @@ class MemoryForgetter:
                 if memory_type in ("preference", "all") and self.pref_repo is not None:
                     for p in self.pref_repo.get_active(user_id):
                         semantic_map.append((p.memory_id, (p.text or "")))
-                if memory_type in ("knowledge", "all") and self.know_repo is not None:
+                if memory_type in ("knowledge", "fact", "all") and self.know_repo is not None:
                     for k in self.know_repo.list_all(status="active", user_id=user_id):
+                        if not self._know_matches_type(k, memory_type):
+                            continue
                         semantic_map.append((k.memory_id, f"{k.name or ''} {k.content or ''}"))
                 for mid, text in semantic_map:
                     if not text:
@@ -474,9 +494,11 @@ class MemoryForgetter:
                 if keyword_hit or p.memory_id in semantic_hits:
                     matched.append(p.memory_id)
 
-        if memory_type in ("knowledge", "all") and self.know_repo is not None:
+        if memory_type in ("knowledge", "fact", "all") and self.know_repo is not None:
             knows = self.know_repo.list_all(status="active", user_id=user_id)
             for k in knows:
+                if not self._know_matches_type(k, memory_type):
+                    continue
                 text = _text_of(know=k)
                 keyword_hit = any(kw.lower() in text for kw in keywords)
                 if keyword_hit or k.memory_id in semantic_hits:

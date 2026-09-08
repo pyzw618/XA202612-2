@@ -39,7 +39,8 @@ VNextDashboardPage::VNextDashboardPage(View view, QWidget *parent)
     header->setSubtitle(current.subtitle);
     layout->addWidget(header);
 
-    auto *notice = new QLabel("默认脱敏 · 管理权限受控 · 访问会记录审计日志", this);
+    // 占位页：本页当前不发起任何请求，故不会记录审计日志——不陈述不实信息
+    auto *notice = new QLabel("预览占位 · 尚未接入后端数据接口", this);
     notice->setObjectName("inlineBanner");
     notice->setWordWrap(true);
     layout->addWidget(notice);

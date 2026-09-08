@@ -75,10 +75,10 @@ KnowledgePage::KnowledgePage(QWidget *parent) : BasePage(parent) {
     m_filterBar->setSearchPlaceholder("搜索名称 / 内容...");
     m_typeCombo = new QComboBox(this);
     m_typeCombo->addItem("全部类型", "");
-    const QStringList types = {"workflow", "case", "template"};
+    // fact 子类型也在 /knowledge 返回中，补进下拉可与 FactPage 明确分工
+    const QStringList types = {"workflow", "case", "template", "fact"};
     for (const QString &t : types) m_typeCombo->addItem(t, t);
     m_statusCombo = new QComboBox(this);
-    m_statusCombo->addItem("有效", "active");
     for (const QString &s : QStringList{"active", "archived", "pending", "deleted"})
         m_statusCombo->addItem(StatusTag::statusText(s), s);
     m_filterBar->addWidget(m_typeCombo);
@@ -281,15 +281,22 @@ void KnowledgePage::populateRow(int row, const QJsonObject &m) {
 }
 
 void KnowledgePage::openDetail(const QString &id) {
-    const int generation = m_generation;
-    api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/knowledge/" + id, {{"user_id", AppContext::instance()->userId()}}));
-    if (generation != m_generation) return;
-    if (!r.ok || !r.hasJsonObject()) { QMessageBox::warning(this, "加载失败", r.errorCode + " " + r.errorMessage); return; }
-    const QJsonObject m = r.jsonObject();
+    const int generation = ++m_detailGeneration;
+    AppContext::instance()->api()->getAsync(
+        api::ApiClient::urlWithQuery("/api/memory/knowledge/" + id,
+                                     {{"user_id", AppContext::instance()->userId()}}),
+        [this, generation, id](const api::Result &r) {
+            if (generation != m_detailGeneration) return;
+            if (!r.ok || !r.hasJsonObject()) {
+                QMessageBox::warning(this, "加载失败", r.errorCode + " " + r.errorMessage);
+                return;
+            }
+            buildDetail(id, r.jsonObject());
+        }, this);
+}
 
-    auto *tabs = new QTabWidget();
+void KnowledgePage::buildDetail(const QString &id, const QJsonObject &m) {
+    auto *tabs = new QTabWidget(m_drawer);
 
     auto *content = new QWidget();
     auto *clay = new QVBoxLayout(content);
@@ -430,15 +437,20 @@ void KnowledgePage::openEditDialog(const QJsonObject &memory, bool isNew) {
     body["confidence"] = confSpin->value();
     if (isNew) body["status"] = "active";
 
-    const api::Result r = isNew
-        ? AppContext::instance()->api()->post("/api/memory/memories/knowledge", body)
-        : AppContext::instance()->api()->put("/api/memory/knowledge/" + j::str(memory, "memory_id"), body);
-    if (r.ok) { QMessageBox::information(this, "完成", isNew ? "知识已写入" : "知识已更新"); onRefresh(); }
-    else if (r.errorCode == "memory.safety.review_required")
-        QMessageBox::warning(this, "需人工复核", "写入需人工复核。");
-    else if (r.errorCode == "memory.safety.rejected")
-        QMessageBox::warning(this, "被策略拒绝", "写入被安全策略拒绝。");
-    else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+    m_addBtn->setEnabled(false);
+    const QString url = isNew ? QStringLiteral("/api/memory/memories/knowledge")
+                              : QStringLiteral("/api/memory/knowledge/") + j::str(memory, "memory_id");
+    auto finish = [this, isNew](const api::Result &r) {
+        m_addBtn->setEnabled(true);
+        if (r.ok) { QMessageBox::information(this, "完成", isNew ? "知识已写入" : "知识已更新"); onRefresh(); }
+        else if (r.errorCode == "memory.safety.review_required")
+            QMessageBox::warning(this, "需人工复核", "写入需人工复核。");
+        else if (r.errorCode == "memory.safety.rejected")
+            QMessageBox::warning(this, "被策略拒绝", "写入被安全策略拒绝。");
+        else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+    };
+    if (isNew) AppContext::instance()->api()->postAsync(url, body, finish, false, this);
+    else AppContext::instance()->api()->putAsync(url, body, finish, false, this);
 }
 
 QList<QString> KnowledgePage::selectedIds() const {
