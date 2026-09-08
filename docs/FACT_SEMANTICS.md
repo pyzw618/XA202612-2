@@ -15,6 +15,13 @@ FACT 仍以 `KnowledgeMemory(knowledge_type=FACT)` 为正式记录，统一通�
 事实不会进入正常检索；`/api/memory/facts/proposals` 可在重启后恢复任务，
 `/api/memory/facts/decide` 和 Agent 决策路由使用相同的统一写入服务。
 
+多租户请求通过现有 `X-MemoryHub-Tenant` 请求头绑定；缺少该头时保留兼容的
+默认租户读取。MCP `memoryhub_decide_facts` 暴露实体、谓词、客体选择和
+`expected_version`，裁决时会重新归一化并校验任务版本。
+
 旧 FACT 行没有语义绑定时，第一次检测会尝试幂等补全；无法确定实体或关系时保留
 原记录并等待人工处理。当前只实现结构化关系检测，不实现有效时间区间、否定事实
 语义或来源可信度裁决。
+
+迁移脚本 `scripts/migrate_fact_semantics.py` 默认只读扫描，只有显式 `--apply`
+才创建语义绑定；它不改动原有 `memory_id`、证据和历史状态。

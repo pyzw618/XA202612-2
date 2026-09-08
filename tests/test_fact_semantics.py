@@ -51,3 +51,81 @@ def test_inverse_relationship_has_one_canonical_key():
     repo.bindings.append(SimpleNamespace(memory_id="m1", user_id="u1", tenant_id="t1", scope="global", subject_id="father", predicate_id="father_of", object_id="son", status="active"))
     result = FactConflictDetector(repo).check(user_id="u1", tenant_id="t1", scope="global", subject_id="son", predicate_id="son_of", object_id="father")
     assert result.relation == "DUPLICATE"
+
+
+def test_mutually_exclusive_predicates_are_symmetric():
+    repo = Repo()
+    alive = PredicateDef("is_alive", "健在", exclusive_with=["is_deceased"])
+    deceased = PredicateDef("is_deceased", "已故", exclusive_with=["is_alive"])
+    repo.save_predicate(alive)
+    repo.save_predicate(deceased)
+    repo.bindings.append(SimpleNamespace(
+        memory_id="m1", user_id="u1", tenant_id="t1", scope="global",
+        subject_id="person", predicate_id="is_alive", object_id="yes", status="active",
+    ))
+    result = FactConflictDetector(repo).check(
+        user_id="u1", tenant_id="t1", scope="global", subject_id="person",
+        predicate_id="is_deceased", object_id="yes",
+    )
+    assert result.relation == "CONFLICT"
+    assert "mutually_exclusive_predicate" in result.conflict_types
+
+
+def test_entity_ids_are_tenant_scoped():
+    first = Entity.make_id("Organization", "同名公司", "u1", "tenant-a")
+    second = Entity.make_id("Organization", "同名公司", "u1", "tenant-b")
+    assert first != second
+
+
+def test_normalizer_prepare_mode_does_not_register_new_entity():
+    repo = Repo()
+    pending = []
+    entity_id = EntityNormalizer(repo).normalize(
+        "C++", "Software", user_id="u1", tenant_id="t1",
+        persist=False, pending_operations=pending,
+    )
+    assert entity_id.startswith("entity:software:")
+    assert repo.entities == {}
+    assert pending and pending[0]["kind"] == "entity_create"
+
+
+def test_force_new_allows_same_name_entities():
+    repo = Repo()
+    normalizer = EntityNormalizer(repo)
+    first = normalizer.normalize(
+        "同名项目", "Organization", user_id="u1", tenant_id="t1", force_new=True
+    )
+    second = normalizer.normalize(
+        "同名项目", "Organization", user_id="u1", tenant_id="t1", force_new=True
+    )
+    assert first != second
+
+
+def test_project_fact_same_key_is_independent_from_global():
+    repo = Repo()
+    predicate = PredicateDef("member_of", "成员属于", single_value=False)
+    repo.save_predicate(predicate)
+    repo.bindings.append(SimpleNamespace(
+        memory_id="global-1", user_id="u1", tenant_id="t1", scope="global",
+        subject_id="person", predicate_id="member_of", object_id="org", status="active",
+    ))
+    result = FactConflictDetector(repo).check(
+        user_id="u1", tenant_id="t1", scope="project:p1",
+        subject_id="person", predicate_id="member_of", object_id="org",
+    )
+    assert result.relation == "NEW"
+
+
+def test_pending_entity_type_is_checked_without_persisting():
+    repo = Repo()
+    predicate = PredicateDef(
+        "located_in", "所在地", domain=["Organization"], range=["Location"]
+    )
+    repo.save_predicate(predicate)
+    result = FactConflictDetector(repo).check(
+        user_id="u1", tenant_id="t1", scope="global",
+        subject_id="new-subject", predicate_id="located_in", object_id="new-object",
+        subject_type="Person", object_type="Location",
+    )
+    assert result.relation == "CONFLICT"
+    assert "domain_type_violation" in result.conflict_types

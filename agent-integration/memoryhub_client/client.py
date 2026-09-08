@@ -60,11 +60,13 @@ class MemoryHubClient:
         base_url: str = "http://127.0.0.1:8099",
         timeout: float = 30.0,
         user_id: str | None = None,
+        tenant_id: str = "default",
         client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = float(timeout)
         self.user_id = (user_id or current_user_id()).strip() or current_user_id()
+        self.tenant_id = str(tenant_id or "default").strip() or "default"
         self._owns_client = client is None
         self.client = client or httpx.Client(base_url=self.base_url, timeout=self.timeout)
 
@@ -124,6 +126,7 @@ class MemoryHubClient:
     ) -> Any:
         try:
             request_headers = dict(headers) if headers else {}
+            request_headers.setdefault("X-MemoryHub-Tenant", self.tenant_id)
             response = self.client.request(method, url_path, json=json_body, params=query, headers=request_headers)
         except httpx.TimeoutException as exc:
             raise MemoryHubError("memoryhub.client.timeout", "MemoryHub request timed out") from exc
@@ -492,7 +495,7 @@ class MemoryHubClient:
         return self._request("POST", f"/conflicts/{conflict_id}/resolve", json_body=payload) or {}
 
     def propose_knowledge_fact(self, triples: list[dict[str, Any]], *, source_id: str = "", scope_hint: str = "global", project_id: str | None = None) -> Any:
-        return self._request("POST", "/facts/propose", json_body={"source_id": source_id, "scope_hint": scope_hint, "project_id": project_id, "triples": triples})
+        return self._request("POST", "/facts/propose", json_body={"user_id": self.user_id, "source_id": source_id, "scope_hint": scope_hint, "project_id": project_id, "triples": triples})
 
     def list_fact_proposals(self, user_id: str | None = None, limit: int = 100) -> list[Any]:
         return self._request("GET", "/facts/proposals", query={"user_id": user_id or self.user_id, "limit": limit}) or []

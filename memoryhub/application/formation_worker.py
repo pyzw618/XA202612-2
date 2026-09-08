@@ -297,6 +297,12 @@ class FormationWorker:
         self.canonical_write_service.write_authority(
             event, envelope, action=memory_action
         )
+        if self._is_structured_fact(envelope):
+            # The semantic FACT adapter may persist a pending decision instead
+            # of an ACTIVE Knowledge row.  Keep the vNext candidate pending in
+            # that case; confirmation is only valid after a real commit.
+            if not self._fact_is_active(envelope.memory_id):
+                return None
         self.candidates.transition(
             tenant_id=candidate.tenant_id,
             user_id=candidate.user_id,
@@ -304,6 +310,26 @@ class FormationWorker:
             status=CandidateStatus.CONFIRMED.value,
         )
         return envelope.memory_id
+
+    @staticmethod
+    def _is_structured_fact(envelope) -> bool:
+        content = dict(getattr(envelope, "content", {}) or {})
+        return (
+            str(getattr(getattr(envelope, "memory_type", None), "value", ""))
+            == "semantic"
+            and all(str(content.get(field, "")).strip()
+                    for field in ("subject", "predicate", "object_value"))
+        )
+
+    def _fact_is_active(self, memory_id: str) -> bool:
+        service = getattr(self.canonical_write_service, "memory_write_service", None)
+        repo = getattr(service, "know_repo", None)
+        if repo is None:
+            return False
+        memory = repo.get_by_id(memory_id)
+        return memory is not None and str(
+            getattr(getattr(memory, "status", None), "value", getattr(memory, "status", ""))
+        ) == "active"
 
     def _find_sibling(self, envelope):
         related = None

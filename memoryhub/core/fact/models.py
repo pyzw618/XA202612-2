@@ -64,11 +64,34 @@ class Entity:
     tenant_id: str = "default"
 
     @staticmethod
-    def make_id(entity_type: str, name: str, user_id: str = "default") -> str:
+    def make_id(
+        entity_type: str,
+        name: str,
+        user_id: str = "default",
+        tenant_id: str = "default",
+        disambiguator: str = "",
+    ) -> str:
         digest = hashlib.sha256(
-            f"{user_id}:{entity_type}:{name}".encode("utf-8")
+            f"{tenant_id}:{user_id}:{entity_type}:{name}:{disambiguator}".encode("utf-8")
         ).hexdigest()[:12]
         return f"entity:{str(entity_type).lower()}:{digest}"
+
+
+@dataclass(frozen=True)
+class FactBinding:
+    """Session-independent view of a persisted semantic FACT binding."""
+
+    memory_id: str
+    tenant_id: str
+    user_id: str
+    subject_id: str
+    predicate_id: str
+    object_id: str
+    object_value: str = ""
+    scope: str = "global"
+    project_id: str | None = None
+    version: int = 1
+    status: str = "active"
 
 
 @dataclass
@@ -85,8 +108,19 @@ class PredicateDef:
     object_single_value: bool = False
     exclusive_with: list[str] = field(default_factory=list)
     acyclic: bool = False
+    tenant_id: str = "__ontology__"
+    user_id: str = "__ontology__"
+    built_in: bool = False
+    ontology_version: str = "v1"
 
     @staticmethod
-    def make_id(name: str) -> str:
-        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:10]
+    def make_id(
+        name: str,
+        *,
+        tenant_id: str = "default",
+        user_id: str = "default",
+    ) -> str:
+        digest = hashlib.sha256(
+            f"{tenant_id}:{user_id}:{name}".encode("utf-8")
+        ).hexdigest()[:10]
         return f"pred:{digest}"

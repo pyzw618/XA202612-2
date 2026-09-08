@@ -172,6 +172,10 @@ class FactPredicateRow(Base):
     """Versioned predicate ontology registry."""
     __tablename__ = "fact_predicates"
     predicate_id = Column(String(96), primary_key=True)
+    # Built-in ontology rows use the reserved ``__ontology__`` owner.  Custom
+    # predicates/aliases are isolated to the tenant and user that created them.
+    tenant_id = Column(String(64), nullable=False, default="__ontology__", index=True)
+    user_id = Column(String(64), nullable=False, default="__ontology__", index=True)
     canonical_name = Column(String(256), nullable=False)
     aliases = Column(JSON, nullable=False, default=list)
     domain = Column(JSON, nullable=False, default=list)
@@ -367,6 +371,7 @@ class MemoryProjectionOutboxRow(Base):
             "memory_type",
             "operation",
             "event_id",
+            "payload_hash",
             unique=True,
             sqlite_where=text("event_id IS NOT NULL"),
         ),
