@@ -160,16 +160,12 @@ void PreferencePage::refresh() {
 }
 
 void PreferencePage::onRefresh() {
+    m_drawer->closeDrawer();
+    m_all = QJsonArray();
+    m_table->setRowCount(0);
     const int generation = ++m_generation;
-    const bool hadData = !m_all.isEmpty();
-    if (!hadData) {
-        m_content->hide();
-        m_stateView->setState(PageState::Loading, "正在加载偏好记忆",
-                              "正在从后端读取真实数据…");
-    } else {
-        m_stateView->setState(PageState::Loading, "正在刷新",
-                              "当前仍显示上次成功加载的数据。");
-    }
+    m_content->hide();
+    m_stateView->setState(PageState::Loading, "正在加载偏好记忆", "正在从后端读取真实数据…");
     m_stateView->clearAction();
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
@@ -314,11 +310,13 @@ void PreferencePage::populateRow(int row, const QJsonObject &m) {
 }
 
 void PreferencePage::openDetail(const QString &memoryId) {
+    const int generation = m_generation;
     api::ApiClient *api = AppContext::instance()->api();
     const api::Result r = api->get(api::ApiClient::urlWithQuery(
         "/api/memory/preferences/" + memoryId,
         {{"user_id", AppContext::instance()->userId()}}));
-    if (!r.hasJsonObject()) {
+    if (generation != m_generation) return;
+    if (!r.ok || !r.hasJsonObject()) {
         QMessageBox::warning(this, "加载失败", r.errorCode + " " + r.errorMessage);
         return;
     }
@@ -366,6 +364,11 @@ void PreferencePage::openDetail(const QString &memoryId) {
     verTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     verTable->setAlternatingRowColors(true);
     const api::Result rv = api->get("/api/memory/preferences/" + memoryId + "/versions");
+    if (generation != m_generation) {
+        delete verWidget;
+        delete tabs;
+        return;
+    }
     if (rv.hasJsonArray()) {
         const QJsonArray versions = rv.jsonArray();
         verTable->setRowCount(int(versions.size()));
@@ -507,7 +510,7 @@ void PreferencePage::openEditDialog(const QJsonObject &memory, bool isNew) {
     if (isNew) body["memory_type"] = "preference";
     body["preference_type"] = typeEdit->currentData().toString();
     body["text"] = textEdit->toPlainText().trimmed();
-    body["payload"] = QJsonObject();
+    if (isNew) body["payload"] = QJsonObject();
     body["scope"] = scope;
     body["is_global"] = globalCheck->isChecked();
     body["confidence"] = confSpin->value();

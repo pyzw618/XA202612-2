@@ -100,6 +100,7 @@ private:
 
     QString m_baseUrl;
     QString m_userId;
+    quint64 m_userGeneration = 0;
     QNetworkAccessManager m_nam;
     bool m_waitCursor = true;
 };

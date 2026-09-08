@@ -338,12 +338,12 @@ void DashboardPage::refresh() {
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
             if (r.ok && r.hasJsonArray()) { m_pref = r.jsonArray().size(); m_statCards[1]->setLoading(false); m_statCards[1]->setNumber(QString::number(m_pref)); }
             else m_statCards[1]->setError(r.errorMessage.isEmpty() ? "偏好记忆加载失败" : r.errorMessage);
-            updateMemoryVisuals(); finishRequest(r.ok); });
+            updateMemoryVisuals(); finishRequest(r.ok); }, this);
     api->getAsync(query("/api/memory/knowledge", {{"status", "active"}}),
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
             if (r.ok && r.hasJsonArray()) { m_know = r.jsonArray().size(); m_statCards[2]->setLoading(false); m_statCards[2]->setNumber(QString::number(m_know)); }
             else m_statCards[2]->setError(r.errorMessage.isEmpty() ? "知识记忆加载失败" : r.errorMessage);
-            updateMemoryVisuals(); finishRequest(r.ok); });
+            updateMemoryVisuals(); finishRequest(r.ok); }, this);
     const struct { const char *arg; int *target; } subtypes[] = {
         {"workflow", &m_knowWorkflow},
         {"case", &m_knowCase},
@@ -355,19 +355,19 @@ void DashboardPage::refresh() {
             [this, generation, sub](const api::Result &r) { if (generation != m_generation) return;
                 if (r.ok && r.hasJsonArray()) *sub.target = r.jsonArray().size();
                 else *sub.target = -2;
-                updateMemoryVisuals(); finishRequest(r.ok); });
+                updateMemoryVisuals(); finishRequest(r.ok); }, this);
     }
     api->getAsync(query("/api/memory/conflicts", {{"status", "pending"}}),
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
-            if (r.ok && r.hasJsonArray()) m_conflicts = r.jsonArray().size(); else m_conflicts = -2; updateTasks(); finishRequest(r.ok); });
+            if (r.ok && r.hasJsonArray()) m_conflicts = r.jsonArray().size(); else m_conflicts = -2; updateTasks(); finishRequest(r.ok); }, this);
     api->getAsync(query("/api/memory/extraction/tasks", {{"status", "dead_letter"}}),
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
-            if (r.ok && r.hasJsonArray()) m_deadLetters = r.jsonArray().size(); else m_deadLetters = -2; updateTasks(); finishRequest(r.ok); });
+            if (r.ok && r.hasJsonArray()) m_deadLetters = r.jsonArray().size(); else m_deadLetters = -2; updateTasks(); finishRequest(r.ok); }, this);
     api->getAsync(query("/api/memory/events", {{"limit", "8"}, {"offset", "0"}}),
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
-            updateActivity(r.jsonObject().value("items").toArray(), r.ok && r.hasJsonObject()); finishRequest(r.ok); });
+            updateActivity(r.jsonObject().value("items").toArray(), r.ok && r.hasJsonObject()); finishRequest(r.ok); }, this);
     api->getAsync("/api/health", [this, generation](const api::Result &r) {
-        if (generation != m_generation) return; finishRequest(r.ok); });
+        if (generation != m_generation) return; finishRequest(r.ok); }, this);
 }
 
 void DashboardPage::resizeEvent(QResizeEvent *event) {
@@ -527,7 +527,7 @@ void DashboardPage::updateActivity(const QJsonArray &items, bool ok) {
         tag->setProperty("tone", eventTypeTone(rawType));
         auto *texts = new QVBoxLayout();
         texts->setSpacing(1);
-        const QString full = j::str(event, "content", j::str(event, "summary"));
+        const QString full = j::str(event, "text");
         auto *title = new QLabel(j::str(event, "scene", "未分类"), row);
         title->setObjectName("activityTitle");
         auto *detail = new QLabel(full, row);

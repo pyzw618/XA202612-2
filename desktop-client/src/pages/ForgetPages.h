@@ -67,6 +67,7 @@ private:
 // ---- P4.2 待审查队列：pending 记忆，保持/归档/删除 ----
 class ForgetPendingPage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit ForgetPendingPage(QWidget *parent = nullptr);
     void refresh() override;
@@ -92,6 +93,7 @@ private:
 // ---- P4.3 归档仓库：archived 记忆，解除归档/删除 ----
 class ForgetArchivedPage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit ForgetArchivedPage(QWidget *parent = nullptr);
     void refresh() override;
@@ -112,6 +114,7 @@ private:
 // ---- P4.4 回收站：deleted 记忆，恢复/彻底删除 ----
 class ForgetRecyclePage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit ForgetRecyclePage(QWidget *parent = nullptr);
     void refresh() override;
@@ -149,6 +152,7 @@ private:
 // ---- P4.6 遗忘历史：ForgetRecord 列表 + 详情 ----
 class ForgetHistoryPage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit ForgetHistoryPage(QWidget *parent = nullptr);
     void refresh() override;
@@ -156,7 +160,7 @@ public:
 
 private slots:
     void onRefresh();
-    void openDetail(const QString &recordId, QPushButton *caller = nullptr);
+    void openDetail(const QJsonObject &record);
 
 private:
     MemoryFilterBar *m_filterBar = nullptr;

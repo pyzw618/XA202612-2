@@ -12,6 +12,7 @@ class PageStateView;
 
 class MemoryTierPage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit MemoryTierPage(QWidget *parent = nullptr);
 

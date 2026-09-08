@@ -183,6 +183,7 @@ void SettingsLLMPage::refresh() { loadConfig(); }
 
 void SettingsLLMPage::loadConfig() {
     const int generation = ++m_generation;
+    m_saveButton->setEnabled(true);
     AppContext::instance()->api()->getAsync("/api/memory/system/config", [this, generation](const api::Result &r) {
         if (generation != m_generation) return;
         if (!r.hasJsonObject()) {
@@ -342,13 +343,13 @@ SettingsDemoPage::SettingsDemoPage(QWidget *parent) : BasePage(parent) {
     root->setSpacing(0);
     auto *header = new PageHeader(this);
     header->setTitle("演示数据工具");
-    header->setSubtitle("危险操作需二次确认（输入确认文本）");
+    header->setSubtitle("清理功能暂不可用");
     root->addWidget(header);
 
     auto *card = new QFrame(this);
     card->setObjectName("card");
     auto *cl = new QVBoxLayout(card);
-    auto *warn = new QLabel("以下操作会删除当前用户（" + AppContext::instance()->userId() + "）的演示数据，请谨慎执行。", card);
+    auto *warn = new QLabel("清理功能已暂停：当前接口会清空所有用户的检索索引，待支持按用户清理后恢复。", card);
     warn->setStyleSheet("background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;color:#B91C1C;padding:8px;");
     warn->setWordWrap(true);
     cl->addWidget(warn);
@@ -356,9 +357,10 @@ SettingsDemoPage::SettingsDemoPage(QWidget *parent) : BasePage(parent) {
     auto *row1 = new QHBoxLayout();
     auto *b1 = new QPushButton("清空偏好", card);
     m_clearPreferencesButton = b1;
+    b1->setEnabled(false);
     b1->setObjectName("dangerBtn");
     connect(b1, &QPushButton::clicked, this, &SettingsDemoPage::clearPreferences);
-    auto *desc1 = new QLabel("仅删除当前用户的偏好记忆（含向量索引投影）", card);
+    auto *desc1 = new QLabel("暂不可用：接口会同时清空跨用户向量索引", card);
     desc1->setObjectName("pageSubtitle");
     row1->addWidget(b1);
     row1->addWidget(desc1, 1);
@@ -367,9 +369,10 @@ SettingsDemoPage::SettingsDemoPage(QWidget *parent) : BasePage(parent) {
     auto *row2 = new QHBoxLayout();
     auto *b2 = new QPushButton("清空全部演示数据", card);
     m_clearAllButton = b2;
+    b2->setEnabled(false);
     b2->setObjectName("solidDangerBtn");
     connect(b2, &QPushButton::clicked, this, &SettingsDemoPage::clearAllDemo);
-    auto *desc2 = new QLabel("删除偏好/知识/事实/事件/冲突/遗忘历史等全部演示数据", card);
+    auto *desc2 = new QLabel("暂不可用：接口会同时清空跨用户检索索引和缓存", card);
     desc2->setObjectName("pageSubtitle");
     row2->addWidget(b2);
     row2->addWidget(desc2, 1);
@@ -384,35 +387,12 @@ SettingsDemoPage::SettingsDemoPage(QWidget *parent) : BasePage(parent) {
     root->addStretch();
 }
 
-void SettingsDemoPage::refresh() {}
+void SettingsDemoPage::refresh() { m_resultLabel->clear(); }
 
 void SettingsDemoPage::clearPreferences() {
-    if (!ConfirmDialog::confirm(this, "清空偏好", "确认清空当前用户的全部偏好记忆？", "清空")) return;
-    m_clearPreferencesButton->setEnabled(false);
-    AppContext::instance()->api()->deleteAsync(
-        api::ApiClient::urlWithQuery("/api/agent/preferences", {{"user_id", AppContext::instance()->userId()}}),
-        [this](const api::Result &r) {
-            m_clearPreferencesButton->setEnabled(true);
-            if (r.ok) m_resultLabel->setText(QString("已清空 %1 条偏好记忆。").arg(j::integer(r.jsonObject(), "deleted")));
-            else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
-        }, false, this);
+    // Disabled until the backend supports user-scoped index cleanup.
 }
 
 void SettingsDemoPage::clearAllDemo() {
-    if (!ConfirmDialog::confirm(this, "清空全部演示数据",
-                                "将删除偏好/知识/事实/事件/冲突/遗忘历史等全部数据，且不可恢复。确认输入“清空全部”执行。",
-                                "清空全部", "确认清空")) return;
-    m_clearAllButton->setEnabled(false);
-    AppContext::instance()->api()->deleteAsync(
-        api::ApiClient::urlWithQuery("/api/agent/demo-data", {{"user_id", AppContext::instance()->userId()}}),
-        [this](const api::Result &r) {
-            m_clearAllButton->setEnabled(true);
-            if (r.ok) {
-                const QJsonObject del = j::obj(r.jsonObject(), "deleted");
-                QString html = "<b>清理结果：</b><br/>";
-                const QStringList keys = {"preferences", "knowledge", "knowledge_versions", "events", "conflicts", "forget_history", "extraction_tasks", "facts"};
-                for (const QString &k : keys) html += QString("%1: %2　").arg(k).arg(j::integer(del, k));
-                m_resultLabel->setText(html);
-            } else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
-        }, false, this);
+    // Disabled until the backend supports user-scoped index cleanup.
 }

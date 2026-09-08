@@ -19,6 +19,7 @@ class QWidget;
 
 class PreferencePage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit PreferencePage(QWidget *parent = nullptr);
 

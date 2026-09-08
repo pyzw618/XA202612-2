@@ -241,7 +241,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     auto *userPopup = new UserSwitcherPopup(userChoices, [this](const QString &userId) {
         m_userEdit->setText(userId);
         AppContext::instance()->setUserId(userId);
-        refreshCurrentPage();
     }, userSwitcher);
     auto *userDropButton = new QPushButton(QIcon(":/icons/chevron-down.svg"), QString(), userSwitcher);
     userDropButton->setObjectName("userDropButton");

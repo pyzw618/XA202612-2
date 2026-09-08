@@ -99,10 +99,12 @@ SafetyOverviewPage::SafetyOverviewPage(QWidget *parent) : BasePage(parent) {
 
 void SafetyOverviewPage::refresh() {
     const int generation = ++m_generation;
+    m_statusLabel->setText("正在加载组件状态…");
+    m_policyLabel->setText("正在加载策略…");
     api::ApiClient *api = AppContext::instance()->api();
     api->getAsync("/api/memory/system/status", [this, generation](const api::Result &r) {
     if (generation != m_generation) return;
-    if (r.hasJsonObject()) {
+    if (r.ok && r.hasJsonObject()) {
         const QJsonObject s = r.jsonObject();
         const QJsonObject safety = j::obj(s, "safety");
         m_statusLabel->setText(QString(
@@ -113,11 +115,13 @@ void SafetyOverviewPage::refresh() {
             .arg(j::boolean(safety, "audit_enabled") ? "已开启" : "未开启")
             .arg(j::boolean(safety, "quarantine_enabled") ? "已开启" : "未开启")
             .arg(j::str(safety, "rule_set_id"), j::str(safety, "rule_set_version")));
+    } else {
+        m_statusLabel->setText("组件状态加载失败：" + r.errorMessage.toHtmlEscaped());
     }
     }, this);
     api->getAsync("/api/memory/system/config", [this, generation](const api::Result &rc) {
     if (generation != m_generation) return;
-    if (rc.hasJsonObject()) {
+    if (rc.ok && rc.hasJsonObject()) {
         const QJsonObject cfg = rc.jsonObject();
         const QJsonObject safety = j::obj(cfg, "safety");
         const QJsonObject policy = j::obj(safety, "policy");
@@ -128,6 +132,8 @@ void SafetyOverviewPage::refresh() {
             .arg(j::str(policy, "fallback_action"))
             .arg(j::boolean(policy, "fail_closed") ? "是" : "否")
             .arg(j::boolean(safety, "auto_mask") ? "是" : "否"));
+    } else {
+        m_policyLabel->setText("策略加载失败：" + rc.errorMessage.toHtmlEscaped());
     }
     }, this);
 }
@@ -178,22 +184,23 @@ void SafetyUserRulesPage::refresh() { onRefresh(); }
 void SafetyUserRulesPage::onRefresh() { loadTable(); }
 
 void SafetyUserRulesPage::loadTable() {
+    m_all = QJsonArray();
+    m_table->clearSpans();
+    m_table->setRowCount(0);
     const int generation = ++m_generation;
     api::ApiClient *api = AppContext::instance()->api();
     const QString kw = m_filterBar->searchBox()->text().trimmed();
     api->getAsync("/api/memory/safety/user-rules", [this, generation, kw](const api::Result &r) {
     if (generation != m_generation) return;
     m_table->setRowCount(0);
-    if (!r.hasJsonArray()) {
-        if (r.errorCode == "user_rule.service_unavailable" || r.errorCode == "user_rule.identity_unavailable") {
-            m_table->setRowCount(1);
-            auto *empty = new EmptyState();
-            empty->setIcon(QIcon(":/icons/shield.svg"));
-            empty->setTitle("用户规则服务不可用");
-            empty->setHint("需 config.yaml 开启 safety.user_rules.enabled 且配置密钥");
-            m_table->setCellWidget(0, 0, empty);
-            m_table->setSpan(0, 0, 1, 8);
-        }
+    if (!r.ok || !r.hasJsonArray()) {
+        m_table->setRowCount(1);
+        auto *empty = new EmptyState();
+        empty->setIcon(QIcon(":/icons/shield.svg"));
+        empty->setTitle("用户规则加载失败");
+        empty->setHint(r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage);
+        m_table->setCellWidget(0, 0, empty);
+        m_table->setSpan(0, 0, 1, 8);
         return;
     }
     m_all = r.jsonArray();
@@ -457,6 +464,9 @@ void SafetyAuditPage::onRefresh() { loadTable(); }
 
 void SafetyAuditPage::loadTable() {
     const int generation = ++m_generation;
+    m_table->setRowCount(0);
+    m_stateLabel->setText("正在加载…");
+    m_stateLabel->show();
     api::ApiClient *api = AppContext::instance()->api();
     const QString kw = m_filterBar->searchBox()->text().trimmed();
     api->getAsync(api::ApiClient::urlWithQuery(
@@ -464,12 +474,13 @@ void SafetyAuditPage::loadTable() {
         [this, generation, kw](const api::Result &r) {
     if (generation != m_generation) return;
     m_table->setRowCount(0);
-    if (!r.hasJsonObject()) {
+    if (!r.ok || !r.hasJsonObject()) {
         m_stateLabel->show();
         m_stateLabel->setStyleSheet("background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;"
                                     "color:#92400E;padding:8px;");
-        m_stateLabel->setText("审计功能未开启（safety.audit_disabled）· 请在 config.yaml 设置 "
-                              "safety.audit.enabled: true 后重启后端。");
+        m_stateLabel->setText(r.errorCode == "safety.audit_disabled"
+            ? "审计功能未开启（safety.audit_disabled）"
+            : "审计日志加载失败：" + r.errorMessage);
         return;
     }
     m_stateLabel->hide();
@@ -484,7 +495,7 @@ void SafetyAuditPage::loadTable() {
         m_table->setItem(row, 0, new QTableWidgetItem(aid));
         m_table->setItem(row, 1, new QTableWidgetItem(j::str(rec, "event_id")));
         auto *tag = new StatusTag();
-        tag->setStatus(j::str(rec, "decision_action"));
+        tag->setStatus(j::str(rec, "decision"));
         m_table->setCellWidget(row, 2, tag);
         m_table->setItem(row, 3, new QTableWidgetItem(j::str(rec, "rule_set_version")));
         m_table->setItem(row, 4, new QTableWidgetItem(j::strList(rec, "reason_codes").join(", ")));
@@ -557,17 +568,21 @@ void SafetyQuarantinePage::onRefresh() { loadTable(); }
 
 void SafetyQuarantinePage::loadTable() {
     const int generation = ++m_generation;
+    m_table->setRowCount(0);
+    m_stateLabel->setText("正在加载…");
+    m_stateLabel->show();
     api::ApiClient *api = AppContext::instance()->api();
     const QString kw = m_filterBar->searchBox()->text().trimmed();
     api->getAsync("/api/memory/safety/quarantine", [this, generation, kw](const api::Result &r) {
     if (generation != m_generation) return;
     m_table->setRowCount(0);
-    if (!r.hasJsonObject()) {
+    if (!r.ok || !r.hasJsonObject()) {
         m_stateLabel->show();
         m_stateLabel->setStyleSheet("background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;"
                                     "color:#92400E;padding:8px;");
-        m_stateLabel->setText("隔离区未开启（safety.quarantine_disabled）· 请在 config.yaml 设置 "
-                              "safety.quarantine.enabled: true 后重启后端。");
+        m_stateLabel->setText(r.errorCode == "safety.quarantine_disabled"
+            ? "隔离区未开启（safety.quarantine_disabled）"
+            : "隔离区加载失败：" + r.errorMessage);
         return;
     }
     m_stateLabel->hide();
@@ -579,7 +594,7 @@ void SafetyQuarantinePage::loadTable() {
         if (!kw.isEmpty() && !rid.contains(kw, Qt::CaseInsensitive)) continue;
         m_table->insertRow(row);
         m_table->setItem(row, 0, new QTableWidgetItem(rid));
-        m_table->setItem(row, 1, new QTableWidgetItem(j::str(rec, "event_id")));
+        m_table->setItem(row, 1, new QTableWidgetItem(j::str(rec, "event_ref")));
         m_table->setItem(row, 2, new QTableWidgetItem(j::timeAgo(j::str(rec, "created_at"))));
         m_table->setItem(row, 3, new QTableWidgetItem(j::timeAgo(j::str(rec, "expires_at"))));
         auto *ops = new QWidget();

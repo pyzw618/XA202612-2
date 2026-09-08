@@ -16,6 +16,7 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QPointer>
 #include <QScrollArea>
 #include <QTableWidget>
 #include <QTabWidget>
@@ -158,6 +159,12 @@ void ForgetPrecisePage::refresh() {
     m_knowAll = QJsonArray();
     m_factAll = QJsonArray();
     m_loadFailures.clear();
+    m_candidateIds.clear();
+    m_executeInProgress = false;
+    while (QLayoutItem *item = m_previewLayout->takeAt(0)) {
+        if (QWidget *w = item->widget()) { w->hide(); w->deleteLater(); }
+        delete item;
+    }
     m_idList->clear();
     m_previewContainer->show();
     m_previewSummary->setText("正在并行读取偏好、知识和事实记忆…");
@@ -197,7 +204,7 @@ void ForgetPrecisePage::refresh() {
         }
     };
     api->getAsync(api::ApiClient::urlWithQuery(
-        "/api/memory/preferences", {{"user_id", uid}, {"status", ""}}),
+        "/api/memory/preferences", {{"user_id", uid}}),
         [finish](const api::Result &r) { finish("偏好", r); }, this);
     api->getAsync(api::ApiClient::urlWithQuery(
         "/api/memory/knowledge", {{"user_id", uid}}),
@@ -382,6 +389,7 @@ void ForgetPrecisePage::doExecute() {
 namespace {
 struct AsyncListState {
     int pending = 0;
+    QStringList failures;
     QJsonArray preference;
     QJsonArray knowledge;
     QJsonArray fact;
@@ -447,6 +455,8 @@ void ForgetPendingPage::onRefresh() { loadTable(); }
 
 void ForgetPendingPage::loadTable() {
     const int generation = ++m_generation;
+    m_allActive->setEnabled(true);
+    m_allArchive->setEnabled(true);
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
     const QString kw = m_filterBar->searchBox()->text().trimmed();
@@ -495,12 +505,19 @@ void ForgetPendingPage::loadTable() {
         append("preference", state->preference);
         append("knowledge", state->knowledge);
         append("fact", state->fact);
+        if (!state->failures.isEmpty()) {
+            const int row = m_table->rowCount();
+            m_table->insertRow(row);
+            m_table->setItem(row, 1, new QTableWidgetItem("部分列表加载失败：" + state->failures.join("；")));
+        }
     };
     auto handle = [state, finish](const QString &type, const api::Result &r) {
         if (r.ok && r.hasJsonArray()) {
             if (type == "preference") state->preference = r.jsonArray();
             else if (type == "knowledge") state->knowledge = r.jsonArray();
             else state->fact = r.jsonArray();
+        } else {
+            state->failures.append(type + "：" + r.errorMessage);
         }
         finish();
     };
@@ -522,9 +539,9 @@ void ForgetPendingPage::setSingleStatus(const QString &type, const QString &id,
     body["user_id"] = AppContext::instance()->userId();
     body["status"] = status;
     AppContext::instance()->api()->putAsync(
-        "/api/memory/" + type + "/" + id, body,
-        [this, caller](const api::Result &r) {
-            if (caller) caller->setEnabled(true);
+        "/api/memory/" + (type == "fact" ? QString("knowledge") : type) + "/" + id, body,
+        [this, guard = QPointer<QPushButton>(caller)](const api::Result &r) {
+            if (guard) guard->setEnabled(true);
             if (r.ok) {
                 onRefresh();
             } else {
@@ -587,11 +604,19 @@ ForgetArchivedPage::ForgetArchivedPage(QWidget *parent) : BasePage(parent) {
 }
 void ForgetArchivedPage::refresh() { onRefresh(); }
 void ForgetArchivedPage::onRefresh() {
+    const int generation = ++m_generation;
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
     const QString kw = m_filterBar->searchBox()->text().trimmed();
     m_table->setRowCount(0);
-    auto append = [&](const QString &type, const QJsonArray &arr) {
+    QStringList failures;
+    auto append = [&](const QString &type, const api::Result &result) {
+        if (generation != m_generation) return;
+        if (!result.ok || !result.hasJsonArray()) {
+            failures.append(type + "：" + result.errorMessage);
+            return;
+        }
+        const QJsonArray arr = result.jsonArray();
         for (const QJsonValue &v : arr) {
             const QJsonObject m = v.toObject();
             if (!kw.isEmpty() && !memContent(m, type).contains(kw, Qt::CaseInsensitive)) continue;
@@ -620,17 +645,25 @@ void ForgetArchivedPage::onRefresh() {
         }
     };
     append("preference", api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/preferences", {{"user_id", uid}, {"status", "archived"}})).jsonArray());
+        "/api/memory/preferences", {{"user_id", uid}, {"status", "archived"}})));
+    if (generation != m_generation) return;
     append("knowledge", api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/knowledge", {{"user_id", uid}, {"status", "archived"}})).jsonArray());
+        "/api/memory/knowledge", {{"user_id", uid}, {"status", "archived"}})));
+    if (generation != m_generation) return;
     append("fact", api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/facts", {{"user_id", uid}, {"status", "archived"}})).jsonArray());
+        "/api/memory/facts", {{"user_id", uid}, {"status", "archived"}})));
+    if (generation != m_generation) return;
+    if (!failures.isEmpty()) {
+        const int row = m_table->rowCount();
+        m_table->insertRow(row);
+        m_table->setItem(row, 1, new QTableWidgetItem("部分列表加载失败：" + failures.join("；")));
+    }
 }
 void ForgetArchivedPage::unarchive(const QString &type, const QString &id, QPushButton *caller) {
     QJsonObject body;
     body["user_id"] = AppContext::instance()->userId();
     body["status"] = "active";
-    const api::Result r = AppContext::instance()->api()->put("/api/memory/" + type + "/" + id, body);
+    const api::Result r = AppContext::instance()->api()->put("/api/memory/" + (type == "fact" ? QString("knowledge") : type) + "/" + id, body);
     if (r.ok) onRefresh();
     else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
 }
@@ -639,7 +672,7 @@ void ForgetArchivedPage::deleteMemory(const QString &type, const QString &id, QP
     QJsonObject body;
     body["user_id"] = AppContext::instance()->userId();
     body["status"] = "deleted";
-    const api::Result r = AppContext::instance()->api()->put("/api/memory/" + type + "/" + id, body);
+    const api::Result r = AppContext::instance()->api()->put("/api/memory/" + (type == "fact" ? QString("knowledge") : type) + "/" + id, body);
     if (r.ok) onRefresh();
     else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
 }
@@ -667,11 +700,19 @@ ForgetRecyclePage::ForgetRecyclePage(QWidget *parent) : BasePage(parent) {
 }
 void ForgetRecyclePage::refresh() { onRefresh(); }
 void ForgetRecyclePage::onRefresh() {
+    const int generation = ++m_generation;
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
     const QString kw = m_filterBar->searchBox()->text().trimmed();
     m_table->setRowCount(0);
-    auto append = [&](const QString &type, const QJsonArray &arr) {
+    QStringList failures;
+    auto append = [&](const QString &type, const api::Result &result) {
+        if (generation != m_generation) return;
+        if (!result.ok || !result.hasJsonArray()) {
+            failures.append(type + "：" + result.errorMessage);
+            return;
+        }
+        const QJsonArray arr = result.jsonArray();
         for (const QJsonValue &v : arr) {
             const QJsonObject m = v.toObject();
             if (!kw.isEmpty() && !memContent(m, type).contains(kw, Qt::CaseInsensitive)) continue;
@@ -698,17 +739,25 @@ void ForgetRecyclePage::onRefresh() {
         }
     };
     append("preference", api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/preferences", {{"user_id", uid}, {"status", "deleted"}})).jsonArray());
+        "/api/memory/preferences", {{"user_id", uid}, {"status", "deleted"}})));
+    if (generation != m_generation) return;
     append("knowledge", api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/knowledge", {{"user_id", uid}, {"status", "deleted"}})).jsonArray());
+        "/api/memory/knowledge", {{"user_id", uid}, {"status", "deleted"}})));
+    if (generation != m_generation) return;
     append("fact", api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/facts", {{"user_id", uid}, {"status", "deleted"}})).jsonArray());
+        "/api/memory/facts", {{"user_id", uid}, {"status", "deleted"}})));
+    if (generation != m_generation) return;
+    if (!failures.isEmpty()) {
+        const int row = m_table->rowCount();
+        m_table->insertRow(row);
+        m_table->setItem(row, 1, new QTableWidgetItem("部分列表加载失败：" + failures.join("；")));
+    }
 }
 void ForgetRecyclePage::restore(const QString &type, const QString &id, QPushButton *caller) {
     QJsonObject body;
     body["user_id"] = AppContext::instance()->userId();
     body["status"] = "active";
-    const api::Result r = AppContext::instance()->api()->put("/api/memory/" + type + "/" + id, body);
+    const api::Result r = AppContext::instance()->api()->put("/api/memory/" + (type == "fact" ? QString("knowledge") : type) + "/" + id, body);
     if (r.ok) onRefresh();
     else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
 }
@@ -759,6 +808,9 @@ ForgetHealthPage::ForgetHealthPage(QWidget *parent) : BasePage(parent) {
 void ForgetHealthPage::refresh() { loadData(); }
 
 void ForgetHealthPage::loadData() {
+    const int generation = ++m_generation;
+    m_items = QJsonArray();
+    m_warningLabel->hide();
     while (QLayoutItem *item = m_listLayout->takeAt(0)) {
         if (QWidget *w = item->widget()) w->deleteLater();
         delete item;
@@ -767,6 +819,12 @@ void ForgetHealthPage::loadData() {
     api::ApiClient *api = AppContext::instance()->api();
     const api::Result r = api->get(api::ApiClient::urlWithQuery(
         "/api/memory/memories/health", {{"user_id", uid}, {"status", "active"}}));
+    if (generation != m_generation) return;
+    if (!r.ok || !r.hasJsonObject()) {
+        m_warningLabel->setText("健康度加载失败：" + r.errorMessage);
+        m_warningLabel->show();
+        return;
+    }
     m_items = j::arr(r.jsonObject(), "items");
 
     // 摘要指标
@@ -960,7 +1018,7 @@ ForgetHistoryPage::ForgetHistoryPage(QWidget *parent) : BasePage(parent) {
     root->setSpacing(0);
     auto *header = new PageHeader(this);
     header->setTitle("遗忘历史");
-    header->setSubtitle("全部遗忘操作记录，可展开查看被删记忆详情");
+    header->setSubtitle("遗忘操作记录及其目标记忆 ID");
     root->addWidget(header);
     m_filterBar = new MemoryFilterBar(this);
     m_filterBar->setSearchPlaceholder("搜索指令...");
@@ -981,13 +1039,19 @@ ForgetHistoryPage::ForgetHistoryPage(QWidget *parent) : BasePage(parent) {
 }
 void ForgetHistoryPage::refresh() { onRefresh(); }
 void ForgetHistoryPage::onRefresh() {
+    const int generation = ++m_generation;
+    m_table->setRowCount(0);
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
     const QString kw = m_filterBar->searchBox()->text().trimmed();
     const api::Result r = api->get(api::ApiClient::urlWithQuery(
         "/api/memory/forget/history", {{"user_id", uid}}));
-    m_table->setRowCount(0);
-    if (!r.hasJsonArray()) return;
+    if (generation != m_generation) return;
+    if (!r.ok || !r.hasJsonArray()) {
+        m_table->setRowCount(1);
+        m_table->setItem(0, 0, new QTableWidgetItem("遗忘历史加载失败：" + r.errorMessage));
+        return;
+    }
     int row = 0;
     for (const QJsonValue &v : r.jsonArray()) {
         const QJsonObject rec = v.toObject();
@@ -999,22 +1063,13 @@ void ForgetHistoryPage::onRefresh() {
         m_table->setItem(row, 2, new QTableWidgetItem(j::fmtTime(j::str(rec, "created_at"))));
         auto *b = new QPushButton("详情");
         b->setObjectName("textBtn");
-        const QString rid = j::str(rec, "record_id");
-        connect(b, &QPushButton::clicked, this, [this, rid]() { openDetail(rid); });
+        connect(b, &QPushButton::clicked, this, [this, rec]() { openDetail(rec); });
         m_table->setCellWidget(row, 3, b);
         ++row;
     }
 }
-void ForgetHistoryPage::openDetail(const QString &recordId, QPushButton *caller) {
-    Q_UNUSED(caller)
-    const QString uid = AppContext::instance()->userId();
-    api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/forget/history/" + recordId, {{"user_id", uid}}));
-    if (!r.hasJsonObject()) { QMessageBox::warning(this, "加载失败", r.errorCode); return; }
-    const QJsonObject data = r.jsonObject();
-    const QJsonObject rec = j::obj(data, "record");
-
+void ForgetHistoryPage::openDetail(const QJsonObject &rec) {
+    const QString recordId = j::str(rec, "record_id");
     QDialog dlg(this);
     dlg.setWindowTitle("遗忘详情 · " + j::shortId(recordId));
     dlg.resize(560, 420);
@@ -1027,22 +1082,20 @@ void ForgetHistoryPage::openDetail(const QString &recordId, QPushButton *caller)
                       .arg(j::str(rec, "instruction").toHtmlEscaped())
                       .arg(j::integer(rec, "deleted_count"))
                       .arg(j::fmtTime(j::str(rec, "created_at")))
-                      .arg(recordId));
+                      .arg(recordId.toHtmlEscaped()));
     lay->addWidget(info);
-    auto *memTable = new QTableWidget(0, 3);
-    memTable->setHorizontalHeaderLabels({"ID", "类型", "内容 / 状态"});
-    memTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    auto *hint = new QLabel("仅展示记录中保存的目标 ID；接口未提供目标记忆的内容或当前状态。", &dlg);
+    hint->setWordWrap(true);
+    lay->addWidget(hint);
+    auto *memTable = new QTableWidget(0, 1);
+    memTable->setHorizontalHeaderLabels({"目标记忆 ID"});
+    memTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     memTable->verticalHeader()->setVisible(false);
     memTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    for (const QJsonValue &v : j::arr(data, "memories")) {
-        const QJsonObject m = v.toObject();
+    for (const QJsonValue &id : j::arr(rec, "target_memory_ids")) {
         const int row = memTable->rowCount();
         memTable->insertRow(row);
-        memTable->setItem(row, 0, new QTableWidgetItem(j::str(m, "memory_id")));
-        memTable->setItem(row, 1, new QTableWidgetItem(j::str(m, "memory_type")));
-        QString content = j::str(m, "content");
-        if (content.isEmpty()) content = "已物理删除";
-        memTable->setItem(row, 2, new QTableWidgetItem(content + "　[" + j::str(m, "status") + "]"));
+        memTable->setItem(row, 0, new QTableWidgetItem(id.toString()));
     }
     lay->addWidget(memTable, 1);
     dlg.exec();
@@ -1090,8 +1143,17 @@ ForgetSettingsPage::ForgetSettingsPage(QWidget *parent) : BasePage(parent) {
     root->addStretch();
 }
 void ForgetSettingsPage::refresh() {
+    const int generation = ++m_generation;
+    m_resultLabel->clear();
+    m_weightsLabel->clear();
+    m_autoForgetLabel->clear();
+    m_lifecycleLabel->clear();
     const api::Result r = AppContext::instance()->api()->get("/api/memory/lifecycle/settings");
-    if (!r.hasJsonObject()) return;
+    if (generation != m_generation) return;
+    if (!r.ok || !r.hasJsonObject()) {
+        m_resultLabel->setText("遗忘设置加载失败：" + r.errorMessage);
+        return;
+    }
     const QJsonObject s = r.jsonObject();
     const QJsonObject hw = j::obj(s, "health_weights");
     const QJsonObject af = j::obj(s, "auto_forget");

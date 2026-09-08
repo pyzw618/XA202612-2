@@ -16,6 +16,7 @@ class QWidget;
 
 class KnowledgePage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit KnowledgePage(QWidget *parent = nullptr);
 

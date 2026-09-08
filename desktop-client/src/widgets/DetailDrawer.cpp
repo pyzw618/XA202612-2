@@ -71,6 +71,13 @@ QPushButton *DetailDrawer::addHeaderButton(const QString &text, const QString &o
 
 void DetailDrawer::closeDrawer() {
     hide();
+    m_title->clear();
+    while (m_stack->count() > 0) {
+        QWidget *old = m_stack->widget(0);
+        m_stack->removeWidget(old);
+        old->hide();
+        old->deleteLater();
+    }
     m_open = false;
     emit closed();
 }

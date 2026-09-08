@@ -17,6 +17,7 @@ class PageStateView;
 
 class FactPage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit FactPage(QWidget *parent = nullptr);
 

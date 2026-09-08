@@ -91,6 +91,15 @@ void ConflictPage::refresh() { loadPage(1); }
 void ConflictPage::onFilterChanged() { loadPage(1); }
 
 void ConflictPage::loadPage(int page) {
+    while (QLayoutItem *item = m_cardsLayout->takeAt(0)) {
+        if (QWidget *w = item->widget()) { w->hide(); w->deleteLater(); }
+        delete item;
+    }
+    m_statPending->setText("待处理：—");
+    m_statResolved->setText("已解决：—");
+    m_pageInfo->clear();
+    m_prevBtn->setEnabled(false);
+    m_nextBtn->setEnabled(false);
     m_currentPage = qMax(1, page);
     const int generation = ++m_generation;
     ++m_pendingLoads;

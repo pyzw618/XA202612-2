@@ -128,11 +128,12 @@ KnowledgePage::KnowledgePage(QWidget *parent) : BasePage(parent) {
 void KnowledgePage::refresh() { onRefresh(); }
 
 void KnowledgePage::onRefresh() {
+    m_drawer->closeDrawer();
+    m_all = QJsonArray();
+    m_table->setRowCount(0);
     const int generation = ++m_generation;
-    const bool hadData = !m_all.isEmpty();
-    if (!hadData) m_content->hide();
-    m_stateView->setState(PageState::Loading, hadData ? "正在刷新" : "正在加载知识记忆",
-                          hadData ? "当前仍显示上次成功加载的数据。" : "正在从后端读取真实数据…");
+    m_content->hide();
+    m_stateView->setState(PageState::Loading, "正在加载知识记忆", "正在从后端读取真实数据…");
     m_stateView->clearAction();
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
@@ -280,10 +281,12 @@ void KnowledgePage::populateRow(int row, const QJsonObject &m) {
 }
 
 void KnowledgePage::openDetail(const QString &id) {
+    const int generation = m_generation;
     api::ApiClient *api = AppContext::instance()->api();
     const api::Result r = api->get(api::ApiClient::urlWithQuery(
         "/api/memory/knowledge/" + id, {{"user_id", AppContext::instance()->userId()}}));
-    if (!r.hasJsonObject()) { QMessageBox::warning(this, "加载失败", r.errorCode); return; }
+    if (generation != m_generation) return;
+    if (!r.ok || !r.hasJsonObject()) { QMessageBox::warning(this, "加载失败", r.errorCode + " " + r.errorMessage); return; }
     const QJsonObject m = r.jsonObject();
 
     auto *tabs = new QTabWidget();
@@ -325,30 +328,7 @@ void KnowledgePage::openDetail(const QString &id) {
     }
     tabs->addTab(content, "内容");
 
-    // 版本历史
-    auto *verW = new QWidget();
-    auto *vl = new QVBoxLayout(verW);
-    auto *verT = new QTableWidget(0, 3);
-    verT->setHorizontalHeaderLabels({"版本", "更新时间", "名称"});
-    verT->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
-    verT->verticalHeader()->setVisible(false);
-    verT->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    verT->setAlternatingRowColors(true);
-    const api::Result rv = api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/knowledge/" + id + "/versions",
-        {{"user_id", AppContext::instance()->userId()}}));
-    if (rv.hasJsonArray()) {
-        const QJsonArray versions = rv.jsonArray();
-        verT->setRowCount(int(versions.size()));
-        for (int i = 0; i < versions.size(); ++i) {
-            const QJsonObject v = versions[i].toObject();
-            verT->setItem(i, 0, new QTableWidgetItem(QString("v%1").arg(j::integer(v, "version"))));
-            verT->setItem(i, 1, new QTableWidgetItem(j::fmtTime(j::str(v, "updated_at"))));
-            verT->setItem(i, 2, new QTableWidgetItem(j::str(v, "name")));
-        }
-    }
-    vl->addWidget(verT);
-    tabs->addTab(verW, "版本历史");
+    // 暂不展示版本历史：后端尚未提供该路由。
 
     // 复用统计
     auto *stW = new QWidget();
