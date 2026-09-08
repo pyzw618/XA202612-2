@@ -19,6 +19,7 @@ public:
     void setHint(const QString &hint); // 中性色细信息，空则隐藏
     void setClickable(bool on);
     void setLoading(bool on);
+    bool isLoading() const;
     void setError(const QString &message);
 
 signals:

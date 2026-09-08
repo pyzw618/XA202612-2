@@ -77,6 +77,8 @@ void StatCard::setLoading(bool on) {
     style()->polish(this);
 }
 
+bool StatCard::isLoading() const { return property("loading").toBool(); }
+
 void StatCard::setError(const QString &message) {
     setProperty("loading", false);
     setProperty("state", "error");

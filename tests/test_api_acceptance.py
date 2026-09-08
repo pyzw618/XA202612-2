@@ -253,6 +253,33 @@ def test_api_08_forget_and_history(client: TestClient) -> None:
     assert any(r["record_id"] == resp.json()["record_id"] for r in history.json())
 
 
+def test_api_08b_forget_history_record_detail(client: TestClient) -> None:
+    """GET /forget/history/{record_id} → 200 单条详情；记录不存在 → 404"""
+    pref = client.post(
+        "/api/memory/memories/preference",
+        json={"user_id": "u-api", "text": "将被遗忘的偏好（详情）", "confidence": 0.9},
+    ).json()
+    memory_id = pref["memory_id"]
+
+    resp = client.post(
+        "/api/memory/forget",
+        json={"user_id": "u-api", "target_memory_ids": [memory_id], "cascade": True},
+    )
+    assert resp.status_code == 200, resp.text
+    record_id = resp.json()["record_id"]
+
+    detail = client.get(f"/api/memory/forget/history/{record_id}")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["record_id"] == record_id
+    assert body["user_id"] == "u-api"
+    assert body["deleted_count"] == 1
+    assert memory_id in body["target_memory_ids"]
+
+    missing = client.get("/api/memory/forget/history/forg_doesnotexist")
+    assert missing.status_code == 404
+
+
 def test_api_fact_knowledge_write_and_search(client: TestClient) -> None:
     """FACT 并入知识：knowledge_type=fact 经 API 写入并可被混合检索命中。"""
     resp = client.post(

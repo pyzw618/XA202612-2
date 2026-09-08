@@ -309,8 +309,10 @@ void SearchPage::renderResults(const QJsonObject &resp) {
         for (const QJsonValue &value : source) {
             const QJsonObject item = value.toObject();
             if (j::num(item, "confidence", 0.0) < minConfidence) continue;
-            const QJsonObject scope = j::obj(item, "scope");
-            if (!scene.isEmpty() && j::str(scope, "scene") != scene) continue;
+            const QJsonValue scopeValue = item.value("scope");
+            const QJsonObject scope = scopeValue.toObject();
+            const QString scopeName = scopeValue.isString() ? scopeValue.toString() : j::str(scope, "scope");
+            if (!scene.isEmpty() && j::str(scope, "scene", scopeName) != scene) continue;
             if (!taskType.isEmpty() && j::str(scope, "task_type") != taskType) continue;
             filtered.append(item);
         }

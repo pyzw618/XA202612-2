@@ -73,6 +73,7 @@ private slots:
     void clearAllDemo();
 
 private:
+    QLabel *m_warningLabel = nullptr;
     QLabel *m_resultLabel = nullptr;
     QPushButton *m_clearPreferencesButton = nullptr;
     QPushButton *m_clearAllButton = nullptr;

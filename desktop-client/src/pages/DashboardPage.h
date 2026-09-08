@@ -67,6 +67,7 @@ private:
     QPushButton *m_configureButton = nullptr;
     QPushButton *m_openAgentButton = nullptr;
     QProcess *m_configProcess = nullptr;
+    QProcess *m_agentProcess = nullptr;
     bool m_narrowLayout = false;
 
     int m_generation = 0;

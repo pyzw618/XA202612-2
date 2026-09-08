@@ -218,7 +218,6 @@ void FactPage::populateRow(int row, const QJsonObject &f) {
     auto mk = [ops](const QString &t) { auto *b = new QPushButton(t, ops); b->setObjectName("textBtn"); return b; };
     auto *bDetail = mk("详情");
     auto *bEdit = mk("编辑");
-    bEdit->setEnabled(false);
     bEdit->setToolTip("暂不可用：后端尚不支持编辑事实三元组");
     auto *bEvidence = mk("证据");
     auto *bDelete = mk("删除");
@@ -330,8 +329,37 @@ void FactPage::openDetail(const QString &id) {
 }
 
 void FactPage::openEditDialog(const QJsonObject &fact) {
-    Q_UNUSED(fact)
-    // No backend endpoint supports editing the triple's semantic fields yet.
+    QDialog dlg(this);
+    dlg.setWindowTitle("Edit Fact Metadata");
+    auto *form = new QFormLayout(&dlg);
+    auto *confidence = new QDoubleSpinBox(&dlg);
+    confidence->setRange(0.0, 1.0);
+    confidence->setDecimals(2);
+    confidence->setSingleStep(0.05);
+    confidence->setValue(j::num(fact, "confidence", 0.7));
+    form->addRow("Confidence", confidence);
+    auto *status = new QComboBox(&dlg);
+    for (const auto &entry : {qMakePair(QStringLiteral("active"), QStringLiteral("active")),
+                              qMakePair(QStringLiteral("pending"), QStringLiteral("pending")),
+                              qMakePair(QStringLiteral("archived"), QStringLiteral("archived")),
+                              qMakePair(QStringLiteral("deleted"), QStringLiteral("deleted"))})
+        status->addItem(entry.first, entry.second);
+    const int index = status->findData(j::str(fact, "status", "active"));
+    status->setCurrentIndex(index >= 0 ? index : 0);
+    form->addRow("Status", status);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, &dlg);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    form->addRow(buttons);
+    if (dlg.exec() != QDialog::Accepted) return;
+    QJsonObject body;
+    body["user_id"] = AppContext::instance()->userId();
+    body["confidence"] = confidence->value();
+    body["status"] = status->currentData().toString();
+    const QString id = j::str(fact, "fact_id", j::str(fact, "memory_id"));
+    const api::Result r = AppContext::instance()->api()->put("/api/memory/knowledge/" + id, body);
+    if (r.ok) { QMessageBox::information(this, "完成", "事实元数据已更新（三元组内容保持不变）"); onRefresh(); }
+    else QMessageBox::warning(this, "保存失败", r.errorCode + " " + r.errorMessage);
 }
 
 void FactPage::openProposeDialog() {

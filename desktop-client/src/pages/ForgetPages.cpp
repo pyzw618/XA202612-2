@@ -210,7 +210,7 @@ void ForgetPrecisePage::refresh() {
         "/api/memory/knowledge", {{"user_id", uid}}),
         [finish](const api::Result &r) { finish("知识", r); }, this);
     api->getAsync(api::ApiClient::urlWithQuery(
-        "/api/memory/facts", {{"user_id", uid}, {"status", ""}}),
+        "/api/memory/facts", {{"user_id", uid}}),
         [finish](const api::Result &r) { finish("事实", r); }, this);
 }
 

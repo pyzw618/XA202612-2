@@ -960,8 +960,10 @@ async def release_quarantine(
 # ============================================================
 # 遗忘历史详情
 #
-# 已由 api.py 注册：GET /api/memory/forget/history/{record_id}
-# 避免在同一 /api/memory 前缀下重复定义。
+# 遗忘历史由 api.py 提供：
+#   GET /api/memory/forget/history          列表
+#   GET /api/memory/forget/history/{record_id}  单条详情（404 当记录不存在）
+# 此处不再重复定义，避免在同一 /api/memory 前缀下冲突。
 # ============================================================
 
 

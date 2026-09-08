@@ -349,7 +349,9 @@ SettingsDemoPage::SettingsDemoPage(QWidget *parent) : BasePage(parent) {
     auto *card = new QFrame(this);
     card->setObjectName("card");
     auto *cl = new QVBoxLayout(card);
-    auto *warn = new QLabel("清理功能已暂停：当前接口会清空所有用户的检索索引，待支持按用户清理后恢复。", card);
+    auto *warn = new QLabel(card);
+    m_warningLabel = warn;
+    warn->setText("清理功能已暂停：当前接口会清空全局向量索引，影响所有用户；待支持按用户清理后恢复。当前用户：" + AppContext::instance()->userId().toHtmlEscaped());
     warn->setStyleSheet("background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;color:#B91C1C;padding:8px;");
     warn->setWordWrap(true);
     cl->addWidget(warn);
@@ -360,7 +362,7 @@ SettingsDemoPage::SettingsDemoPage(QWidget *parent) : BasePage(parent) {
     b1->setEnabled(false);
     b1->setObjectName("dangerBtn");
     connect(b1, &QPushButton::clicked, this, &SettingsDemoPage::clearPreferences);
-    auto *desc1 = new QLabel("暂不可用：接口会同时清空跨用户向量索引", card);
+    auto *desc1 = new QLabel("暂不可用：不会恢复跨用户清理能力；接口会清空全局向量索引", card);
     desc1->setObjectName("pageSubtitle");
     row1->addWidget(b1);
     row1->addWidget(desc1, 1);
@@ -372,7 +374,7 @@ SettingsDemoPage::SettingsDemoPage(QWidget *parent) : BasePage(parent) {
     b2->setEnabled(false);
     b2->setObjectName("solidDangerBtn");
     connect(b2, &QPushButton::clicked, this, &SettingsDemoPage::clearAllDemo);
-    auto *desc2 = new QLabel("暂不可用：接口会同时清空跨用户检索索引和缓存", card);
+    auto *desc2 = new QLabel("暂不可用：接口会清空全局向量索引和缓存", card);
     desc2->setObjectName("pageSubtitle");
     row2->addWidget(b2);
     row2->addWidget(desc2, 1);
@@ -387,7 +389,11 @@ SettingsDemoPage::SettingsDemoPage(QWidget *parent) : BasePage(parent) {
     root->addStretch();
 }
 
-void SettingsDemoPage::refresh() { m_resultLabel->clear(); }
+void SettingsDemoPage::refresh() {
+    m_warningLabel->setText("清理功能已暂停：当前接口会清空全局向量索引，影响所有用户；待支持按用户清理后恢复。当前用户：" + AppContext::instance()->userId().toHtmlEscaped());
+    m_resultLabel->setText("当前用户：" + AppContext::instance()->userId().toHtmlEscaped() +
+                           "。清理按钮已禁用，避免跨用户清空全局向量索引。");
+}
 
 void SettingsDemoPage::clearPreferences() {
     // Disabled until the backend supports user-scoped index cleanup.

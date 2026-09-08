@@ -32,6 +32,22 @@
 #include "../widgets/PageHeader.h"
 #include "../widgets/StatusTag.h"
 
+namespace {
+// P0-13：按 errorCode / 网络状态区分失败原因，避免笼统显示 "HTTP 503"。
+// 注意：后端返回 503 时 Qt 会同时置 networkError，因此必须先判 errorCode 再判 networkError。
+QString safetyFailText(const api::Result &r, const QString &what) {
+    if (r.errorCode == QLatin1String("safety.gate_unavailable"))
+        return QStringLiteral("安全门禁不可用（门禁未装配），请联系管理员部署安全门禁");
+    if (r.networkError)
+        return QStringLiteral("后端离线或网络错误：")
+            + (r.networkErrorText.isEmpty() ? r.errorMessage : r.networkErrorText);
+    QString msg = r.errorMessage;
+    if (!r.errorCode.isEmpty())
+        msg = r.errorCode + (msg.isEmpty() ? QString() : QStringLiteral(" - ") + msg);
+    return what + QStringLiteral("加载失败：") + (msg.isEmpty() ? QStringLiteral("未知错误") : msg);
+}
+} // namespace
+
 // ============================================================
 // P6.1 安全总览
 // ============================================================
@@ -441,7 +457,7 @@ SafetyAuditPage::SafetyAuditPage(QWidget *parent) : BasePage(parent) {
     root->addWidget(m_stateLabel);
 
     m_filterBar = new MemoryFilterBar(this);
-    m_filterBar->setSearchPlaceholder("搜索 audit_id / event_id...");
+    m_filterBar->setSearchPlaceholder("搜索 audit_id / event_ref...");
     connect(m_filterBar, &MemoryFilterBar::refreshRequested, this, &SafetyAuditPage::onRefresh);
     connect(m_filterBar, &MemoryFilterBar::searchTextChanged, this,
             [this](const QString &) { onRefresh(); });
@@ -449,7 +465,7 @@ SafetyAuditPage::SafetyAuditPage(QWidget *parent) : BasePage(parent) {
 
     m_table = new QTableWidget(this);
     m_table->setColumnCount(6);
-    m_table->setHorizontalHeaderLabels({"audit_id", "event_id", "决策", "规则集", "原因码", "时间"});
+    m_table->setHorizontalHeaderLabels({"audit_id", "event_ref", "决策", "规则集", "原因码", "时间"});
     m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_table->verticalHeader()->setVisible(false);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -480,7 +496,7 @@ void SafetyAuditPage::loadTable() {
                                     "color:#92400E;padding:8px;");
         m_stateLabel->setText(r.errorCode == "safety.audit_disabled"
             ? "审计功能未开启（safety.audit_disabled）"
-            : "审计日志加载失败：" + r.errorMessage);
+            : safetyFailText(r, "审计日志"));
         return;
     }
     m_stateLabel->hide();
@@ -490,10 +506,10 @@ void SafetyAuditPage::loadTable() {
         const QJsonObject rec = v.toObject();
         const QString aid = j::str(rec, "audit_id");
         if (!kw.isEmpty() && !aid.contains(kw, Qt::CaseInsensitive) &&
-            !j::str(rec, "event_id").contains(kw, Qt::CaseInsensitive)) continue;
+            !j::str(rec, "event_ref").contains(kw, Qt::CaseInsensitive)) continue;
         m_table->insertRow(row);
         m_table->setItem(row, 0, new QTableWidgetItem(aid));
-        m_table->setItem(row, 1, new QTableWidgetItem(j::str(rec, "event_id")));
+        m_table->setItem(row, 1, new QTableWidgetItem(j::str(rec, "event_ref")));
         auto *tag = new StatusTag();
         tag->setStatus(j::str(rec, "decision"));
         m_table->setCellWidget(row, 2, tag);
@@ -551,7 +567,7 @@ SafetyQuarantinePage::SafetyQuarantinePage(QWidget *parent) : BasePage(parent) {
 
     m_table = new QTableWidget(this);
     m_table->setColumnCount(5);
-    m_table->setHorizontalHeaderLabels({"review_id", "event_id", "创建时间", "过期时间", "操作"});
+    m_table->setHorizontalHeaderLabels({"review_id", "event_ref", "创建时间", "过期时间", "操作"});
     m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_table->verticalHeader()->setVisible(false);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -582,7 +598,7 @@ void SafetyQuarantinePage::loadTable() {
                                     "color:#92400E;padding:8px;");
         m_stateLabel->setText(r.errorCode == "safety.quarantine_disabled"
             ? "隔离区未开启（safety.quarantine_disabled）"
-            : "隔离区加载失败：" + r.errorMessage);
+            : safetyFailText(r, "隔离区"));
         return;
     }
     m_stateLabel->hide();
@@ -629,7 +645,13 @@ void SafetyQuarantinePage::viewRecord(const QString &reviewId) {
     api->getAsync("/api/memory/safety/quarantine/" + reviewId,
         [this, token, reviewId](const api::Result &r) {
             if (token != m_viewGeneration) return;
-            if (!r.hasJsonObject()) { QMessageBox::warning(this, "读取失败", r.errorCode); return; }
+            if (!r.ok || !r.hasJsonObject()) {
+                const QString message = r.errorCode == "safety.quarantine_disabled"
+                    ? "隔离区未开启（safety.quarantine_disabled）"
+                    : safetyFailText(r, "隔离事件详情");
+                QMessageBox::warning(this, "读取失败", message);
+                return;
+            }
             QDialog dlg(this);
             dlg.setWindowTitle("隔离事件原文 · " + j::shortId(reviewId));
             dlg.resize(620, 480);

@@ -1792,6 +1792,28 @@ async def list_forget_history(
     return []
 
 
+@router.get("/forget/history/{record_id}", response_model=ForgetRecord)
+async def get_forget_history_record(
+    record_id: str, request: Request
+) -> ForgetRecord:
+    """
+    获取单条遗忘记录详情
+
+    参数:
+        record_id: 遗忘记录 ID
+
+    返回:
+        遗忘记录对象；记录不存在时返回 404
+    """
+    repo = getattr(request.app.state, "forget_repo", None) if request else None
+    if repo is None:
+        raise HTTPException(status_code=503, detail="forget repository not initialized")
+    record = repo.get_by_id(record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="forget record not found")
+    return record
+
+
 class ForgetRuleRequest(BaseModel):
     """用户遗忘规则创建请求（I-13）。"""
 

@@ -109,6 +109,10 @@ void ConflictPage::loadPage(int page) {
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
     const QString status = m_statusCombo->currentData().toString();
+    // "已解决"不是落库裁决值（只有 override/merge/coexist/pending），后端按 decision == status 过滤恒空；
+    // 改为拉全量（status 传空）后本地过滤 decision != pending；已解决视图省略 page/size
+    // 走后端"不传 page 返回全量"的兼容行为，避免分页切片丢行（size 上限 200，超出必收 422）。
+    const bool resolvedView = status == "resolved";
 
     api->getAsync(api::ApiClient::urlWithQuery(
         "/api/memory/conflicts", {{"user_id", uid}, {"status", ""}}),
@@ -126,12 +130,14 @@ void ConflictPage::loadPage(int page) {
             }
         }, this);
 
-    // 分页数据
+    if (resolvedView) m_currentPage = 1;
+    // 分页数据；已解决视图省略 page/size（urlWithQuery 跳过 null），走后端全量返回
     api->getAsync(api::ApiClient::urlWithQuery(
         "/api/memory/conflicts",
-        {{"user_id", uid}, {"status", status}, {"page", QString::number(m_currentPage)},
-         {"size", QString::number(m_size)}}),
-        [this, generation](const api::Result &r) {
+        {{"user_id", uid}, {"status", resolvedView ? "" : status},
+         {"page", resolvedView ? QString() : QString::number(m_currentPage)},
+         {"size", resolvedView ? QString() : QString::number(m_size)}}),
+        [this, generation, status, resolvedView](const api::Result &r) {
             if (generation != m_generation) return;
             m_scroll->setEnabled(true);
             if (!r.ok || (!r.hasJsonArray() && !r.hasJsonObject())) {
@@ -145,15 +151,31 @@ void ConflictPage::loadPage(int page) {
             if (r.hasJsonObject() && r.jsonObject().contains("items")) {
                 items = j::arr(r.jsonObject(), "items");
                 m_total = j::integer(r.jsonObject(), "total");
-            } else { items = r.jsonArray(); m_total = int(items.size()); }
+            } else { items = r.jsonArray(); }
+            QJsonArray visible;
+            for (const QJsonValue &v : items) {
+                const QString decision = j::str(v.toObject(), "decision");
+                if ((status == "pending" && decision == "pending") ||
+                    (status == "resolved" && decision != "pending") || status.isEmpty())
+                    visible.append(v);
+            }
+            items = visible;
+            m_total = int(items.size());
             m_stateView->setState(items.isEmpty() ? PageState::Empty : PageState::Content,
                                   "暂无冲突", "有偏好、知识或事实写入冲突时会出现在这里。");
             if (items.isEmpty()) m_stateView->setAction("刷新", [this]() { loadPage(m_currentPage); });
             renderCards(items);
-            const int maxPage = qMax(1, (m_total + m_size - 1) / m_size);
-            m_pageInfo->setText(QString("第 %1 / %2 页 · 共 %3 条").arg(m_currentPage).arg(maxPage).arg(m_total));
-            m_prevBtn->setEnabled(m_currentPage > 1);
-            m_nextBtn->setEnabled(m_currentPage < maxPage);
+            if (resolvedView) {
+                // 已解决视图为全量单页：如实标注不分页，禁用翻页避免缺行错觉
+                m_pageInfo->setText(QString("共 %1 条 · 已解决视图不分页").arg(m_total));
+                m_prevBtn->setEnabled(false);
+                m_nextBtn->setEnabled(false);
+            } else {
+                const int maxPage = qMax(1, (m_total + m_size - 1) / m_size);
+                m_pageInfo->setText(QString("第 %1 / %2 页 · 共 %3 条").arg(m_currentPage).arg(maxPage).arg(m_total));
+                m_prevBtn->setEnabled(m_currentPage > 1);
+                m_nextBtn->setEnabled(m_currentPage < maxPage);
+            }
         }, this);
 }
 

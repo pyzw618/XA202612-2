@@ -7,6 +7,7 @@
 #include "pages/SettingsPages.h"
 #include "pages/KnowledgePage.h"
 #include "pages/MemoryTierPage.h"
+#include "pages/ConflictPage.h"
 #include "widgets/DetailDrawer.h"
 
 #include <QtTest>
@@ -21,6 +22,7 @@
 #include <QTableWidget>
 #include <QTimer>
 #include <QTabWidget>
+#include <QComboBox>
 
 // Real pages and ApiClient against a local HTTP fixture; no production backend writes.
 class FrontendRegressionTest : public QObject {
@@ -124,6 +126,18 @@ private slots:
         QVERIFY(page.m_contextText->text().isEmpty());
         QVERIFY(!page.m_copyContextBtn->isEnabled());
     }
+    void searchRendersFactContractFallbacksAndStringScope() {
+        SearchPage page;
+        page.m_sceneCombo->setCurrentIndex(0);
+        page.renderResults(QJsonObject{
+            {"facts", QJsonArray{QJsonObject{{"fact_id", "fact-1"}, {"object_value", "Alice"},
+                                               {"scope", "global"}, {"confidence", 0.9}}}},
+            {"preferences", QJsonArray()}, {"knowledge", QJsonArray()}});
+        bool found = false;
+        for (auto *label : page.findChildren<QLabel *>())
+            if (label->text() == "Alice") found = true;
+        QVERIFY(found);
+    }
     void preferenceEditDoesNotOverwritePayload() {
         PreferencePage page;
         QJsonObject sent;
@@ -220,11 +234,35 @@ private slots:
         ForgetPrecisePage page;
         page.refresh();
         QTRY_COMPARE(requests.size(), 3);
+        // 偏好/知识/事实三组列表都不允许携带空 status 参数（后端可能按它过滤导致恒空）
+        const QList<QByteArray> prefixes = {"/api/memory/preferences?", "/api/memory/knowledge?",
+                                            "/api/memory/facts?"};
+        for (const QByteArray &prefix : prefixes) {
+            bool found = false;
+            for (const Request &r : requests) if (r.path.startsWith(prefix)) {
+                found = true;
+                QVERIFY2(!r.path.contains("status="), r.path.constData());
+                QVERIFY(r.path.contains("user_id=alice"));
+            }
+            QVERIFY2(found, prefix.constData());
+        }
+    }
+    void conflictResolvedFilterOmitsStatusParam() {
+        ConflictPage page;
+        QComboBox *statusCombo = nullptr;
+        for (auto *combo : page.findChildren<QComboBox *>())
+            if (combo->itemData(0).toString() == "pending") statusCombo = combo;
+        QVERIFY(statusCombo);
+        statusCombo->setCurrentIndex(1); // "已解决"
+        QTRY_COMPARE(requests.size(), 2);
         bool found = false;
-        for (const Request &r : requests) if (r.path.startsWith("/api/memory/preferences?")) {
+        for (const Request &r : requests) if (r.path.startsWith("/api/memory/conflicts?")) {
+            QVERIFY2(!r.path.contains("status=resolved"), r.path.constData());
+            // 已解决视图必须省略 page/size 走全量返回；size 上限 200，
+            // 传 500 会被后端参数校验拒绝（422），导致"已解决"筛选必然报错
+            QVERIFY2(!r.path.contains("page=") && !r.path.contains("size="),
+                     r.path.constData());
             found = true;
-            QVERIFY(!r.path.contains("status="));
-            QVERIFY(r.path.contains("user_id=alice"));
         }
         QVERIFY(found);
     }
