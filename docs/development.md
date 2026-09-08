@@ -111,3 +111,7 @@ cd desktop-client && bash build-linux.sh && ./build/memoryhub-client
 # 打包
 bash packaging/linux/build-deb.sh
 ```
+# FACT 语义增强
+
+事实记忆的归一化和关系冲突规则见 `docs/FACT_SEMANTICS.md`。FACT 仍使用统一
+Knowledge/Authority 写入链路；新增辅助表由 `Database.init_schema()` 自动创建。

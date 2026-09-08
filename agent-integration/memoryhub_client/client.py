@@ -494,6 +494,12 @@ class MemoryHubClient:
     def propose_knowledge_fact(self, triples: list[dict[str, Any]], *, source_id: str = "", scope_hint: str = "global", project_id: str | None = None) -> Any:
         return self._request("POST", "/facts/propose", json_body={"source_id": source_id, "scope_hint": scope_hint, "project_id": project_id, "triples": triples})
 
+    def list_fact_proposals(self, user_id: str | None = None, limit: int = 100) -> list[Any]:
+        return self._request("GET", "/facts/proposals", query={"user_id": user_id or self.user_id, "limit": limit}) or []
+
+    def decide_fact(self, memory_id: str, *, action: str, user_id: str | None = None, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/facts/decide", json_body={"memory_id": memory_id, "action": action, "user_id": user_id or self.user_id, **(payload or {})}) or {}
+
     def decide_knowledge_fact(self, proposal_id: str, *, commit: bool, user_id: str | None = None, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         action = "fact_commit" if commit else "fact_reject"
         return self._root_request("POST", f"/agent/actions/{proposal_id}/decision", json_body={"action_type": action, "decision": "commit" if commit else "reject", "payload": {"user_id": user_id or self.user_id, **(payload or {})}}) or {}

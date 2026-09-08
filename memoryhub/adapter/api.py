@@ -795,6 +795,8 @@ def _fact_memory_to_dict(memory: KnowledgeMemory) -> dict:
         ),
         "version": memory.version,
         "memory_type": "fact",
+        "fact_semantic": (memory.extra_payload or {}).get("fact_semantic", {}),
+        "decision_task": (memory.extra_payload or {}).get("fact_decision_task", {}),
     }
 
 
@@ -841,7 +843,32 @@ async def list_fact_conflicts(
             r for r in conflict_repo.list_all(user_id=user_id)
             if getattr(r, "memory_type", "") == "knowledge"
         )
+    know_repo = getattr(request.app.state, "know_repo", None)
+    if know_repo is not None:
+        for memory in know_repo.get_by_type(user_id, knowledge_type="fact", status="pending"):
+            task = (memory.extra_payload or {}).get("fact_decision_task", {}) or {}
+            out.append({
+                "conflict_id": f"fact-decision:{memory.memory_id}",
+                "user_id": user_id,
+                "old_memory_id": (task.get("existing_memory_ids") or [""])[0],
+                "new_memory_id": memory.memory_id,
+                "memory_type": "fact",
+                "conflict_field": task.get("conflict_type", "fact_semantics"),
+                "reason": task.get("reason", "事实需要裁决"),
+                "decision": "pending",
+            })
     return out[:limit]
+
+
+@router.get("/facts/proposals")
+async def list_fact_proposals_early(request: Request, user_id: str = "default", limit: int = Query(default=100, ge=1, le=500)):
+    """Return pending FACT rows; registered before the parameterized fact route."""
+    repo = getattr(request.app.state, "know_repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="knowledge repository not initialized")
+    rows = repo.get_by_type(user_id, knowledge_type="fact", status="pending")
+    return [_fact_memory_to_dict(item) | {"decision_task": (item.extra_payload or {}).get("fact_decision_task", {})}
+            for item in rows[:limit]]
 
 @router.get("/facts/{fact_id}")
 async def get_fact(fact_id: str, request: Request, user_id: str = "default"):
@@ -867,6 +894,11 @@ async def delete_fact(fact_id: str, request: Request, user_id: str = "default"):
         raise HTTPException(status_code=503, detail="memory write service not initialized")
     memory.status = MemoryStatus.DELETED
     write_service.sync_memory(memory, remove=True)
+    try:
+        from memoryhub.storage.database import FactSemanticRepository
+        FactSemanticRepository(getattr(request.app.state, "db")).set_binding_status(fact_id, "deleted")
+    except Exception:
+        pass
     return {"deleted": True, "fact_id": fact_id}
 @router.post("/admin/reconcile")
 async def reconcile_memory_indexes(request: Request):
@@ -1635,6 +1667,21 @@ class FactProposeRequest(BaseModel):
     triples: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class FactDecideRequest(BaseModel):
+    """Resolve one persisted FACT conflict or entity-resolution task."""
+    user_id: str = "default"
+    memory_id: str
+    action: str
+    subject: str | None = None
+    predicate: str | None = None
+    object_value: str | None = None
+    subject_id: str | None = None
+    predicate_id: str | None = None
+    object_id: str | None = None
+    reason: str = ""
+    expected_version: int | None = None
+
+
 @router.post("/forget/preview", response_model=ForgetPreviewResponse)
 async def preview_forget(
     req: ForgetRequest,
@@ -1678,8 +1725,11 @@ async def propose_facts(req: FactProposeRequest, request: Request):
     from memoryhub.adapter.schemas import KnowledgeType, SceneScope
 
     know_repo = getattr(request.app.state, "know_repo", None)
+    from memoryhub.core.knowledge.updater import KnowledgeUpdater
+    fact_updater = KnowledgeUpdater(write_service=write_service)
     created: list[dict] = []
     failed: list[dict] = []
+    pending: list[dict] = []
     for raw in req.triples:
         triple_data = dict(raw)
         subject = str(triple_data.get("subject_text") or triple_data.get("subject") or "").strip()
@@ -1708,24 +1758,27 @@ async def propose_facts(req: FactProposeRequest, request: Request):
             object_type=str(triple_data.get("object_type") or "Other"),
             scope=scope,
             confidence=float(triple_data.get("confidence") or 0.9),
+            extra_payload={
+                "project_id": req.project_id or "",
+                "fact_source_id": req.source_id,
+                "subject_type": str(triple_data.get("subject_type") or "Other"),
+            },
         )
         try:
-            # upsert_memory 经 Domain Writer 事务写入；失败以抛异常或回读缺失呈现
-            # （无 domain_writer 时 receipt 为 None，repo.save 已执行，故以回读为准）
-            write_service.upsert_memory(memory, skip_write_gate=True)
+            result_id = fact_updater.add(memory, skip_write_gate=True)
             stored = (
-                know_repo.get_by_id(memory.memory_id)
+                know_repo.get_by_id(result_id)
                 if know_repo is not None
                 else memory
             )
             if stored is None:
                 failed.append({**entry, "reason": "write not persisted (read-back miss)"})
                 continue
-            created.append(
-                _fact_memory_to_dict(
-                    stored if isinstance(stored, KnowledgeMemory) else memory
-                )
-            )
+            view = _fact_memory_to_dict(stored if isinstance(stored, KnowledgeMemory) else memory)
+            if stored.status == MemoryStatus.PENDING:
+                pending.append(view)
+            else:
+                created.append(view)
         except Exception as exc:  # noqa: BLE001 —— 单条失败不阻断其余三元组
             logger.warning(
                 "facts/propose: upsert failed for triple %s %s %s: %s",
@@ -1737,7 +1790,101 @@ async def propose_facts(req: FactProposeRequest, request: Request):
             failed.append(
                 {**entry, "reason": f"{type(exc).__name__}: {exc}"}
             )
-    return {"created": created, "failed": failed}
+    return {"created": created, "pending": pending, "failed": failed}
+
+
+@router.post("/facts/decide")
+async def decide_fact(req: FactDecideRequest, request: Request):
+    """Apply an explicit FACT decision through the same writer as automatic writes."""
+    repo = getattr(request.app.state, "know_repo", None)
+    writer = getattr(request.app.state, "memory_write_service", None)
+    if repo is None or writer is None:
+        raise HTTPException(status_code=503, detail="fact services not initialized")
+    memory = repo.get_by_id(req.memory_id)
+    if memory is None or memory.user_id != req.user_id or getattr(memory.knowledge_type, "value", str(memory.knowledge_type)) != "fact":
+        raise HTTPException(status_code=404, detail="fact proposal not found")
+    if memory.status != MemoryStatus.PENDING:
+        raise HTTPException(status_code=409, detail="fact.decision_stale")
+    task = (memory.extra_payload or {}).get("fact_decision_task", {}) or {}
+    if req.expected_version is not None and req.expected_version != memory.version:
+        raise HTTPException(status_code=409, detail="fact.decision_stale")
+    action = req.action.casefold()
+    if action in {"reject", "keep_old"}:
+        memory.status = MemoryStatus.DELETED
+        memory.extra_payload = {**(memory.extra_payload or {}), "fact_decision": {"action": action, "reason": req.reason}}
+        writer.upsert_memory(memory, action="reject", skip_write_gate=True)
+        try:
+            from memoryhub.storage.database import FactSemanticRepository
+            FactSemanticRepository(getattr(request.app.state, "db")).resolve_decision(
+                f"fact-decision:{memory.memory_id}", status="rejected", reason=req.reason
+            )
+        except Exception:
+            pass
+        return {"status": "rejected", "memory_id": memory.memory_id}
+    if action not in {"replace", "merge", "coexist"}:
+        raise HTTPException(status_code=400, detail="unsupported fact decision")
+    if req.subject is not None:
+        memory.subject = req.subject
+    if req.predicate is not None:
+        memory.predicate = req.predicate
+    if req.object_value is not None:
+        memory.object_value = req.object_value
+    memory.content = f"{memory.subject} {memory.predicate} {memory.object_value}".strip()
+    conflict_ids = ((memory.extra_payload or {}).get("fact_decision_task", {}) or {}).get("existing_memory_ids", [])
+    old = repo.get_by_id(conflict_ids[0]) if conflict_ids else None
+    from memoryhub.core.knowledge.updater import KnowledgeUpdater
+    updater = KnowledgeUpdater(write_service=writer)
+    semantic = (
+        updater.fact_semantics.prepare(
+            memory,
+            selected_subject_id=req.subject_id,
+            selected_predicate_id=req.predicate_id,
+            selected_object_id=req.object_id,
+        )
+        if updater.fact_semantics is not None else None
+    )
+    if semantic is not None and semantic.relation == "DECISION_REQUIRED":
+        raise HTTPException(status_code=409, detail="fact.decision_requires_selection")
+    if semantic is not None and semantic.relation == "CONFLICT" and action != "replace":
+        raise HTTPException(status_code=409, detail="fact.decision_invalid_action")
+    same_scope = True
+    if old is not None and updater.fact_semantics is not None:
+        same_scope = updater.fact_semantics._scope(memory) == updater.fact_semantics._scope(old)
+    if action == "replace" and old is not None and same_scope:
+        old.status = MemoryStatus.ARCHIVED
+        writer.upsert_memory(old, action="supersede", skip_write_gate=True)
+        try:
+            from memoryhub.storage.database import FactSemanticRepository
+            FactSemanticRepository(getattr(request.app.state, "db")).set_binding_status(old.memory_id, "archived")
+        except Exception:
+            pass
+        memory.parent_id = old.memory_id
+        memory.version = max(1, old.version) + 1
+    if semantic is not None:
+        memory.extra_payload = {
+            **(memory.extra_payload or {}),
+            "fact_semantic": {
+                "subject_id": semantic.subject_id,
+                "predicate_id": semantic.predicate_id,
+                "object_id": semantic.object_id,
+                "scope": updater.fact_semantics._scope(memory),
+            },
+        }
+    memory.status = MemoryStatus.ACTIVE
+    writer_action = {"replace": "supersede", "merge": "revise", "coexist": "coexist"}[action]
+    writer.upsert_memory(memory, action=writer_action, skip_write_gate=True)
+    if semantic is not None:
+        updater.fact_semantics.bind(memory, semantic)
+    try:
+        from memoryhub.storage.database import FactSemanticRepository
+        semantic_repo = FactSemanticRepository(getattr(request.app.state, "db"))
+        semantic_repo.resolve_decision(
+            f"fact-decision:{memory.memory_id}", status="committed",
+            result_memory_id=memory.memory_id, reason=req.reason
+        )
+    except Exception:
+        pass
+    return {"status": "committed", "memory_id": memory.memory_id, "action": action}
 
 
 def _fact_sha256(subject: str, predicate: str, obj: str) -> str:

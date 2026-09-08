@@ -32,6 +32,10 @@ from memoryhub.storage.models import (
     Base,
     ConflictRow,
     EventRow,
+    FactBindingRow,
+    FactDecisionRow,
+    FactEntityRow,
+    FactPredicateRow,
     ExtractionTaskRow,
     ForgetRow,
     KnowledgeRow,
@@ -40,6 +44,7 @@ from memoryhub.storage.models import (
     PreferenceRow,
     ShortTermMemoryRow,
 )
+from memoryhub.core.fact.models import Entity, PredicateDef
 
 # ============================================================
 # 数据库管理器
@@ -1808,3 +1813,177 @@ class MidTermMemoryRepository:
             "last_accessed_at": row.last_accessed_at, "decay_score": row.decay_score,
             "status": row.status, "created_at": row.created_at,
         }
+
+
+class FactSemanticRepository:
+    """SQLAlchemy adapter for fact semantic metadata.
+
+    KnowledgeRow remains the source of truth for the memory itself; these
+    tables only store entity/predicate identity and a binding for deterministic
+    conflict checks.
+    """
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    @staticmethod
+    def _entity(row: FactEntityRow) -> Entity:
+        return Entity(row.entity_id, row.canonical_name, row.entity_type,
+                      list(row.aliases or []), row.user_id, row.tenant_id)
+
+    @staticmethod
+    def _predicate(row: FactPredicateRow) -> PredicateDef:
+        return PredicateDef(
+            predicate_id=row.predicate_id, canonical_name=row.canonical_name,
+            aliases=list(row.aliases or []), domain=list(row.domain or []),
+            range=list(row.range or []), single_value=bool(row.single_value),
+            inverse_of=row.inverse_of, symmetric=bool(row.symmetric),
+            irreflexive=bool(row.irreflexive),
+            object_single_value=bool(row.object_single_value),
+            exclusive_with=list(row.exclusive_with or []), acyclic=bool(row.acyclic),
+        )
+
+    def get_entity(self, entity_id: str, tenant_id: str = "default", user_id: str = "default"):
+        with self.db.session() as s:
+            row = s.query(FactEntityRow).filter_by(
+                entity_id=entity_id, tenant_id=tenant_id, user_id=user_id
+            ).one_or_none()
+            return self._entity(row) if row else None
+
+    def list_entities(self, tenant_id: str, user_id: str, entity_type: str = ""):
+        with self.db.session() as s:
+            q = s.query(FactEntityRow).filter_by(tenant_id=tenant_id, user_id=user_id)
+            if entity_type and entity_type != "Other":
+                q = q.filter_by(entity_type=entity_type)
+            return [self._entity(r) for r in q.order_by(FactEntityRow.entity_id).all()]
+
+    def find_entities(self, text: str, tenant_id: str, user_id: str, entity_type: str = ""):
+        needle = str(text).casefold().strip()
+        return [e for e in self.list_entities(tenant_id, user_id, entity_type)
+                if e.canonical_name.casefold() == needle
+                or any(str(a).casefold() == needle for a in e.aliases)]
+
+    @staticmethod
+    def entity_dict(entity: Entity) -> dict:
+        return {"entity_id": entity.entity_id, "canonical_name": entity.canonical_name,
+                "entity_type": entity.entity_type, "aliases": list(entity.aliases)}
+
+    def save_entity(self, entity: Entity) -> None:
+        with self.db.session() as s:
+            row = s.get(FactEntityRow, entity.entity_id)
+            if row is None:
+                row = FactEntityRow(entity_id=entity.entity_id)
+                s.add(row)
+            row.tenant_id, row.user_id = entity.tenant_id, entity.user_id
+            row.canonical_name, row.entity_type, row.aliases = (
+                entity.canonical_name, entity.entity_type, list(dict.fromkeys(entity.aliases))
+            )
+
+    def add_alias(self, entity_id: str, alias: str, tenant_id: str, user_id: str) -> None:
+        with self.db.session() as s:
+            row = s.query(FactEntityRow).filter_by(
+                entity_id=entity_id, tenant_id=tenant_id, user_id=user_id
+            ).one_or_none()
+            if row is not None and alias not in (row.aliases or []):
+                row.aliases = [*(row.aliases or []), alias]
+
+    def get_predicate(self, predicate_id: str):
+        with self.db.session() as s:
+            row = s.get(FactPredicateRow, predicate_id)
+            return self._predicate(row) if row else None
+
+    def list_predicates(self):
+        with self.db.session() as s:
+            return [self._predicate(r) for r in s.query(FactPredicateRow).all()]
+
+    def find_predicates(self, text: str):
+        needle = str(text).casefold().strip()
+        return [p for p in self.list_predicates()
+                if p.canonical_name.casefold() == needle
+                or any(str(a).casefold() == needle for a in p.aliases)]
+
+    @staticmethod
+    def predicate_dict(pred: PredicateDef) -> dict:
+        return {"predicate_id": pred.predicate_id, "canonical_name": pred.canonical_name,
+                "aliases": list(pred.aliases), "single_value": pred.single_value}
+
+    def save_predicate(self, pred: PredicateDef) -> None:
+        with self.db.session() as s:
+            row = s.get(FactPredicateRow, pred.predicate_id)
+            if row is None:
+                row = FactPredicateRow(predicate_id=pred.predicate_id)
+                s.add(row)
+            for field in ("canonical_name", "aliases", "domain", "range", "single_value",
+                          "inverse_of", "symmetric", "irreflexive", "object_single_value",
+                          "exclusive_with", "acyclic"):
+                setattr(row, field, getattr(pred, field))
+
+    def add_predicate_alias(self, predicate_id: str, alias: str) -> None:
+        pred = self.get_predicate(predicate_id)
+        if pred is not None and alias not in pred.aliases:
+            pred.aliases.append(alias)
+            self.save_predicate(pred)
+
+    def bind(self, memory, *, tenant_id: str, scope: str,
+             subject_id: str, predicate_id: str, object_id: str) -> None:
+        with self.db.session() as s:
+            row = s.get(FactBindingRow, memory.memory_id)
+            if row is None:
+                row = FactBindingRow(memory_id=memory.memory_id)
+                s.add(row)
+            row.tenant_id, row.user_id = tenant_id, memory.user_id
+            row.subject_id, row.predicate_id, row.object_id = subject_id, predicate_id, object_id
+            row.object_value, row.scope = memory.object_value, scope
+            row.project_id = ((getattr(memory, "extra_payload", {}) or {}).get("project_id")
+                              or (scope.split(":", 1)[1] if scope.startswith("project:") else None))
+            row.version, row.status = memory.version, "active"
+
+    def list_bindings(self, user_id: str, tenant_id: str, scope: str):
+        with self.db.session() as s:
+            q = s.query(FactBindingRow).filter_by(user_id=user_id, tenant_id=tenant_id, status="active")
+            if scope.startswith("project:"):
+                q = q.filter(FactBindingRow.scope.in_(["global", scope]))
+            else:
+                q = q.filter(FactBindingRow.scope == "global")
+            rows = q.all()
+            return rows
+
+    def set_binding_status(self, memory_id: str, status: str) -> None:
+        with self.db.session() as s:
+            row = s.get(FactBindingRow, memory_id)
+            if row is not None:
+                row.status = status
+                row.updated_at = datetime.now()
+
+    def save_decision(self, *, decision_id: str, tenant_id: str, user_id: str,
+                      memory_id: str, task_type: str, payload: dict,
+                      expected_version: int = 1) -> None:
+        with self.db.session() as s:
+            row = s.get(FactDecisionRow, decision_id)
+            if row is None:
+                row = FactDecisionRow(decision_id=decision_id)
+                s.add(row)
+            row.tenant_id, row.user_id = tenant_id, user_id
+            row.memory_id, row.task_type = memory_id, task_type
+            row.payload, row.expected_version = payload, expected_version
+            row.status = "pending"
+
+    def list_decisions(self, *, tenant_id: str, user_id: str, status: str = "pending") -> list[dict]:
+        with self.db.session() as s:
+            rows = s.query(FactDecisionRow).filter_by(
+                tenant_id=tenant_id, user_id=user_id, status=status
+            ).order_by(FactDecisionRow.created_at.desc()).all()
+            return [{"decision_id": r.decision_id, "memory_id": r.memory_id,
+                     "task_type": r.task_type, "payload": r.payload or {},
+                     "expected_version": r.expected_version, "status": r.status}
+                    for r in rows]
+
+    def resolve_decision(self, decision_id: str, *, status: str,
+                         result_memory_id: str = "", reason: str = "") -> bool:
+        with self.db.session() as s:
+            row = s.get(FactDecisionRow, decision_id)
+            if row is None:
+                return False
+            row.status, row.result_memory_id, row.reason = status, result_memory_id, reason
+            row.resolved_at = datetime.now()
+            return True

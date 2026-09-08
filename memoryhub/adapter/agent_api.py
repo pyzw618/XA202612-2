@@ -17,6 +17,7 @@ from memoryhub.adapter.schemas import (
     ForgetRequest,
     KnowledgeMemory,
     KnowledgeType,
+    MemoryStatus,
     MemoryEvent,
     SceneScope,
     SearchRequest,
@@ -463,7 +464,14 @@ async def decide_agent_action(
 ):
     """接收用户裁决，由 Agent 适配层执行相应 MemoryHub 操作。"""
     if body.action_type == "fact_reject":
-        return {"action_id": action_id, "status": "rejected"}
+        from memoryhub.adapter.api import FactDecideRequest, decide_fact
+        payload = body.payload or {}
+        result = await decide_fact(
+            FactDecideRequest(user_id=str(payload.get("user_id", "default")),
+                              memory_id=action_id, action="reject",
+                              reason=str(payload.get("reason", ""))), request
+        )
+        return {"action_id": action_id, **result}
 
     if body.action_type == "fact_commit":
         write_service = getattr(request.app.state, "memory_write_service", None)
@@ -471,6 +479,22 @@ async def decide_agent_action(
             raise HTTPException(status_code=503, detail="memory write service not initialized")
         payload = body.payload or {}
         user_id = str(payload.get("user_id", "default"))
+        # A pending fact decision is resumed through the canonical fact endpoint.
+        fact_repo = getattr(request.app.state, "know_repo", None)
+        pending = fact_repo.get_by_id(action_id) if fact_repo is not None else None
+        if pending is not None and pending.user_id == user_id and pending.status == MemoryStatus.PENDING:
+            from memoryhub.adapter.api import FactDecideRequest, decide_fact
+            result = await decide_fact(
+                FactDecideRequest(
+                    user_id=user_id, memory_id=action_id,
+                    action=str(payload.get("action") or "replace"),
+                    subject=payload.get("subject") or payload.get("subject_text"),
+                    predicate=payload.get("predicate") or payload.get("predicate_text"),
+                    object_value=payload.get("object") or payload.get("object_text"),
+                    reason=str(payload.get("reason", "")),
+                ), request
+            )
+            return {"action_id": action_id, **result}
         memory = KnowledgeMemory(
             user_id=user_id,
             knowledge_type=KnowledgeType.FACT,
@@ -479,7 +503,8 @@ async def decide_agent_action(
             object_value=str(payload.get("object") or payload.get("object_text") or ""),
             object_type=str(payload.get("object_type") or ""),
         )
-        write_service.upsert_memory(memory, skip_write_gate=True)
+        from memoryhub.core.knowledge.updater import KnowledgeUpdater
+        KnowledgeUpdater(write_service=write_service).add(memory, skip_write_gate=True)
         return {
             "action_id": action_id,
             "status": "committed",
