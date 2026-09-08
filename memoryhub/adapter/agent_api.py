@@ -11,6 +11,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
+from memoryhub import __version__
 from memoryhub.adapter.api import _to_memory_event_contract
 from memoryhub.adapter.schemas import (
     EventProcessingSummary,
@@ -44,7 +45,7 @@ async def root_health_check():
     return {
         "status": "ok",
         "service": "Kylin-MemoryHub",
-        "version": "0.1.0",
+        "version": __version__,
     }
 
 
@@ -111,8 +112,8 @@ async def clear_demo_data(request: Request, user_id: str = "default"):
             ("forget_history", ForgetRow),
             ("extraction_tasks", ExtractionTaskRow),
         ]:
-            counts[name] = s.query(model).filter(model.user_id == user_id).delete(
-                synchronize_session=False
+            counts[name] = (
+                s.query(model).filter(model.user_id == user_id).delete(synchronize_session=False)
             )
 
     # 清空向量索引与进程内检索投影，避免检索返回已删除的“幽灵”记忆
@@ -359,9 +360,7 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
     selected = rollout.read(
         vnext_request,
         legacy_reader=lambda _request: (
-            legacy_retriever.search(legacy_request)
-            if legacy_retriever is not None
-            else None
+            legacy_retriever.search(legacy_request) if legacy_retriever is not None else None
         ),
         vnext_reader=lambda value: retrieval_service.search(value),
     )
@@ -381,7 +380,9 @@ async def execute_agent_step(body: AgentStepRequest, request: Request):
         content = dict(item.content or {})
         memory_type = getattr(item.memory_type, "value", str(item.memory_type)).lower()
         is_preference = memory_type == "preference"
-        title = content.get("name", item.memory_id) if not is_preference else content.get("text", "")
+        title = (
+            content.get("name", item.memory_id) if not is_preference else content.get("text", "")
+        )
         summary = content.get("text", "") if is_preference else content.get("content", "")
         if not summary:
             summary = content.get("object_value", "") or content.get("source_text", "")

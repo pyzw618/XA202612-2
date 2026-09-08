@@ -120,15 +120,21 @@ def put_lineage(conn: sqlite3.Connection, item: dict[str, Any]) -> bool:
     return (
         conn.execute(
             """INSERT OR IGNORE INTO memory_lineage
-        (lineage_id,memory_id,memory_type,parent_memory_id,root_memory_id,semantic_version,evidence_revision,transition_action,created_at)
-        VALUES (?,?,?,?,?,?,?,?,?)""",
+        (lineage_id,tenant_id,user_id,memory_id,memory_type,parent_memory_id,
+         root_memory_id,semantic_version,content_version,schema_version,
+         evidence_revision,transition_action,created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 item["lineage_id"],
+                item["tenant_id"],
+                item["user_id"],
                 item["memory_id"],
                 item["memory_type"],
                 item["parent_memory_id"],
                 item["root_memory_id"],
                 item["semantic_version"],
+                item["content_version"],
+                item["schema_version"],
                 1,
                 item["transition_action"],
                 item["created_at"],
@@ -142,14 +148,20 @@ def put_evidence(conn: sqlite3.Connection, item: dict[str, Any]) -> bool:
     return (
         conn.execute(
             """INSERT OR IGNORE INTO memory_evidence
-        (evidence_id,memory_id,memory_type,event_id,source_hash,source_type,excerpt,occurred_at,quality_score,safety_audit_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (evidence_id,tenant_id,user_id,memory_id,memory_type,event_id,source_hash,
+         schema_version,content_version,source_type,excerpt,occurred_at,
+         quality_score,safety_audit_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 item["evidence_id"],
+                item["tenant_id"],
+                item["user_id"],
                 item["memory_id"],
                 item["memory_type"],
                 item["event_id"],
                 item["source_hash"],
+                item["schema_version"],
+                item["content_version"],
                 item["source_type"],
                 item["excerpt"],
                 item["occurred_at"],
@@ -192,9 +204,13 @@ def migrate_domain(
             "lineage_id": lineage_id(memory_id, memory_type, version, root_id),
             "memory_id": memory_id,
             "memory_type": memory_type,
+            "tenant_id": "default",
+            "user_id": user_id,
             "parent_memory_id": parent_id,
             "root_memory_id": root_id,
             "semantic_version": version,
+            "content_version": version,
+            "schema_version": "vnext/v1",
             "transition_action": "new" if parent_id is None else "supersede",
             "created_at": str(row["created_at"] or now()),
         }
@@ -233,8 +249,12 @@ def migrate_domain(
                 "evidence_id": evidence_id(memory_id, event_id, source_hash),
                 "memory_id": memory_id,
                 "memory_type": memory_type,
+                "tenant_id": "default",
+                "user_id": user_id,
                 "event_id": event_id,
                 "source_hash": source_hash,
+                "schema_version": "vnext/v1",
+                "content_version": version,
                 "source_type": source_type,
                 "excerpt": excerpt[:1000],
                 "occurred_at": str(evidence.get("timestamp") or now()),
@@ -324,8 +344,7 @@ def main() -> int:
         if args.dry_run:
             target = owners
         owner_match = {
-            kind: dict(owners[kind]) == dict(target[kind])
-            for kind in ("preference", "knowledge")
+            kind: dict(owners[kind]) == dict(target[kind]) for kind in ("preference", "knowledge")
         }
         report = {
             "migration": MIGRATION_NAME,

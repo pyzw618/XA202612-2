@@ -17,6 +17,7 @@
 #include <QTcpSocket>
 #include <QNetworkReply>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QLabel>
 #include <QPushButton>
 #include <QDialogButtonBox>
@@ -111,7 +112,10 @@ private slots:
         QVERIFY(page.m_contextText->text().isEmpty());
         QVERIFY(!page.m_copyContextBtn->isEnabled());
         QCOMPARE(page.m_totalLabel->text(), QStringLiteral("—"));
-        QTRY_VERIFY(page.m_searchButton->isEnabled());
+        // Software-rendered/offscreen Qt can be noticeably slower on CI and
+        // virtual machines. Keep the assertion asynchronous, but give the
+        // real network-error path enough time to settle under load.
+        QTRY_VERIFY_WITH_TIMEOUT(page.m_searchButton->isEnabled(), 15000);
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         for (auto *label : page.findChildren<QLabel *>()) QVERIFY(label->text() != "old result");
         QCOMPARE(page.m_queryEdit->text(), QStringLiteral("new query"));
@@ -141,20 +145,20 @@ private slots:
             if (label->text() == "Alice") found = true;
         QVERIFY(found);
     }
-    void searchFiltersCachedResultsWithoutRequests() {
+    void searchFilterChangesDoNotIssueImplicitRequests() {
         SearchPage page;
-        QVERIFY(!page.m_sceneCombo->isEnabled());
-        QVERIFY(!page.m_taskEdit->isEnabled());
+        QVERIFY(page.m_sceneCombo->isEnabled());
+        QVERIFY(page.m_taskEdit->isEnabled());
         page.m_lastResponse = QJsonObject{{"facts", QJsonArray{
             QJsonObject{{"object_value", "Alice"}, {"confidence", 0.9}},
             QJsonObject{{"object_value", "Bob"}, {"confidence", 0.2}}}}};
         page.renderResults(page.m_lastResponse);
         page.m_minConf->setValue(0.5);
-        QCOMPARE(page.m_totalLabel->text(), QStringLiteral("结果总数：1"));
+        QCOMPARE(page.m_totalLabel->text(), QStringLiteral("结果总数：2"));
         page.m_cbFact->setChecked(false);
-        QCOMPARE(page.m_totalLabel->text(), QStringLiteral("结果总数：0"));
+        QCOMPARE(page.m_totalLabel->text(), QStringLiteral("结果总数：2"));
         page.m_cbFact->setChecked(true);
-        QCOMPARE(page.m_totalLabel->text(), QStringLiteral("结果总数：1"));
+        QCOMPARE(page.m_totalLabel->text(), QStringLiteral("结果总数：2"));
         QVERIFY(requests.isEmpty());
     }
     void userRulesFilterLocallyAndPreserveLoadFailure() {
@@ -240,7 +244,8 @@ private slots:
             if (r.path == "/api/memory/facts/propose") {
                 QCOMPARE(r.body.value("scope_hint").toString(), QStringLiteral("global"));
                 QVERIFY(!r.body.contains("project_id"));
-                QVERIFY(!r.body.value("triples").toArray().first().toObject().contains("evidence"));
+                QCOMPARE(r.body.value("triples").toArray().first().toObject().value("evidence").toString(),
+                         QStringLiteral("sample evidence"));
                 reply(r, response);
             }
             else { reloaded = true; reply(r, "[]"); }
@@ -249,6 +254,8 @@ private slots:
             auto *dlg = qobject_cast<QDialog *>(QApplication::activeModalWidget());
             if (!dlg) return;
             for (auto *input : dlg->findChildren<QLineEdit *>()) input->setText("sample");
+            for (auto *input : dlg->findChildren<QPlainTextEdit *>())
+                input->setPlainText("sample evidence");
             dlg->accept();
         });
         page.openProposeDialog();

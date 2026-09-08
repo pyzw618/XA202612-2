@@ -77,7 +77,7 @@ def test_health_endpoint_is_minimal_and_ready(client):
     assert response.json() == {
         "status": "ok",
         "service": "Kylin-MemoryHub",
-        "version": "0.1.0",
+        "version": "2.0.0",
     }
 
 
@@ -220,6 +220,7 @@ def test_fact_propose_is_visible_to_same_user_and_dashboard_query(client):
                     "subject_text": "MemoryHub",
                     "predicate_text": "runs_on",
                     "object_text": "Kylin",
+                    "evidence": "MemoryHub runs on Kylin",
                     "confidence": 1.0,
                 }
             ],
@@ -230,9 +231,12 @@ def test_fact_propose_is_visible_to_same_user_and_dashboard_query(client):
     assert response.json()["created"][0]["user_id"] == "ethan"
     assert response.json()["failed"] == []
 
-    assert test_client.get(
-        "/api/memory/facts", params={"user_id": "default", "status": "active"}
-    ).json() == []
+    assert (
+        test_client.get(
+            "/api/memory/facts", params={"user_id": "default", "status": "active"}
+        ).json()
+        == []
+    )
     facts = test_client.get(
         "/api/memory/facts", params={"user_id": "ethan", "status": "active"}
     ).json()
@@ -325,9 +329,18 @@ def test_agent_step_extracts_memory_from_raw_dialogue_and_retrieves_it(client):
 
 def test_long_demo_builds_memory_across_one_multi_turn_session(client):
     test_client, _ = client
-    replay_path = Path(__file__).parents[1] / "frontend" / "public" / "examples" / "memory-system-long-replay.json"
+    replay_path = (
+        Path(__file__).parents[1]
+        / "frontend"
+        / "public"
+        / "examples"
+        / "memory-system-long-replay.json"
+    )
     if not replay_path.exists():
-        pytest.skip("missing long-demo replay fixture: frontend/public/examples/memory-system-long-replay.json")
+        pytest.skip(
+            "missing long-demo replay fixture: "
+            "frontend/public/examples/memory-system-long-replay.json"
+        )
     replay = json.loads(replay_path.read_text(encoding="utf-8"))
     events_by_turn = {event["turn_id"]: [event] for event in replay["events"]}
 
@@ -352,8 +365,12 @@ def test_long_demo_builds_memory_across_one_multi_turn_session(client):
     assert len(responses[0]["processing"]["preferences_written"]) == 3
     assert any(item["memory_type"] == "preference" for item in responses[1]["candidate_memories"])
     assert any(responses[4]["processing"]["knowledge_written"])
-    assert any(item.get("knowledge_type") == "workflow" for item in responses[5]["candidate_memories"])
-    assert any(item.get("knowledge_type") == "template" for item in responses[7]["candidate_memories"])
+    assert any(
+        item.get("knowledge_type") == "workflow" for item in responses[5]["candidate_memories"]
+    )
+    assert any(
+        item.get("knowledge_type") == "template" for item in responses[7]["candidate_memories"]
+    )
     assert len(responses[8]["fact_proposals"]) == 2
 
 

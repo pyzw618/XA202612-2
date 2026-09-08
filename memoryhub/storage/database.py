@@ -11,7 +11,7 @@ import os
 import re
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import create_engine, func, or_
 from sqlalchemy.orm import Session, sessionmaker
@@ -40,6 +40,7 @@ from memoryhub.storage.models import (
     PreferenceRow,
     ShortTermMemoryRow,
 )
+from memoryhub.storage.sqlite_lock import sqlite_database_lock
 
 # ============================================================
 # 数据库管理器
@@ -60,6 +61,7 @@ class Database:
 
     def __init__(self, db_path: str = "data/memoryhub.db"):
         self.db_path = db_path
+        self._lock = sqlite_database_lock(db_path)
         self.engine = None
         self.session_factory = None
 
@@ -76,12 +78,17 @@ class Database:
         self.engine = create_engine(
             f"sqlite:///{self.db_path}",
             echo=False,
-            connect_args={"check_same_thread": False},
+            # The desktop service has several short-lived background writers
+            # (projection repair, lifecycle consolidation and API requests).
+            # Give SQLite enough time to serialize those writers instead of
+            # surfacing transient ``database is locked`` errors to users.
+            connect_args={"check_same_thread": False, "timeout": 30.0},
         )
         # WAL 模式 — 读写不互斥
         with self.engine.connect() as conn:
             conn.exec_driver_sql("PRAGMA journal_mode=WAL")
             conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+            conn.exec_driver_sql("PRAGMA busy_timeout=30000")
 
         Base.metadata.create_all(self.engine)
         self._ensure_compatible_schema()
@@ -373,15 +380,19 @@ class Database:
         """
         if self.session_factory is None:
             raise RuntimeError("数据库未初始化，请先调用 init_schema()")
-        s = self.session_factory()
-        try:
-            yield s
-            s.commit()
-        except Exception:
-            s.rollback()
-            raise
-        finally:
-            s.close()
+        # Multiple adapters and background workers may own distinct engines
+        # for this file.  SQLite allows one writer, so keep the full transaction
+        # inside the process-wide per-file lock.
+        with self._lock:
+            s = self.session_factory()
+            try:
+                yield s
+                s.commit()
+            except Exception:
+                s.rollback()
+                raise
+            finally:
+                s.close()
 
     def close(self) -> None:
         """关闭数据库连接。"""

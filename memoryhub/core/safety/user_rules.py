@@ -41,6 +41,7 @@ from memoryhub.adapter.schemas import (
     SensitiveRule,
 )
 from memoryhub.safety_rules.regex_safety import validate_regex_safety
+from memoryhub.storage.sqlite_lock import sqlite_database_lock
 
 if TYPE_CHECKING:
     from memoryhub.config import SafetyConfig
@@ -327,7 +328,7 @@ class SQLiteUserRuleRepository:
             self._connection.execute("PRAGMA busy_timeout = 5000")
         except (OSError, TypeError, ValueError, sqlite3.Error):
             raise UserRuleError("user_rule.storage_error") from None
-        self._lock = threading.RLock()
+        self._lock = sqlite_database_lock(database_path)
         self._closed = False
         self._initialize_schema()
 

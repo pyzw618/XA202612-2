@@ -89,6 +89,12 @@ class RetrievalPlanner:
     ) -> RetrievalPlan:
         """Create a recall plan from a vNext request and its routed intent."""
         requested_channels = list(self._INTENT_CHANNELS.get(routed.intent, list(self.ALL_CHANNELS)))
+        # The legacy REST/MCP contract already enters vNext through a composite
+        # legacy retriever exposed as the vector channel. Running all vNext
+        # channels again changes projection and filtering semantics, so keep
+        # that compatibility request on its single delegated channel.
+        if request.legacy_compatibility and "vector" in self.available_channels:
+            requested_channels = ["vector"]
 
         # Authority-checked consistency always adds an authority read.
         authority_checked = request.consistency is ConsistencyMode.AUTHORITY_CHECKED
@@ -114,12 +120,12 @@ class RetrievalPlanner:
         top_k = max(1, min(100, request.page_size))
         candidate_multiplier = 2
 
-        layers = list(routed.target_layers)
+        layers = list(request.requested_layers or routed.target_layers)
         if not layers:
             layers = self._default_layers_for_intent(routed.intent)
 
-        types = list(routed.target_types)
-        if request.memory_types:
+        types = list(request.requested_types or routed.target_types)
+        if request.memory_types and not request.requested_types:
             requested = {str(value).strip().lower() for value in request.memory_types}
             type_map = {
                 "preference": MemoryType.PREFERENCE,
@@ -154,9 +160,7 @@ class RetrievalPlanner:
         degraded = [ch for ch in requested if ch not in self.available_channels]
         return enabled, degraded
 
-    def _ensure_fallback_channels(
-        self, enabled: list[str], degraded: list[str]
-    ) -> list[str]:
+    def _ensure_fallback_channels(self, enabled: list[str], degraded: list[str]) -> list[str]:
         """For state/history queries, keep at least metadata + authority readable
         when those channels are actually available."""
         fallback = list(enabled)

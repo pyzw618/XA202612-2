@@ -83,23 +83,38 @@ def _memory_text(memory) -> str:
 
 def _memory_metadata(memory) -> dict:
     """检索结果随行的元数据（与 app.py 中 _VectorStoreSearchAdapter 的补全逻辑一致）"""
+    knowledge_fields = {}
+    if memory.memory_type == "knowledge":
+        knowledge_type = getattr(memory, "knowledge_type", "workflow")
+        knowledge_fields = {
+            "knowledge_type": getattr(knowledge_type, "value", knowledge_type),
+            "name": getattr(memory, "name", ""),
+            "knowledge_content": getattr(memory, "content", ""),
+            "steps": list(getattr(memory, "steps", []) or []),
+            "tools": list(getattr(memory, "tools", []) or []),
+            "template_body": getattr(memory, "template_body", ""),
+        }
     return {
         "memory_type": memory.memory_type,
         "user_id": memory.user_id,
         "content": _memory_text(memory),
         "confidence": memory.confidence,
-        "status": (
-            memory.status.value if hasattr(memory.status, "value") else str(memory.status)
-        ),
+        "status": (memory.status.value if hasattr(memory.status, "value") else str(memory.status)),
         "scope": (
             {"scope": memory.scope, "project_id": memory.project_id or ""}
-            if memory.memory_type == "fact" else memory.scope.model_dump()
+            if memory.memory_type == "fact"
+            else memory.scope.model_dump()
         ),
-        **({
-            "subject_id": memory.subject_id,
-            "predicate_id": memory.predicate_id,
-            "object_id": memory.object_id,
-        } if memory.memory_type == "fact" else {}),
+        **(
+            {
+                "subject_id": memory.subject_id,
+                "predicate_id": memory.predicate_id,
+                "object_id": memory.object_id,
+            }
+            if memory.memory_type == "fact"
+            else {}
+        ),
+        **knowledge_fields,
     }
 
 
@@ -227,7 +242,6 @@ class MilvusHybridRetriever:
                 vector_cache_hit=False,
             )
 
-
         # 4. 用与 C API 一致的 FNV-1a 规则构造稀疏向量
         t0 = time.perf_counter()
         sparse_terms = build_sparse_vector(normalized_query)
@@ -239,8 +253,22 @@ class MilvusHybridRetriever:
             # The installed vector engines only understand exact scalar filters.
             # Fetch enough candidates, then apply every request predicate against
             # authoritative metadata below, before slicing Top-K.
-            fetch_k = max(
-                search_request.top_k * max(self.config.candidate_multiplier, 10), 100
+            configured_fetch_k = search_request.top_k * self.config.candidate_multiplier
+            context = search_request.context
+            needs_post_filter_overfetch = bool(
+                search_request.memory_types
+                or search_request.min_confidence > 0
+                or search_request.scenes
+                or search_request.task_types
+                or search_request.project_id
+                or context.scene
+                or context.task_type
+                or context.app
+            )
+            fetch_k = (
+                max(configured_fetch_k, 100)
+                if needs_post_filter_overfetch
+                else configured_fetch_k
             )
             assert dense_vector is not None
             engine_filters: dict[str, Any] = {
@@ -427,16 +455,14 @@ class MilvusHybridRetriever:
         # 非生产模式也不允许降级时，同样抛出原始异常
         raise
 
-    def _to_search_result(
-        self, hit, timings: dict[str, float] | None = None
-    ) -> SearchResult:
+    def _to_search_result(self, hit, timings: dict[str, float] | None = None) -> SearchResult:
         """VectorSearchResult → adapter 的 SearchResult（source 固定为 hybrid）"""
         t0 = time.perf_counter()
         memory = self.memory_lookup.get(hit.memory_id)
         if timings is not None:
-            timings["sqlite_lookup_ms"] = timings.get("sqlite_lookup_ms", 0.0) + (
-                time.perf_counter() - t0
-            ) * 1000
+            timings["sqlite_lookup_ms"] = (
+                timings.get("sqlite_lookup_ms", 0.0) + (time.perf_counter() - t0) * 1000
+            )
         metadata = _memory_metadata(memory) if memory is not None else dict(hit.metadata)
         return SearchResult(
             memory_id=hit.memory_id,
@@ -454,9 +480,7 @@ class MilvusHybridRetriever:
         filtered = []
         for result in results:
             memory = self.memory_lookup.get(result.memory_id)
-            result_user_id = getattr(memory, "user_id", "") or result.metadata.get(
-                "user_id"
-            )
+            result_user_id = getattr(memory, "user_id", "") or result.metadata.get("user_id")
             if not result_user_id or result_user_id != request.user_id:
                 continue
             status = getattr(memory, "status", "") or result.metadata.get("status")
@@ -511,9 +535,9 @@ class MilvusHybridRetriever:
             result.memory_level = result.memory_level or "long"
             memory = self.memory_lookup.get(result.memory_id)
             if timings is not None:
-                timings["sqlite_lookup_ms"] = timings.get("sqlite_lookup_ms", 0.0) + (
-                    time.perf_counter() - t0
-                ) * 1000
+                timings["sqlite_lookup_ms"] = (
+                    timings.get("sqlite_lookup_ms", 0.0) + (time.perf_counter() - t0) * 1000
+                )
             if isinstance(memory, PreferenceMemory):
                 preferences.append(memory)
             elif isinstance(memory, KnowledgeMemory):
