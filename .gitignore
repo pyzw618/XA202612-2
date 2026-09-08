@@ -294,4 +294,6 @@ desktop-client/build-release/
 
 # ---- 评估测试临时产物 ----
 evaluation/results/*.db
+evaluation/results/runs.sqlite
+evaluation/results/reports/
 evaluation/results/rebuild_report*.json
