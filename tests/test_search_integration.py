@@ -133,3 +133,29 @@ def test_search_cache_hit(seeded_config):
     assert [p["memory_id"] for p in first["preferences"]] == [
         p["memory_id"] for p in second["preferences"]
     ]
+
+
+def test_frontend_and_default_mcp_search_return_same_memory_ids(seeded_config):
+    """MCP transport identity must not narrow the application scope."""
+    # These synthetic rows are deliberately written through the legacy
+    # repositories, so use the matching read authority for this parity test.
+    seeded_config.vnext.mode = "legacy"
+    with TestClient(create_app(seeded_config)) as client:
+        frontend = client.get(
+            "/api/memory/v2/search",
+            params={"user_id": "u1", "query": "周报", "top_k": 5},
+        ).json()
+        mcp = client.post(
+            "/api/memory/search",
+            json={
+                "user_id": "u1",
+                "query": "周报",
+                "top_k": 5,
+                "context": {"scene": "", "task_type": "", "app": ""},
+            },
+        ).json()
+
+    assert {item["memory_id"] for item in frontend["results"]} == {
+        item["memory_id"] for item in mcp["results"]
+    }
+    assert frontend["results"], "synthetic preference/workflow data must be recalled"

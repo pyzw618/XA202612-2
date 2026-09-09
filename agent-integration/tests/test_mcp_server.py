@@ -49,3 +49,20 @@ def test_tool_surface_and_safe_forget():
     }
     result = json.loads(registry.call("memoryhub_forget", {"instruction": "old"}))
     assert "preview" in result
+
+
+def test_search_does_not_apply_transport_name_as_app_scope():
+    registry = ToolRegistry(FakeClient(), McpConfig(user_id="alice", project_root="/tmp/project"))
+
+    default_result = json.loads(
+        registry.call("memoryhub_search", {"query": "AI 周报 写作习惯"})
+    )
+    assert default_result["payload"]["app"] == ""
+
+    scoped_result = json.loads(
+        registry.call(
+            "memoryhub_search",
+            {"query": "AI 周报 写作习惯", "app": "writer-agent"},
+        )
+    )
+    assert scoped_result["payload"]["app"] == "writer-agent"

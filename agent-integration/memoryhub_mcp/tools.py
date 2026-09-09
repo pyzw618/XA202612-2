@@ -36,7 +36,7 @@ class ToolRegistry:
         self._handlers[name] = handler
 
     def _register(self) -> None:
-        common = {"user_id": {"type": "string", "default": self.config.user_id}, "scene": {"type": "string"}, "task_type": {"type": "string"}, "project_id": {"type": "string"}}
+        common = {"user_id": {"type": "string", "default": self.config.user_id}, "scene": {"type": "string"}, "task_type": {"type": "string"}, "app": {"type": "string", "description": "Optional application scope; omitted means no app restriction."}, "project_id": {"type": "string"}}
         self._add("memoryhub_health", "Check whether the MemoryHub service is reachable.", {}, [], lambda _: self.client.health())
         self._add("memoryhub_search", "Search preference, knowledge and fact memories.", {"query": {"type": "string"}, "top_k": {"type": "integer", "default": 5}, "level": {"type": "string", "enum": ["short", "mid", "long", ""]}, **common}, ["query"], self._search)
         self._add("memoryhub_get_context", "Get prompt-ready memory context for the current task.", {"query": {"type": "string"}, "top_k": {"type": "integer", "default": 5}, "level": {"type": "string", "enum": ["short", "mid", "long", ""]}, **common}, ["query"], self._context)
@@ -75,7 +75,10 @@ class ToolRegistry:
             return _error(exc)
 
     def _payload(self, args: dict[str, Any]) -> dict[str, Any]:
-        return self.client.build_search_payload(user_id=str(args.get("user_id") or self.config.user_id), query=str(args.get("query") or ""), top_k=int(args.get("top_k") or 5), scene=str(args.get("scene") or ""), task_type=str(args.get("task_type") or ""), app="memoryhub-mcp", project_id=str(args.get("project_id") or ""), level=str(args.get("level") or ""), session_id=str(args.get("session_id") or ""))
+        # The MCP transport identity must not become a memory-scope filter.
+        # Desktop search leaves app empty, so MCP does the same unless the
+        # Agent explicitly requests an application-local search.
+        return self.client.build_search_payload(user_id=str(args.get("user_id") or self.config.user_id), query=str(args.get("query") or ""), top_k=int(args.get("top_k") or 5), scene=str(args.get("scene") or ""), task_type=str(args.get("task_type") or ""), app=str(args.get("app") or ""), project_id=str(args.get("project_id") or ""), level=str(args.get("level") or ""), session_id=str(args.get("session_id") or ""))
 
     def _search(self, args: dict[str, Any]) -> dict[str, Any]:
         return self.client.search(self._payload(args))
