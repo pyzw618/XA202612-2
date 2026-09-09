@@ -652,6 +652,55 @@ def test_preference_updater_persists_conflict_and_syncs_versions(
     assert conflicts[0].result_memory_id == result_id
 
 
+class _FixedActivePreferenceRepo:
+    """get_active 始终返回同一条旧偏好，用于复现"同一冲突对被反复检测"。"""
+
+    def __init__(self, memory: PreferenceMemory) -> None:
+        self.memory = memory
+
+    def get_active(self, user_id: str = "") -> list:
+        return [self.memory]
+
+    def get_by_id(self, memory_id: str):
+        return self.memory
+
+    def save(self, memory) -> None:  # noqa: ARG002 - 版本演进不参与本用例
+        return None
+
+
+def test_preference_conflict_record_is_idempotent(tmp_path: Path) -> None:
+    """同一冲突对重复检测只落一条记录（确定性 conflict_id，与知识侧对齐）。"""
+    conflict_repo = ConflictRepository(_db(tmp_path))
+    old = PreferenceMemory(
+        memory_id="pref_old_idem",
+        user_id="u1",
+        text="Use JSON",
+        payload={"target": "format", "value": "json"},
+        confidence=0.7,
+    )
+    updater = PreferenceUpdater(
+        pref_repo=_FixedActivePreferenceRepo(old),
+        conflict_repo=conflict_repo,
+    )
+    incoming = PreferenceMemory(
+        memory_id="pref_new_idem",
+        user_id="u1",
+        text="Use Markdown",
+        payload={"target": "format", "value": "markdown"},
+        confidence=0.95,
+        extract_source="explicit_feedback",
+    )
+
+    updater.add(incoming)
+    updater.add(incoming)
+
+    records = conflict_repo.list_all()
+    assert len(records) == 1
+    assert records[0].conflict_id.startswith("conf_pref_")
+    assert records[0].old_memory_id == "pref_old_idem"
+    assert records[0].new_memory_id == "pref_new_idem"
+
+
 def test_event_normalizer_emits_complete_schema_11_event() -> None:
     event = EventNormalizer().normalize(
         {

@@ -85,7 +85,7 @@
 
 - `vnext.formation_mode` 控制形成链姿态：`shadow`（只观察）/ `candidate-only`（产候选不固化）/ `authority`（默认，沉淀到长期 Authority）。
 - 标准写入口 `POST /api/memory/events` 与 `/sources/*` 在 `vnext.events_default=true`（默认）时路由到 vNext canonical write（`adapter/api.py:_should_use_canonical_write`）。
-- 决策面统一为 8 动作（new/update/duplicate/coexist/reject/review 等，`core/memory/base.py`），冲突消解矩阵在 `core/conflict/`。
+- 决策面统一为 8 动作（new/update/duplicate/coexist/reject/review 等，`core/memory/base.py`）；生产链路的冲突检测与消解矩阵在 `core/preference/updater.py`（偏好）与 `core/knowledge/updater.py`（知识/事实），`core/conflict/` 是并行的确定性实现，当前仅被测试引用。
 
 ## 4. 读取链路（Retrieval & Context）
 

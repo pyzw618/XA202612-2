@@ -72,8 +72,8 @@
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/conflicts` | 冲突列表 |
-| POST | `/conflicts/{conflict_id}/resolve` | 冲突消解（决策矩阵 + LLM 辅助） |
+| GET | `/conflicts` | 冲突列表。`status` 取 `pending`/`override`/`merge`/`coexist`（按 decision 精确匹配）或 `resolved`（等价于 `decision != pending`，即"已裁决"）；`memory_type` 过滤 `preference`/`knowledge`；传 `page`/`size` 返回 `{items,total,page,size}`，不传返回全量数组 |
+| POST | `/conflicts/{conflict_id}/resolve` | 冲突消解。默认只记录裁决结论（`override`/`merge`/`coexist`/`pending`）；`apply=true` 时按裁决实际修改记忆（override 归档旧记忆并生成新版本、merge 归档旧记忆并生成合并版本、coexist 两条并存），`pending` 不可落地 |
 | POST | `/feedback` | 记忆反馈 |
 | POST | `/forget` · `/forget/preview` | 精准遗忘 / 影响面预览 |
 | GET | `/forget/history` | 遗忘审计历史 |

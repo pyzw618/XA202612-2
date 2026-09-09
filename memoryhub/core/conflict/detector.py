@@ -1,4 +1,10 @@
-﻿"""Deterministic conflict detection for preference and knowledge memories."""
+﻿"""Deterministic conflict detection for preference and knowledge memories.
+
+注意：生产写入链路实际使用的是 ``core/preference/updater.py`` 与
+``core/knowledge/updater.py`` 内的冲突检测；本模块是并行的确定性实现，
+目前仅被测试引用，两者判定规则存在差异（例如本模块的兜底判定额外要求
+token 重合度，见 ``_semantic_contradiction``）。
+"""
 
 from __future__ import annotations
 
