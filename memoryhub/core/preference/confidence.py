@@ -102,23 +102,39 @@ class ConfidenceCalculator:
                 )
         return self.calculate(preference)
 
+    #: 已知来源的无证据基线。值与各自生产方构建偏好时显式设置的置信度意图一致：
+    #: workflow_miner 固定 0.8；tool_preference_miner 公式下限 0.6；
+    #: vnext_authority 来自治理流水线候选置信度（反射服务典型 0.85）。
+    BASELINE_BY_SOURCE = {
+        "explicit_feedback": 0.8,
+        "implicit_inference": 0.5,
+        "workflow_miner": 0.8,
+        "tool_preference_miner": 0.6,
+        "vnext_authority": 0.85,
+    }
+
     def _baseline_confidence(self, preference: PreferenceMemory) -> float:
         """无证据时的置信度基线：显式反馈置信度高，隐式推断置信度低。
 
         structured_agent_event（结构化代理事件）通常带 quality_score：
         用 0.55 + 0.35 * quality_score 派生基线，避免无证据时被打成恒定 0.5。
+
+        已知来源按 BASELINE_BY_SOURCE 分档；未知来源保留调用方显式设置的
+        非占位置信度（0.5 是模型默认值，无法与"显式 0.5"区分，视为未知）。
         """
-        if preference.extract_source == "explicit_feedback":
-            return 0.8
-        if preference.extract_source == "implicit_inference":
-            return 0.5
-        if preference.extract_source == "structured_agent_event":
+        source = preference.extract_source
+        if source == "structured_agent_event":
             try:
                 quality = float(getattr(preference, "quality_score", 0.5) or 0.0)
             except (TypeError, ValueError):
                 quality = 0.0
             quality = max(0.0, min(1.0, quality))
             return round(min(0.95, 0.55 + 0.35 * quality), 4)
+        if source in self.BASELINE_BY_SOURCE:
+            return self.BASELINE_BY_SOURCE[source]
+        explicit = float(getattr(preference, "confidence", 0.5) or 0.5)
+        if 0.0 <= explicit != 0.5:
+            return max(0.0, min(1.0, explicit))
         return 0.5
 
     def _factor_evidence_count(self, evidence_count: int) -> float:
