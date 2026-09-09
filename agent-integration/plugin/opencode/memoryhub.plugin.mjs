@@ -36,7 +36,7 @@ function toolWrapper(command, description, buildArgs, toolFactory) {
   if (!toolFactory) return fallback
   const s = toolFactory.schema
   const args = command === "remember"
-    ? { text: s.string().describe("Text to remember"), memory_type: s.string().optional().describe("preference or knowledge subtype") }
+    ? { text: s.string().describe("Text to remember"), memory_type: s.string().optional().describe("memory type: preference, workflow, case, template, fact, knowledge (treated as fact) or knowledge:<subtype>") }
     : { query: s.string().describe("MemoryHub query") }
   return toolFactory({ description, args, execute })
 }

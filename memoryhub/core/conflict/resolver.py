@@ -1,4 +1,9 @@
-"""Conflict resolution primitives shared by preference and knowledge flows."""
+"""Conflict resolution primitives shared by preference and knowledge flows.
+
+注意：生产写入链路实际使用的是 ``core/preference/updater.py`` 内的
+``ConflictResolver``；本模块当前仅被测试引用。``apply_override/apply_merge``
+需要注入 ``write_service`` 才会落库。
+"""
 
 from __future__ import annotations
 
@@ -109,9 +114,17 @@ class ConflictResolver:
             )
         merged.status = MemoryStatus.ACTIVE
         merged.updated_at = datetime.now(timezone.utc)
+        # 归档被合并的旧版本，否则合并后新旧两条会同时保持 ACTIVE
+        old_memory.status = MemoryStatus.ARCHIVED
+        old_memory.updated_at = datetime.now(timezone.utc)
+        if self.write_service is not None:
+            self.write_service.upsert_memory(old_memory)
         return merged
 
     def apply_coexist(self, old_memory, new_memory) -> tuple[str, str]:
+        # 并存意味着两条都要可用：新记忆若此前是 PENDING（待确认）需一并激活。
+        new_memory.status = MemoryStatus.ACTIVE
+        new_memory.updated_at = datetime.now(timezone.utc)
         if self.write_service is not None:
             self.write_service.upsert_memory(old_memory)
             self.write_service.upsert_memory(new_memory)

@@ -60,13 +60,20 @@ class MemoryHubClient:
         base_url: str = "http://127.0.0.1:8099",
         timeout: float = 30.0,
         user_id: str | None = None,
+        tenant_id: str = "",
         client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = float(timeout)
         self.user_id = (user_id or current_user_id()).strip() or current_user_id()
+        # Sent on retrieval so reads resolve the same tenant the writes used.
+        # Empty means "let the server apply its default".
+        self.tenant_id = str(tenant_id or "").strip()
         self._owns_client = client is None
         self.client = client or httpx.Client(base_url=self.base_url, timeout=self.timeout)
+
+    def _tenant_headers(self) -> dict[str, str]:
+        return {"X-MemoryHub-Tenant": self.tenant_id} if self.tenant_id else {}
 
     def close(self) -> None:
         if self._owns_client:
@@ -232,11 +239,11 @@ class MemoryHubClient:
 
     def search(self, payload: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
         body = dict(payload or kwargs)
-        return self._request("POST", "/search", json_body=body) or {}
+        return self._request("POST", "/search", json_body=body, headers=self._tenant_headers()) or {}
 
     def get_context(self, payload: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
         body = dict(payload or kwargs)
-        return self._request("POST", "/context", json_body=body) or {}
+        return self._request("POST", "/context", json_body=body, headers=self._tenant_headers()) or {}
 
     def vnext_search(
         self,
@@ -395,10 +402,18 @@ class MemoryHubClient:
                     "extract_source": "explicit_feedback",
                 }
             )
-        if memory_type.startswith("knowledge:"):
+        if memory_type == "knowledge":
+            # 裸 knowledge 无子类型信息：按 fact 处理（客观知识默认沉淀为事实）
+            memory_type = "fact"
+        elif memory_type.startswith("knowledge:"):
             memory_type = memory_type.split(":", 1)[1]
         if memory_type not in {"workflow", "case", "template", "fact"}:
-            raise MemoryHubError("memoryhub.client.invalid_type", f"unsupported memory type: {memory_type}")
+            raise MemoryHubError(
+                "memoryhub.client.invalid_type",
+                f"unsupported memory type: {memory_type!r}; "
+                "use one of: preference, workflow, case, template, fact, "
+                "knowledge (treated as fact), knowledge:<subtype>",
+            )
         return self.write_knowledge(
             {
                 "user_id": user_id,

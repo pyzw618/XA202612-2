@@ -93,7 +93,9 @@ class HybridRetriever:
             if cached is not None:
                 return cached
 
-        fetch_k = max(request.top_k * 2, 10)
+        # Apply hard metadata predicates before final top-k; a small candidate
+        # fetch would let an ineligible high-ranked record hide later matches.
+        fetch_k = max(request.top_k * 10, 100)
 
         # 向量检索：需要 embedding_fn 把 query 转成向量；缺省时跳过
         vector_results: list[SearchResult] = []
@@ -212,6 +214,12 @@ class HybridRetriever:
             confidence = result.metadata.get("confidence")
             if confidence is not None and confidence < request.min_confidence:
                 continue
+            scope = result.metadata.get("scope")
+            if isinstance(scope, dict):
+                if request.scenes and scope.get("scene") not in request.scenes:
+                    continue
+                if request.task_types and scope.get("task_type") not in request.task_types:
+                    continue
             if self._scope_conflict(result, request):
                 continue
             filtered.append(result)

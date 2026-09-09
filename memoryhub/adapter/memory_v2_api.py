@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from memoryhub.adapter.api import search_memory
-from memoryhub.adapter.schemas import SearchRequest
+from memoryhub.adapter.schemas import SceneScope, SearchRequest
 from memoryhub.storage.memory_metadata import (
     MemoryEvidenceRepository,
     MemoryLineageRepository,
@@ -230,11 +230,24 @@ async def search_with_provenance(
     user_id: str = Query(..., min_length=1),
     query: str = Query(..., min_length=1),
     top_k: int = Query(5, ge=1, le=50),
+    memory_types: list[str] = Query(default=[]),
+    min_confidence: float = Query(0.0, ge=0.0, le=1.0),
+    scene: str = "",
+    task_type: str = "",
     include_provenance: bool = False,
 ):
     """GET retrieval compatibility endpoint with optional safe provenance references."""
     response = await search_memory(
-        SearchRequest(user_id=user_id, query=query, top_k=top_k), request
+        SearchRequest(
+            user_id=user_id,
+            query=query,
+            top_k=top_k,
+            memory_types=memory_types,
+            min_confidence=min_confidence,
+            scenes=[scene] if scene else [],
+            task_types=[task_type] if task_type else [],
+            context=SceneScope(scene=scene, task_type=task_type),
+        ), request
     )
     body = response.model_dump(mode="json")
     if not include_provenance:

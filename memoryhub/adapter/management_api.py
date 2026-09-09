@@ -19,12 +19,12 @@ REST API 路由定义 — 管理后台缺口补齐（供前端可视化后台使
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 from urllib.parse import urlparse
-import os
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -228,10 +228,7 @@ def _merge_evidences(existing, incoming, *, replace: bool):
     if replace:
         return list(incoming)
     merged = list(existing or [])
-    known = {
-        (str(item.evidence_id), str(item.event_id), str(item.content))
-        for item in merged
-    }
+    known = {(str(item.evidence_id), str(item.event_id), str(item.content)) for item in merged}
     for item in incoming:
         key = (str(item.evidence_id), str(item.event_id), str(item.content))
         if key not in known:
@@ -265,12 +262,33 @@ def _unified_memory_update(
 
     fields_by_type = {
         "preference": {
-            "status", "confidence", "version", "parent_id", "root_id", "evidences",
-            "text", "preference_type", "payload", "scope", "is_global", "tags", "extra_payload",
+            "status",
+            "confidence",
+            "version",
+            "parent_id",
+            "root_id",
+            "evidences",
+            "text",
+            "preference_type",
+            "payload",
+            "scope",
+            "is_global",
+            "tags",
+            "extra_payload",
         },
         "knowledge": {
-            "status", "confidence", "version", "parent_id", "evidences", "name", "content",
-            "knowledge_type", "steps", "tools", "template_body", "scope",
+            "status",
+            "confidence",
+            "version",
+            "parent_id",
+            "evidences",
+            "name",
+            "content",
+            "knowledge_type",
+            "steps",
+            "tools",
+            "template_body",
+            "scope",
         },
     }
     disallowed = requested - fields_by_type[memory_type]
@@ -295,8 +313,19 @@ def _unified_memory_update(
         replace=body.replace_evidences,
     )
     semantic_fields = {
-        "text", "preference_type", "payload", "scope", "is_global", "tags", "extra_payload",
-        "name", "content", "knowledge_type", "steps", "tools", "template_body",
+        "text",
+        "preference_type",
+        "payload",
+        "scope",
+        "is_global",
+        "tags",
+        "extra_payload",
+        "name",
+        "content",
+        "knowledge_type",
+        "steps",
+        "tools",
+        "template_body",
     }
     if not _update_field_is_set(body, "version") and requested & semantic_fields:
         data["version"] = max(1, int(memory.version)) + 1
@@ -351,10 +380,7 @@ def _get_audit_log(request: Request):
     """解析已装配的安全审计日志；未启用/不可用时抛出稳定错误。"""
     gate = getattr(request.app.state, "safety_gate", None)
     if gate is None:
-        code = (
-            getattr(request.app.state, "safety_gate_error", "")
-            or "safety.gate_unavailable"
-        )
+        code = getattr(request.app.state, "safety_gate_error", "") or "safety.gate_unavailable"
         raise HTTPException(status_code=503, detail={"code": code})
     audit_log = getattr(gate, "audit_log", None)
     if audit_log is None:
@@ -366,16 +392,11 @@ def _get_quarantine_store(request: Request):
     """解析已装配的 REVIEW 隔离区；未启用/不可用时抛出稳定错误。"""
     gate = getattr(request.app.state, "safety_gate", None)
     if gate is None:
-        code = (
-            getattr(request.app.state, "safety_gate_error", "")
-            or "safety.gate_unavailable"
-        )
+        code = getattr(request.app.state, "safety_gate_error", "") or "safety.gate_unavailable"
         raise HTTPException(status_code=503, detail={"code": code})
     store = getattr(gate, "quarantine", None)
     if store is None:
-        raise HTTPException(
-            status_code=503, detail={"code": "safety.quarantine_disabled"}
-        )
+        raise HTTPException(status_code=503, detail={"code": "safety.quarantine_disabled"})
     return store
 
 
@@ -489,18 +510,14 @@ async def batch_update_memory_status(body: BatchMemoryStatusUpdate, request: Req
     results: list[dict[str, Any]] = []
     for mid in body.memory_ids:
         try:
-            results.append(
-                _set_memory_status(request.app.state, mid, body.user_id, body.status)
-            )
+            results.append(_set_memory_status(request.app.state, mid, body.user_id, body.status))
         except HTTPException as exc:
             results.append(
                 {
                     "memory_id": mid,
                     "error": {
                         "status_code": exc.status_code,
-                        "code": (
-                            exc.detail if isinstance(exc.detail, str) else exc.detail
-                        ),
+                        "code": (exc.detail if isinstance(exc.detail, str) else exc.detail),
                     },
                 }
             )
@@ -512,9 +529,7 @@ async def batch_update_memory_status(body: BatchMemoryStatusUpdate, request: Req
 async def batch_delete_memories(body: BatchMemoryDelete, request: Request):
     """批量软删除（列表页"勾选 → 删除"），级联清理向量/证据/冲突并记录遗忘历史。"""
     forgetter = _build_forgetter(request.app.state)
-    deleted = forgetter.delete_memories(
-        body.memory_ids, cascade=body.cascade, user_id=body.user_id
-    )
+    deleted = forgetter.delete_memories(body.memory_ids, cascade=body.cascade, user_id=body.user_id)
     deleted_ids = list(forgetter._last_deleted_ids)
     record = forgetter.create_audit_log(
         ForgetRequest(
@@ -582,6 +597,7 @@ async def list_memories_health(
                 {
                     "memory_id": m.memory_id,
                     "memory_type": "preference",
+                    "content": m.text or "",
                     "health_score": round(calc.calculate(m), 4),
                     "time_decay": round(factors.time_decay, 4),
                     "usage_frequency": round(factors.usage_frequency, 4),
@@ -589,23 +605,27 @@ async def list_memories_health(
                     "access_count_30d": m.access_count_30d,
                     "last_accessed_at": _iso(m.last_accessed_at),
                     "confidence": m.confidence,
-                    "status": (
-                        m.status.value if hasattr(m.status, "value") else str(m.status)
-                    ),
-                    "level": (
-                        m.level.value if hasattr(m.level, "value") else str(m.level)
-                    ),
+                    "status": (m.status.value if hasattr(m.status, "value") else str(m.status)),
+                    "level": (m.level.value if hasattr(m.level, "value") else str(m.level)),
                 }
             )
 
     know_repo = getattr(state, "know_repo", None)
     if know_repo is not None:
         for m in know_repo.list_all(status=status, user_id=user_id):
+            # FACT 行由下方 fact 循环单独输出（memory_type=fact），此处跳过避免同一
+            # memory_id 双重计入活跃数/平均健康度/直方图/TopN。
+            kt = str(
+                getattr(getattr(m, "knowledge_type", ""), "value", getattr(m, "knowledge_type", ""))
+            )
+            if kt == "fact":
+                continue
             factors = calc.factors_for(m)
             items.append(
                 {
                     "memory_id": m.memory_id,
                     "memory_type": "knowledge",
+                    "content": (m.name or m.content or ""),
                     "health_score": round(calc.calculate(m), 4),
                     "time_decay": round(factors.time_decay, 4),
                     "usage_frequency": round(factors.usage_frequency, 4),
@@ -613,20 +633,14 @@ async def list_memories_health(
                     "access_count_30d": m.access_count_30d,
                     "last_accessed_at": _iso(m.last_accessed_at),
                     "confidence": m.confidence,
-                    "status": (
-                        m.status.value if hasattr(m.status, "value") else str(m.status)
-                    ),
-                    "level": (
-                        m.level.value if hasattr(m.level, "value") else str(m.level)
-                    ),
+                    "status": (m.status.value if hasattr(m.status, "value") else str(m.status)),
+                    "level": (m.level.value if hasattr(m.level, "value") else str(m.level)),
                 }
             )
 
     if know_repo is not None:
         try:
-            facts = know_repo.get_by_type(
-                user_id=user_id, knowledge_type="fact", status=status
-            )
+            facts = know_repo.get_by_type(user_id=user_id, knowledge_type="fact", status=status)
         except (ValueError, TypeError):
             facts = []
         for f in facts:
@@ -635,6 +649,7 @@ async def list_memories_health(
                 {
                     "memory_id": f.memory_id,
                     "memory_type": "fact",
+                    "content": f.object_value or "",
                     "health_score": round(calc.calculate(f), 4),
                     "time_decay": round(factors.time_decay, 4),
                     "usage_frequency": round(factors.usage_frequency, 4),
@@ -642,12 +657,8 @@ async def list_memories_health(
                     "access_count_30d": f.access_count_30d,
                     "last_accessed_at": _iso(f.last_accessed_at),
                     "confidence": f.confidence,
-                    "status": (
-                        f.status.value if hasattr(f.status, "value") else str(f.status)
-                    ),
-                    "level": (
-                        f.level.value if hasattr(f.level, "value") else str(f.level)
-                    ),
+                    "status": (f.status.value if hasattr(f.status, "value") else str(f.status)),
+                    "level": (f.level.value if hasattr(f.level, "value") else str(f.level)),
                 }
             )
 
@@ -744,7 +755,9 @@ async def run_memory_consolidation(request: Request, user_id: str = ""):
         from memoryhub.core.preference.updater import PreferenceUpdater
 
         memory_cons = MemoryConsolidator(
-            mid_term_repo=mt_repo, event_repo=event_repo, extraction_executor=executor,
+            mid_term_repo=mt_repo,
+            event_repo=event_repo,
+            extraction_executor=executor,
             preference_updater=PreferenceUpdater(
                 pref_repo=pref_repo,
                 conflict_repo=getattr(state, "conflict_repo", None),
@@ -755,11 +768,15 @@ async def run_memory_consolidation(request: Request, user_id: str = ""):
         )
         result["episodes_consolidated"] = memory_cons.consolidate_episodes(user_id=user_id)
         result["tool_preferences"] = memory_cons.consolidate_tool_preferences(user_id=user_id)
-        result["workflow_preferences"] = memory_cons.consolidate_workflow_preferences(user_id=user_id)
+        result["workflow_preferences"] = memory_cons.consolidate_workflow_preferences(
+            user_id=user_id
+        )
     if write_service is not None and pref_repo is not None and know_repo is not None:
         degrader = MemoryDegrader(
-            pref_repo=pref_repo, know_repo=know_repo,
-            mid_term_repo=mt_repo, write_service=write_service,
+            pref_repo=pref_repo,
+            know_repo=know_repo,
+            mid_term_repo=mt_repo,
+            write_service=write_service,
         )
         result["degraded"] = degrader.degrade_low_health(user_id=user_id)
     return result
@@ -920,17 +937,13 @@ async def release_quarantine(
         processor = getattr(request.app.state, "event_processor", None)
         event_repo = getattr(request.app.state, "event_repo", None)
         if processor is None or event_repo is None:
-            raise HTTPException(
-                status_code=503, detail="event processor not initialized"
-            )
+            raise HTTPException(status_code=503, detail="event processor not initialized")
         if event_repo.get_by_id(event.event_id) is None:
             payload = dict(event.payload)
             payload["_safety"] = {
                 "review_id": review_id,
                 "release_action": "manual_allow",
-                "released_at": datetime.now(timezone.utc).strftime(
-                    "%Y-%m-%dT%H:%M:%SZ"
-                ),
+                "released_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             }
             event = event.model_copy(
                 update={
@@ -960,8 +973,10 @@ async def release_quarantine(
 # ============================================================
 # 遗忘历史详情
 #
-# 已由 api.py 注册：GET /api/memory/forget/history/{record_id}
-# 避免在同一 /api/memory 前缀下重复定义。
+# 遗忘历史由 api.py 提供：
+#   GET /api/memory/forget/history          列表
+#   GET /api/memory/forget/history/{record_id}  单条详情（404 当记录不存在）
+# 此处不再重复定义，避免在同一 /api/memory 前缀下冲突。
 # ============================================================
 
 
@@ -1029,7 +1044,7 @@ async def system_status(request: Request, user_id: str = "default"):
 
     return {
         "service": "Kylin-MemoryHub",
-        "version": getattr(request.app, "version", "0.1.0"),
+        "version": getattr(request.app, "version", "2.0.0"),
         "runtime_mode": config.runtime.mode if config is not None else "unknown",
         "storage": {
             "engine": "sqlite",
@@ -1055,9 +1070,7 @@ async def system_status(request: Request, user_id: str = "default"):
             "provider": config.vector_engine.provider if config is not None else None,
             "collection": config.vector_engine.collection if config is not None else "",
             "connected": (
-                getattr(vector_engine, "_connected", None)
-                if vector_engine is not None
-                else None
+                getattr(vector_engine, "_connected", None) if vector_engine is not None else None
             ),
             "vector_count": (
                 vector_store.size()
@@ -1067,19 +1080,11 @@ async def system_status(request: Request, user_id: str = "default"):
         },
         "retrieval": {
             "type": type(retriever).__name__ if retriever is not None else None,
-            "default_top_k": (
-                config.retrieval.default_top_k if config is not None else None
-            ),
+            "default_top_k": (config.retrieval.default_top_k if config is not None else None),
             "weights": {
-                "vector": (
-                    config.retrieval.vector_weight if config is not None else None
-                ),
-                "keyword": (
-                    config.retrieval.keyword_weight if config is not None else None
-                ),
-                "metadata": (
-                    config.retrieval.metadata_weight if config is not None else None
-                ),
+                "vector": (config.retrieval.vector_weight if config is not None else None),
+                "keyword": (config.retrieval.keyword_weight if config is not None else None),
+                "metadata": (config.retrieval.metadata_weight if config is not None else None),
             },
             "cache_ttl_seconds": (
                 config.retrieval.cache_ttl_seconds if config is not None else None
@@ -1089,15 +1094,10 @@ async def system_status(request: Request, user_id: str = "default"):
         "safety": {
             "gate_available": getattr(state, "safety_gate", None) is not None,
             "gate_error": getattr(state, "safety_gate_error", "") or "",
-            "user_rule_service_available": getattr(state, "user_rule_service", None)
-            is not None,
+            "user_rule_service_available": getattr(state, "user_rule_service", None) is not None,
             "rule_set_id": config.safety.rule_set_id if config is not None else None,
-            "rule_set_version": (
-                config.safety.rule_set_version if config is not None else None
-            ),
-            "audit_enabled": (
-                config.safety.audit.enabled if config is not None else None
-            ),
+            "rule_set_version": (config.safety.rule_set_version if config is not None else None),
+            "audit_enabled": (config.safety.audit.enabled if config is not None else None),
             "quarantine_enabled": (
                 config.safety.quarantine.enabled if config is not None else None
             ),

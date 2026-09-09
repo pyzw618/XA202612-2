@@ -42,7 +42,7 @@ class ToolRegistry:
         self._add("memoryhub_get_context", "Get prompt-ready memory context for the current task.", {"query": {"type": "string"}, "top_k": {"type": "integer", "default": 5}, "level": {"type": "string", "enum": ["short", "mid", "long", ""]}, **common}, ["query"], self._context)
         self._add("memoryhub_write_event", "Write one or more canonical MemoryEvent records.", {"event": {"type": "object"}, "events": {"type": "array"}, "text": {"type": "string"}, "event_type": {"type": "string"}, "session_id": {"type": "string"}, "turn_id": {"type": "string"}}, [], self._write_event)
         self._add("memoryhub_resume_task", "Resume a task by task_id using the vNext resume endpoint.", {"task_id": {"type": "string"}, "resume_token": {"type": "string"}, "expected_version": {"type": "integer"}, **common}, ["task_id"], self._resume_task)
-        self._add("memoryhub_remember", "Explicitly remember a preference or knowledge item.", {"text": {"type": "string"}, "memory_type": {"type": "string", "enum": ["preference", "workflow", "case", "template", "fact", "knowledge:fact"]}, "name": {"type": "string"}, **common}, ["text"], self._remember)
+        self._add("memoryhub_remember", "Explicitly remember a preference or knowledge item.", {"text": {"type": "string"}, "memory_type": {"type": "string", "enum": ["preference", "workflow", "case", "template", "fact", "knowledge", "knowledge:fact"]}, "name": {"type": "string"}, **common}, ["text"], self._remember)
         self._add("memoryhub_forget", "Preview or execute precise forgetting; preview is the safe default.", {"instruction": {"type": "string"}, "preview": {"type": "boolean", "default": True}, "confirm": {"type": "boolean", "default": False}, "cascade": {"type": "boolean", "default": True}, "user_id": common["user_id"]}, ["instruction"], self._forget)
         self._add("memoryhub_feedback", "Confirm, reject or update a memory after use.", {"memory_id": {"type": "string"}, "action": {"type": "string", "enum": ["confirm", "reject", "update"]}, "feedback_text": {"type": "string"}, "user_id": common["user_id"]}, ["memory_id", "action"], self._feedback)
         self._add("memoryhub_vnext_feedback", "Record attributed vNext usage or task feedback.", {"retrieval_id": {"type": "string"}, "memory_ids": {"type": "array", "items": {"type": "string"}}, "feedback_id": {"type": "string"}, "feedback_type": {"type": "string", "enum": ["EXPLICIT_POSITIVE", "EXPLICIT_NEGATIVE", "TASK_SUCCESS", "TASK_FAILURE", "PARTIAL_SUCCESS", "USER_CORRECTION", "USER_CONFIRMATION", "UNKNOWN"]}, "outcome": {"type": "string"}, "project_id": {"type": "string"}, "task_id": {"type": "string"}, "session_id": {"type": "string"}, **common}, ["retrieval_id", "feedback_id", "feedback_type"], self._vnext_feedback)
@@ -60,7 +60,12 @@ class ToolRegistry:
             return _error(exc)
 
     def _payload(self, args: dict[str, Any]) -> dict[str, Any]:
-        return self.client.build_search_payload(user_id=str(args.get("user_id") or self.config.user_id), query=str(args.get("query") or ""), top_k=int(args.get("top_k") or 5), scene=str(args.get("scene") or ""), task_type=str(args.get("task_type") or ""), app="memoryhub-mcp", project_id=str(args.get("project_id") or ""), level=str(args.get("level") or ""), session_id=str(args.get("session_id") or ""))
+        # Retrieval stays unscoped unless the caller narrows it.  The legacy
+        # contract treats context.app as a scope *selector*, not a provenance
+        # tag: sending our own name turned every search into an
+        # APPLICATION:memoryhub-mcp lookup and silently dropped every memory
+        # written by the CLI, the OpenCode plugin or the desktop console.
+        return self.client.build_search_payload(user_id=str(args.get("user_id") or self.config.user_id), query=str(args.get("query") or ""), top_k=int(args.get("top_k") or 5), scene=str(args.get("scene") or ""), task_type=str(args.get("task_type") or ""), project_id=str(args.get("project_id") or ""), level=str(args.get("level") or ""), session_id=str(args.get("session_id") or ""))
 
     def _search(self, args: dict[str, Any]) -> dict[str, Any]:
         return self.client.search(self._payload(args))

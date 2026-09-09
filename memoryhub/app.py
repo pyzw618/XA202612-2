@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from memoryhub import __version__
 from memoryhub.adapter import schemas as adapter_schemas
 from memoryhub.adapter import user_rule_schemas
 from memoryhub.adapter.agent_api import root_router as agent_root_router
@@ -62,19 +63,27 @@ def _memory_metadata(memory) -> dict:
     else:
         scope = memory.scope.model_dump()
         fact_fields = {}
+    knowledge_fields = {}
+    if memory.memory_type == "knowledge":
+        knowledge_type = getattr(memory, "knowledge_type", "workflow")
+        knowledge_fields = {
+            "knowledge_type": getattr(knowledge_type, "value", knowledge_type),
+            "name": getattr(memory, "name", ""),
+            "knowledge_content": getattr(memory, "content", ""),
+            "steps": list(getattr(memory, "steps", []) or []),
+            "tools": list(getattr(memory, "tools", []) or []),
+            "template_body": getattr(memory, "template_body", ""),
+        }
     return {
         "tenant_id": getattr(memory, "tenant_id", "") or authority.get("tenant_id", "default"),
         "memory_type": memory.memory_type,
         "user_id": memory.user_id,
         "content": _memory_text(memory),
         "confidence": memory.confidence,
-        "status": (
-            memory.status.value
-            if hasattr(memory.status, "value")
-            else str(memory.status)
-        ),
+        "status": (memory.status.value if hasattr(memory.status, "value") else str(memory.status)),
         "scope": scope,
         **fact_fields,
+        **knowledge_fields,
     }
 
 
@@ -154,10 +163,7 @@ def _safe_validation_errors(exc: RequestValidationError) -> list[dict[str, objec
     projected: list[dict[str, object]] = []
     for error in exc.errors():
         error_type = error.get("type")
-        if (
-            not isinstance(error_type, str)
-            or _SAFE_ERROR_TYPE.fullmatch(error_type) is None
-        ):
+        if not isinstance(error_type, str) or _SAFE_ERROR_TYPE.fullmatch(error_type) is None:
             error_type = "validation_error"
 
         location: list[str | int] = []
@@ -203,9 +209,7 @@ def create_app(
     """
     if config is None:
         config = load_config()
-    if user_rule_identity_resolver is not None and not callable(
-        user_rule_identity_resolver
-    ):
+    if user_rule_identity_resolver is not None and not callable(user_rule_identity_resolver):
         raise ValueError("user_rule_identity_resolver must be callable")
 
     @asynccontextmanager
@@ -219,7 +223,7 @@ def create_app(
     app = FastAPI(
         title="Kylin-MemoryHub",
         description="面向麒麟 OS Agent 的可插拔本地记忆中枢",
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan,
     )
     # Runtime services are application-scoped; tests and embedding applications can
@@ -313,9 +317,7 @@ def create_app(
                 key = (
                     key_resolution.key("user_rule")
                     if key_resolution is not None
-                    else _user_rule_master_key_from_env(
-                        config.safety.user_rules.encryption_key_env
-                    )
+                    else _user_rule_master_key_from_env(config.safety.user_rules.encryption_key_env)
                 )
                 if key is None:
                     app.state.user_rule_service_error = "user_rule.key_unavailable"
@@ -325,25 +327,15 @@ def create_app(
                             config.storage.db_path,
                             key,
                             key_id=config.safety.user_rules.key_id,
-                            max_rules_per_user=(
-                                config.safety.user_rules.max_rules_per_user
-                            ),
-                            max_matcher_chars=(
-                                config.safety.user_rules.max_matcher_chars
-                            ),
-                            allow_advanced_regex=(
-                                config.safety.user_rules.allow_advanced_regex
-                            ),
-                            detector_cache_size=(
-                                config.safety.user_rules.detector_cache_size
-                            ),
+                            max_rules_per_user=(config.safety.user_rules.max_rules_per_user),
+                            max_matcher_chars=(config.safety.user_rules.max_matcher_chars),
+                            allow_advanced_regex=(config.safety.user_rules.allow_advanced_regex),
+                            detector_cache_size=(config.safety.user_rules.detector_cache_size),
                         )
                     except UserRuleError as exc:
                         app.state.user_rule_service_error = exc.code
                     except Exception:
-                        app.state.user_rule_service_error = (
-                            "user_rule.service_unavailable"
-                        )
+                        app.state.user_rule_service_error = "user_rule.service_unavailable"
                     else:
                         app.state.owns_user_rule_service = True
 
@@ -407,9 +399,7 @@ def create_app(
             quarantine_key = (
                 key_resolution.key("quarantine")
                 if key_resolution is not None
-                else _user_rule_master_key_from_env(
-                    config.safety.quarantine.encryption_key_env
-                )
+                else _user_rule_master_key_from_env(config.safety.quarantine.encryption_key_env)
             )
             if audit_key is None or quarantine_key is None:
                 app.state.safety_gate_error = "gate.key_unavailable"
@@ -424,8 +414,7 @@ def create_app(
                         )
                     elif config.safety.user_rules.enabled:
                         app.state.safety_gate_error = (
-                            app.state.user_rule_service_error
-                            or "gate.detector_unavailable"
+                            app.state.user_rule_service_error or "gate.detector_unavailable"
                         )
                     else:
                         app.state.safety_gate = SafetyWriteGate.from_config(
@@ -503,13 +492,9 @@ def create_app(
             vector_store.init_index()
             if vector_store.index.ntotal == 0 and memories:
                 for memory in memories:
-                    vector_store.add(
-                        memory.memory_id, embedding_client.embed(_memory_text(memory))
-                    )
+                    vector_store.add(memory.memory_id, embedding_client.embed(_memory_text(memory)))
                 vector_store.save()
-            vector_search_adapter = _VectorStoreSearchAdapter(
-                vector_store, memory_lookup
-            )
+            vector_search_adapter = _VectorStoreSearchAdapter(vector_store, memory_lookup)
         elif engine_provider in ("milvus", "milvus_mock"):
             engine_kwargs = {
                 "app_id": config.vector_engine.app_id,
@@ -551,9 +536,7 @@ def create_app(
                     ]
                 )
             except ImportError:
-                logger.warning(
-                    "vnext_keyword_channel_unavailable: rank-bm25 is not installed"
-                )
+                logger.warning("vnext_keyword_channel_unavailable: rank-bm25 is not installed")
                 keyword_search = None
 
         app.state.db = db
@@ -581,9 +564,7 @@ def create_app(
         # A single redacted trace store associates S5 diagnostics across write,
         # retrieval, Forget and infrastructure paths. It is observability only,
         # never an Authority data store.
-        app.state.trace_store = TraceStore(
-            db=db, sampling_policy=TraceSamplingPolicy()
-        )
+        app.state.trace_store = TraceStore(db=db, sampling_policy=TraceSamplingPolicy())
         app.state.infrastructure_metrics = InfrastructureMetrics(db=db)
         app.state.audit_store = AuditStore(db)
 
@@ -681,6 +662,7 @@ def create_app(
         from memoryhub.application.dashboard_service import DashboardService
         from memoryhub.application.diagnostic_service import DiagnosticService
         from memoryhub.application.forget_service import ForgetService
+
         app.state.forget_service = ForgetService(
             db,
             authority_repository,
@@ -717,9 +699,7 @@ def create_app(
             write_service=app.state.memory_write_service,
         )
         knowledge_extractor = KnowledgeExtractor(llm_client=llm_client)
-        preference_handler = PreferenceMemoryHandler(
-            preference_extractor, preference_updater
-        )
+        preference_handler = PreferenceMemoryHandler(preference_extractor, preference_updater)
         knowledge_handler = KnowledgeMemoryHandler(
             knowledge_extractor,
             KnowledgeUpdater(
@@ -748,10 +728,7 @@ def create_app(
             mode=config.vnext.formation_mode,
             reflection_service=app.state.reflection_service,
         )
-        if (
-            app.state.event_ingestion_service is None
-            and app.state.safety_gate is not None
-        ):
+        if app.state.event_ingestion_service is None and app.state.safety_gate is not None:
             app.state.event_ingestion_service = EventIngestionService(
                 event_repo=event_repo,
                 safety_gate=app.state.safety_gate,
@@ -763,9 +740,7 @@ def create_app(
                 extraction_task_repo=extraction_task_repo,
                 extraction_executor=extraction_executor,
                 short_term_repo=(
-                    ShortTermMemoryRepository(db)
-                    if config.memory_tier.enabled
-                    else None
+                    ShortTermMemoryRepository(db) if config.memory_tier.enabled else None
                 ),
                 short_ttl_hours=config.memory_tier.short_ttl_hours,
             )
@@ -818,17 +793,17 @@ def create_app(
                 workflow_miner=WorkflowMiner(),
             )
             memory_degrader = MemoryDegrader(
-                pref_repo=pref_repo, know_repo=know_repo,
-                mid_term_repo=mt_repo, write_service=app.state.memory_write_service,
+                pref_repo=pref_repo,
+                know_repo=know_repo,
+                mid_term_repo=mt_repo,
+                write_service=app.state.memory_write_service,
                 threshold=config.memory_tier.degrade_health_threshold,
             )
             app.state.lifecycle_scheduler = LifecycleScheduler(
                 session_consolidator=session_consolidator,
                 memory_consolidator=memory_consolidator,
                 memory_degrader=memory_degrader,
-                lifecycle_manager=LifecycleManager(
-                    pref_repo=pref_repo, know_repo=know_repo
-                ),
+                lifecycle_manager=LifecycleManager(pref_repo=pref_repo, know_repo=know_repo),
                 interval_seconds=config.memory_tier.consolidate_interval_seconds,
                 enabled=config.memory_tier.scheduler_enabled,
             )
@@ -838,9 +813,7 @@ def create_app(
         # "删除所有涉及 X 的记忆"类主题规则，遗忘执行前并入意图关键词。
         from memoryhub.core.forget.rules import ForgetRuleService
 
-        app.state.forget_rule_service = ForgetRuleService(
-            database_path=config.storage.db_path
-        )
+        app.state.forget_rule_service = ForgetRuleService(database_path=config.storage.db_path)
 
         if config.runtime.is_production or vector_engine is not None:
             # 生产路径：仅装配 MilvusHybridRetriever，不构建 KeywordSearcher / HybridRetriever
@@ -877,9 +850,7 @@ def create_app(
             embedding_client=embedding_client,
             vector_engine=vector_engine,
             cache=cache,
-            retriever=(
-                retriever if isinstance(retriever, MilvusHybridRetriever) else None
-            ),
+            retriever=(retriever if isinstance(retriever, MilvusHybridRetriever) else None),
             index_version=index_version,
             config=config,
             memory_write_service=app.state.memory_write_service,
@@ -970,6 +941,13 @@ def create_app(
             finally:
                 app.state.user_rule_service = None
                 app.state.owns_user_rule_service = False
+        forget_rule_service = getattr(app.state, "forget_rule_service", None)
+        if forget_rule_service is not None:
+            try:
+                forget_rule_service.close()
+            except Exception:
+                logger.exception("failed to close forget rule service")
+            app.state.forget_rule_service = None
         # 停止抽取重试任务
         extraction_retry_task = getattr(app.state, "extraction_retry_task", None)
         if extraction_retry_task is not None:

@@ -26,4 +26,7 @@ public:
 
     // 通用：纯文本标签 + 属性（供自定义配色）
     void setTag(const QString &text, const QString &propName, const QString &propValue);
+
+private:
+    QString m_tagProp;  // 最近一次着色所用 QSS 属性名（切换时清理旧属性）
 };

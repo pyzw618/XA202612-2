@@ -18,7 +18,7 @@ namespace api {
 
 // 一次请求的结果
 struct Result {
-    bool ok = false;             // 请求成功且 HTTP 2xx/3xx
+    bool ok = false;             // 请求成功且 HTTP 2xx
     int statusCode = 0;          // HTTP 状态码，网络错误时为 0
     bool networkError = false;   // 网络层失败（连接拒绝/超时）
     QString networkErrorText;    // 网络错误文本
@@ -50,21 +50,15 @@ public:
     void setBaseUrl(const QString &url);
     QString userId() const { return m_userId; }
     void setUserId(const QString &id);
-
-    // 是否在请求期间显示等待光标（同步请求默认开启）
-    void setWaitCursorEnabled(bool on) { m_waitCursor = on; }
+    void setVNextManagementCredentials(const QString &tenantId, const QString &adminToken);
 
     // ---- 同步调用（遗留兼容接口；新页面必须使用异步接口） ----
     // path 以 "/api/..." 或 "/" 开头；useUserHeader 用于需要 X-MemoryHub-User 的接口（用户规则）
     Result get(const QString &path, bool useUserHeader = false);
     Result post(const QString &path, const QJsonObject &body, bool useUserHeader = false);
-    Result postRaw(const QString &path, const QJsonValue &body, bool useUserHeader = false);
     Result patch(const QString &path, const QJsonObject &body, bool useUserHeader = false);
     Result put(const QString &path, const QJsonObject &body, bool useUserHeader = false);
     Result del(const QString &path, bool useUserHeader = false);
-
-    // 无响应体的请求（如 204），返回状态码
-    Result delNoBody(const QString &path, bool useUserHeader = false);
 
     // ---- 异步调用（非阻塞；context 销毁后自动断开回调） ----
     using Callback = std::function<void(const Result &)>;
@@ -100,8 +94,10 @@ private:
 
     QString m_baseUrl;
     QString m_userId;
+    QString m_vnextTenantId;
+    QString m_vnextAdminToken;
+    quint64 m_userGeneration = 0;
     QNetworkAccessManager m_nam;
-    bool m_waitCursor = true;
 };
 
 } // namespace api

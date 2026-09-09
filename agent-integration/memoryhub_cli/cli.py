@@ -353,7 +353,9 @@ def run(argv: Sequence[str] | None = None, *, stdout=None, stderr=None) -> int:
     try:
         args = parser.parse_args(list(argv) if argv is not None else None)
         cfg = _config(args)
-        with MemoryHubClient(cfg.api_url, cfg.timeout, cfg.user_id) as client:
+        with MemoryHubClient(
+            cfg.api_url, cfg.timeout, cfg.user_id, tenant_id=getattr(cfg, "tenant_id", "")
+        ) as client:
             value = _run_command(args, client, cfg)
         print(_result_for(args, value), file=stdout)
         return 0

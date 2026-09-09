@@ -243,7 +243,7 @@ pytest tests/test_vnext_docs.py -v   # 文档-代码一致性守护示例
 
 ```bash
 bash packaging/linux/build-deb.sh    # 产出 packaging/linux/dist/kylin-memoryhub_<version>-<revision>_amd64.deb
-sudo apt install ./packaging/linux/dist/kylin-memoryhub_0.1.0-1_amd64.deb
+sudo apt install ./packaging/linux/dist/kylin-memoryhub_2.0.0-1_amd64.deb
 ```
 
 安装包含后端服务、桌面控制台、CLI/MCP、OpenCode 全局插件与 XDG 自启动配置；生产运行时（麒麟 Embedding SDK + Milvus）部署前请执行 `scripts/check_kylin_embedding_runtime.py` 逐项自检。详见 **[docs/deployment.md](docs/deployment.md)** 与 [packaging/linux/README.md](packaging/linux/README.md)。

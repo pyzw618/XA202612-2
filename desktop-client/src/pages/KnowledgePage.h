@@ -16,6 +16,7 @@ class QWidget;
 
 class KnowledgePage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit KnowledgePage(QWidget *parent = nullptr);
 
@@ -30,8 +31,8 @@ private slots:
 
 private:
     void populateRow(int row, const QJsonObject &m);
+    void buildDetail(const QString &id, const QJsonObject &m);
     QList<QString> selectedIds() const;
-    void deleteSelected();
 
     MemoryFilterBar *m_filterBar = nullptr;
     QComboBox *m_typeCombo = nullptr;

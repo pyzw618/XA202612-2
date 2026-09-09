@@ -14,6 +14,12 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from memoryhub.adapter.schemas import (
+    ConflictDecision,
+    ConflictRecord,
+    MemoryStatus,
+    PreferenceMemory,
+)
 from memoryhub.app import create_app
 from memoryhub.config import AppConfig, SafetyConfig, StorageConfig, UserRuleConfig
 
@@ -142,7 +148,7 @@ def test_api_04_knowledge_list_detail_filter(client: TestClient) -> None:
 
 
 def test_api_05_conflicts_list_and_resolve(client: TestClient) -> None:
-    """GET /conflicts + POST /{id}/resolve → 200;缺失冲突 → 404"""
+    """GET /conflicts + POST /{id}/resolve → 200;缺失冲突 → 404;非法裁决值 → 400"""
     listing = client.get("/api/memory/conflicts", params={"user_id": "u-api"})
     assert listing.status_code == 200
     assert isinstance(listing.json(), list)
@@ -152,6 +158,196 @@ def test_api_05_conflicts_list_and_resolve(client: TestClient) -> None:
         json={"user_id": "u-api", "decision": "override"},
     )
     assert missing.status_code == 404
+
+    invalid = client.post(
+        "/api/memory/conflicts/conf_missing/resolve",
+        json={"user_id": "u-api", "decision": "definitely_not_a_decision"},
+    )
+    assert invalid.status_code == 400
+
+
+def test_api_05b_conflict_resolve_persists_valid_decision(client: TestClient) -> None:
+    """合法裁决值落库：override/merge/coexist/pending 之外一律 400。"""
+    repo = client.app.state.conflict_repo
+    assert repo is not None
+    repo.save(
+        ConflictRecord(
+            conflict_id="conf_api_decision",
+            user_id="u-api",
+            old_memory_id="pref_old",
+            new_memory_id="pref_new",
+            memory_type="preference",
+            old_content="Use JSON",
+            new_content="Use Markdown",
+            decision=ConflictDecision.PENDING,
+        )
+    )
+
+    resolved = client.post(
+        "/api/memory/conflicts/conf_api_decision/resolve",
+        json={"user_id": "u-api", "decision": "merge", "reason": "merged manually"},
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["decision"] == "merge"
+
+    stored = client.get(
+        "/api/memory/conflicts", params={"user_id": "u-api", "status": "merge"}
+    ).json()
+    assert len(stored) == 1
+    assert stored[0]["result_memory_id"] == ""
+    assert stored[0]["resolved_at"] is not None
+
+
+def _seed_conflict(client: TestClient, *, conflict_id: str, old, new, memory_type: str = "preference"):
+    """写入冲突双方并登记一条 PENDING 冲突记录，返回 app.state。"""
+    state = client.app.state
+    state.memory_write_service.upsert_memory(old)
+    state.memory_write_service.upsert_memory(new)
+    state.conflict_repo.save(
+        ConflictRecord(
+            conflict_id=conflict_id,
+            user_id=old.user_id,
+            old_memory_id=old.memory_id,
+            new_memory_id=new.memory_id,
+            memory_type=memory_type,
+            old_content=old.text,
+            new_content=new.text,
+            decision=ConflictDecision.PENDING,
+        )
+    )
+    return state
+
+
+def _pref_pair(prefix: str):
+    old = PreferenceMemory(
+        memory_id=f"{prefix}_old",
+        user_id="u-api",
+        text="Use JSON",
+        payload={"target": "format", "value": "json"},
+    )
+    new = PreferenceMemory(
+        memory_id=f"{prefix}_new",
+        user_id="u-api",
+        text="Use Markdown",
+        payload={"target": "format", "value": "markdown"},
+        status=MemoryStatus.PENDING,
+    )
+    return old, new
+
+
+def test_api_05c_conflict_filter_by_resolved_and_memory_type(client: TestClient) -> None:
+    """status=resolved 等价于 decision != pending；memory_type 走服务端过滤。"""
+    old, new = _pref_pair("pref_filter")
+    state = _seed_conflict(
+        client, conflict_id="conf_filter_pending", old=old, new=new
+    )
+    state.conflict_repo.save(
+        ConflictRecord(
+            conflict_id="conf_filter_done",
+            user_id="u-api",
+            old_memory_id="pref_done_old",
+            new_memory_id="pref_done_new",
+            memory_type="knowledge",
+            decision=ConflictDecision.MERGE,
+        )
+    )
+
+    resolved = client.get(
+        "/api/memory/conflicts", params={"user_id": "u-api", "status": "resolved"}
+    ).json()
+    assert [item["conflict_id"] for item in resolved] == ["conf_filter_done"]
+
+    only_knowledge = client.get(
+        "/api/memory/conflicts",
+        params={"user_id": "u-api", "status": "", "memory_type": "knowledge"},
+    ).json()
+    assert [item["conflict_id"] for item in only_knowledge] == ["conf_filter_done"]
+
+    paged = client.get(
+        "/api/memory/conflicts",
+        params={"user_id": "u-api", "status": "resolved", "page": 1, "size": 1},
+    ).json()
+    assert paged["total"] == 1
+    assert len(paged["items"]) == 1
+
+
+def test_api_05d_conflict_apply_override_versions_old(client: TestClient) -> None:
+    """apply=true 的 override：归档旧记忆并生成带版本链的后继。"""
+    old, new = _pref_pair("pref_apply_ovr")
+    state = _seed_conflict(client, conflict_id="conf_apply_override", old=old, new=new)
+
+    resp = client.post(
+        "/api/memory/conflicts/conf_apply_override/resolve",
+        json={"user_id": "u-api", "decision": "override", "apply": True},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["applied"] is True
+    assert state.pref_repo.get_by_id(old.memory_id).status.value == "archived"
+    successor = state.pref_repo.get_by_id(body["result_id"])
+    assert successor.status.value == "active"
+    assert successor.parent_id == old.memory_id
+    assert successor.version == old.version + 1
+
+
+def test_api_05e_conflict_apply_merge_archives_old(client: TestClient) -> None:
+    """apply=true 的 merge：旧记忆归档，合并结果为新版本。"""
+    old, new = _pref_pair("pref_apply_mrg")
+    state = _seed_conflict(client, conflict_id="conf_apply_merge", old=old, new=new)
+
+    resp = client.post(
+        "/api/memory/conflicts/conf_apply_merge/resolve",
+        json={"user_id": "u-api", "decision": "merge", "apply": True},
+    )
+    assert resp.status_code == 200, resp.text
+    assert state.pref_repo.get_by_id(old.memory_id).status.value == "archived"
+    merged = state.pref_repo.get_by_id(resp.json()["result_id"])
+    assert merged.status.value == "active"
+    assert merged.parent_id == old.memory_id
+
+
+def test_api_05f_conflict_apply_coexist_activates_both(client: TestClient) -> None:
+    """apply=true 的 coexist：两条都保持可用（待确认的新记忆被激活）。"""
+    old, new = _pref_pair("pref_apply_co")
+    state = _seed_conflict(client, conflict_id="conf_apply_coexist", old=old, new=new)
+
+    resp = client.post(
+        "/api/memory/conflicts/conf_apply_coexist/resolve",
+        json={"user_id": "u-api", "decision": "coexist", "apply": True},
+    )
+    assert resp.status_code == 200, resp.text
+    assert state.pref_repo.get_by_id(old.memory_id).status.value == "active"
+    assert state.pref_repo.get_by_id(new.memory_id).status.value == "active"
+
+
+def test_api_05g_conflict_apply_rejects_pending_and_missing_memory(client: TestClient) -> None:
+    """pending 无法落地；冲突任一方记忆缺失时返回 409。"""
+    old, new = _pref_pair("pref_apply_guard")
+    state = _seed_conflict(client, conflict_id="conf_apply_guard", old=old, new=new)
+
+    pending = client.post(
+        "/api/memory/conflicts/conf_apply_guard/resolve",
+        json={"user_id": "u-api", "decision": "pending", "apply": True},
+    )
+    assert pending.status_code == 400
+    assert pending.json()["detail"]["code"] == "conflict.cannot_apply_pending"
+
+    state.conflict_repo.save(
+        ConflictRecord(
+            conflict_id="conf_apply_orphan",
+            user_id="u-api",
+            old_memory_id="pref_gone",
+            new_memory_id="pref_also_gone",
+            memory_type="preference",
+            decision=ConflictDecision.PENDING,
+        )
+    )
+    orphan = client.post(
+        "/api/memory/conflicts/conf_apply_orphan/resolve",
+        json={"user_id": "u-api", "decision": "override", "apply": True},
+    )
+    assert orphan.status_code == 409
+    assert orphan.json()["detail"]["code"] == "conflict.memory_missing"
 
 
 def test_api_06_feedback_confirm_update_reject(client: TestClient) -> None:
@@ -251,6 +447,33 @@ def test_api_08_forget_and_history(client: TestClient) -> None:
     history = client.get("/api/memory/forget/history", params={"user_id": "u-api"})
     assert history.status_code == 200
     assert any(r["record_id"] == resp.json()["record_id"] for r in history.json())
+
+
+def test_api_08b_forget_history_record_detail(client: TestClient) -> None:
+    """GET /forget/history/{record_id} → 200 单条详情；记录不存在 → 404"""
+    pref = client.post(
+        "/api/memory/memories/preference",
+        json={"user_id": "u-api", "text": "将被遗忘的偏好（详情）", "confidence": 0.9},
+    ).json()
+    memory_id = pref["memory_id"]
+
+    resp = client.post(
+        "/api/memory/forget",
+        json={"user_id": "u-api", "target_memory_ids": [memory_id], "cascade": True},
+    )
+    assert resp.status_code == 200, resp.text
+    record_id = resp.json()["record_id"]
+
+    detail = client.get(f"/api/memory/forget/history/{record_id}")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["record_id"] == record_id
+    assert body["user_id"] == "u-api"
+    assert body["deleted_count"] == 1
+    assert memory_id in body["target_memory_ids"]
+
+    missing = client.get("/api/memory/forget/history/forg_doesnotexist")
+    assert missing.status_code == 404
 
 
 def test_api_fact_knowledge_write_and_search(client: TestClient) -> None:

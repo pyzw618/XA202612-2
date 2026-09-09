@@ -70,10 +70,13 @@ FactPage::FactPage(QWidget *parent) : BasePage(parent) {
     m_scopeCombo->addItem("全局 global", "global");
     m_scopeCombo->addItem("项目 project", "project");
     m_statusCombo = new QComboBox(this);
-    m_statusCombo->addItem("有效", "active");
-    m_statusCombo->addItem("已替代", "superseded");
-    m_statusCombo->addItem("存疑", "disputed");
-    m_statusCombo->addItem("已删除", "deleted");
+    // 后端合法状态：active/pending/archived/deleted（database.py 按状态等值查询）；
+    // "全部"对应 /facts 的 status=all
+    m_statusCombo->addItem("全部", "all");
+    m_statusCombo->addItem(StatusTag::statusText("active"), "active");
+    m_statusCombo->addItem(StatusTag::statusText("pending"), "pending");
+    m_statusCombo->addItem(StatusTag::statusText("archived"), "archived");
+    m_statusCombo->addItem(StatusTag::statusText("deleted"), "deleted");
     m_filterBar->addWidget(m_scopeCombo);
     m_filterBar->addWidget(m_statusCombo);
     m_filterBar->addStretch();
@@ -84,14 +87,6 @@ FactPage::FactPage(QWidget *parent) : BasePage(parent) {
     connect(m_statusCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
             &FactPage::onRefresh);
     root->addWidget(m_filterBar);
-
-    // 候选裁决区（折叠卡片容器）
-    m_candidateContainer = new QWidget(this);
-    m_candidateContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_candidateContainer->hide();
-    m_candidateLayout = new QVBoxLayout(m_candidateContainer);
-    m_candidateLayout->setContentsMargins(0, 8, 0, 4);
-    root->addWidget(m_candidateContainer);
 
     m_stateView = new PageStateView(this);
     m_stateView->hide();
@@ -104,20 +99,17 @@ FactPage::FactPage(QWidget *parent) : BasePage(parent) {
     clay->setContentsMargins(2, 2, 2, 2);
     clay->setSpacing(0);
 
-    m_table = new QTableWidget(0, 8, content);
-    m_table->setHorizontalHeaderLabels({"", "三元组", "置信度", "作用域", "状态", "来源", "访问", "操作"});
-    m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_table = new QTableWidget(0, 6, content);
+    m_table->setHorizontalHeaderLabels({"三元组", "置信度", "作用域", "状态", "访问", "操作"});
+    m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_table->verticalHeader()->setVisible(false);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_table->setAlternatingRowColors(true);
-    m_table->setColumnWidth(0, 34);
-    m_table->setColumnWidth(2, 72);
-    m_table->setColumnWidth(3, 110);
-    m_table->setColumnWidth(4, 80);
-    m_table->setColumnWidth(5, 120);
-    m_table->setColumnWidth(6, 60);
-    m_table->setColumnWidth(7, 170);
+    m_table->setColumnWidth(1, 72);
+    m_table->setColumnWidth(2, 110);
+    m_table->setColumnWidth(3, 80);
+    m_table->setColumnWidth(4, 60);
+    m_table->setColumnWidth(5, 170);
     m_table->verticalHeader()->setDefaultSectionSize(44);
     clay->addWidget(m_table, 1);
 
@@ -131,11 +123,14 @@ FactPage::FactPage(QWidget *parent) : BasePage(parent) {
 void FactPage::refresh() { onRefresh(); }
 
 void FactPage::onRefresh() {
+    ++m_detailGeneration;
+    m_proposeBtn->setEnabled(true);
+    m_drawer->closeDrawer();
+    m_all = QJsonArray();
+    m_table->setRowCount(0);
     const int generation = ++m_generation;
-    const bool hadData = !m_all.isEmpty();
-    if (!hadData) m_content->hide();
-    m_stateView->setState(PageState::Loading, hadData ? "正在刷新" : "正在加载事实记忆",
-                          hadData ? "当前仍显示上次成功加载的数据。" : "正在从后端读取真实数据…");
+    m_content->hide();
+    m_stateView->setState(PageState::Loading, "正在加载事实记忆", "正在从后端读取真实数据…");
     m_stateView->clearAction();
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
@@ -158,6 +153,10 @@ void FactPage::onRefresh() {
             if (m_all.isEmpty()) {
                 m_stateView->setState(PageState::Empty, "暂无事实记忆", "当前接口返回了空数据。");
                 m_stateView->setAction("刷新", [this]() { onRefresh(); });
+            } else if (m_all.size() >= 500) {
+                // /facts 上限 500：达到上限时如实提示可能截断
+                m_stateView->setState(PageState::Content,
+                                      "已达单次加载上限（500 条）", "可能存在未展示的事实，请缩小筛选范围。");
             } else {
                 m_stateView->setState(PageState::Content, QString(), QString());
             }
@@ -173,7 +172,7 @@ void FactPage::applyLocalFilter() {
         const QJsonObject f = v.toObject();
         if (!scope.isEmpty() && j::str(f, "scope") != scope) continue;
         if (!kw.isEmpty() && !tripleText(f).contains(kw, Qt::CaseInsensitive) &&
-            !j::str(f, "source_id").contains(kw, Qt::CaseInsensitive))
+            !j::str(f, "source_text").contains(kw, Qt::CaseInsensitive))
             continue;
         filtered.append(f);
     }
@@ -184,29 +183,26 @@ void FactPage::applyLocalFilter() {
 
 void FactPage::populateRow(int row, const QJsonObject &f) {
     const QString id = j::str(f, "fact_id");
-    m_table->setItem(row, 0, new QTableWidgetItem(""));
     auto *triple = new QLabel(tripleText(f));
     triple->setToolTip(j::str(f, "source_text"));
     triple->setTextInteractionFlags(Qt::TextSelectableByMouse);
     triple->setStyleSheet("border:none;");
-    m_table->setCellWidget(row, 1, triple);
+    m_table->setCellWidget(row, 0, triple);
 
     auto *conf = new QLabel(QString::number(j::num(f, "confidence"), 'f', 2));
     conf->setAlignment(Qt::AlignCenter);
     conf->setStyleSheet(QString("color:%1;font-weight:600;")
                             .arg(j::num(f, "confidence") >= 0.6 ? "#16A34A"
                                  : j::num(f, "confidence") >= 0.4 ? "#D97706" : "#DC2626"));
-    m_table->setCellWidget(row, 2, conf);
+    m_table->setCellWidget(row, 1, conf);
 
-    m_table->setItem(row, 3, new QTableWidgetItem(
-        j::str(f, "scope") + (j::str(f, "project_id").isEmpty() ? "" : " · " + j::str(f, "project_id"))));
+    m_table->setItem(row, 2, new QTableWidgetItem(j::str(f, "scope", "—")));
 
     auto *statusTag = new StatusTag();
     statusTag->setStatus(j::str(f, "status"));
-    m_table->setCellWidget(row, 4, statusTag);
+    m_table->setCellWidget(row, 3, statusTag);
 
-    m_table->setItem(row, 5, new QTableWidgetItem(j::shortId(j::str(f, "source_id"))));
-    m_table->setItem(row, 6, new QTableWidgetItem(QString::number(j::integer(f, "access_count_30d"))));
+    m_table->setItem(row, 4, new QTableWidgetItem(QString::number(j::integer(f, "access_count_30d"))));
 
     auto *ops = new QWidget();
     auto *ol = new QHBoxLayout(ops);
@@ -215,12 +211,10 @@ void FactPage::populateRow(int row, const QJsonObject &f) {
     auto mk = [ops](const QString &t) { auto *b = new QPushButton(t, ops); b->setObjectName("textBtn"); return b; };
     auto *bDetail = mk("详情");
     auto *bEdit = mk("编辑");
-    auto *bEvidence = mk("证据");
     auto *bDelete = mk("删除");
     bDelete->setStyleSheet("color:#EF4444;");
     connect(bDetail, &QPushButton::clicked, this, [this, id]() { openDetail(id); });
     connect(bEdit, &QPushButton::clicked, this, [this, f]() { openEditDialog(f); });
-    connect(bEvidence, &QPushButton::clicked, this, [this, id]() { openDetail(id); });
     connect(bDelete, &QPushButton::clicked, this, [this, f, bDelete]() {
         if (!ConfirmDialog::confirm(this, "删除事实", "确认删除这条事实三元组？")) return;
         QPointer<QPushButton> guard(bDelete);
@@ -242,13 +236,12 @@ void FactPage::populateRow(int row, const QJsonObject &f) {
                 } else {
                     QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
                 }
-            }, this);
+            }, false, this);
     });
     ol->addWidget(bDetail);
     ol->addWidget(bEdit);
-    ol->addWidget(bEvidence);
     ol->addWidget(bDelete);
-    m_table->setCellWidget(row, 7, ops);
+    m_table->setCellWidget(row, 5, ops);
 }
 
 void FactPage::openDetail(const QString &id) {
@@ -260,13 +253,14 @@ void FactPage::openDetail(const QString &id) {
         "/api/memory/facts/" + id, {{"user_id", uid}}),
         [this, generation, id, uid, api](const api::Result &r) {
             if (generation != m_detailGeneration) return;
-            if (!r.hasJsonObject()) {
-                QMessageBox::warning(this, "加载失败", r.errorCode);
+            if (!r.ok || !r.hasJsonObject()) {
+                QMessageBox::warning(this, "加载失败", r.errorCode + " " + r.errorMessage);
                 return;
             }
             const QJsonObject f = r.jsonObject();
 
-            auto *tabs = new QTabWidget();
+            auto *tabs = new QTabWidget(m_drawer);
+            connect(AppContext::instance(), &AppContext::userIdChanged, tabs, &QObject::deleteLater);
             auto *info = new QWidget();
             auto *il = new QVBoxLayout(info);
             auto *label = new QLabel();
@@ -303,7 +297,7 @@ void FactPage::openDetail(const QString &id) {
                     evT->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
                     evT->verticalHeader()->setVisible(false);
                     evT->setEditTriggers(QAbstractItemView::NoEditTriggers);
-                    if (rev.hasJsonArray()) {
+                    if (rev.ok && rev.hasJsonArray()) {
                         const QJsonArray evs = rev.jsonArray();
                         evT->setRowCount(int(evs.size()));
                         for (int i = 0; i < evs.size(); ++i) {
@@ -312,70 +306,78 @@ void FactPage::openDetail(const QString &id) {
                             evT->setItem(i, 1, new QTableWidgetItem(j::str(e, "event_id")));
                             evT->setItem(i, 2, new QTableWidgetItem(j::str(e, "content")));
                         }
+                    } else {
+                        el->addWidget(new QLabel("证据加载失败：" + rev.errorMessage, evW));
                     }
                     el->addWidget(evT);
                     tabs->addTab(evW, "证据");
                     tabs->addTab(new ProvenancePanel(id, tabs), "统一溯源");
                     m_drawer->open(j::shortId(id), tabs);
-                }, this);
+                }, tabs);
         }, this);
 }
 
 void FactPage::openEditDialog(const QJsonObject &fact) {
     QDialog dlg(this);
-    dlg.setWindowTitle("编辑事实");
-    dlg.setMinimumWidth(460);
+    dlg.setWindowTitle("编辑事实元数据（三元组内容不可修改）");
     auto *form = new QFormLayout(&dlg);
-
-    auto *objectEdit = new QLineEdit(j::str(fact, "object_value"), &dlg);
-    form->addRow("客体 *", objectEdit);
-    auto *typeEdit = new QLineEdit(&dlg);
-    typeEdit->setPlaceholderText("如 Person / Location（可选）");
-    form->addRow("客体类型", typeEdit);
     auto *confidence = new QDoubleSpinBox(&dlg);
     confidence->setRange(0.0, 1.0);
     confidence->setDecimals(2);
     confidence->setSingleStep(0.05);
     confidence->setValue(j::num(fact, "confidence", 0.7));
     form->addRow("置信度", confidence);
-    auto *evidence = new QPlainTextEdit(&dlg);
-    evidence->setPlaceholderText("可选：为此次修改追加一条证据");
-    evidence->setFixedHeight(80);
-    form->addRow("新增证据", evidence);
+    auto *status = new QComboBox(&dlg);
+    for (const auto &entry : {qMakePair(QStringLiteral("active"), QStringLiteral("active")),
+                              qMakePair(QStringLiteral("pending"), QStringLiteral("pending")),
+                              qMakePair(QStringLiteral("archived"), QStringLiteral("archived")),
+                              qMakePair(QStringLiteral("deleted"), QStringLiteral("deleted"))})
+        status->addItem(StatusTag::statusText(entry.second), entry.second);
+    const int index = status->findData(j::str(fact, "status", "active"));
+    status->setCurrentIndex(index >= 0 ? index : 0);
+    form->addRow("状态", status);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, &dlg);
     buttons->button(QDialogButtonBox::Ok)->setText("保存");
     connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
     form->addRow(buttons);
     if (dlg.exec() != QDialog::Accepted) return;
-    if (objectEdit->text().trimmed().isEmpty()) {
-        QMessageBox::warning(this, "提示", "客体不能为空");
-        return;
-    }
-
     QJsonObject body;
     body["user_id"] = AppContext::instance()->userId();
-    body["object_value"] = objectEdit->text().trimmed();
     body["confidence"] = confidence->value();
-    body["transition_action"] = "revise";
-    if (!typeEdit->text().trimmed().isEmpty()) body["object_type"] = typeEdit->text().trimmed();
-    if (!evidence->toPlainText().trimmed().isEmpty()) body["evidence_text"] = evidence->toPlainText().trimmed();
-    const api::Result result = AppContext::instance()->api()->put(
-        "/api/memory/fact/" + j::str(fact, "fact_id"), body);
-    if (result.ok) {
-        QMessageBox::information(this, "完成", "事实已更新");
-        onRefresh();
-    } else {
-        QMessageBox::warning(this, "失败", result.errorCode + " " + result.errorMessage);
-    }
+    body["status"] = status->currentData().toString();
+    const QString id = j::str(fact, "fact_id", j::str(fact, "memory_id"));
+    m_proposeBtn->setEnabled(false);
+    AppContext::instance()->api()->putAsync("/api/memory/knowledge/" + id, body,
+        [this](const api::Result &r) {
+            m_proposeBtn->setEnabled(true);
+            if (r.ok) {
+                QMessageBox::information(this, "完成", "事实元数据已更新（三元组内容保持不变）");
+                onRefresh();
+            } else {
+                QMessageBox::warning(this, "保存失败", r.errorCode + " " + r.errorMessage);
+            }
+        }, false, this);
 }
 
 void FactPage::openProposeDialog() {
+    // Evidence and project scope are part of the persisted fact contract.
     QDialog dlg(this);
+    auto *scope = new QComboBox(&dlg);
+    scope->addItem("global", "global");
+    scope->addItem("project", "project");
+    auto *project = new QLineEdit(&dlg);
+    auto *evidence = new QPlainTextEdit(&dlg);
+    project->setEnabled(false);
+    connect(scope, qOverload<int>(&QComboBox::currentIndexChanged), &dlg,
+            [project](int index) { project->setEnabled(index == 1); });
     dlg.setWindowTitle("手动提交三元组");
     dlg.setMinimumWidth(520);
     auto *form = new QFormLayout(&dlg);
 
+    form->addRow("作用域", scope);
+    form->addRow("项目 ID", project);
+    form->addRow("证据 *", evidence);
     auto *sEdit = new QLineEdit(&dlg);
     sEdit->setPlaceholderText("如：张三");
     form->addRow("主语 *", sEdit);
@@ -385,16 +387,6 @@ void FactPage::openProposeDialog() {
     auto *oEdit = new QLineEdit(&dlg);
     oEdit->setPlaceholderText("如：银河麒麟软件有限公司");
     form->addRow("宾语 *", oEdit);
-    auto *evEdit = new QLineEdit(&dlg);
-    evEdit->setPlaceholderText("支撑该事实的原文证据（可选）");
-    form->addRow("证据", evEdit);
-    auto *scopeCombo = new QComboBox(&dlg);
-    scopeCombo->addItem("全局", "global");
-    scopeCombo->addItem("项目", "project");
-    form->addRow("作用域", scopeCombo);
-    auto *projEdit = new QLineEdit(&dlg);
-    projEdit->setPlaceholderText("project 作用域的项目 ID（可选）");
-    form->addRow("项目 ID", projEdit);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, &dlg);
     buttons->button(QDialogButtonBox::Ok)->setText("提交提案");
@@ -405,8 +397,9 @@ void FactPage::openProposeDialog() {
 
     if (dlg.exec() != QDialog::Accepted) return;
     if (sEdit->text().trimmed().isEmpty() || pEdit->text().trimmed().isEmpty() ||
-        oEdit->text().trimmed().isEmpty()) {
-        QMessageBox::warning(this, "提示", "主语/谓词/宾语均不能为空");
+        oEdit->text().trimmed().isEmpty() || evidence->toPlainText().trimmed().isEmpty() ||
+        (scope->currentData().toString() == "project" && project->text().trimmed().isEmpty())) {
+        QMessageBox::warning(this, "提示", "主语、谓词、宾语和证据均不能为空；项目作用域还必须提供项目 ID。");
         return;
     }
 
@@ -414,23 +407,30 @@ void FactPage::openProposeDialog() {
     triple["subject_text"] = sEdit->text().trimmed();
     triple["predicate_text"] = pEdit->text().trimmed();
     triple["object_text"] = oEdit->text().trimmed();
-    triple["evidence"] = evEdit->text().trimmed();
     triple["confidence"] = 1.0;
+    triple["evidence"] = evidence->toPlainText().trimmed();
 
     QJsonObject body;
     // 列表与总览都按当前用户查询；提交必须使用同一 user_id，不能落入后端默认用户。
     body["user_id"] = AppContext::instance()->userId();
-    body["scope_hint"] = scopeCombo->currentData().toString();
-    body["project_id"] = projEdit->text().trimmed().isEmpty() ? QJsonValue() : QJsonValue(projEdit->text().trimmed());
+    body["scope_hint"] = scope->currentData().toString();
+    if (scope->currentData().toString() == "project") body["project_id"] = project->text().trimmed();
     body["triples"] = QJsonArray{triple};
 
     m_proposeBtn->setEnabled(false);
     AppContext::instance()->api()->postAsync("/api/memory/facts/propose", body,
         [this](const api::Result &r) {
             m_proposeBtn->setEnabled(true);
-            if (r.ok && r.hasJsonArray()) {
-                QMessageBox::information(this, "完成", "事实已写入（knowledge(FACT)）。");
-                onRefresh();
+            if (r.ok && r.hasJsonObject() && r.jsonObject().value("created").isArray()
+                    && r.jsonObject().value("failed").isArray()) {
+                const QJsonArray created = j::arr(r.jsonObject(), "created");
+                const QJsonArray failed = j::arr(r.jsonObject(), "failed");
+                if (!created.isEmpty()) onRefresh();
+                QString message = QString("写入成功 %1 条，失败 %2 条。").arg(created.size()).arg(failed.size());
+                for (const QJsonValue &value : failed)
+                    message += "\n" + j::str(value.toObject(), "reason", "未知失败原因");
+                if (failed.isEmpty() && !created.isEmpty()) QMessageBox::information(this, "完成", message);
+                else QMessageBox::warning(this, "提交结果", message);
             } else if (r.errorCode == "memory.safety.review_required") {
                 QMessageBox::warning(this, "需人工复核", "提案需人工复核。");
             } else if (r.errorCode == "memory.safety.rejected") {
@@ -438,132 +438,5 @@ void FactPage::openProposeDialog() {
             } else {
                 QMessageBox::warning(this, "提交失败", r.errorCode + " " + r.errorMessage);
             }
-        }, this);
-}
-
-void FactPage::renderCandidates() {
-    // 清空旧卡片
-    while (QLayoutItem *item = m_candidateLayout->takeAt(0)) {
-        if (QWidget *w = item->widget()) w->deleteLater();
-        delete item;
-    }
-    if (m_candidates.isEmpty()) {
-        m_candidateContainer->hide();
-        return;
-    }
-    m_candidateContainer->show();
-
-    auto *title = new QLabel(QString("待裁决事实候选（%1）").arg(m_candidates.size()));
-    title->setObjectName("cardTitle");
-    m_candidateLayout->addWidget(title);
-
-    for (int i = 0; i < m_candidates.size(); ++i) {
-        const QJsonObject p = m_candidates[i].toObject();
-        auto *card = new QFrame();
-        card->setObjectName("card");
-        auto *cl = new QVBoxLayout(card);
-        auto *head = new QLabel();
-        head->setTextFormat(Qt::RichText);
-        head->setText(QString("<span style='font-size:14px;font-weight:600;color:#1F2430;'>%1</span>")
-                          .arg(QString("%1 → %2 → %3")
-                                   .arg(j::str(p, "subject"), j::str(p, "predicate"), j::str(p, "object"))
-                                   .toHtmlEscaped()));
-        cl->addWidget(head);
-        if (!j::str(p, "admission_reason").isEmpty())
-            cl->addWidget(new QLabel("准入理由：" + j::str(p, "admission_reason")));
-        cl->addWidget(new QLabel("建议作用域：" + j::str(p, "suggested_scope") +
-                                 "　置信度：" + QString::number(j::num(p, "confidence"), 'f', 2)));
-        auto *row = new QHBoxLayout();
-        row->addStretch();
-        auto *accept = new QPushButton("采纳");
-        accept->setObjectName("primaryBtn");
-        auto *reject = new QPushButton("驳回");
-        reject->setObjectName("dangerBtn");
-        const QString pid = j::str(p, "proposal_id");
-        connect(accept, &QPushButton::clicked, this, [this, pid, accept, reject]() {
-            QDialog dlg(this);
-            dlg.setWindowTitle("采纳事实候选");
-            auto *form = new QFormLayout(&dlg);
-            auto *scope = new QComboBox(&dlg);
-            scope->addItem("全局", "global");
-            scope->addItem("项目", "project");
-            form->addRow("作用域", scope);
-            auto *proj = new QLineEdit(&dlg);
-            proj->setPlaceholderText("project 作用域的项目 ID");
-            form->addRow("项目 ID", proj);
-            auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-            bb->button(QDialogButtonBox::Ok)->setText("确认采纳");
-            connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-            connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-            form->addRow(bb);
-            if (dlg.exec() != QDialog::Accepted) return;
-            QJsonObject payload;
-            payload["scope"] = scope->currentData().toString();
-            if (!proj->text().trimmed().isEmpty()) payload["project_id"] = proj->text().trimmed();
-            QJsonObject body;
-            body["action_type"] = "fact_commit";
-            body["decision"] = "commit";
-            body["payload"] = payload;
-            QPointer<QPushButton> guardAccept(accept);
-            QPointer<QPushButton> guardReject(reject);
-            accept->setEnabled(false);
-            reject->setEnabled(false);
-            AppContext::instance()->api()->postAsync(
-                "/api/agent/actions/" + pid + "/decision", body,
-                [this, pid, guardAccept, guardReject](const api::Result &r) {
-                    if (guardAccept) guardAccept->setEnabled(true);
-                    if (guardReject) guardReject->setEnabled(true);
-                    if (r.ok) {
-                        QMessageBox::information(this, "完成", "事实已入库");
-                        removeCandidate(pid);
-                        onRefresh();
-                    } else if (r.errorCode == "memory.safety.review_required") {
-                        QMessageBox::warning(this, "需人工复核", "采纳需人工复核。");
-                    } else if (r.errorCode == "memory.safety.rejected") {
-                        QMessageBox::warning(this, "被策略拒绝", "采纳被安全策略拒绝。");
-                    } else {
-                        QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
-                    }
-                }, this);
-        });
-        connect(reject, &QPushButton::clicked, this, [this, pid, accept, reject]() {
-            QJsonObject body;
-            body["action_type"] = "fact_reject";
-            body["decision"] = "reject";
-            body["payload"] = QJsonObject();
-            QPointer<QPushButton> guardAccept(accept);
-            QPointer<QPushButton> guardReject(reject);
-            accept->setEnabled(false);
-            reject->setEnabled(false);
-            AppContext::instance()->api()->postAsync(
-                "/api/agent/actions/" + pid + "/decision", body,
-                [this, pid, guardAccept, guardReject](const api::Result &r) {
-                    if (guardAccept) guardAccept->setEnabled(true);
-                    if (guardReject) guardReject->setEnabled(true);
-                    if (r.ok) {
-                        QMessageBox::information(this, "完成", "已驳回");
-                        removeCandidate(pid);
-                    } else if (r.errorCode == "memory.safety.review_required") {
-                        QMessageBox::warning(this, "需人工复核", "驳回需人工复核。");
-                    } else if (r.errorCode == "memory.safety.rejected") {
-                        QMessageBox::warning(this, "被策略拒绝", "驳回被安全策略拒绝。");
-                    } else {
-                        QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
-                    }
-                }, this);
-        });
-        row->addWidget(accept);
-        row->addWidget(reject);
-        cl->addLayout(row);
-        m_candidateLayout->addWidget(card);
-    }
-}
-
-void FactPage::removeCandidate(const QString &proposalId) {
-    QJsonArray kept;
-    for (const QJsonValue &v : m_candidates) {
-        if (j::str(v.toObject(), "proposal_id") != proposalId) kept.append(v);
-    }
-    m_candidates = kept;
-    renderCandidates();
+        }, false, this);
 }

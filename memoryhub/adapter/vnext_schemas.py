@@ -124,7 +124,15 @@ class MemoryRetrievalRequest(APIModel):
     active_constraints: list[str] = Field(default_factory=list)
     scope_level: MemoryScope | None = None
     scope: str = ""
+    memory_types: list[str] = Field(default_factory=list)
+    min_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    scenes: list[str] = Field(default_factory=list)
+    task_types: list[str] = Field(default_factory=list)
     intent_hint: RetrievalIntent | None = None
+    requested_layers: list[LifecycleLayer] = Field(default_factory=list)
+    requested_types: list[MemoryType] = Field(default_factory=list)
+    min_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    legacy_compatibility: bool = False
     token_budget: int = Field(default=2000, ge=128, le=1_000_000)
     consistency: ConsistencyMode = ConsistencyMode.EVENTUAL
     cursor: str = ""
@@ -146,6 +154,10 @@ class MemoryRetrievalRequest(APIModel):
         """
         scope_level, scope = _legacy_scope_to_vnext(request.context, request.project_id)
         fallback_request_id = f"legacy-{request.user_id}-{hash(request.query) & 0xFFFFFFFF:08x}"
+        requested_layers = {
+            "short": [LifecycleLayer.WORKING],
+            "mid": [LifecycleLayer.EPISODE],
+        }.get((request.level or "").strip().lower(), [LifecycleLayer.LONG_TERM])
         return cls(
             api_version="vnext/v1",
             request_id=request_id or fallback_request_id,
@@ -153,9 +165,16 @@ class MemoryRetrievalRequest(APIModel):
             user_id=request.user_id or "default",
             query=request.query,
             session_id=request.session_id,
+            memory_types=list(request.memory_types),
+            min_confidence=request.min_confidence,
+            scenes=list(request.scenes),
+            task_types=list(request.task_types),
             scope_level=scope_level,
             scope=scope,
             intent_hint=_legacy_intent_hint(request.level, request.memory_types),
+            requested_layers=requested_layers,
+            requested_types=_legacy_requested_types(request.memory_types),
+            legacy_compatibility=True,
             token_budget=max(128, request.top_k * 40),
             page_size=max(1, min(100, request.top_k or 5)),
         )
@@ -464,9 +483,23 @@ def _legacy_intent_hint(level: str, memory_types: list[str]) -> RetrievalIntent:
     normalized_types = {t.strip().lower() for t in memory_types if isinstance(t, str)}
     if normalized_types == {"preference"}:
         return RetrievalIntent.PREFERENCE
-    if normalized_types and normalized_types <= {"knowledge", "fact"}:
+    if normalized_types == {"fact"}:
         return RetrievalIntent.SEMANTIC_FACT
     return RetrievalIntent.MIXED
+
+
+def _legacy_requested_types(memory_types: list[str]) -> list[MemoryType]:
+    """Expand legacy aggregate filters into explicit vNext memory types."""
+    requested: list[MemoryType] = []
+    for value in memory_types:
+        normalized = value.strip().lower() if isinstance(value, str) else ""
+        if normalized == "preference":
+            requested.append(MemoryType.PREFERENCE)
+        elif normalized == "fact":
+            requested.append(MemoryType.SEMANTIC)
+        elif normalized == "knowledge":
+            requested.extend([MemoryType.SEMANTIC, MemoryType.PROCEDURAL, MemoryType.EPISODIC])
+    return list(dict.fromkeys(requested))
 
 
 def legacy_search_request_from_vnext(
@@ -506,6 +539,15 @@ def legacy_search_request_from_vnext(
         RetrievalIntent.EXPERIENCE: "mid",
     }.get(selected_intent, "long")
     legacy_types = [_legacy_memory_type(memory_type) for memory_type in memory_types or []]
+    if request.memory_types:
+        legacy_types = list(dict.fromkeys(request.memory_types))
+    context = context.model_copy(
+        update={
+            "scene": context.scene or (request.scenes[0] if len(request.scenes) == 1 else ""),
+            "task_type": context.task_type
+            or (request.task_types[0] if len(request.task_types) == 1 else ""),
+        }
+    )
     return SearchRequest(
         user_id=request.user_id,
         query=request.query,
@@ -513,7 +555,9 @@ def legacy_search_request_from_vnext(
         project_id=project_id,
         top_k=top_k or request.page_size,
         memory_types=list(dict.fromkeys(legacy_types)),
-        min_confidence=0.0,
+        min_confidence=request.min_confidence,
+        scenes=list(request.scenes),
+        task_types=list(request.task_types),
         level=level,
         session_id=request.session_id,
     )
@@ -574,12 +618,15 @@ def _retrieved_memory_to_legacy_dict(item: RetrievedMemory) -> dict[str, Any]:
 
 
 def _retrieved_memory_to_search_result(item: RetrievedMemory) -> SearchResult:
+    source = "+".join(item.source_ids) or "vnext"
+    if "hybrid" in item.source_ids:
+        source = "hybrid"
     return SearchResult(
         memory_id=item.memory_id,
         memory_type=_legacy_memory_type(item.memory_type),
         content=_extract_content_text(item.content),
         score=item.score,
-        source="+".join(item.source_ids) or "vnext",
+        source=source,
         metadata={
             "scope": item.scope,
             "scope_level": item.scope_level.value,
@@ -612,7 +659,7 @@ def _retrieved_memory_to_legacy_typed(
     common: dict[str, Any] = {
         "user_id": item.user_id,
         "memory_id": item.memory_id,
-        "confidence": item.score,
+        "confidence": float(item.content.get("legacy_confidence", item.score)),
         "status": status_map.get(item.evolution_status.upper(), MemoryStatus.ACTIVE),
         "version": item.content_version,
         "level": level_map.get(item.layer, MemoryLevel.LONG),
@@ -637,12 +684,18 @@ def _retrieved_memory_to_legacy_typed(
             object_value=content_text,
         )
     if item.memory_type in (MemoryType.PROCEDURAL, MemoryType.EPISODIC):
+        knowledge_type = item.content.get("knowledge_type")
+        if knowledge_type not in {"workflow", "case", "template"}:
+            knowledge_type = "case" if item.memory_type is MemoryType.EPISODIC else "workflow"
         return KnowledgeMemory(
             **common,
             scope=_legacy_scene_scope(item.scope_level, item.scope),
             name=item.content.get("name", item.memory_id),
-            content=content_text,
+            content=item.content.get("content", content_text),
+            knowledge_type=knowledge_type,
             steps=item.content.get("steps", []),
+            tools=item.content.get("tools", []),
+            template_body=item.content.get("template_body", ""),
         )
     return None
 

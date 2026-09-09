@@ -159,9 +159,7 @@ def _make_runtime(
         db, preference_repository=pref_repo, knowledge_repository=know_repo
     )
     facade = LongTermAuthorityFacade(authority)
-    writer = MemoryWriteService(
-        pref_repo=pref_repo, know_repo=know_repo, project_immediately=False
-    )
+    writer = MemoryWriteService(pref_repo=pref_repo, know_repo=know_repo, project_immediately=False)
     tasks = ExtractionTaskRepository(db)
     canonical = CanonicalWriteService(
         db,
@@ -191,9 +189,7 @@ def _make_runtime(
     trace_store = TraceStore(db=db)
     audit_store = AuditStore(db)
 
-    def active_memories(
-        request: MemoryRetrievalRequest, _plan: Any, channel: str
-    ) -> list[Any]:
+    def active_memories(request: MemoryRetrievalRequest, _plan: Any, channel: str) -> list[Any]:
         from memoryhub.adapter.vnext_schemas import RetrievedMemory
 
         values = authority.list(
@@ -333,7 +329,7 @@ def _search(runtime: DemoRuntime, request_id: str, **overrides: Any) -> dict[str
 
 
 def scenario_formation(output_dir: Path) -> dict[str, Any]:
-    runtime = _make_runtime(output_dir, formation_mode="authority")
+    runtime = _make_runtime(output_dir, formation_mode="candidate-only")
     try:
         raw = _load_fixture("event_start_report.json")
         raw["payload"] = {**raw["payload"], "explicit_long_term": True}
@@ -365,9 +361,7 @@ def scenario_formation(output_dir: Path) -> dict[str, Any]:
                 "candidate_count": len(task.candidate_ids),
                 "candidate_status": candidate.status,
                 "authority_memory_count": len(memories),
-                "formation_status": (
-                    "AUTHORITY_PROMOTED" if memories else "CANDIDATE_STAGED"
-                ),
+                "formation_status": ("AUTHORITY_PROMOTED" if memories else "CANDIDATE_STAGED"),
                 "task_status": task.status.value,
             },
         }
@@ -401,9 +395,11 @@ def scenario_evidence(output_dir: Path) -> dict[str, Any]:
         evidence_count = 0
         if memories:
             with runtime.db.session() as session:
-                evidence_count = session.query(MemoryEvidenceRow).filter(
-                    MemoryEvidenceRow.memory_id == memories[0].memory_id
-                ).count()
+                evidence_count = (
+                    session.query(MemoryEvidenceRow)
+                    .filter(MemoryEvidenceRow.memory_id == memories[0].memory_id)
+                    .count()
+                )
         if candidate is None or len(memories) != 1 or candidate.status != "CONFIRMED":
             raise RuntimeError("independent evidence did not promote the candidate")
         return {

@@ -1,4 +1,4 @@
-﻿"""Knowledge handler preserving KnowledgeExtractor and KnowledgeUpdater contracts."""
+"""Knowledge handler preserving KnowledgeExtractor and KnowledgeUpdater contracts."""
 
 from __future__ import annotations
 
@@ -94,10 +94,12 @@ class KnowledgeMemoryHandler(BaseMemoryHandler):
             return None
         action = str(getattr(decision, "action", "")).lower()
         if action in {"reject", "review"}:
-            logger.info(
-                "knowledge apply: skipping action=%s for %s",
+            # 候选被丢弃必须可见：warning 日志 + 挂到 decision.reason 供调用方汇总
+            logger.warning(
+                "knowledge apply: dropped candidate action=%s memory_id=%s reason=%s",
                 action,
                 getattr(decision.candidate.payload, "memory_id", "?"),
+                getattr(decision, "reason", ""),
             )
             return None
         memory = decision.candidate.payload

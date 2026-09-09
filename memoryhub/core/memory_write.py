@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from memoryhub.adapter.schemas import (
+    Evidence,
     KnowledgeMemory,
     MemoryDecision,
     MemoryProvenance,
@@ -16,6 +17,9 @@ from memoryhub.adapter.schemas import (
 from memoryhub.core.domain_writer import DomainMemoryWriter
 
 Memory = PreferenceMemory | KnowledgeMemory
+
+
+_GOVERNED_CONFIDENCE_SOURCES = frozenset({"vnext_authority"})
 
 
 class MemoryWriteService:
@@ -78,6 +82,7 @@ class MemoryWriteService:
             "content": cls.index_text(memory),
             "confidence": memory.confidence,
             "scope": memory.scope.model_dump(),
+            "project_id": getattr(memory, "project_id", "") or "",
             "status": (
                 memory.status.value
                 if hasattr(memory.status, "value")
@@ -165,6 +170,7 @@ class MemoryWriteService:
         provenance=None,
     ):
         """Persist first, then project; the domain writer owns authoritative DB writes."""
+        self._enforce_confidence_contract(memory)
         repo = self.know_repo if memory.memory_type == "knowledge" else self.pref_repo
         receipt = None
         if self.domain_writer is not None:
@@ -184,6 +190,55 @@ class MemoryWriteService:
         if self.project_immediately:
             self.sync_memory(memory)
         return receipt
+
+
+    def _enforce_confidence_contract(self, memory: Memory) -> None:
+        """Close the preference confidence bypass at the single persistence chokepoint.
+
+        PreferenceMemory 写路径（显式 API / remember() / 统一更新）此前不经
+        ConfidenceCalculator，请求体未给 confidence 时入库 pydantic 占位值 0.5、
+        evidences 为空。这里统一收口：证据链为空时用本次写入事件补一条
+        manual_config 证据（已存在记忆的旧证据先合并，避免更新分支丢证据），
+        再经 ConfidenceCalculator 重算置信度，使入库值来自四因子公式。
+        vnext_authority 等治理来源的置信度由权威流水线自行管理，不在这里覆盖。
+        """
+        if not isinstance(memory, PreferenceMemory):
+            return
+        from memoryhub.core.memory.evidence import EvidenceMerger
+        from memoryhub.core.preference.confidence import (
+            ConfidenceCalculator,
+            parse_occurred_at,
+        )
+        from memoryhub.core.safety.memory_write import build_memory_write_event
+
+        if not memory.evidences:
+            merged: list[Evidence] = []
+            get_by_id = getattr(self.pref_repo, "get_by_id", None)
+            if callable(get_by_id):
+                try:
+                    existing = get_by_id(memory.memory_id)
+                except Exception:
+                    existing = None
+                if existing is not None:
+                    merged = list(getattr(existing, "evidences", []) or [])
+            event = build_memory_write_event(memory, operation="memory_sync")
+            merged.append(
+                Evidence(
+                    event_id=event.event_id,
+                    content=(
+                        f"[{event.event_type.upper()}] "
+                        f"Source:{event.source_type.value} Quality:1.00"
+                    ),
+                    source_type=event.source_type,
+                    timestamp=parse_occurred_at(event.occurred_at),
+                    weight=1.0,
+                    decision=None,
+                )
+            )
+            memory.evidences = EvidenceMerger().normalize_and_merge(merged)
+        if memory.extract_source in _GOVERNED_CONFIDENCE_SOURCES:
+            return
+        ConfidenceCalculator().calculate(memory)
 
     def _build_domain_writer(self) -> DomainMemoryWriter | None:
         """Enable the transactional path only when both repositories share a Database."""

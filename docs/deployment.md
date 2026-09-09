@@ -80,7 +80,7 @@ memoryhub-configure-opencode --current-user   # 写入 ~/.config/opencode/ 插�
 memoryhub status                              # CLI 连通性验证
 ```
 
-细节与故障排查见 [packaging/linux/README.md](../packaging/linux/README.md)；面向最终用户的图文手册见 `old/docs/银河麒麟安装与使用手册.md`（按 0.1.0-14 Release 编写）。
+细节与故障排查见 [packaging/linux/README.md](../packaging/linux/README.md)；面向最终用户的图文手册见 `old/docs/银河麒麟安装与使用手册.md`（历史版本说明，仅供参考）。
 
 > 注意：麒麟处于「维护模式」时先退出维护模式再安装；安装后如 OpenCode 未生效，重新执行 `memoryhub-configure-opencode --current-user`。
 
@@ -110,4 +110,4 @@ memoryhub status                              # CLI 连通性验证
 1. **升级前**：备份 db + 密钥文件；`migrate_vnext.py` 只读扫描确认迁移面。
 2. **灰度**：`vnext.mode` 按 legacy → shadow → dual-read → canary(5/25/50/100%) → vnext 推进，使用 `/api/memory/vnext/rollout/*` 接口登记观察与推进（零容忍门禁）。
 3. **回滚**：`POST /rollout/rollback` 为只读开关，回滚窗口默认 60 分钟；回滚不产生第二个 Authority 写者。
-4. **版本状态**：软件版本以 `pyproject.toml` 为准（当前 0.1.0）；发布产物见 GitHub Releases。
+4. **版本状态**：软件版本以 `pyproject.toml` 为准（当前 2.0.0）；发布产物见 GitHub Releases。

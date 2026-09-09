@@ -11,6 +11,7 @@
 #include <QLinearGradient>
 #include <QPainter>
 #include <QProcess>
+#include <QTimer>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QStyle>
@@ -154,10 +155,17 @@ DashboardPage::DashboardPage(QWidget *parent) : BasePage(parent) {
     refresh->setObjectName("primaryButton");
     m_configureButton = new QPushButton("一键配置", header);
     m_configureButton->setObjectName("secondaryButton");
-    m_configureButton->setToolTip("为当前 Linux 用户安装或修复 OpenCode 插件配置");
     m_openAgentButton = new QPushButton("打开 Agent", header);
     m_openAgentButton->setObjectName("agentButton");
+#ifdef Q_OS_WIN
+    m_configureButton->setEnabled(false);
+    m_configureButton->setToolTip("当前平台不支持：一键配置仅适用于 Linux");
+    m_openAgentButton->setEnabled(false);
+    m_openAgentButton->setToolTip("当前平台不支持 Agent 启动");
+#else
+    m_configureButton->setToolTip("为当前 Linux 用户安装或修复 OpenCode 插件配置");
     m_openAgentButton->setToolTip("在主目录打开系统终端并启动 OpenCode");
+#endif
     header->actionLayout()->addWidget(m_updateTime);
     header->actionLayout()->addWidget(search);
     header->actionLayout()->addWidget(refresh);
@@ -306,7 +314,7 @@ DashboardPage::DashboardPage(QWidget *parent) : BasePage(parent) {
 }
 
 void DashboardPage::beginLoading() {
-    m_pendingRequests = 10;
+    m_pendingRequests = 6;
     m_successfulRequests = 0;
     m_pref = m_know = -1;
     m_knowWorkflow = m_knowCase = m_knowTemplate = m_knowFact = -1;
@@ -320,6 +328,8 @@ void DashboardPage::beginLoading() {
     m_deadLetterCount->setText("—");
     m_chartEmpty->setText("正在读取记忆数据…");
     m_chartEmpty->show();
+    m_pieCenter->setText("—\n总记忆");
+    m_pieCenter->hide();
     setBanner(QString(), "info");
 }
 
@@ -338,36 +348,35 @@ void DashboardPage::refresh() {
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
             if (r.ok && r.hasJsonArray()) { m_pref = r.jsonArray().size(); m_statCards[1]->setLoading(false); m_statCards[1]->setNumber(QString::number(m_pref)); }
             else m_statCards[1]->setError(r.errorMessage.isEmpty() ? "偏好记忆加载失败" : r.errorMessage);
-            updateMemoryVisuals(); finishRequest(r.ok); });
+            updateMemoryVisuals(); finishRequest(r.ok); }, this);
     api->getAsync(query("/api/memory/knowledge", {{"status", "active"}}),
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
-            if (r.ok && r.hasJsonArray()) { m_know = r.jsonArray().size(); m_statCards[2]->setLoading(false); m_statCards[2]->setNumber(QString::number(m_know)); }
+            if (r.ok && r.hasJsonArray()) {
+                const QJsonArray rows = r.jsonArray();
+                m_know = rows.size();
+                m_knowWorkflow = m_knowCase = m_knowTemplate = m_knowFact = 0;
+                for (const QJsonValue &value : rows) {
+                    const QString type = j::str(value.toObject(), "knowledge_type").toLower();
+                    if (type == "workflow") ++m_knowWorkflow;
+                    else if (type == "case") ++m_knowCase;
+                    else if (type == "template") ++m_knowTemplate;
+                    else if (type == "fact") ++m_knowFact;
+                }
+                m_statCards[2]->setLoading(false); m_statCards[2]->setNumber(QString::number(m_know));
+            }
             else m_statCards[2]->setError(r.errorMessage.isEmpty() ? "知识记忆加载失败" : r.errorMessage);
-            updateMemoryVisuals(); finishRequest(r.ok); });
-    const struct { const char *arg; int *target; } subtypes[] = {
-        {"workflow", &m_knowWorkflow},
-        {"case", &m_knowCase},
-        {"template", &m_knowTemplate},
-        {"fact", &m_knowFact},
-    };
-    for (const auto &sub : subtypes) {
-        api->getAsync(query("/api/memory/knowledge", {{"status", "active"}, {"knowledge_type", QString::fromUtf8(sub.arg)}}),
-            [this, generation, sub](const api::Result &r) { if (generation != m_generation) return;
-                if (r.ok && r.hasJsonArray()) *sub.target = r.jsonArray().size();
-                else *sub.target = -2;
-                updateMemoryVisuals(); finishRequest(r.ok); });
-    }
+            updateMemoryVisuals(); finishRequest(r.ok); }, this);
     api->getAsync(query("/api/memory/conflicts", {{"status", "pending"}}),
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
-            if (r.ok && r.hasJsonArray()) m_conflicts = r.jsonArray().size(); else m_conflicts = -2; updateTasks(); finishRequest(r.ok); });
+            if (r.ok && r.hasJsonArray()) m_conflicts = r.jsonArray().size(); else m_conflicts = -2; updateTasks(); finishRequest(r.ok); }, this);
     api->getAsync(query("/api/memory/extraction/tasks", {{"status", "dead_letter"}}),
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
-            if (r.ok && r.hasJsonArray()) m_deadLetters = r.jsonArray().size(); else m_deadLetters = -2; updateTasks(); finishRequest(r.ok); });
+            if (r.ok && r.hasJsonArray()) m_deadLetters = r.jsonArray().size(); else m_deadLetters = -2; updateTasks(); finishRequest(r.ok); }, this);
     api->getAsync(query("/api/memory/events", {{"limit", "8"}, {"offset", "0"}}),
         [this, generation](const api::Result &r) { if (generation != m_generation) return;
-            updateActivity(r.jsonObject().value("items").toArray(), r.ok && r.hasJsonObject()); finishRequest(r.ok); });
+            updateActivity(r.jsonObject().value("items").toArray(), r.ok && r.hasJsonObject()); finishRequest(r.ok); }, this);
     api->getAsync("/api/health", [this, generation](const api::Result &r) {
-        if (generation != m_generation) return; finishRequest(r.ok); });
+        if (generation != m_generation) return; finishRequest(r.ok); }, this);
 }
 
 void DashboardPage::resizeEvent(QResizeEvent *event) {
@@ -399,10 +408,27 @@ void DashboardPage::finishRequest(bool ok) {
     m_updateTime->setText("更新于 " + QDateTime::currentDateTime().toString("HH:mm"));
     if (m_successfulRequests == 0) {
         setBanner("后端当前不可用。界面仍可正常浏览，你可以启动服务后点击“刷新数据”重试。", "offline");
-    } else if (m_successfulRequests < 10) {
+    } else if (m_successfulRequests < 6) {
         setBanner("部分数据暂时无法获取，已保留成功加载的内容。", "warning");
     } else {
         setBanner(QString(), "info");
+    }
+    // 保证指标卡不卡在 loading：总数卡在全部请求结束后仍未落定（存在失败项）时进入终态。
+    const bool partialMemory = m_pref < 0 || m_know < 0 ||
+        m_knowWorkflow == -2 || m_knowCase == -2 || m_knowTemplate == -2 || m_knowFact == -2;
+    if (m_statCards[0]->isLoading()) {
+        if (m_successfulRequests == 0) {
+            m_statCards[0]->setError("后端当前不可用");
+        } else if (partialMemory) {
+            m_statCards[0]->setError("部分数据不可用");
+        }
+    }
+    if (m_successfulRequests == 0 && m_chartEmpty->isVisible()) {
+        m_chartEmpty->setText("数据不可用");
+        m_pieCenter->hide();
+    } else if (partialMemory && m_chartEmpty->isVisible()) {
+        m_chartEmpty->setText("部分数据不可用");
+        m_pieCenter->hide();
     }
 }
 
@@ -423,8 +449,10 @@ void DashboardPage::updateMemoryVisuals() {
     if (m_knowFact >= 0) {
         m_statCards[3]->setLoading(false);
         m_statCards[3]->setNumber(QString::number(m_knowFact));
-    }
-    if (m_knowFact < 0) m_statCards[3]->setHint(allKnown ? "事实数据不可用" : "等待知识数据…");
+    } else if (m_knowFact == -2) {
+        m_statCards[3]->setLoading(false);
+        m_statCards[3]->setHint("事实数据不可用");
+    } else if (m_knowFact < 0) m_statCards[3]->setHint(allKnown ? "事实数据不可用" : "等待知识数据…");
     else if (m_know > 0) m_statCards[3]->setHint(QString("占知识记忆 %1%").arg(qRound(m_knowFact * 100.0 / m_know)));
     else if (m_know == 0) m_statCards[3]->setHint("暂无知识记忆");
 
@@ -527,7 +555,7 @@ void DashboardPage::updateActivity(const QJsonArray &items, bool ok) {
         tag->setProperty("tone", eventTypeTone(rawType));
         auto *texts = new QVBoxLayout();
         texts->setSpacing(1);
-        const QString full = j::str(event, "content", j::str(event, "summary"));
+        const QString full = j::str(event, "text");
         auto *title = new QLabel(j::str(event, "scene", "未分类"), row);
         title->setObjectName("activityTitle");
         auto *detail = new QLabel(full, row);
@@ -581,6 +609,10 @@ bool DashboardPage::eventFilter(QObject *watched, QEvent *event) {
 }
 
 void DashboardPage::configureOpenCode() {
+#ifdef Q_OS_WIN
+    setBanner("当前平台不支持 OpenCode 一键配置（Windows）。", "warning");
+    return;
+#endif
     if (m_configProcess) return;
     const QString helper = installedHelper(QStringLiteral("memoryhub-configure-opencode"));
     if (helper.isEmpty()) {
@@ -591,31 +623,74 @@ void DashboardPage::configureOpenCode() {
     m_configureButton->setText("配置中…");
     setBanner("正在为当前 Linux 用户配置 OpenCode 插件…", "info");
     m_configProcess = new QProcess(this);
-    connect(m_configProcess, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
-            [this](int exitCode, QProcess::ExitStatus status) {
-                const QString output = QString::fromUtf8(m_configProcess->readAll()).trimmed();
+    QProcess *proc = m_configProcess;
+    proc->setProcessChannelMode(QProcess::MergedChannels);
+    connect(proc, &QProcess::errorOccurred, this, [this, proc](QProcess::ProcessError error) {
+        setBanner(error == QProcess::FailedToStart
+                     ? "OpenCode 配置失败：无法运行配置工具。"
+                     : "OpenCode 配置失败：配置进程异常退出。",
+                  "warning");
+        if (m_configProcess == proc) m_configProcess = nullptr;
+        proc->deleteLater();
+        m_configureButton->setText("一键配置");
+        m_configureButton->setEnabled(true);
+    });
+    connect(proc, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+            [this, proc](int exitCode, QProcess::ExitStatus status) {
+                const QString output = QString::fromUtf8(proc->readAll()).trimmed();
                 const bool ok = status == QProcess::NormalExit && exitCode == 0;
                 setBanner(ok ? "OpenCode 插件配置完成，可以直接打开 Agent。"
                              : QString("OpenCode 配置失败：%1").arg(output.isEmpty() ? "请查看系统日志" : output),
                           ok ? "success" : "warning");
-                m_configProcess->deleteLater();
-                m_configProcess = nullptr;
+                if (m_configProcess == proc) m_configProcess = nullptr;
+                proc->deleteLater();
                 m_configureButton->setText("一键配置");
                 m_configureButton->setEnabled(true);
             });
-    m_configProcess->setProcessChannelMode(QProcess::MergedChannels);
-    m_configProcess->start(helper, {QStringLiteral("--current-user")});
+    proc->start(helper, {QStringLiteral("--current-user")});
+    QTimer::singleShot(10000, proc, [this]() {
+        if (!m_configProcess || m_configProcess->state() == QProcess::NotRunning) return;
+        m_configProcess->kill();
+        setBanner("OpenCode 配置超时，已终止。", "warning");
+        m_configureButton->setText("一键配置");
+        m_configureButton->setEnabled(true);
+    });
 }
 
 void DashboardPage::openAgent() {
+#ifdef Q_OS_WIN
+    setBanner("当前平台不支持 Agent 启动（Windows）。", "warning");
+    return;
+#endif
     const QString helper = installedHelper(QStringLiteral("memoryhub-open-agent"));
     if (helper.isEmpty()) {
-        setBanner("未找到 Agent 启动工具，请重新安装最新版 MemoryHub。", "warning");
+        setBanner("未找到 Agent 启动工具，当前无法启动。", "warning");
         return;
     }
-    if (!QProcess::startDetached(helper, {})) {
-        setBanner("系统终端启动失败，请确认 UKUI 终端可用。", "warning");
-        return;
-    }
-    setBanner("已在主目录打开系统终端并启动 OpenCode。", "success");
+    if (m_agentProcess) return;
+    m_openAgentButton->setEnabled(false);
+    setBanner("正在启动 Agent…", "info");
+    m_agentProcess = new QProcess(this);
+    m_agentProcess->setProcessChannelMode(QProcess::MergedChannels);
+    connect(m_agentProcess, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
+        setBanner("Agent 启动失败：无法运行启动工具。", "warning");
+        m_openAgentButton->setEnabled(true);
+        if (m_agentProcess) { m_agentProcess->deleteLater(); m_agentProcess = nullptr; }
+    });
+    connect(m_agentProcess, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+            [this](int code, QProcess::ExitStatus status) {
+        const bool ok = status == QProcess::NormalExit && code == 0;
+        setBanner(ok ? "已在主目录打开系统终端并启动 OpenCode。"
+                     : "Agent 启动失败：" + QString::fromUtf8(m_agentProcess->readAll()).trimmed(),
+                  ok ? "success" : "warning");
+        m_openAgentButton->setEnabled(true);
+        m_agentProcess->deleteLater(); m_agentProcess = nullptr;
+    });
+    m_agentProcess->start(helper, QStringList{});
+    QTimer::singleShot(10000, m_agentProcess, [this]() {
+        if (!m_agentProcess || m_agentProcess->state() == QProcess::NotRunning) return;
+        m_agentProcess->kill();
+        setBanner("Agent 启动超时，请检查系统终端和 OpenCode。", "warning");
+        m_openAgentButton->setEnabled(true);
+    });
 }

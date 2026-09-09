@@ -137,6 +137,7 @@ class ScopeResolver:
         their repositories.  Long-term candidates may use GLOBAL as a safe
         fallback; every other scoped record must exactly match the request.
         """
+        preferred_scope_value = preferred_scope.split(":", 1)[-1]
         eligible: list[ValidationResult] = []
         dropped: list[tuple[RetrievedMemory, str]] = []
         for result in results:
@@ -153,7 +154,7 @@ class ScopeResolver:
                 and memory.scope_level is not MemoryScope.GLOBAL
                 and (
                     memory.scope_level is not preferred_scope_level
-                    or memory.scope != preferred_scope
+                    or memory.scope.split(":", 1)[-1] != preferred_scope_value
                 )
             ):
                 reason = "scope does not match request"
@@ -163,9 +164,7 @@ class ScopeResolver:
                 eligible.append(result)
         return eligible, dropped
 
-    def _validate_candidates(
-        self, candidates: list[RetrievedMemory]
-    ) -> list[ValidationResult]:
+    def _validate_candidates(self, candidates: list[RetrievedMemory]) -> list[ValidationResult]:
         """Reject blocked statuses and stale projection versions."""
         results: list[ValidationResult] = []
         for memory in candidates:
@@ -274,22 +273,16 @@ class ScopeResolver:
             if winner is None:
                 # All members conflict and none should be promoted.
                 for memory in group.memories:
-                    dropped.append(
-                        (memory, f"conflict group {group.identity_key}: no safe winner")
-                    )
+                    dropped.append((memory, f"conflict group {group.identity_key}: no safe winner"))
                 continue
 
             selected.append(winner)
             for memory in drops:
-                dropped.append(
-                    (memory, f"conflict group {group.identity_key}: {resolution}")
-                )
+                dropped.append((memory, f"conflict group {group.identity_key}: {resolution}"))
 
         return selected, groups, dropped
 
-    def _build_conflict_groups(
-        self, memories: list[RetrievedMemory]
-    ) -> list[ConflictGroup]:
+    def _build_conflict_groups(self, memories: list[RetrievedMemory]) -> list[ConflictGroup]:
         """Group by the conceptual identity key: memory_type + normalized content key."""
         by_key: dict[str, list[RetrievedMemory]] = {}
         for memory in memories:
@@ -326,11 +319,12 @@ class ScopeResolver:
 
         # Priority 1: exact preferred scope match.
         if preferred_scope_level is not None:
+            preferred_scope_value = preferred_scope.split(":", 1)[-1]
             exact = [
                 m
                 for m in memories
                 if m.scope_level == preferred_scope_level
-                and (not preferred_scope or m.scope == preferred_scope)
+                and (not preferred_scope or m.scope.split(":", 1)[-1] == preferred_scope_value)
             ]
             if exact:
                 winner = self._newest_in_scope(exact)
@@ -367,9 +361,7 @@ def filter_blocked_statuses(
     blocked = {EvolutionStatus.DELETED.value, EvolutionStatus.SUPERSEDED.value}
     for candidate in candidates:
         if candidate.evolution_status.upper() in blocked:
-            dropped.append(
-                (candidate, f"{candidate.evolution_status} memory is not retrievable")
-            )
+            dropped.append((candidate, f"{candidate.evolution_status} memory is not retrievable"))
         else:
             selected.append(candidate)
     return selected, dropped

@@ -42,7 +42,6 @@ private:
     QPushButton *m_nextBtn = nullptr;
     PageStateView *m_stateView = nullptr;
     int m_generation = 0;
-    int m_pendingLoads = 0;
     bool m_writeInProgress = false;
 
     int m_currentPage = 1;

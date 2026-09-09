@@ -8,10 +8,10 @@
 class QLabel;
 class QPushButton;
 class QTableWidget;
-class PageStateView;
 
 class MemoryTierPage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit MemoryTierPage(QWidget *parent = nullptr);
 
@@ -33,7 +33,6 @@ private:
     QLabel *m_shortSummary = nullptr;
     QLabel *m_midSummary = nullptr;
     QPushButton *m_consolidateBtn = nullptr;
-    PageStateView *m_state = nullptr;
     QJsonArray m_short;
     QJsonArray m_mid;
     int m_generation = 0;

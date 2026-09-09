@@ -126,3 +126,46 @@ def test_new_preference_archives_previous_version(tmp_path) -> None:
         assert len(active.json()) == 1
         assert "JSON" in active.json()[0]["text"]
         assert active.json()[0]["version"] == 2
+
+
+def test_event_write_tenant_defaults_to_default_not_user_id(tmp_path) -> None:
+    """写入与检索必须解析出同一个租户。
+
+    legacy 事件端点曾把缺省租户取成 ``event.user_id``，而所有检索端点取
+    ``"default"``；于是无 header 写入（OpenCode 插件）形成的记忆永远检索不到。
+    """
+    import sqlite3
+
+    db_path = tmp_path / "memoryhub.db"
+    config = AppConfig(
+        storage=StorageConfig(
+            db_path=str(db_path),
+            vector_index_path=str(tmp_path / "vector_index"),
+            evidence_path=str(tmp_path / "evidence"),
+        )
+    )
+    with TestClient(create_app(config)) as client:
+        assert (
+            client.post(
+                "/api/memory/events",
+                json={"events": [event_payload("默认租户", "evt-tenant-default")]},
+            ).status_code
+            == 200
+        )
+        explicit = event_payload("显式租户", "evt-tenant-explicit")
+        # 不同 session 才能落在不同 episode（episode_id 由 session 派生）。
+        explicit["session_id"] = "session-002"
+        explicit["turn_id"] = "turn-002"
+        assert (
+            client.post(
+                "/api/memory/events",
+                json={"events": [explicit]},
+                headers={"X-MemoryHub-Tenant": "tenant-a"},
+            ).status_code
+            == 200
+        )
+
+    with sqlite3.connect(db_path) as con:
+        tenants = dict(con.execute("SELECT event_id, tenant_id FROM events"))
+    assert tenants["evt-tenant-default"] == "default"
+    assert tenants["evt-tenant-explicit"] == "tenant-a"

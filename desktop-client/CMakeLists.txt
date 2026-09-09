@@ -4,7 +4,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-project(KylinMemoryHubClient VERSION 0.1.0 LANGUAGES CXX)
+project(KylinMemoryHubClient VERSION 2.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -101,6 +101,16 @@ add_executable(memoryhub-client-api-tests tests/ApiClientTest.cpp src/api/ApiCli
 target_include_directories(memoryhub-client-api-tests PRIVATE src)
 target_link_libraries(memoryhub-client-api-tests PRIVATE Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Network Qt5::Test)
 add_test(NAME memoryhub-client-api-tests COMMAND memoryhub-client-api-tests)
+
+set(FRONTEND_TEST_SOURCES ${CLIENT_SOURCES})
+list(REMOVE_ITEM FRONTEND_TEST_SOURCES src/main.cpp)
+add_executable(memoryhub-client-frontend-tests tests/FrontendRegressionTest.cpp
+    ${FRONTEND_TEST_SOURCES} ${CLIENT_HEADERS} resources/app.qrc)
+target_include_directories(memoryhub-client-frontend-tests PRIVATE src)
+target_link_libraries(memoryhub-client-frontend-tests PRIVATE
+    Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Network Qt5::Charts Qt5::Test)
+add_test(NAME memoryhub-client-frontend-tests COMMAND memoryhub-client-frontend-tests)
+set_tests_properties(memoryhub-client-frontend-tests PROPERTIES TIMEOUT 120)
 
 if(WIN32)
     target_compile_definitions(memoryhub-client PRIVATE _CRT_SECURE_NO_WARNINGS)

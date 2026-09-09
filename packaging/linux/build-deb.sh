@@ -66,18 +66,21 @@ cmake --build "$CLIENT_BUILD" --parallel "$(nproc)"
 if command -v /usr/sbin/kyexectl >/dev/null 2>&1; then
     echo "Registering freshly built executables with Kylin execution control"
     sudo /usr/sbin/kyexectl -s "$CLIENT_BUILD/memoryhub-client-api-tests"
+    sudo /usr/sbin/kyexectl -s "$CLIENT_BUILD/memoryhub-client-frontend-tests"
     sudo /usr/sbin/kyexectl -s "$CLIENT_BUILD/memoryhub-client"
     if command -v /usr/sbin/kysec_netctl >/dev/null 2>&1; then
         sudo /usr/sbin/kysec_netctl --remove -a "$CLIENT_BUILD/memoryhub-client-api-tests" >/dev/null 2>&1 || true
+        sudo /usr/sbin/kysec_netctl --remove -a "$CLIENT_BUILD/memoryhub-client-frontend-tests" >/dev/null 2>&1 || true
         sudo /usr/sbin/kysec_netctl --remove -a "$CLIENT_BUILD/memoryhub-client" >/dev/null 2>&1 || true
         sudo /usr/sbin/kysec_netctl --set -a "$CLIENT_BUILD/memoryhub-client-api-tests" -s allow
+        sudo /usr/sbin/kysec_netctl --set -a "$CLIENT_BUILD/memoryhub-client-frontend-tests" -s allow
         sudo /usr/sbin/kysec_netctl --set -a "$CLIENT_BUILD/memoryhub-client" -s allow
     fi
 fi
 env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
     NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
     QT_QPA_PLATFORM=offscreen ctest --test-dir "$CLIENT_BUILD" --output-on-failure \
-    --timeout 30
+    --timeout 120
 
 echo "[3/5] Staging package"
 install -d "$STAGE/opt/memoryhub" \

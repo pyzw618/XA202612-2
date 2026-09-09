@@ -62,10 +62,13 @@ void SettingsStatusPage::refresh() { loadStatus(); }
 void SettingsStatusPage::loadStatus() {
     const int generation = ++m_generation;
     api::ApiClient *api = AppContext::instance()->api();
-    api->getAsync("/api/memory/system/status", [this, generation](const api::Result &r) {
+    // 传 user_id：fact_count 按当前用户统计，与总览/事实页口径一致
+    api->getAsync(api::ApiClient::urlWithQuery(
+        "/api/memory/system/status", {{"user_id", AppContext::instance()->userId()}}),
+        [this, generation](const api::Result &r) {
     if (generation != m_generation) return;
     m_table->setRowCount(0);
-    if (!r.hasJsonObject()) {
+    if (!r.ok || !r.hasJsonObject()) {
         m_table->insertRow(0);
         m_table->setItem(0, 0, new QTableWidgetItem("REST 服务"));
         auto *tag = new StatusTag();
@@ -76,13 +79,16 @@ void SettingsStatusPage::loadStatus() {
         return;
     }
     const QJsonObject s = r.jsonObject();
-    auto addRow = [this](const QString &name, bool ok, const QString &detail) {
+    // 状态灯三态：正常 / 异常 / 未知。未知=后端未提供判定字段，
+    // 不再默认显示"正常"绿灯伪装。
+    auto addRow = [this](const QString &name, const QString &state, const QString &detail) {
         const int row = m_table->rowCount();
         m_table->insertRow(row);
         m_table->setItem(row, 0, new QTableWidgetItem(name));
         auto *tag = new StatusTag();
-        tag->setStatus(ok ? "active" : "deleted");
-        tag->setText(ok ? "正常" : "异常");
+        if (state == "ok") { tag->setStatus("active"); tag->setText("正常"); }
+        else if (state == "bad") { tag->setStatus("deleted"); tag->setText("异常"); }
+        else { tag->setStatus("pending"); tag->setText("未知"); }
         m_table->setCellWidget(row, 1, tag);
         m_table->setItem(row, 2, new QTableWidgetItem(detail));
     };
@@ -94,22 +100,31 @@ void SettingsStatusPage::loadStatus() {
     const QJsonObject retr = j::obj(s, "retrieval");
     const QJsonObject safety = j::obj(s, "safety");
 
-    addRow("REST 服务", true, j::str(s, "service") + " v" + j::str(s, "version") + " · " + j::str(s, "runtime_mode"));
-    addRow("SQLite 存储", true, QString("事件 %1 · 偏好 %2 · 知识 %3 · 事实 %4 · 冲突 %5 · 遗忘 %6")
+    addRow("REST 服务", "ok", j::str(s, "service") + " v" + j::str(s, "version") + " · " + j::str(s, "runtime_mode"));
+    addRow("SQLite 存储", "ok", QString("事件 %1 · 偏好 %2 · 知识 %3 · 事实 %4（当前用户）· 冲突 %5 · 遗忘 %6")
         .arg(j::integer(storage, "event_count")).arg(j::integer(storage, "preference_count"))
         .arg(j::integer(storage, "knowledge_count")).arg(j::integer(storage, "fact_count"))
         .arg(j::integer(storage, "conflict_count")).arg(j::integer(storage, "forget_count")));
-    addRow("Embedding", true, QString("%1 · dim %2 · %3")
-        .arg(j::str(embed, "provider")).arg(j::integer(embed, "dimension")).arg(j::str(embed, "model_name")));
-    addRow("LLM", true, QString("%1 · %2").arg(j::str(llm, "provider"), j::str(llm, "model")));
-    const bool vecConnected = vec.value("connected").isBool() ? j::boolean(vec, "connected") : true;
-    addRow("向量引擎", vecConnected, QString("%1 · %2 · %3 条")
-        .arg(j::str(vec, "provider"), j::str(vec, "collection"))
-        .arg(j::integer(vec, "vector_count")));
-    addRow("检索配置", true, QString("type=%1 · top_k=%2 · cache_ttl=%3s")
-        .arg(j::str(retr, "type")).arg(j::integer(retr, "default_top_k"))
-        .arg(j::integer(retr, "cache_ttl_seconds")));
-    addRow("安全门禁", j::boolean(safety, "gate_available"),
+    addRow("Embedding", j::str(embed, "provider").isEmpty() ? "bad" : "ok",
+           QString("%1 · dim %2 · %3")
+               .arg(j::str(embed, "provider").isEmpty() ? "未配置" : j::str(embed, "provider"))
+               .arg(j::integer(embed, "dimension")).arg(j::str(embed, "model_name")));
+    addRow("LLM", j::str(llm, "model").isEmpty() ? "bad" : "ok",
+           QString("%1 · %2").arg(j::str(llm, "provider").isEmpty() ? "未配置" : j::str(llm, "provider"),
+                                  j::str(llm, "model").isEmpty() ? "未配置" : j::str(llm, "model")));
+    QString vecState = "unknown";
+    if (vec.value("connected").isBool())
+        vecState = j::boolean(vec, "connected") ? "ok" : "bad";
+    addRow("向量引擎", vecState, QString("%1 · %2 · %3")
+           .arg(j::str(vec, "provider").isEmpty() ? "未装配" : j::str(vec, "provider"),
+                j::str(vec, "collection").isEmpty() ? "—" : j::str(vec, "collection"),
+                vec.value("vector_count").isNull() ? QString("—") : QString::number(j::integer(vec, "vector_count"))));
+    addRow("检索配置", j::str(retr, "type").isEmpty() ? "unknown" : "ok",
+           QString("type=%1 · top_k=%2 · cache_ttl=%3s")
+               .arg(j::str(retr, "type").isEmpty() ? "—" : j::str(retr, "type"))
+               .arg(j::integer(retr, "default_top_k"))
+               .arg(j::integer(retr, "cache_ttl_seconds")));
+    addRow("安全门禁", j::boolean(safety, "gate_available") ? "ok" : "bad",
            QString("规则集 %1 · 审计 %2 · 隔离区 %3")
                .arg(j::str(safety, "rule_set_version"))
                .arg(j::boolean(safety, "audit_enabled") ? "开" : "关")
@@ -119,7 +134,7 @@ void SettingsStatusPage::loadStatus() {
     configApi->getAsync("/api/memory/system/config", [this, generation, storage](const api::Result &rCfg) {
         if (generation != m_generation) return;
         QString indexPath = "—";
-        if (rCfg.hasJsonObject()) indexPath = j::str(j::obj(rCfg.jsonObject(), "storage"), "vector_index_path", "—");
+        if (rCfg.ok && rCfg.hasJsonObject()) indexPath = j::str(j::obj(rCfg.jsonObject(), "storage"), "vector_index_path", "—");
         m_connLabel->setText(QString("<b>API Base URL</b> %1<br/><b>数据库路径</b> %2<br/><b>索引路径</b> %3")
             .arg(AppContext::instance()->baseUrl(), j::str(storage, "db_path"), indexPath));
     }, this);
@@ -164,6 +179,9 @@ SettingsLLMPage::SettingsLLMPage(QWidget *parent) : BasePage(parent) {
     m_keyStatus = new QLabel(card);
     m_keyStatus->setObjectName("pageSubtitle");
     layout->addWidget(m_keyStatus);
+    // dirty 追踪：有未保存修改时刷新不覆盖表单
+    for (QLineEdit *edit : {m_apiBase, m_apiKey, m_model})
+        connect(edit, &QLineEdit::textEdited, this, [this]() { m_dirty = true; });
     auto *actions = new QHBoxLayout();
     m_saveButton = new QPushButton("保存 LLM 配置", card);
     m_saveButton->setObjectName("primaryBtn");
@@ -183,11 +201,20 @@ void SettingsLLMPage::refresh() { loadConfig(); }
 
 void SettingsLLMPage::loadConfig() {
     const int generation = ++m_generation;
+    m_saveButton->setEnabled(true);
     AppContext::instance()->api()->getAsync("/api/memory/system/config", [this, generation](const api::Result &r) {
         if (generation != m_generation) return;
-        if (!r.hasJsonObject()) {
+        if (!r.ok || !r.hasJsonObject()) {
             m_resultLabel->setStyleSheet("color:#DC2626;font-size:13px;");
-            m_resultLabel->setText("无法读取 LLM 配置：" + r.errorCode);
+            m_resultLabel->setText("无法读取 LLM 配置：" +
+                                   (r.errorCode.isEmpty() && r.errorMessage.isEmpty()
+                                        ? QStringLiteral("网络错误") : r.errorCode + " " + r.errorMessage));
+            return;
+        }
+        if (m_dirty) {
+            // 有未保存修改：不覆盖表单，如实提示
+            m_keyStatus->setText(m_keyStatus->text().isEmpty()
+                ? "表单有未保存的修改，未用服务端配置覆盖；保存或还原后才会刷新。" : m_keyStatus->text());
             return;
         }
         const QJsonObject llm = j::obj(r.jsonObject(), "llm");
@@ -227,6 +254,7 @@ void SettingsLLMPage::saveConfig() {
                 return;
             }
             m_apiKey->clear();
+            m_dirty = false;
             m_keyStatus->setText("当前服务已配置 API Key；留空保存将保留该密钥。");
             m_resultLabel->setStyleSheet("color:#16A34A;font-size:13px;");
             m_resultLabel->setText("LLM 配置已保存。请重启 MemoryHub 服务后，新的云端模型配置才会用于记忆提取。");
@@ -342,13 +370,15 @@ SettingsDemoPage::SettingsDemoPage(QWidget *parent) : BasePage(parent) {
     root->setSpacing(0);
     auto *header = new PageHeader(this);
     header->setTitle("演示数据工具");
-    header->setSubtitle("危险操作需二次确认（输入确认文本）");
+    header->setSubtitle("清理功能暂不可用");
     root->addWidget(header);
 
     auto *card = new QFrame(this);
     card->setObjectName("card");
     auto *cl = new QVBoxLayout(card);
-    auto *warn = new QLabel("以下操作会删除当前用户（" + AppContext::instance()->userId() + "）的演示数据，请谨慎执行。", card);
+    auto *warn = new QLabel(card);
+    m_warningLabel = warn;
+    warn->setText("清理功能已暂停：当前接口会清空全局向量索引，影响所有用户；待支持按用户清理后恢复。当前用户：" + AppContext::instance()->userId().toHtmlEscaped());
     warn->setStyleSheet("background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;color:#B91C1C;padding:8px;");
     warn->setWordWrap(true);
     cl->addWidget(warn);
@@ -356,9 +386,10 @@ SettingsDemoPage::SettingsDemoPage(QWidget *parent) : BasePage(parent) {
     auto *row1 = new QHBoxLayout();
     auto *b1 = new QPushButton("清空偏好", card);
     m_clearPreferencesButton = b1;
+    b1->setEnabled(false);
     b1->setObjectName("dangerBtn");
     connect(b1, &QPushButton::clicked, this, &SettingsDemoPage::clearPreferences);
-    auto *desc1 = new QLabel("仅删除当前用户的偏好记忆（含向量索引投影）", card);
+    auto *desc1 = new QLabel("暂不可用：不会恢复跨用户清理能力；接口会清空全局向量索引", card);
     desc1->setObjectName("pageSubtitle");
     row1->addWidget(b1);
     row1->addWidget(desc1, 1);
@@ -367,9 +398,10 @@ SettingsDemoPage::SettingsDemoPage(QWidget *parent) : BasePage(parent) {
     auto *row2 = new QHBoxLayout();
     auto *b2 = new QPushButton("清空全部演示数据", card);
     m_clearAllButton = b2;
+    b2->setEnabled(false);
     b2->setObjectName("solidDangerBtn");
     connect(b2, &QPushButton::clicked, this, &SettingsDemoPage::clearAllDemo);
-    auto *desc2 = new QLabel("删除偏好/知识/事实/事件/冲突/遗忘历史等全部演示数据", card);
+    auto *desc2 = new QLabel("暂不可用：接口会清空全局向量索引和缓存", card);
     desc2->setObjectName("pageSubtitle");
     row2->addWidget(b2);
     row2->addWidget(desc2, 1);
@@ -384,35 +416,16 @@ SettingsDemoPage::SettingsDemoPage(QWidget *parent) : BasePage(parent) {
     root->addStretch();
 }
 
-void SettingsDemoPage::refresh() {}
+void SettingsDemoPage::refresh() {
+    m_warningLabel->setText("清理功能已暂停：当前接口会清空全局向量索引，影响所有用户；待支持按用户清理后恢复。当前用户：" + AppContext::instance()->userId().toHtmlEscaped());
+    m_resultLabel->setText("当前用户：" + AppContext::instance()->userId().toHtmlEscaped() +
+                           "。清理按钮已禁用，避免跨用户清空全局向量索引。");
+}
 
 void SettingsDemoPage::clearPreferences() {
-    if (!ConfirmDialog::confirm(this, "清空偏好", "确认清空当前用户的全部偏好记忆？", "清空")) return;
-    m_clearPreferencesButton->setEnabled(false);
-    AppContext::instance()->api()->deleteAsync(
-        api::ApiClient::urlWithQuery("/api/agent/preferences", {{"user_id", AppContext::instance()->userId()}}),
-        [this](const api::Result &r) {
-            m_clearPreferencesButton->setEnabled(true);
-            if (r.ok) m_resultLabel->setText(QString("已清空 %1 条偏好记忆。").arg(j::integer(r.jsonObject(), "deleted")));
-            else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
-        }, false, this);
+    // Disabled until the backend supports user-scoped index cleanup.
 }
 
 void SettingsDemoPage::clearAllDemo() {
-    if (!ConfirmDialog::confirm(this, "清空全部演示数据",
-                                "将删除偏好/知识/事实/事件/冲突/遗忘历史等全部数据，且不可恢复。确认输入“清空全部”执行。",
-                                "清空全部", "确认清空")) return;
-    m_clearAllButton->setEnabled(false);
-    AppContext::instance()->api()->deleteAsync(
-        api::ApiClient::urlWithQuery("/api/agent/demo-data", {{"user_id", AppContext::instance()->userId()}}),
-        [this](const api::Result &r) {
-            m_clearAllButton->setEnabled(true);
-            if (r.ok) {
-                const QJsonObject del = j::obj(r.jsonObject(), "deleted");
-                QString html = "<b>清理结果：</b><br/>";
-                const QStringList keys = {"preferences", "knowledge", "knowledge_versions", "events", "conflicts", "forget_history", "extraction_tasks", "facts"};
-                for (const QString &k : keys) html += QString("%1: %2　").arg(k).arg(j::integer(del, k));
-                m_resultLabel->setText(html);
-            } else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
-        }, false, this);
+    // Disabled until the backend supports user-scoped index cleanup.
 }

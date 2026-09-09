@@ -20,7 +20,6 @@ public:
 
 private:
     QLabel *m_policyLabel = nullptr;
-    QLabel *m_ruleCountLabel = nullptr;
     QLabel *m_statusLabel = nullptr;
     int m_generation = 0;
 };
@@ -38,11 +37,12 @@ private slots:
     void openEditDialog(const QJsonObject &rule);
     void toggleEnabled(const QString &ruleId, int revision, bool on);
     void removeRule(const QString &ruleId, int revision);
-    void showVersionHistory(const QJsonObject &rule);
 
 private:
     void loadTable();
+    void renderRows();
 
+    bool m_rulesLoaded = false;
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
     QPushButton *m_addBtn = nullptr;
@@ -60,16 +60,19 @@ public:
 private slots:
     void onRefresh();
     void verifyChain();
-    void showRecord(const QJsonObject &rec);
 
 private:
     void loadTable();
+    void renderRows();
 
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
     QPushButton *m_verifyBtn = nullptr;
     QLabel *m_stateLabel = nullptr;
     QJsonArray m_all;
+    int m_total = 0;
+    bool m_loadFailed = false;
+    QString m_failText;
     int m_generation = 0;
 };
 
@@ -88,11 +91,14 @@ private slots:
 
 private:
     void loadTable();
+    void renderRows();
 
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
     QLabel *m_stateLabel = nullptr;
     QJsonArray m_all;
+    bool m_loadFailed = false;
+    QString m_failText;
     int m_generation = 0;
     int m_viewGeneration = 0;
 };

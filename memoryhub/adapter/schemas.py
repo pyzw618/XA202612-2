@@ -1410,7 +1410,7 @@ class PreferenceMemory(BaseModel):
     is_global: bool = False                # 是否为全局通用偏好（用于跨场景兜底）
 
     # --- 置信度、质量与状态 ---
-    confidence: float = 0.5                # [0, 1] 综合置信度
+    confidence: float = 0.5                # [0, 1] 综合置信度（未计算占位：MemoryWriteService 写入时强制经 ConfidenceCalculator 重算并补证据）
     quality_score: float = 1.0             # [0, 1] 来源 MemoryEvent 的质量评分
     extract_source: str = "implicit_inference" # 提取来源: explicit_feedback / implicit_inference
     status: MemoryStatus = MemoryStatus.ACTIVE
@@ -1451,6 +1451,7 @@ class KnowledgeMemory(BaseModel):
 
     memory_id: str = Field(default_factory=lambda: f"know_{uuid.uuid4().hex[:8]}")
     user_id: str = "default"
+    project_id: str = ""
     memory_type: str = "knowledge"
     knowledge_type: KnowledgeType = KnowledgeType.WORKFLOW
 
@@ -1471,7 +1472,7 @@ class KnowledgeMemory(BaseModel):
     scope: SceneScope = Field(default_factory=SceneScope)
 
     # --- 质量指标 ---
-    confidence: float = 0.0
+    confidence: float = 0.0  # 未计算占位（pydantic 需默认值）：写路径必须经 KnowledgeConfidenceCalculator/Updater 重算
     success_count: int = 0  # 成功复用次数
     total_count: int = 0  # 总调用次数
     status: MemoryStatus = MemoryStatus.ACTIVE
@@ -1592,6 +1593,8 @@ class SearchRequest(BaseModel):
     top_k: int = 5
     memory_types: list[str] = Field(default_factory=list)  # 过滤记忆类型
     min_confidence: float = 0.0
+    scenes: list[str] = Field(default_factory=list)
+    task_types: list[str] = Field(default_factory=list)
     level: str = ""  # 记忆分层过滤：short / mid / long（REFACTOR_PLAN_V2 §4.4.3）
     session_id: str = ""  # 会话上下文（短期工作记忆定位）
 
@@ -1720,6 +1723,7 @@ class ForgetRequest(BaseModel):
 
     user_id: str = "default"
     instruction: str = ""  # 自然语言遗忘指令
+    memory_type: str = ""  # 显式类型限定：preference / knowledge / fact / all；空 = 按指令推断
     target_memory_ids: list[str] = Field(default_factory=list)  # 精确 ID 模式
     target_scope: SceneScope | None = None
     target_project_id: str = ""

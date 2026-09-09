@@ -43,6 +43,7 @@ private:
     QLabel *m_keyStatus = nullptr;
     QLabel *m_resultLabel = nullptr;
     QPushButton *m_saveButton = nullptr;
+    bool m_dirty = false;       // 表单有未保存修改时，refresh 不再静默覆盖输入
     int m_generation = 0;
 };
 class SettingsConfigPage : public BasePage {
@@ -73,6 +74,7 @@ private slots:
     void clearAllDemo();
 
 private:
+    QLabel *m_warningLabel = nullptr;
     QLabel *m_resultLabel = nullptr;
     QPushButton *m_clearPreferencesButton = nullptr;
     QPushButton *m_clearAllButton = nullptr;

@@ -37,6 +37,7 @@ private:
     QJsonObject buildPreviewRequest();
     void renderCandidates(const QList<QString> &ids);
     QList<QString> selectedCandidateIds() const;
+    void filterIdList();
 
     QTabWidget *m_tabs = nullptr;
     // NL tab
@@ -57,7 +58,6 @@ private:
     QPushButton *m_executeBtn = nullptr;
 
     QJsonArray m_prefAll, m_knowAll, m_factAll;
-    QList<QString> m_candidateIds;
     int m_generation = 0;
     int m_pendingLoads = 0;
     bool m_executeInProgress = false;
@@ -67,6 +67,7 @@ private:
 // ---- P4.2 待审查队列：pending 记忆，保持/归档/删除 ----
 class ForgetPendingPage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit ForgetPendingPage(QWidget *parent = nullptr);
     void refresh() override;
@@ -80,18 +81,23 @@ private slots:
 
 private:
     void loadTable();
+    void renderTable();
+    void deleteSingle(const QString &id, QPushButton *caller = nullptr);
     QList<QString> selectedIds() const;
 
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
     QPushButton *m_allActive = nullptr;
     QPushButton *m_allArchive = nullptr;
+    QJsonArray m_rows;          // 三类合并缓存（含 __type 标记），搜索本地过滤用
+    QStringList m_loadFailures;
     int m_generation = 0;
 };
 
 // ---- P4.3 归档仓库：archived 记忆，解除归档/删除 ----
 class ForgetArchivedPage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit ForgetArchivedPage(QWidget *parent = nullptr);
     void refresh() override;
@@ -103,15 +109,18 @@ private slots:
     void deleteMemory(const QString &type, const QString &id, QPushButton *caller = nullptr);
 
 private:
-    void loadTable();
+    void renderTable();
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
+    QJsonArray m_rows;
+    QStringList m_loadFailures;
     int m_generation = 0;
 };
 
 // ---- P4.4 回收站：deleted 记忆，恢复/彻底删除 ----
 class ForgetRecyclePage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit ForgetRecyclePage(QWidget *parent = nullptr);
     void refresh() override;
@@ -123,9 +132,11 @@ private slots:
     void hardDelete(const QString &id, QPushButton *caller = nullptr);
 
 private:
-    void loadTable();
+    void renderTable();
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
+    QJsonArray m_rows;
+    QStringList m_loadFailures;
     int m_generation = 0;
 };
 
@@ -139,6 +150,7 @@ public:
 
 private:
     void loadData();
+    void renderData(const QJsonArray &items);
     QVBoxLayout *m_listLayout = nullptr;
     QWidget *m_listContainer = nullptr;
     QLabel *m_warningLabel = nullptr;
@@ -149,6 +161,7 @@ private:
 // ---- P4.6 遗忘历史：ForgetRecord 列表 + 详情 ----
 class ForgetHistoryPage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit ForgetHistoryPage(QWidget *parent = nullptr);
     void refresh() override;
@@ -156,11 +169,14 @@ public:
 
 private slots:
     void onRefresh();
-    void openDetail(const QString &recordId, QPushButton *caller = nullptr);
+    void openDetail(const QJsonObject &record);
 
 private:
+    void renderTable();
     MemoryFilterBar *m_filterBar = nullptr;
     QTableWidget *m_table = nullptr;
+    QJsonArray m_records;
+    QStringList m_loadFailures;
     int m_generation = 0;
 };
 
@@ -177,9 +193,11 @@ private slots:
     void runLifecycleCheck(QPushButton *caller = nullptr);
 
 private:
+    void renderSettings(const QJsonObject &s);
     QLabel *m_weightsLabel = nullptr;
     QLabel *m_autoForgetLabel = nullptr;
     QLabel *m_lifecycleLabel = nullptr;
     QLabel *m_resultLabel = nullptr;
+    bool m_runInProgress = false;
     int m_generation = 0;
 };

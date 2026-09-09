@@ -72,16 +72,18 @@ MemoryTierPage::MemoryTierPage(QWidget *parent) : BasePage(parent) {
     tabs->addTab(midW, "中期 · 情景");
 
     root->addWidget(tabs, 1);
-
-    m_state = new PageStateView(this);
-    m_state->hide();
-    root->addWidget(m_state);
 }
 
 void MemoryTierPage::refresh() { load(); }
 
 void MemoryTierPage::load() {
-    const int generation = ++m_generation;
+    ++m_generation;  // 使用方（loadShortTerm/loadMidTerm）各自读取 m_generation
+    m_short = QJsonArray();
+    m_mid = QJsonArray();
+    m_shortTable->setRowCount(0);
+    m_midTable->setRowCount(0);
+    m_shortSummary->setText("正在加载短期工作记忆…");
+    m_midSummary->setText("正在加载中期情景…");
     m_consolidateBtn->setEnabled(true);
     loadShortTerm();
     loadMidTerm();
@@ -94,6 +96,10 @@ void MemoryTierPage::loadShortTerm() {
         "/api/memory/short-term", {{"user_id", uid}}),
         [this, generation](const api::Result &result) {
             if (generation != m_generation) return;
+            if (!result.ok || !result.hasJsonArray()) {
+                m_shortSummary->setText("短期工作记忆加载失败：" + result.errorMessage);
+                return;
+            }
             m_short = result.ok && result.hasJsonArray() ? result.jsonArray() : QJsonArray();
             m_shortTable->setRowCount(m_short.size());
             for (int row = 0; row < m_short.size(); ++row) populateShort(row, m_short.at(row).toObject());
@@ -110,6 +116,10 @@ void MemoryTierPage::loadMidTerm() {
         "/api/memory/mid-term", {{"user_id", uid}}),
         [this, generation](const api::Result &result) {
             if (generation != m_generation) return;
+            if (!result.ok || !result.hasJsonArray()) {
+                m_midSummary->setText("中期情景加载失败：" + result.errorMessage);
+                return;
+            }
             m_mid = result.ok && result.hasJsonArray() ? result.jsonArray() : QJsonArray();
             m_midTable->setRowCount(m_mid.size());
             for (int row = 0; row < m_mid.size(); ++row) populateMid(row, m_mid.at(row).toObject());
@@ -142,8 +152,8 @@ void MemoryTierPage::runConsolidate() {
                                 "确认执行一轮记忆分层流转（session→mid→long + 降级）？")) return;
     m_consolidateBtn->setEnabled(false);
     const QString uid = AppContext::instance()->userId();
-    Api::client()->postAsync("/api/memory/lifecycle/consolidate",
-        QJsonObject{{"user_id", uid}},
+    Api::client()->postAsync(api::ApiClient::urlWithQuery(
+        "/api/memory/lifecycle/consolidate", {{"user_id", uid}}), QJsonObject{},
         [this](const api::Result &result) {
             m_consolidateBtn->setEnabled(true);
             if (result.ok && result.hasJsonObject()) {

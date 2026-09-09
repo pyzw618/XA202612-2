@@ -19,6 +19,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from memoryhub.storage.sqlite_lock import sqlite_database_lock
+
 
 class ForgetRuleError(RuntimeError):
     """稳定的遗忘规则错误码（不含任何用户内容）。"""
@@ -35,7 +37,11 @@ class ForgetRuleService:
         self._own_connection = database_path is not None
         self._path = None if database_path is None else Path(database_path)
         self._connection = None
-        self._lock = threading.RLock()
+        self._lock = (
+            threading.RLock()
+            if database_path is None
+            else sqlite_database_lock(database_path)
+        )
         if database_path is not None:
             self._open(database_path)
 
@@ -46,9 +52,17 @@ class ForgetRuleService:
                 parent = Path(path_text).expanduser().absolute().parent
                 parent.mkdir(parents=True, exist_ok=True)
             self._connection = sqlite3.connect(
-                path_text, timeout=5.0, check_same_thread=False
+                path_text,
+                timeout=30.0,
+                check_same_thread=False,
+                # This service keeps one connection for its lifetime.  In the
+                # default sqlite3 transaction mode a create/delete call would
+                # otherwise leave a write transaction open indefinitely and
+                # lock every SQLAlchemy repository sharing the same database.
+                isolation_level=None,
             )
-            self._connection.execute("PRAGMA busy_timeout = 5000")
+            self._connection.execute("PRAGMA journal_mode = WAL")
+            self._connection.execute("PRAGMA busy_timeout = 30000")
             self._initialize_schema()
         except (OSError, TypeError, ValueError, sqlite3.Error):
             raise ForgetRuleError("forget_rule.storage_error") from None
@@ -144,6 +158,13 @@ class ForgetRuleService:
         """返回该用户全部启用规则的 topic→keywords 映射（供遗忘执行前展开）。"""
         rules = self.list(user_id, include_disabled=False)
         return {rule["topic"]: rule["keywords"] for rule in rules}
+
+    def close(self) -> None:
+        """Release the owned SQLite connection without affecting bound callers."""
+        with self._lock:
+            if self._connection is not None and self._own_connection:
+                self._connection.close()
+            self._connection = None
 
     @staticmethod
     def _row_to_dict(rule_id, user_id, topic, keywords, enabled, created_at, updated_at) -> dict:

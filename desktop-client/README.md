@@ -85,6 +85,9 @@ src/
 
 ## 备注
 
+- 演示数据清理入口暂时禁用：当前后端会清空跨用户检索索引，需支持按用户清理后才能恢复。
+- 事实三元组编辑暂时禁用，知识详情暂不展示版本历史；遗忘历史详情展示记录中的目标记忆 ID。
+
 - **知识列表接口已支持 status 过滤**：后端 `GET /api/memory/knowledge` 支持
   `scene` / `knowledge_type` / `status` 三种过滤，非 active 状态的知识会出现在
   待审查 / 归档 / 回收站列表中；`status` 传空串时兼容返回 active。
@@ -92,3 +95,14 @@ src/
   否则页面显示"待开启"提示（后端返回 `safety.audit_disabled` / `safety.quarantine_disabled`）。
 - 遗忘设置页的权重 / 阈值为**代码常量**（只读展示）；自动遗忘扫描与生命周期检查可手动触发。
 - 控制台不内嵌终端。需要使用 OpenCode 时，在总览页点击“打开 Agent”，由系统终端启动；目标机需先安装 `opencode`。
+- **冲突中心只覆盖 legacy 抽取链路写入的冲突记录**；vNext 链路的冲突以 `REVIEW` 状态呈现在偏好/知识页的待审队列中。
+  列表的 `status`/`memory_type` 过滤与分页均由服务端完成；裁决默认只记录结论，勾选“同时应用到记忆”后才会按裁决修改记忆（需后端 `apply=true` 支持）。
+
+## 回归测试
+
+构建后执行 `ctest --test-dir build --output-on-failure --timeout 60`。
+无桌面环境可设置 `QT_QPA_PLATFORM=offscreen`，Windows 需将 Qt 的 `bin` 目录加入 `PATH`。
+
+`memoryhub-client-frontend-tests` 使用真实页面和本地 HTTP 模拟服务，覆盖偏好 payload 保留、
+检索及上下文失效、事实提案部分失败、fact 状态路由、流转用户参数、详情降级、
+按钮生命周期与用户切换。测试不连接实际后端；提示框由测试自动校验文本并关闭。

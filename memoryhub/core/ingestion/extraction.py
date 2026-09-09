@@ -179,7 +179,17 @@ class ExtractionExecutor:
                     getattr(decision, "action", "?"),
                     getattr(candidate.payload, "memory_id", "?") if candidate else "None",
                 )
-                self.knowledge_handler.apply(decision)
+                result = self.knowledge_handler.apply(decision)
+                if not result and str(getattr(decision, "action", "")).lower() in {
+                    "reject",
+                    "review",
+                }:
+                    logger.warning(
+                        "run_knowledge: candidate %s dropped: action=%s reason=%s",
+                        getattr(candidate.payload, "memory_id", "?") if candidate else "None",
+                        getattr(decision, "action", "?"),
+                        getattr(decision, "reason", ""),
+                    )
             return len(decisions)
         if self.knowledge_extractor is None or not events:
             return 0

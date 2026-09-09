@@ -1,6 +1,6 @@
 [project]
 name = "kylin-memoryhub"
-version = "0.1.0"
+version = "2.0.0"
 description = "面向麒麟 OS Agent 的可插拔本地记忆中枢"
 requires-python = ">=3.11"
 dependencies = [

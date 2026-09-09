@@ -177,6 +177,9 @@ QLabel[statusTag="running"] { color: #356CC7; background: #EEF4FF; border: 1px s
 QLabel[memTag="preference"] { color: #356CC7; background: #EEF4FF; border: 1px solid #C8D9F6; }
 QLabel[memTag="knowledge"] { color: #6F5AC7; background: #F3F0FF; border: 1px solid #D9D1FA; }
 QLabel[memTag="fact"] { color: #25838B; background: #ECF9FA; border: 1px solid #BDE4E7; }
+QLabel[decisionTag="override"] { color: #B64B32; background: #FFF1ED; border: 1px solid #F0C7BC; }
+QLabel[decisionTag="merge"] { color: #6F5AC7; background: #F3F0FF; border: 1px solid #D9D1FA; }
+QLabel[decisionTag="coexist"] { color: #25838B; background: #ECF9FA; border: 1px solid #BDE4E7; }
 
 /* Tabs, drawers, scrollbars */
 QTabWidget::pane { border: 1px solid #E8EBF0; border-radius: 9px; top: -1px; background: #FFFFFF; }

@@ -14,6 +14,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollArea>
@@ -76,7 +77,6 @@ PreferencePage::PreferencePage(QWidget *parent) : BasePage(parent) {
     for (const QString &t : types) m_typeCombo->addItem(StatusTag::memoryTypeText(t) + " · " + t, t);
 
     m_statusCombo = new QComboBox(this);
-    m_statusCombo->addItem("有效", "active");
     const QStringList statuses = {"active", "archived", "pending", "deleted"};
     for (const QString &s : statuses) m_statusCombo->addItem(StatusTag::statusText(s), s);
 
@@ -160,16 +160,12 @@ void PreferencePage::refresh() {
 }
 
 void PreferencePage::onRefresh() {
+    m_drawer->closeDrawer();
+    m_all = QJsonArray();
+    m_table->setRowCount(0);
     const int generation = ++m_generation;
-    const bool hadData = !m_all.isEmpty();
-    if (!hadData) {
-        m_content->hide();
-        m_stateView->setState(PageState::Loading, "正在加载偏好记忆",
-                              "正在从后端读取真实数据…");
-    } else {
-        m_stateView->setState(PageState::Loading, "正在刷新",
-                              "当前仍显示上次成功加载的数据。");
-    }
+    m_content->hide();
+    m_stateView->setState(PageState::Loading, "正在加载偏好记忆", "正在从后端读取真实数据…");
     m_stateView->clearAction();
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
@@ -249,7 +245,12 @@ void PreferencePage::populateRow(int row, const QJsonObject &m) {
 
     auto *typeTag = new StatusTag();
     typeTag->setMemoryType("preference");
-    typeTag->setText(StatusTag::memoryTypeText(j::str(m, "preference_type")) + " · " + j::str(m, "preference_type"));
+    // memoryTypeText 对未知子类型原样返回：翻译与原文相同则不再重复显示 "x · x"
+    {
+        const QString raw = j::str(m, "preference_type");
+        const QString translated = StatusTag::memoryTypeText(raw);
+        typeTag->setText(translated == raw ? raw : translated + " · " + raw);
+    }
     m_table->setCellWidget(row, 2, typeTag);
 
     auto *conf = new ScoreRing();
@@ -290,20 +291,23 @@ void PreferencePage::populateRow(int row, const QJsonObject &m) {
     connect(btnDetail, &QPushButton::clicked, this, [this, id]() { openDetail(id); });
     connect(btnEdit, &QPushButton::clicked, this, [this, m]() { openEditDialog(m, false); });
     connect(btnFeedback, &QPushButton::clicked, this, [this, m]() { openFeedbackMenu(m); });
-    connect(btnForget, &QPushButton::clicked, this, [this, m]() {
+    connect(btnForget, &QPushButton::clicked, this, [this, m, btnForget]() {
         if (ConfirmDialog::confirm(this, "精准遗忘", "确认遗忘这条偏好记忆？\n将同步清理向量索引与证据。")) {
-            api::ApiClient *api = AppContext::instance()->api();
             QJsonObject body;
             body["user_id"] = AppContext::instance()->userId();
             body["target_memory_ids"] = QJsonArray{j::str(m, "memory_id")};
             body["cascade"] = true;
-            const api::Result r = api->post("/api/memory/forget", body);
-            if (r.ok) {
-                QMessageBox::information(this, "完成", "已遗忘");
-                onRefresh();
-            } else {
-                QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
-            }
+            btnForget->setEnabled(false);
+            AppContext::instance()->api()->postAsync("/api/memory/forget", body,
+                [this, guard = QPointer<QPushButton>(btnForget)](const api::Result &r) {
+                    if (guard) guard->setEnabled(true);
+                    if (r.ok) {
+                        QMessageBox::information(this, "完成", "已遗忘");
+                        onRefresh();
+                    } else {
+                        QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+                    }
+                }, false, this, 15000);
         }
     });
     opsLay->addWidget(btnDetail);
@@ -314,17 +318,23 @@ void PreferencePage::populateRow(int row, const QJsonObject &m) {
 }
 
 void PreferencePage::openDetail(const QString &memoryId) {
-    api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/preferences/" + memoryId,
-        {{"user_id", AppContext::instance()->userId()}}));
-    if (!r.hasJsonObject()) {
-        QMessageBox::warning(this, "加载失败", r.errorCode + " " + r.errorMessage);
-        return;
-    }
-    const QJsonObject m = r.jsonObject();
+    const int generation = ++m_detailGeneration;
+    AppContext::instance()->api()->getAsync(
+        api::ApiClient::urlWithQuery("/api/memory/preferences/" + memoryId,
+                                     {{"user_id", AppContext::instance()->userId()}}),
+        [this, generation, memoryId](const api::Result &r) {
+            if (generation != m_detailGeneration) return;
+            if (!r.ok || !r.hasJsonObject()) {
+                QMessageBox::warning(this, "加载失败", r.errorCode + " " + r.errorMessage);
+                return;
+            }
+            buildDetail(memoryId, r.jsonObject());
+        }, this);
+}
 
-    auto *tabs = new QTabWidget();
+void PreferencePage::buildDetail(const QString &memoryId, const QJsonObject &m) {
+    auto *tabs = new QTabWidget(m_drawer);
+    connect(AppContext::instance(), &AppContext::userIdChanged, tabs, &QObject::deleteLater);
     // Tab1 内容
     auto *content = new QWidget();
     auto *clay = new QVBoxLayout(content);
@@ -356,7 +366,7 @@ void PreferencePage::openDetail(const QString &memoryId) {
     clay->addWidget(jsonView, 1);
     tabs->addTab(content, "内容");
 
-    // Tab2 版本链
+    // Tab2 版本链（异步加载，抽屉关闭时随 tabs 一并销毁）
     auto *verWidget = new QWidget();
     auto *vlay = new QVBoxLayout(verWidget);
     auto *verTable = new QTableWidget(0, 3);
@@ -365,19 +375,28 @@ void PreferencePage::openDetail(const QString &memoryId) {
     verTable->verticalHeader()->setVisible(false);
     verTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     verTable->setAlternatingRowColors(true);
-    const api::Result rv = api->get("/api/memory/preferences/" + memoryId + "/versions");
-    if (rv.hasJsonArray()) {
-        const QJsonArray versions = rv.jsonArray();
-        verTable->setRowCount(int(versions.size()));
-        for (int i = 0; i < versions.size(); ++i) {
-            const QJsonObject v = versions[i].toObject();
-            verTable->setItem(i, 0, new QTableWidgetItem(QString("v%1").arg(j::integer(v, "version"))));
-            verTable->setItem(i, 1, new QTableWidgetItem(j::fmtTime(j::str(v, "updated_at"))));
-            verTable->setItem(i, 2, new QTableWidgetItem(j::str(v, "text")));
-        }
-    }
     vlay->addWidget(verTable);
     tabs->addTab(verWidget, "版本链");
+    AppContext::instance()->api()->getAsync(
+        "/api/memory/preferences/" + memoryId + "/versions",
+        [verTable](const api::Result &rv) {
+            // context=tabs：抽屉销毁后回调自动断连，verTable 不会悬垂
+            if (!rv.ok || !rv.hasJsonArray()) {
+                verTable->setRowCount(1);
+                verTable->setItem(0, 0, new QTableWidgetItem(
+                    "版本链加载失败：" + (rv.errorMessage.isEmpty() ? rv.errorCode : rv.errorMessage)));
+                verTable->setSpan(0, 0, 1, 3);
+                return;
+            }
+            const QJsonArray versions = rv.jsonArray();
+            verTable->setRowCount(int(versions.size()));
+            for (int i = 0; i < versions.size(); ++i) {
+                const QJsonObject v = versions[i].toObject();
+                verTable->setItem(i, 0, new QTableWidgetItem(QString("v%1").arg(j::integer(v, "version"))));
+                verTable->setItem(i, 1, new QTableWidgetItem(j::fmtTime(j::str(v, "updated_at"))));
+                verTable->setItem(i, 2, new QTableWidgetItem(j::str(v, "text")));
+            }
+        }, tabs);
 
     // Tab3 证据链
     auto *evWidget = new QWidget();
@@ -507,7 +526,7 @@ void PreferencePage::openEditDialog(const QJsonObject &memory, bool isNew) {
     if (isNew) body["memory_type"] = "preference";
     body["preference_type"] = typeEdit->currentData().toString();
     body["text"] = textEdit->toPlainText().trimmed();
-    body["payload"] = QJsonObject();
+    if (isNew) body["payload"] = QJsonObject();
     body["scope"] = scope;
     body["is_global"] = globalCheck->isChecked();
     body["confidence"] = confSpin->value();
@@ -518,24 +537,32 @@ void PreferencePage::openEditDialog(const QJsonObject &memory, bool isNew) {
         body["level"] = "mid";
     }
 
-    api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = isNew
-        ? api->post("/api/memory/memories/preference", body)
-        : api->put("/api/memory/preference/" + j::str(memory, "memory_id"), body);
-    if (r.ok) {
-        QMessageBox::information(this, "完成", isNew ? "偏好已写入" : "偏好已更新");
-        onRefresh();
-    } else {
-        // 安全门禁感知
-        if (r.errorCode == "memory.safety.review_required") {
-            QMessageBox::warning(this, "需人工复核",
-                                 QString("写入被安全门禁拦截：已进入人工复核流程。\naudit_id: %1")
-                                     .arg(r.jsonObject().value("audit_id").toString()));
-        } else if (r.errorCode == "memory.safety.rejected") {
-            QMessageBox::warning(this, "被策略拒绝", "写入被安全策略拒绝，请联系管理员检查规则。");
+    m_addBtn->setEnabled(false);
+    auto finish = [this, isNew](const api::Result &r) {
+        m_addBtn->setEnabled(true);
+        if (r.ok) {
+            QMessageBox::information(this, "完成", isNew ? "偏好已写入" : "偏好已更新");
+            onRefresh();
         } else {
-            QMessageBox::warning(this, "写入失败", r.errorCode + " " + r.errorMessage);
+            // 安全门禁感知
+            if (r.errorCode == "memory.safety.review_required") {
+                QMessageBox::warning(this, "需人工复核",
+                                     QString("写入被安全门禁拦截：已进入人工复核流程。\naudit_id: %1")
+                                         .arg(r.jsonObject().value("audit_id").toString()));
+            } else if (r.errorCode == "memory.safety.rejected") {
+                QMessageBox::warning(this, "被策略拒绝", "写入被安全策略拒绝，请联系管理员检查规则。");
+            } else {
+                QMessageBox::warning(this, "写入失败", r.errorCode + " " + r.errorMessage);
+            }
         }
+    };
+    if (isNew) {
+        AppContext::instance()->api()->postAsync("/api/memory/memories/preference", body,
+                                                 std::move(finish), false, this);
+    } else {
+        AppContext::instance()->api()->putAsync(
+            "/api/memory/preference/" + j::str(memory, "memory_id"), body,
+            std::move(finish), false, this);
     }
 }
 
@@ -565,25 +592,32 @@ void PreferencePage::openFeedbackMenu(const QJsonObject &m) {
 
     if (dlg.exec() != QDialog::Accepted) return;
 
+    // 后端对 action=update 且反馈文本为空会静默 no-op 却返回成功：前端先拦下
+    if (actionCombo->currentData().toString() == "update" && textEdit->toPlainText().trimmed().isEmpty()) {
+        QMessageBox::warning(this, "提示", "动作为“更新内容”时，反馈内容必填。");
+        return;
+    }
+
     QJsonObject body;
     body["user_id"] = AppContext::instance()->userId();
     body["memory_id"] = j::str(m, "memory_id");
     body["action"] = actionCombo->currentData().toString();
     body["feedback_text"] = textEdit->toPlainText();
 
-    api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->post("/api/memory/feedback", body);
-    if (r.ok) {
-        QMessageBox::information(this, "完成", "反馈已提交");
-        onRefresh();
-    } else {
-        if (r.errorCode == "memory.safety.review_required")
-            QMessageBox::warning(this, "需人工复核", "更新内容需人工复核。");
-        else if (r.errorCode == "memory.safety.rejected")
-            QMessageBox::warning(this, "被策略拒绝", "更新被安全策略拒绝。");
-        else
-            QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
-    }
+    AppContext::instance()->api()->postAsync("/api/memory/feedback", body,
+        [this](const api::Result &r) {
+            if (r.ok) {
+                QMessageBox::information(this, "完成", "反馈已提交");
+                onRefresh();
+            } else {
+                if (r.errorCode == "memory.safety.review_required")
+                    QMessageBox::warning(this, "需人工复核", "更新内容需人工复核。");
+                else if (r.errorCode == "memory.safety.rejected")
+                    QMessageBox::warning(this, "被策略拒绝", "更新被安全策略拒绝。");
+                else
+                    QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+            }
+        }, false, this);
 }
 
 QList<QString> PreferencePage::selectedIds() const {
@@ -613,15 +647,18 @@ void PreferencePage::deleteSelected() {
     body["memory_ids"] = arr;
     body["cascade"] = true;
 
-    api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->post("/api/memory/memories/delete", body);
-    if (r.ok) {
-        QMessageBox::information(this, "完成",
-                                 QString("已删除 %1 条，记入遗忘历史：%2")
-                                     .arg(r.jsonObject().value("deleted_count").toInt())
-                                     .arg(r.jsonObject().value("record_id").toString()));
-        onRefresh();
-    } else {
-        QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
-    }
+    m_batchDelete->setEnabled(false);
+    AppContext::instance()->api()->postAsync("/api/memory/memories/delete", body,
+        [this](const api::Result &r) {
+            m_batchDelete->setEnabled(true);
+            if (r.ok) {
+                QMessageBox::information(this, "完成",
+                                         QString("已删除 %1 条，记入遗忘历史：%2")
+                                             .arg(r.jsonObject().value("deleted_count").toInt())
+                                             .arg(r.jsonObject().value("record_id").toString()));
+                onRefresh();
+            } else {
+                QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+            }
+        }, false, this);
 }

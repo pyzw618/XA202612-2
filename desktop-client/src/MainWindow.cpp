@@ -241,7 +241,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     auto *userPopup = new UserSwitcherPopup(userChoices, [this](const QString &userId) {
         m_userEdit->setText(userId);
         AppContext::instance()->setUserId(userId);
-        refreshCurrentPage();
     }, userSwitcher);
     auto *userDropButton = new QPushButton(QIcon(":/icons/chevron-down.svg"), QString(), userSwitcher);
     userDropButton->setObjectName("userDropButton");
@@ -539,9 +538,7 @@ void MainWindow::navigateToSearch(const QString &query) {
 void MainWindow::pollHealth() {
     api::ApiClient *client = AppContext::instance()->api();
     client->getAsync("/api/health", [this](const api::Result &r) {
-        bool online = r.ok && r.jsonObject().value("status").toString() == "ok";
-        m_backendOnline = online;
-        m_healthChecked = true;
+        const bool online = r.ok && r.jsonObject().value("status").toString() == "ok";
         if (online) {
             m_statusDot->setProperty("online", true);
             m_statusText->setText("后端已连接");

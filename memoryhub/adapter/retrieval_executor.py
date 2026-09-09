@@ -76,14 +76,31 @@ def _legacy_memory_metadata(memory: Any) -> dict[str, Any]:
     extra_payload = getattr(memory, "extra_payload", {}) or {}
     authority = extra_payload.get("vnext_authority", {})
     status = getattr(memory, "status", "ACTIVE")
-    return {
+    scope = getattr(memory, "scope", {})
+    if hasattr(scope, "model_dump"):
+        scope = scope.model_dump()
+    metadata = {
         "tenant_id": getattr(memory, "tenant_id", "") or authority.get("tenant_id", "default"),
         "user_id": getattr(memory, "user_id", "default"),
         "memory_type": getattr(memory, "memory_type", "semantic"),
         "confidence": float(getattr(memory, "confidence", 0.0) or 0.0),
         "status": getattr(status, "value", status),
-        "scope": getattr(memory, "scope", {}),
+        "scope": scope,
+        "project_id": getattr(memory, "project_id", "") or "",
     }
+    if str(metadata["memory_type"]).lower() == "knowledge":
+        knowledge_type = getattr(memory, "knowledge_type", "workflow")
+        metadata.update(
+            {
+                "knowledge_type": getattr(knowledge_type, "value", knowledge_type),
+                "name": getattr(memory, "name", ""),
+                "knowledge_content": getattr(memory, "content", ""),
+                "steps": list(getattr(memory, "steps", []) or []),
+                "tools": list(getattr(memory, "tools", []) or []),
+                "template_body": getattr(memory, "template_body", ""),
+            }
+        )
+    return metadata
 
 
 def _legacy_memory_text(memory: Any) -> str:
@@ -102,6 +119,8 @@ def _legacy_memory_text(memory: Any) -> str:
 
 def _memory_scope(metadata: dict[str, Any]) -> tuple[MemoryScope, str]:
     raw_scope = metadata.get("scope", "GLOBAL")
+    if metadata.get("project_id") and isinstance(raw_scope, dict):
+        raw_scope = {**raw_scope, "project_id": metadata["project_id"]}
     authority = metadata.get("vnext_authority", {})
     scope_level = metadata.get("scope_level") or authority.get("scope_level")
     if scope_level:
@@ -112,10 +131,10 @@ def _memory_scope(metadata: dict[str, Any]) -> tuple[MemoryScope, str]:
         raw_scope.get(key) for key in ("task_id", "task_type")
     ):
         level = MemoryScope.TASK
-    elif isinstance(raw_scope, dict) and any(
-        raw_scope.get(key) for key in ("scene", "app")
-    ):
+    elif isinstance(raw_scope, dict) and raw_scope.get("app"):
         level = MemoryScope.APPLICATION
+    elif isinstance(raw_scope, dict) and raw_scope.get("scene"):
+        level = MemoryScope.SESSION
     else:
         level = MemoryScope.GLOBAL
     return level, _scope_text(raw_scope)
@@ -131,7 +150,7 @@ def _search_result_to_retrieved_memory(
     """Best-effort conversion from legacy SearchResult to vNext RetrievedMemory."""
     metadata = result.metadata or {}
     scope_level, scope = _memory_scope(metadata)
-    memory_type_str = result.memory_type or "semantic"
+    memory_type_str = _qualified_memory_type(result.memory_type or "semantic", metadata)
     memory_level_str = result.memory_level or "long"
     evolution_status = metadata.get("evolution_status", "ACTIVE")
     content_version = metadata.get("content_version", 1)
@@ -146,6 +165,7 @@ def _search_result_to_retrieved_memory(
     if result_tenant != tenant_id:
         return None
 
+    content = _retrieved_content(result.content or "", metadata)
     return RetrievedMemory(
         tenant_id=result_tenant,
         user_id=owner,
@@ -156,7 +176,16 @@ def _search_result_to_retrieved_memory(
         scope=scope if scope else "GLOBAL",
         content_version=int(content_version) if isinstance(content_version, int) else 1,
         evolution_status=status.value,
-        content={"text": result.content or ""},
+        content={
+            **content,
+            "confidence": metadata.get("confidence"),
+            "scene": (metadata.get("scope") or {}).get("scene", "")
+            if isinstance(metadata.get("scope"), dict)
+            else "",
+            "task_type": (metadata.get("scope") or {}).get("task_type", "")
+            if isinstance(metadata.get("scope"), dict)
+            else "",
+        },
         score=float(result.score),
         score_breakdown=metadata.get("score_breakdown", {}),
         source_ids=[source or result.source or "retriever"],
@@ -177,8 +206,44 @@ def _safe_memory_type(value: str) -> MemoryType:
 
     normalized = (value or "").strip().lower()
     if normalized == "knowledge":
-        normalized = "knowledge.fact"
+        normalized = "knowledge.workflow"
     return LEGACY_TYPE_MAP.get(normalized, MemoryType.SEMANTIC)
+
+
+def _qualified_memory_type(value: str, metadata: dict[str, Any]) -> str:
+    """Preserve the legacy KnowledgeMemory subtype during vNext conversion."""
+    normalized = (value or "").strip().lower()
+    if normalized != "knowledge":
+        return normalized
+    # Historical SearchResult records used ``knowledge`` for fact-like items.
+    # Newly indexed KnowledgeMemory records include an explicit subtype.
+    subtype = str(metadata.get("knowledge_type") or "fact").strip().lower()
+    return f"knowledge.{subtype}"
+
+
+def _retrieved_content(text: str, metadata: dict[str, Any]) -> dict[str, Any]:
+    """Carry structured legacy fields through vNext retrieval and back."""
+    content: dict[str, Any] = {"text": text}
+    if metadata.get("confidence") is not None:
+        content["legacy_confidence"] = float(metadata["confidence"])
+    for key in (
+        "knowledge_type",
+        "name",
+        "knowledge_content",
+        "steps",
+        "tools",
+        "template_body",
+        "subject_id",
+        "predicate_id",
+        "object_id",
+        "object_value",
+    ):
+        value = metadata.get(key)
+        if value not in (None, "", []):
+            content[key] = value
+    if metadata.get("knowledge_content"):
+        content["content"] = metadata["knowledge_content"]
+    return content
 
 
 def _safe_layer(value: str) -> LifecycleLayer:
@@ -217,14 +282,28 @@ def build_legacy_retriever_executor(state: Any) -> Any:
 
         results: list[RetrievedMemory] = []
         for result in response.results:
+            legacy_memory = getattr(retriever, "memory_lookup", {}).get(result.memory_id)
+            if legacy_memory is not None:
+                result = result.model_copy(
+                    update={
+                        "metadata": {
+                            **_legacy_memory_metadata(legacy_memory),
+                            **(result.metadata or {}),
+                        }
+                    }
+                )
             converted = _search_result_to_retrieved_memory(
                 result,
                 tenant_id=request.tenant_id,
                 user_id=request.user_id,
-                source="vector",
+                source=result.source or "vector",
             )
             if converted is not None:
-                if _matches_request_scope(converted, request):
+                if (
+                    _memory_type_matches(converted.memory_type, plan)
+                    and (not plan.required_layers or converted.layer in plan.required_layers)
+                    and _matches_request_scope(converted, request)
+                ):
                     results.append(converted)
         return results
 
@@ -546,10 +625,28 @@ def _matches_request_scope(memory: RetrievedMemory, request: MemoryRetrievalRequ
     """
     if memory.tenant_id != request.tenant_id or memory.user_id != request.user_id:
         return False
+    if request.memory_types:
+        requested = {str(value).strip().lower() for value in request.memory_types}
+        actual = memory.memory_type.value.lower()
+        knowledge_types = {"semantic", "procedural", "episodic"}
+        matches_legacy_knowledge = actual in knowledge_types and "knowledge" in requested
+        matches_legacy_fact = actual == "semantic" and "fact" in requested
+        if actual not in requested and not matches_legacy_knowledge and not matches_legacy_fact:
+            return False
+    if request.min_confidence > 0:
+        raw_confidence = memory.content.get("confidence")
+        if raw_confidence is not None and float(raw_confidence) < request.min_confidence:
+            return False
+    if request.scenes and str(memory.content.get("scene", "")) not in request.scenes:
+        return False
+    if request.task_types and str(memory.content.get("task_type", "")) not in request.task_types:
+        return False
     if request.scope_level is None or not request.scope:
         return True
+    requested_scope = request.scope.split(":", 1)[-1]
+    memory_scope = memory.scope.split(":", 1)[-1]
     return memory.scope_level is MemoryScope.GLOBAL or (
-        memory.scope_level is request.scope_level and memory.scope == request.scope
+        memory.scope_level is request.scope_level and memory_scope == requested_scope
     )
 
 
@@ -561,10 +658,12 @@ def _long_term_memory_from_legacy(
     score: float,
 ) -> RetrievedMemory:
     metadata = _legacy_memory_metadata(memory)
-    memory_type = _safe_memory_type(str(metadata.get("memory_type", "semantic")))
+    memory_type = _safe_memory_type(
+        _qualified_memory_type(str(metadata.get("memory_type", "semantic")), metadata)
+    )
     scope_level, scope = _memory_scope(metadata)
     text = _legacy_memory_text(memory)
-    content: dict[str, Any] = {"text": text}
+    content = _retrieved_content(text, metadata)
     if getattr(memory, "payload", None):
         content["payload"] = memory.payload
     if getattr(memory, "steps", None):
@@ -620,9 +719,7 @@ def build_keyword_executor(keyword_search: Any) -> Any:
         if keyword_search is None or not request.query:
             return []
         try:
-            raw_results = keyword_search.search(
-                request.query, top_k=max(1, plan.keyword_top_k)
-            )
+            raw_results = keyword_search.search(request.query, top_k=max(1, plan.keyword_top_k))
         except Exception:
             return []
         # BM25 raw scores may be negative when IDF is negative; normalize to [0, 1]
@@ -637,7 +734,11 @@ def build_keyword_executor(keyword_search: Any) -> Any:
                 source=channel,
             )
             if converted is not None:
-                if _matches_request_scope(converted, request):
+                if (
+                    _memory_type_matches(converted.memory_type, plan)
+                    and (not plan.required_layers or converted.layer in plan.required_layers)
+                    and _matches_request_scope(converted, request)
+                ):
                     results.append(converted)
         return results
 
@@ -668,9 +769,7 @@ def build_authority_executor(authority_repository: Any) -> Any:
             if not _memory_type_matches(envelope.memory_type, plan):
                 continue
             text = json.dumps(envelope.content, ensure_ascii=False, sort_keys=True)
-            relevance = _query_relevance(
-                request.query, f"{envelope.normalized_key} {text}"
-            )
+            relevance = _query_relevance(request.query, f"{envelope.normalized_key} {text}")
             scope_bonus = 0.1 if request.scope and envelope.scope == request.scope else 0.0
             ranked.append((min(1.0, 0.5 + 0.5 * relevance + scope_bonus), envelope))
         ranked.sort(key=lambda item: (-item[0], item[1].memory_id))
@@ -713,7 +812,9 @@ def build_metadata_executor(memory_lookup: dict[str, Any] | None) -> Any:
                 continue
             if metadata.get("user_id") != request.user_id:
                 continue
-            memory_type = _safe_memory_type(str(metadata.get("memory_type", "semantic")))
+            memory_type = _safe_memory_type(
+                _qualified_memory_type(str(metadata.get("memory_type", "semantic")), metadata)
+            )
             if not _memory_type_matches(memory_type, plan):
                 continue
             if plan.required_layers and LifecycleLayer.LONG_TERM not in plan.required_layers:

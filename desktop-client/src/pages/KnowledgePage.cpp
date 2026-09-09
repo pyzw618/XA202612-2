@@ -75,10 +75,10 @@ KnowledgePage::KnowledgePage(QWidget *parent) : BasePage(parent) {
     m_filterBar->setSearchPlaceholder("搜索名称 / 内容...");
     m_typeCombo = new QComboBox(this);
     m_typeCombo->addItem("全部类型", "");
-    const QStringList types = {"workflow", "case", "template"};
+    // fact 子类型也在 /knowledge 返回中，补进下拉可与 FactPage 明确分工
+    const QStringList types = {"workflow", "case", "template", "fact"};
     for (const QString &t : types) m_typeCombo->addItem(t, t);
     m_statusCombo = new QComboBox(this);
-    m_statusCombo->addItem("有效", "active");
     for (const QString &s : QStringList{"active", "archived", "pending", "deleted"})
         m_statusCombo->addItem(StatusTag::statusText(s), s);
     m_filterBar->addWidget(m_typeCombo);
@@ -128,11 +128,12 @@ KnowledgePage::KnowledgePage(QWidget *parent) : BasePage(parent) {
 void KnowledgePage::refresh() { onRefresh(); }
 
 void KnowledgePage::onRefresh() {
+    m_drawer->closeDrawer();
+    m_all = QJsonArray();
+    m_table->setRowCount(0);
     const int generation = ++m_generation;
-    const bool hadData = !m_all.isEmpty();
-    if (!hadData) m_content->hide();
-    m_stateView->setState(PageState::Loading, hadData ? "正在刷新" : "正在加载知识记忆",
-                          hadData ? "当前仍显示上次成功加载的数据。" : "正在从后端读取真实数据…");
+    m_content->hide();
+    m_stateView->setState(PageState::Loading, "正在加载知识记忆", "正在从后端读取真实数据…");
     m_stateView->clearAction();
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
@@ -280,13 +281,22 @@ void KnowledgePage::populateRow(int row, const QJsonObject &m) {
 }
 
 void KnowledgePage::openDetail(const QString &id) {
-    api::ApiClient *api = AppContext::instance()->api();
-    const api::Result r = api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/knowledge/" + id, {{"user_id", AppContext::instance()->userId()}}));
-    if (!r.hasJsonObject()) { QMessageBox::warning(this, "加载失败", r.errorCode); return; }
-    const QJsonObject m = r.jsonObject();
+    const int generation = ++m_detailGeneration;
+    AppContext::instance()->api()->getAsync(
+        api::ApiClient::urlWithQuery("/api/memory/knowledge/" + id,
+                                     {{"user_id", AppContext::instance()->userId()}}),
+        [this, generation, id](const api::Result &r) {
+            if (generation != m_detailGeneration) return;
+            if (!r.ok || !r.hasJsonObject()) {
+                QMessageBox::warning(this, "加载失败", r.errorCode + " " + r.errorMessage);
+                return;
+            }
+            buildDetail(id, r.jsonObject());
+        }, this);
+}
 
-    auto *tabs = new QTabWidget();
+void KnowledgePage::buildDetail(const QString &id, const QJsonObject &m) {
+    auto *tabs = new QTabWidget(m_drawer);
 
     auto *content = new QWidget();
     auto *clay = new QVBoxLayout(content);
@@ -325,30 +335,7 @@ void KnowledgePage::openDetail(const QString &id) {
     }
     tabs->addTab(content, "内容");
 
-    // 版本历史
-    auto *verW = new QWidget();
-    auto *vl = new QVBoxLayout(verW);
-    auto *verT = new QTableWidget(0, 3);
-    verT->setHorizontalHeaderLabels({"版本", "更新时间", "名称"});
-    verT->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
-    verT->verticalHeader()->setVisible(false);
-    verT->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    verT->setAlternatingRowColors(true);
-    const api::Result rv = api->get(api::ApiClient::urlWithQuery(
-        "/api/memory/knowledge/" + id + "/versions",
-        {{"user_id", AppContext::instance()->userId()}}));
-    if (rv.hasJsonArray()) {
-        const QJsonArray versions = rv.jsonArray();
-        verT->setRowCount(int(versions.size()));
-        for (int i = 0; i < versions.size(); ++i) {
-            const QJsonObject v = versions[i].toObject();
-            verT->setItem(i, 0, new QTableWidgetItem(QString("v%1").arg(j::integer(v, "version"))));
-            verT->setItem(i, 1, new QTableWidgetItem(j::fmtTime(j::str(v, "updated_at"))));
-            verT->setItem(i, 2, new QTableWidgetItem(j::str(v, "name")));
-        }
-    }
-    vl->addWidget(verT);
-    tabs->addTab(verW, "版本历史");
+    // 暂不展示版本历史：后端尚未提供该路由。
 
     // 复用统计
     auto *stW = new QWidget();
@@ -450,15 +437,20 @@ void KnowledgePage::openEditDialog(const QJsonObject &memory, bool isNew) {
     body["confidence"] = confSpin->value();
     if (isNew) body["status"] = "active";
 
-    const api::Result r = isNew
-        ? AppContext::instance()->api()->post("/api/memory/memories/knowledge", body)
-        : AppContext::instance()->api()->put("/api/memory/knowledge/" + j::str(memory, "memory_id"), body);
-    if (r.ok) { QMessageBox::information(this, "完成", isNew ? "知识已写入" : "知识已更新"); onRefresh(); }
-    else if (r.errorCode == "memory.safety.review_required")
-        QMessageBox::warning(this, "需人工复核", "写入需人工复核。");
-    else if (r.errorCode == "memory.safety.rejected")
-        QMessageBox::warning(this, "被策略拒绝", "写入被安全策略拒绝。");
-    else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+    m_addBtn->setEnabled(false);
+    const QString url = isNew ? QStringLiteral("/api/memory/memories/knowledge")
+                              : QStringLiteral("/api/memory/knowledge/") + j::str(memory, "memory_id");
+    auto finish = [this, isNew](const api::Result &r) {
+        m_addBtn->setEnabled(true);
+        if (r.ok) { QMessageBox::information(this, "完成", isNew ? "知识已写入" : "知识已更新"); onRefresh(); }
+        else if (r.errorCode == "memory.safety.review_required")
+            QMessageBox::warning(this, "需人工复核", "写入需人工复核。");
+        else if (r.errorCode == "memory.safety.rejected")
+            QMessageBox::warning(this, "被策略拒绝", "写入被安全策略拒绝。");
+        else QMessageBox::warning(this, "失败", r.errorCode + " " + r.errorMessage);
+    };
+    if (isNew) AppContext::instance()->api()->postAsync(url, body, finish, false, this);
+    else AppContext::instance()->api()->putAsync(url, body, finish, false, this);
 }
 
 QList<QString> KnowledgePage::selectedIds() const {

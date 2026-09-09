@@ -2,6 +2,7 @@
 
 #include "SafetyPages.h"
 
+#include <QBrush>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
@@ -31,6 +32,22 @@
 #include "../widgets/MemoryFilterBar.h"
 #include "../widgets/PageHeader.h"
 #include "../widgets/StatusTag.h"
+
+namespace {
+// P0-13：按 errorCode / 网络状态区分失败原因，避免笼统显示 "HTTP 503"。
+// 注意：后端返回 503 时 Qt 会同时置 networkError，因此必须先判 errorCode 再判 networkError。
+QString safetyFailText(const api::Result &r, const QString &what) {
+    if (r.errorCode == QLatin1String("safety.gate_unavailable"))
+        return QStringLiteral("安全门禁不可用（门禁未装配），请联系管理员部署安全门禁");
+    if (r.networkError)
+        return QStringLiteral("后端离线或网络错误：")
+            + (r.networkErrorText.isEmpty() ? r.errorMessage : r.networkErrorText);
+    QString msg = r.errorMessage;
+    if (!r.errorCode.isEmpty())
+        msg = r.errorCode + (msg.isEmpty() ? QString() : QStringLiteral(" - ") + msg);
+    return what + QStringLiteral("加载失败：") + (msg.isEmpty() ? QStringLiteral("未知错误") : msg);
+}
+} // namespace
 
 // ============================================================
 // P6.1 安全总览
@@ -99,10 +116,12 @@ SafetyOverviewPage::SafetyOverviewPage(QWidget *parent) : BasePage(parent) {
 
 void SafetyOverviewPage::refresh() {
     const int generation = ++m_generation;
+    m_statusLabel->setText("正在加载组件状态…");
+    m_policyLabel->setText("正在加载策略…");
     api::ApiClient *api = AppContext::instance()->api();
     api->getAsync("/api/memory/system/status", [this, generation](const api::Result &r) {
     if (generation != m_generation) return;
-    if (r.hasJsonObject()) {
+    if (r.ok && r.hasJsonObject()) {
         const QJsonObject s = r.jsonObject();
         const QJsonObject safety = j::obj(s, "safety");
         m_statusLabel->setText(QString(
@@ -113,11 +132,13 @@ void SafetyOverviewPage::refresh() {
             .arg(j::boolean(safety, "audit_enabled") ? "已开启" : "未开启")
             .arg(j::boolean(safety, "quarantine_enabled") ? "已开启" : "未开启")
             .arg(j::str(safety, "rule_set_id"), j::str(safety, "rule_set_version")));
+    } else {
+        m_statusLabel->setText("组件状态加载失败：" + r.errorMessage.toHtmlEscaped());
     }
     }, this);
     api->getAsync("/api/memory/system/config", [this, generation](const api::Result &rc) {
     if (generation != m_generation) return;
-    if (rc.hasJsonObject()) {
+    if (rc.ok && rc.hasJsonObject()) {
         const QJsonObject cfg = rc.jsonObject();
         const QJsonObject safety = j::obj(cfg, "safety");
         const QJsonObject policy = j::obj(safety, "policy");
@@ -128,6 +149,8 @@ void SafetyOverviewPage::refresh() {
             .arg(j::str(policy, "fallback_action"))
             .arg(j::boolean(policy, "fail_closed") ? "是" : "否")
             .arg(j::boolean(safety, "auto_mask") ? "是" : "否"));
+    } else {
+        m_policyLabel->setText("策略加载失败：" + rc.errorMessage.toHtmlEscaped());
     }
     }, this);
 }
@@ -152,7 +175,7 @@ SafetyUserRulesPage::SafetyUserRulesPage(QWidget *parent) : BasePage(parent) {
     m_filterBar->setSearchPlaceholder("搜索规则标签...");
     connect(m_filterBar, &MemoryFilterBar::refreshRequested, this, &SafetyUserRulesPage::onRefresh);
     connect(m_filterBar, &MemoryFilterBar::searchTextChanged, this,
-            [this](const QString &) { onRefresh(); });
+            [this](const QString &) { if (m_rulesLoaded) renderRows(); });
     root->addWidget(m_filterBar);
 
     m_table = new QTableWidget(this);
@@ -178,25 +201,36 @@ void SafetyUserRulesPage::refresh() { onRefresh(); }
 void SafetyUserRulesPage::onRefresh() { loadTable(); }
 
 void SafetyUserRulesPage::loadTable() {
+    m_rulesLoaded = false;
+    m_all = QJsonArray();
+    m_table->clearSpans();
+    m_table->setRowCount(0);
     const int generation = ++m_generation;
     api::ApiClient *api = AppContext::instance()->api();
-    const QString kw = m_filterBar->searchBox()->text().trimmed();
-    api->getAsync("/api/memory/safety/user-rules", [this, generation, kw](const api::Result &r) {
+    api->getAsync("/api/memory/safety/user-rules", [this, generation](const api::Result &r) {
     if (generation != m_generation) return;
     m_table->setRowCount(0);
-    if (!r.hasJsonArray()) {
-        if (r.errorCode == "user_rule.service_unavailable" || r.errorCode == "user_rule.identity_unavailable") {
-            m_table->setRowCount(1);
-            auto *empty = new EmptyState();
-            empty->setIcon(QIcon(":/icons/shield.svg"));
-            empty->setTitle("用户规则服务不可用");
-            empty->setHint("需 config.yaml 开启 safety.user_rules.enabled 且配置密钥");
-            m_table->setCellWidget(0, 0, empty);
-            m_table->setSpan(0, 0, 1, 8);
-        }
+    if (!r.ok || !r.hasJsonArray()) {
+        m_table->setRowCount(1);
+        auto *empty = new EmptyState();
+        empty->setIcon(QIcon(":/icons/shield.svg"));
+        empty->setTitle("用户规则加载失败");
+        empty->setHint(r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage);
+        m_table->setCellWidget(0, 0, empty);
+        m_table->setSpan(0, 0, 1, 8);
         return;
     }
     m_all = r.jsonArray();
+    m_rulesLoaded = true;
+    renderRows();
+    }, true, this);
+}
+
+void SafetyUserRulesPage::renderRows() {
+    // 数据已全量在手，搜索词本地过滤，不重新请求
+    const QString kw = m_filterBar->searchBox()->text().trimmed();
+    m_table->clearSpans();
+    m_table->setRowCount(0);
     int row = 0;
     for (const QJsonValue &v : m_all) {
         const QJsonObject rule = v.toObject();
@@ -222,19 +256,15 @@ void SafetyUserRulesPage::loadTable() {
         ol->setSpacing(2);
         auto mk = [ops](const QString &t) { auto *b = new QPushButton(t, ops); b->setObjectName("textBtn"); return b; };
         auto *bEdit = mk("编辑");
-        auto *bVer = mk("版本");
         auto *bDel = mk("删除");
         bDel->setStyleSheet("color:#EF4444;");
         connect(bEdit, &QPushButton::clicked, this, [this, rule]() { openEditDialog(rule); });
-        connect(bVer, &QPushButton::clicked, this, [this, rule]() { showVersionHistory(rule); });
         connect(bDel, &QPushButton::clicked, this, [this, rid, revision]() { removeRule(rid, revision); });
         ol->addWidget(bEdit);
-        ol->addWidget(bVer);
         ol->addWidget(bDel);
         m_table->setCellWidget(row, 7, ops);
         ++row;
     }
-    }, true, this);
 }
 
 void SafetyUserRulesPage::openCreateDialog() {
@@ -362,12 +392,18 @@ void SafetyUserRulesPage::toggleEnabled(const QString &ruleId, int revision, boo
     body["enabled"] = on;
     AppContext::instance()->api()->patchAsync(
         "/api/memory/safety/user-rules/" + ruleId, body,
-        [this, check](const api::Result &r) {
+        [this, check, on](const api::Result &r) {
             if (check) check->setEnabled(true);
             if (r.ok) {
-                QMessageBox::information(this, "完成", "规则状态已更新");
+                // 静默成功：避免每次切换都弹模态打断
                 onRefresh();
             } else {
+                // 失败回滚复选框，避免界面显示与后端状态不一致
+                if (check) {
+                    check->blockSignals(true);
+                    check->setChecked(!on);
+                    check->blockSignals(false);
+                }
                 QMessageBox::warning(this, "切换失败", r.errorCode + " " + r.errorMessage);
             }
         }, /*useUserHeader=*/true, this);
@@ -389,27 +425,6 @@ void SafetyUserRulesPage::removeRule(const QString &ruleId, int revision) {
                 QMessageBox::warning(this, "删除失败", r.errorCode + " " + r.errorMessage);
             }
         }, /*useUserHeader=*/true, this);
-}
-
-void SafetyUserRulesPage::showVersionHistory(const QJsonObject &rule) {
-    QDialog dlg(this);
-    dlg.setWindowTitle("版本历史 · " + j::str(rule, "label"));
-    dlg.resize(560, 300);
-    auto *lay = new QVBoxLayout(&dlg);
-    auto *info = new QLabel("matcher 一律显示 ••••••（密文不落盘回显）", &dlg);
-    info->setObjectName("pageSubtitle");
-    lay->addWidget(info);
-    auto *t = new QTableWidget(1, 4, &dlg);
-    t->setHorizontalHeaderLabels({"版本", "类型", "效果", "更新时间"});
-    t->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    t->verticalHeader()->setVisible(false);
-    t->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    t->setItem(0, 0, new QTableWidgetItem(QString("v%1").arg(j::integer(rule, "revision"))));
-    t->setItem(0, 1, new QTableWidgetItem(j::str(rule, "kind")));
-    t->setItem(0, 2, new QTableWidgetItem(j::str(rule, "effect")));
-    t->setItem(0, 3, new QTableWidgetItem(j::fmtTime(j::str(rule, "updated_at"))));
-    lay->addWidget(t, 1);
-    dlg.exec();
 }
 
 // ============================================================
@@ -434,15 +449,15 @@ SafetyAuditPage::SafetyAuditPage(QWidget *parent) : BasePage(parent) {
     root->addWidget(m_stateLabel);
 
     m_filterBar = new MemoryFilterBar(this);
-    m_filterBar->setSearchPlaceholder("搜索 audit_id / event_id...");
+    m_filterBar->setSearchPlaceholder("搜索 audit_id / event_ref...");
     connect(m_filterBar, &MemoryFilterBar::refreshRequested, this, &SafetyAuditPage::onRefresh);
     connect(m_filterBar, &MemoryFilterBar::searchTextChanged, this,
-            [this](const QString &) { onRefresh(); });
+            [this](const QString &) { renderRows(); });
     root->addWidget(m_filterBar);
 
     m_table = new QTableWidget(this);
     m_table->setColumnCount(6);
-    m_table->setHorizontalHeaderLabels({"audit_id", "event_id", "决策", "规则集", "原因码", "时间"});
+    m_table->setHorizontalHeaderLabels({"audit_id", "event_ref", "决策", "规则集", "原因码", "时间"});
     m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_table->verticalHeader()->setVisible(false);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -457,41 +472,74 @@ void SafetyAuditPage::onRefresh() { loadTable(); }
 
 void SafetyAuditPage::loadTable() {
     const int generation = ++m_generation;
+    m_all = QJsonArray();
+    m_total = 0;
+    m_table->setRowCount(0);
+    m_stateLabel->setText("正在加载…");
+    m_stateLabel->show();
     api::ApiClient *api = AppContext::instance()->api();
-    const QString kw = m_filterBar->searchBox()->text().trimmed();
     api->getAsync(api::ApiClient::urlWithQuery(
         "/api/memory/safety/audit-logs", {{"limit", "200"}, {"offset", "0"}}),
-        [this, generation, kw](const api::Result &r) {
+        [this, generation](const api::Result &r) {
     if (generation != m_generation) return;
     m_table->setRowCount(0);
-    if (!r.hasJsonObject()) {
-        m_stateLabel->show();
-        m_stateLabel->setStyleSheet("background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;"
-                                    "color:#92400E;padding:8px;");
-        m_stateLabel->setText("审计功能未开启（safety.audit_disabled）· 请在 config.yaml 设置 "
-                              "safety.audit.enabled: true 后重启后端。");
+    if (!r.ok || !r.hasJsonObject()) {
+        m_loadFailed = true;
+        m_failText = r.errorCode == "safety.audit_disabled"
+            ? QStringLiteral("审计功能未开启（safety.audit_disabled）")
+            : safetyFailText(r, QStringLiteral("审计日志"));
+        renderRows();
         return;
     }
     m_stateLabel->hide();
-    const QJsonArray items = j::arr(r.jsonObject(), "items");
+    m_loadFailed = false;
+    m_all = j::arr(r.jsonObject(), "items");
+    m_total = j::integer(r.jsonObject(), "total", m_all.size());
+    renderRows();
+    }, this);
+}
+
+void SafetyAuditPage::renderRows() {
+    m_table->setRowCount(0);
+    if (m_loadFailed) {
+        m_stateLabel->show();
+        m_stateLabel->setStyleSheet("background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;"
+                                    "color:#92400E;padding:8px;");
+        m_stateLabel->setText(m_failText);
+        return;
+    }
+    m_stateLabel->hide();
+    const QString kw = m_filterBar->searchBox()->text().trimmed();
     int row = 0;
-    for (const QJsonValue &v : items) {
+    for (const QJsonValue &v : m_all) {
         const QJsonObject rec = v.toObject();
         const QString aid = j::str(rec, "audit_id");
         if (!kw.isEmpty() && !aid.contains(kw, Qt::CaseInsensitive) &&
-            !j::str(rec, "event_id").contains(kw, Qt::CaseInsensitive)) continue;
+            !j::str(rec, "event_ref").contains(kw, Qt::CaseInsensitive)) continue;
         m_table->insertRow(row);
         m_table->setItem(row, 0, new QTableWidgetItem(aid));
-        m_table->setItem(row, 1, new QTableWidgetItem(j::str(rec, "event_id")));
+        m_table->setItem(row, 1, new QTableWidgetItem(j::str(rec, "event_ref")));
         auto *tag = new StatusTag();
-        tag->setStatus(j::str(rec, "decision_action"));
+        tag->setStatus(j::str(rec, "decision"));
         m_table->setCellWidget(row, 2, tag);
         m_table->setItem(row, 3, new QTableWidgetItem(j::str(rec, "rule_set_version")));
         m_table->setItem(row, 4, new QTableWidgetItem(j::strList(rec, "reason_codes").join(", ")));
-        m_table->setItem(row, 5, new QTableWidgetItem(j::timeAgo(j::str(rec, "created_at"))));
+        auto *timeItem = new QTableWidgetItem(j::timeAgo(j::str(rec, "created_at")));
+        timeItem->setToolTip(j::fmtTime(j::str(rec, "created_at")));
+        m_table->setItem(row, 5, timeItem);
         ++row;
     }
-    }, this);
+    // 接口固定 limit=200：超出部分不可见时必须如实提示，避免"审计完整"的错觉
+    if (m_total > m_all.size()) {
+        const int row2 = m_table->rowCount();
+        m_table->insertRow(row2);
+        auto *hint = new QTableWidgetItem(
+            QString("仅显示最近 %1 条（共 %2 条）；更早记录请缩小时间范围或调大后端 limit。")
+                .arg(m_all.size()).arg(m_total));
+        hint->setForeground(QBrush(QColor("#92400E")));
+        m_table->setItem(row2, 0, hint);
+        m_table->setSpan(row2, 0, 1, 6);
+    }
 }
 
 void SafetyAuditPage::verifyChain() {
@@ -499,19 +547,11 @@ void SafetyAuditPage::verifyChain() {
     AppContext::instance()->api()->getAsync("/api/memory/safety/audit-logs/verify",
         [this](const api::Result &r) {
             m_verifyBtn->setEnabled(true);
-            if (r.hasJsonObject()) {
+            if (r.ok && r.hasJsonObject()) {
                 const bool valid = j::boolean(r.jsonObject(), "valid");
                 QMessageBox::information(this, "验链结果", valid ? "哈希链校验通过" : "校验失败：" + j::str(r.jsonObject(), "code"));
             } else QMessageBox::warning(this, "验链失败", r.errorCode + " " + r.errorMessage);
         }, this);
-}
-
-void SafetyAuditPage::showRecord(const QJsonObject &rec) {
-    QMessageBox box(this);
-    box.setWindowTitle("审计记录详情");
-    box.setText(QJsonDocument(rec).toJson(QJsonDocument::Indented));
-    box.setTextInteractionFlags(Qt::TextSelectableByMouse);
-    box.exec();
 }
 
 // ============================================================
@@ -535,12 +575,12 @@ SafetyQuarantinePage::SafetyQuarantinePage(QWidget *parent) : BasePage(parent) {
     m_filterBar->setSearchPlaceholder("搜索 review_id...");
     connect(m_filterBar, &MemoryFilterBar::refreshRequested, this, &SafetyQuarantinePage::onRefresh);
     connect(m_filterBar, &MemoryFilterBar::searchTextChanged, this,
-            [this](const QString &) { onRefresh(); });
+            [this](const QString &) { renderRows(); });
     root->addWidget(m_filterBar);
 
     m_table = new QTableWidget(this);
     m_table->setColumnCount(5);
-    m_table->setHorizontalHeaderLabels({"review_id", "event_id", "创建时间", "过期时间", "操作"});
+    m_table->setHorizontalHeaderLabels({"review_id", "event_ref", "创建时间", "过期时间", "操作"});
     m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_table->verticalHeader()->setVisible(false);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -557,29 +597,49 @@ void SafetyQuarantinePage::onRefresh() { loadTable(); }
 
 void SafetyQuarantinePage::loadTable() {
     const int generation = ++m_generation;
+    m_all = QJsonArray();
+    m_table->setRowCount(0);
+    m_stateLabel->setText("正在加载…");
+    m_stateLabel->show();
     api::ApiClient *api = AppContext::instance()->api();
-    const QString kw = m_filterBar->searchBox()->text().trimmed();
-    api->getAsync("/api/memory/safety/quarantine", [this, generation, kw](const api::Result &r) {
+    api->getAsync("/api/memory/safety/quarantine", [this, generation](const api::Result &r) {
     if (generation != m_generation) return;
     m_table->setRowCount(0);
-    if (!r.hasJsonObject()) {
-        m_stateLabel->show();
-        m_stateLabel->setStyleSheet("background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;"
-                                    "color:#92400E;padding:8px;");
-        m_stateLabel->setText("隔离区未开启（safety.quarantine_disabled）· 请在 config.yaml 设置 "
-                              "safety.quarantine.enabled: true 后重启后端。");
+    if (!r.ok || !r.hasJsonObject()) {
+        m_loadFailed = true;
+        m_failText = r.errorCode == "safety.quarantine_disabled"
+            ? QStringLiteral("隔离区未开启（safety.quarantine_disabled）")
+            : safetyFailText(r, QStringLiteral("隔离区"));
+        renderRows();
         return;
     }
     m_stateLabel->hide();
-    const QJsonArray items = j::arr(r.jsonObject(), "items");
+    m_loadFailed = false;
+    m_all = j::arr(r.jsonObject(), "items");
+    renderRows();
+    }, this);
+}
+
+void SafetyQuarantinePage::renderRows() {
+    m_table->setRowCount(0);
+    if (m_loadFailed) {
+        m_stateLabel->show();
+        m_stateLabel->setStyleSheet("background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;"
+                                    "color:#92400E;padding:8px;");
+        m_stateLabel->setText(m_failText);
+        return;
+    }
+    m_stateLabel->hide();
+    const QString kw = m_filterBar->searchBox()->text().trimmed();
     int row = 0;
-    for (const QJsonValue &v : items) {
+    for (const QJsonValue &v : m_all) {
         const QJsonObject rec = v.toObject();
         const QString rid = j::str(rec, "review_id");
-        if (!kw.isEmpty() && !rid.contains(kw, Qt::CaseInsensitive)) continue;
+        if (!kw.isEmpty() && !rid.contains(kw, Qt::CaseInsensitive) &&
+            !j::str(rec, "event_ref").contains(kw, Qt::CaseInsensitive)) continue;
         m_table->insertRow(row);
         m_table->setItem(row, 0, new QTableWidgetItem(rid));
-        m_table->setItem(row, 1, new QTableWidgetItem(j::str(rec, "event_id")));
+        m_table->setItem(row, 1, new QTableWidgetItem(j::str(rec, "event_ref")));
         m_table->setItem(row, 2, new QTableWidgetItem(j::timeAgo(j::str(rec, "created_at"))));
         m_table->setItem(row, 3, new QTableWidgetItem(j::timeAgo(j::str(rec, "expires_at"))));
         auto *ops = new QWidget();
@@ -603,7 +663,6 @@ void SafetyQuarantinePage::loadTable() {
         m_table->setCellWidget(row, 4, ops);
         ++row;
     }
-    }, this);
 }
 
 void SafetyQuarantinePage::viewRecord(const QString &reviewId) {
@@ -614,7 +673,13 @@ void SafetyQuarantinePage::viewRecord(const QString &reviewId) {
     api->getAsync("/api/memory/safety/quarantine/" + reviewId,
         [this, token, reviewId](const api::Result &r) {
             if (token != m_viewGeneration) return;
-            if (!r.hasJsonObject()) { QMessageBox::warning(this, "读取失败", r.errorCode); return; }
+            if (!r.ok || !r.hasJsonObject()) {
+                const QString message = r.errorCode == "safety.quarantine_disabled"
+                    ? "隔离区未开启（safety.quarantine_disabled）"
+                    : safetyFailText(r, "隔离事件详情");
+                QMessageBox::warning(this, "读取失败", message);
+                return;
+            }
             QDialog dlg(this);
             dlg.setWindowTitle("隔离事件原文 · " + j::shortId(reviewId));
             dlg.resize(620, 480);
@@ -627,6 +692,15 @@ void SafetyQuarantinePage::viewRecord(const QString &reviewId) {
 }
 
 void SafetyQuarantinePage::releaseRecord(const QString &reviewId, const QString &decision) {
+    // 放行/驳回都是不可逆处置，必须二次确认（与同页"删除"一致）
+    if (decision == "allow") {
+        if (!ConfirmDialog::confirm(this, "放行事件",
+                                    "放行后事件将重新进入处理管线并生成记忆。确认放行？")) return;
+    } else {
+        if (!ConfirmDialog::confirm(this, "驳回事件",
+                                    "驳回将直接删除该隔离记录（不可恢复），事件不会进入管线。确认驳回？",
+                                    "驳回")) return;
+    }
     QPointer<QPushButton> btn = qobject_cast<QPushButton *>(sender());
     if (btn) btn->setEnabled(false);
     QJsonObject body;

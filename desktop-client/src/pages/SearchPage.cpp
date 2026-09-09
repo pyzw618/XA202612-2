@@ -15,6 +15,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
@@ -101,6 +102,9 @@ SearchPage::SearchPage(QWidget *parent) : BasePage(parent) {
     filterRow->addWidget(m_minConf);
     filterRow->addStretch();
     root->addLayout(filterRow);
+    auto *filterHint = new QLabel("筛选条件由服务端在排序截断前执行；结果保留可追溯来源。", this);
+    filterHint->setWordWrap(true);
+    root->addWidget(filterHint);
 
     // ---- 主内容：左结果 / 右侧栏 ----
     auto *content = new QWidget(this);
@@ -142,6 +146,7 @@ SearchPage::SearchPage(QWidget *parent) : BasePage(parent) {
     // 上下文预览
     auto ctxCard = makeCard("上下文预览（可直接注入 prompt）");
     m_contextText = new QLabel(ctxCard.first);
+    m_contextText->setTextFormat(Qt::PlainText);
     m_contextText->setWordWrap(true);
     m_contextText->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_contextText->setStyleSheet("background:#F8F9FB;border:1px solid #ECEEF2;border-radius:6px;"
@@ -153,6 +158,7 @@ SearchPage::SearchPage(QWidget *parent) : BasePage(parent) {
     m_contextButton->setAccessibleName("生成检索上下文");
     connect(m_contextButton, &QPushButton::clicked, this, &SearchPage::generateContext);
     m_copyContextBtn = new QPushButton("复制", ctxCard.first);
+    m_copyContextBtn->setEnabled(false);
     connect(m_copyContextBtn, &QPushButton::clicked, this, [this]() {
         if (m_contextText->text().isEmpty()) return;
         QApplication::clipboard()->setText(m_contextText->text());
@@ -168,25 +174,71 @@ SearchPage::SearchPage(QWidget *parent) : BasePage(parent) {
     auto perfCard = makeCard("性能");
     m_latencyLabel = new QLabel("—", perfCard.first);
     m_totalLabel = new QLabel("—", perfCard.first);
-    m_cacheLabel = new QLabel("—", perfCard.first);
     perfCard.second->addWidget(m_latencyLabel);
     perfCard.second->addWidget(m_totalLabel);
-    perfCard.second->addWidget(m_cacheLabel);
     sideLay->addWidget(perfCard.first);
 
     // 请求 JSON
     auto reqCard = makeCard("请求 JSON");
-    auto *reqView = new JsonViewer(reqCard.first);
-    reqView->editor()->setMaximumHeight(260);
-    reqCard.second->addWidget(reqView);
+    m_requestView = new JsonViewer(reqCard.first);
+    m_requestView->editor()->setMaximumHeight(260);
+    reqCard.second->addWidget(m_requestView);
     sideLay->addWidget(reqCard.first);
     sideLay->addStretch();
 
     mainRow->addWidget(side);
     root->addWidget(content, 1);
+    // Any change to context inputs invalidates both displayed and in-flight context.
+    connect(m_queryEdit, &QLineEdit::textChanged, this, &SearchPage::clearContext);
+    connect(m_taskEdit, &QLineEdit::textChanged, this, &SearchPage::clearContext);
+    connect(m_sceneCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &SearchPage::clearContext);
+    connect(m_topK, QOverload<int>::of(&QSpinBox::valueChanged), this, &SearchPage::clearContext);
+    connect(m_minConf, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &SearchPage::clearContext);
+    for (auto *check : {m_cbPreference, m_cbKnowledge, m_cbFact})
+        connect(check, &QCheckBox::toggled, this, &SearchPage::clearContext);
+    const auto refilter = [this]() {
+        if (!m_lastResponse.isEmpty()) renderResults(m_lastResponse);
+    };
+    connect(m_minConf, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, refilter);
+    for (auto *check : {m_cbPreference, m_cbKnowledge, m_cbFact})
+        connect(check, &QCheckBox::toggled, this, refilter);
 }
 
-void SearchPage::refresh() {}
+void SearchPage::clearResults() {
+    while (QLayoutItem *item = m_resultsLayout->takeAt(0)) {
+        if (QWidget *w = item->widget()) {
+            if (w != m_stateView) { w->hide(); w->deleteLater(); }
+        }
+        delete item;
+    }
+    m_resultsLayout->addWidget(m_stateView);
+    m_resultsScroll->verticalScrollBar()->setValue(0);
+    m_stateView->clearAction();
+}
+
+void SearchPage::clearContext() {
+    ++m_contextGeneration;
+    m_contextLoading = false;
+    m_contextText->clear();
+    m_contextText->setToolTip(QString());
+    m_copyContextBtn->setEnabled(false);
+    m_copyContextBtn->setText("复制");
+    m_contextButton->setEnabled(true);
+    m_contextButton->setText("生成上下文");
+}
+
+void SearchPage::refresh() {
+    ++m_generation;
+    clearResults();
+    clearContext();
+    m_lastRequest = QJsonObject();
+    m_lastResponse = QJsonObject();
+    m_requestView->setObject(m_lastRequest);
+    for (auto *label : {m_latencyLabel, m_totalLabel}) label->setText("—");
+    m_searchButton->setEnabled(true);
+    m_searchButton->setText("检索");
+    m_stateView->setState(PageState::Empty, "输入查询开始检索", "结果会显示在这里。");
+}
 
 void SearchPage::applySearchQuery(const QString &query) {
     m_queryEdit->setText(query);
@@ -219,17 +271,33 @@ void SearchPage::runSearch() {
     const QString q = m_queryEdit->text().trimmed();
     if (q.isEmpty()) { QMessageBox::information(this, "提示", "请输入查询内容"); return; }
 
-    m_lastRequest = updateRequestJson();
+    refresh();
+    QJsonArray types;
+    if (m_cbPreference->isChecked()) types.append("preference");
+    if (m_cbKnowledge->isChecked()) types.append("knowledge");
+    if (m_cbFact->isChecked()) types.append("fact");
+    m_lastRequest = QJsonObject{{"user_id", AppContext::instance()->userId()},
+                                {"query", q}, {"top_k", m_topK->value()},
+                                {"memory_types", types}, {"min_confidence", m_minConf->value()},
+                                {"scene", m_sceneCombo->currentData().toString()},
+                                {"task_type", m_taskEdit->text().trimmed()},
+                                {"include_provenance", true}};
+    m_requestView->setObject(m_lastRequest);
     const int generation = ++m_generation;
     m_searchButton->setEnabled(false);
     m_searchButton->setText("检索中…");
     m_stateView->setState(PageState::Loading, "正在检索", "正在查询真实记忆数据…");
-    const QString provenancePath = api::ApiClient::urlWithQuery(
-        "/api/memory/v2/search",
-        {{"user_id", AppContext::instance()->userId()},
-         {"query", q},
-         {"top_k", QString::number(m_topK->value())},
-         {"include_provenance", "true"}});
+    QList<QPair<QString, QString>> params{{"user_id", AppContext::instance()->userId()},
+                                            {"query", q},
+                                            {"top_k", QString::number(m_topK->value())},
+                                            {"min_confidence", QString::number(m_minConf->value(), 'f', 2)},
+                                            {"scene", m_sceneCombo->currentData().toString()},
+                                            {"task_type", m_taskEdit->text().trimmed()},
+                                            {"include_provenance", "true"}};
+    if (m_cbPreference->isChecked()) params.append(qMakePair(QStringLiteral("memory_types"), QStringLiteral("preference")));
+    if (m_cbKnowledge->isChecked()) params.append(qMakePair(QStringLiteral("memory_types"), QStringLiteral("knowledge")));
+    if (m_cbFact->isChecked()) params.append(qMakePair(QStringLiteral("memory_types"), QStringLiteral("fact")));
+    const QString provenancePath = api::ApiClient::urlWithQuery("/api/memory/v2/search", params);
     AppContext::instance()->api()->getAsync(provenancePath,
         [this, generation](const api::Result &r) {
             if (generation != m_generation) return;
@@ -249,41 +317,17 @@ void SearchPage::runSearch() {
 }
 
 void SearchPage::renderResults(const QJsonObject &resp) {
-    // 清空
-    while (QLayoutItem *item = m_resultsLayout->takeAt(0)) {
-        if (QWidget *w = item->widget()) {
-            if (w != m_stateView) w->deleteLater();
-        }
-        delete item;
-    }
+    clearResults();
 
-    const auto filterGroup = [this](const QJsonArray &source, const QCheckBox *enabled) {
-        QJsonArray filtered;
-        if (!enabled->isChecked()) return filtered;
-        const QString scene = m_sceneCombo->currentData().toString();
-        const QString taskType = m_taskEdit->text().trimmed();
-        const double minConfidence = m_minConf->value();
-        for (const QJsonValue &value : source) {
-            const QJsonObject item = value.toObject();
-            if (j::num(item, "confidence", 0.0) < minConfidence) continue;
-            const QJsonObject scope = j::obj(item, "scope");
-            if (!scene.isEmpty() && j::str(scope, "scene") != scene) continue;
-            if (!taskType.isEmpty() && j::str(scope, "task_type") != taskType) continue;
-            filtered.append(item);
-        }
-        return filtered;
-    };
-    // API v2 keeps the provenance-aware retrieval contract compact.  Retain the
-    // existing desktop filters locally so the UI behavior stays compatible.
-    const QJsonArray prefs = filterGroup(j::arr(resp, "preferences"), m_cbPreference);
-    const QJsonArray knows = filterGroup(j::arr(resp, "knowledge"), m_cbKnowledge);
-    const QJsonArray facts = filterGroup(j::arr(resp, "facts"), m_cbFact);
+    const QJsonArray prefs = j::arr(resp, "preferences");
+    const QJsonArray knows = j::arr(resp, "knowledge");
+    const QJsonArray facts = j::arr(resp, "facts");
 
     const int total = prefs.size() + knows.size() + facts.size();
     if (total == 0) {
         auto *empty = new EmptyState();
         empty->setIcon(QIcon(":/icons/search.svg"));
-        empty->setTitle("未检索到相关记忆");
+        empty->setTitle("本次返回结果中无匹配记忆");
         empty->setHint("尝试调整查询词、放宽类型或置信度阈值");
         m_resultsLayout->addWidget(empty, 1);
     } else {
@@ -295,10 +339,6 @@ void SearchPage::renderResults(const QJsonObject &resp) {
 
     m_totalLabel->setText(QString("结果总数：%1").arg(total));
     m_latencyLabel->setText(QString("耗时：%1 ms").arg(j::num(resp, "latency_ms"), 0, 'f', 1));
-    const QJsonValue cache = resp.value("cache_hit");
-    m_cacheLabel->setText(cache.isBool() ? QString("缓存命中：%1").arg(cache.toBool() ? "是" : "否")
-                                         : "缓存命中：接口未提供");
-    m_resultsLayout->addWidget(m_stateView);
     m_stateView->setState(PageState::Content, QString(), QString());
 }
 
@@ -322,6 +362,9 @@ void SearchPage::renderGroup(const QString &title, const QColor &color, const QJ
         summ->setStyleSheet("color:#1F2430;");
         QString content = j::str(item, "text").isEmpty() ? j::str(item, "name") : j::str(item, "text");
         if (content.isEmpty()) content = j::str(item, "content");
+        if (content.isEmpty()) content = j::str(item, "object_value");
+        if (content.isEmpty()) content = j::str(item, "source_text");
+        summ->setTextFormat(Qt::PlainText);
         summ->setText(content);
         topRow->addWidget(summ, 1);
 
@@ -337,16 +380,8 @@ void SearchPage::renderGroup(const QString &title, const QColor &color, const QJ
         auto *typeTag = new StatusTag();
         typeTag->setMemoryType(j::str(item, "memory_type"));
         metaRow->addWidget(typeTag);
-        // 来源标签
-        const QString source = j::str(item, "source");
-        if (!source.isEmpty()) {
-            auto *srcTag = new StatusTag();
-            srcTag->setTag(source, "statusTag",
-                           source == "vector" ? "active" : (source == "keyword" ? "pending" : "archived"));
-            metaRow->addWidget(srcTag);
-        }
         const QJsonObject provenance = j::obj(m_lastResponse, "provenance")
-                                           .value(j::str(item, "memory_id"))
+                                           .value(j::str(item, "memory_id", j::str(item, "fact_id")))
                                            .toObject();
         if (!provenance.isEmpty()) {
             const int evidenceCount = j::integer(provenance, "evidence_count");
@@ -374,11 +409,14 @@ void SearchPage::generateContext() {
     }
     const QJsonObject req = updateRequestJson();
     if (m_contextLoading) return;
+    clearContext();
+    const int generation = m_contextGeneration;
     m_contextLoading = true;
     m_contextButton->setEnabled(false);
     m_contextButton->setText("生成中…");
     AppContext::instance()->api()->postAsync("/api/memory/context", req,
-        [this](const api::Result &r) {
+        [this, generation](const api::Result &r) {
+            if (generation != m_contextGeneration) return;
             m_contextLoading = false;
             m_contextButton->setEnabled(true);
             m_contextButton->setText("生成上下文");

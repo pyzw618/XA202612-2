@@ -25,7 +25,12 @@ def _error(message_id: Any, code: int, message: str) -> dict[str, Any]:
 class MemoryHubMcpServer:
     def __init__(self, config=None) -> None:
         self.config = config or load_config()
-        self.client = MemoryHubClient(self.config.api_url, self.config.api_timeout, self.config.user_id)
+        self.client = MemoryHubClient(
+            self.config.api_url,
+            self.config.api_timeout,
+            self.config.user_id,
+            tenant_id=self.config.tenant_id,
+        )
         self.tools = ToolRegistry(self.client, self.config)
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any] | None:

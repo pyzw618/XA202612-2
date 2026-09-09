@@ -19,6 +19,7 @@ class QWidget;
 
 class PreferencePage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit PreferencePage(QWidget *parent = nullptr);
 
@@ -33,8 +34,8 @@ private slots:
     void deleteSelected();
 
 private:
-    void loadTable();
     void populateRow(int row, const QJsonObject &m);
+    void buildDetail(const QString &memoryId, const QJsonObject &m);
     void openFeedbackMenu(const QJsonObject &m);
     QList<QString> selectedIds() const;
 
@@ -52,4 +53,5 @@ private:
 
     QJsonArray m_all;   // 最近一次从后端拉取的全量（未应用客户端过滤）
     int m_generation = 0;
+    int m_detailGeneration = 0;
 };

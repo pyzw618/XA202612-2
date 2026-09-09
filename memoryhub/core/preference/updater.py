@@ -4,6 +4,7 @@
 包含冲突检测 (ConflictDetector)、冲突解决策略 (ConflictResolver) 及版本管理链。
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -290,7 +291,15 @@ class PreferenceUpdater:
             if e.decision is None:
                 e.decision = decision
 
+        # 确定性 conflict_id：同一冲突对再次被检测到时更新既有记录，
+        # 而不是插入重复行（与 KnowledgeUpdater._record_ambiguous_conflict 对齐）。
+        conflict_digest = hashlib.sha256(
+            f"{preference.user_id}|{existing_pref.memory_id}|{preference.memory_id}".encode(
+                "utf-8"
+            )
+        ).hexdigest()[:24]
         conflict_rec = ConflictRecord(
+            conflict_id=f"conf_pref_{conflict_digest}",
             user_id=preference.user_id,
             old_memory_id=existing_pref.memory_id,
             new_memory_id=preference.memory_id,

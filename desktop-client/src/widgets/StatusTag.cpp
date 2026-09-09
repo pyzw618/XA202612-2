@@ -53,24 +53,22 @@ QString StatusTag::decisionText(const QString &decision) {
     if (decision == "merge") return "合并";
     if (decision == "coexist") return "并存";
     if (decision == "pending") return "待确认";
-    if (decision == "resolve") return "已解决";
     return decision;
 }
 
 void StatusTag::setDecision(const QString &decision) {
+    // 决策语义：override 红 / merge 紫 / coexist 青 / pending 琥珀（QSS decisionTag 规则）
     const QString d = decision.toLower();
-    // 决策语义：override 红 / merge 紫 / coexist 蓝 / pending 琥珀
-    QString propVal;
-    if (d == "override") propVal = "deleted";       // 红
-    else if (d == "merge") propVal = "knowledge";   // 紫
-    else if (d == "coexist") propVal = "fact";      // 青
-    else propVal = "pending";                       // 琥珀
-    // 决策用 statusTag 配色，override 映射 deleted(红)，merge 用 memTag 紫，coexist 用 memTag 青
-    setTag(decisionText(d), "statusTag", propVal);
+    if (d == "pending") setTag(decisionText(d), "statusTag", "pending");
+    else setTag(decisionText(d), "decisionTag", d);
 }
 
 void StatusTag::setTag(const QString &text, const QString &propName, const QString &propValue) {
     setText(text);
+    // 同一标签可先后以不同属性着色：先清掉上一次的属性，避免残留可匹配规则
+    if (!m_tagProp.isEmpty() && m_tagProp != propName)
+        setProperty(m_tagProp.toUtf8().constData(), QVariant());
+    m_tagProp = propName;
     setProperty(propName.toUtf8().constData(), QVariant(propValue));
     // 保留 base 样式属性
     setProperty("tagBase", true);

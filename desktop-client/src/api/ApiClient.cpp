@@ -30,7 +30,16 @@ void ApiClient::setBaseUrl(const QString &url) {
     m_baseUrl = u;
 }
 
-void ApiClient::setUserId(const QString &id) { m_userId = id; }
+void ApiClient::setUserId(const QString &id) {
+    if (id == m_userId) return;
+    m_userId = id;
+    ++m_userGeneration;
+}
+
+void ApiClient::setVNextManagementCredentials(const QString &tenantId, const QString &adminToken) {
+    m_vnextTenantId = tenantId.trimmed();
+    m_vnextAdminToken = adminToken.trimmed();
+}
 
 void ApiClient::applyCommonHeaders(QNetworkRequest *req, bool useUserHeader) const {
     req->setRawHeader("Accept", "application/json");
@@ -38,6 +47,10 @@ void ApiClient::applyCommonHeaders(QNetworkRequest *req, bool useUserHeader) con
         // 用户规则接口要求 X-MemoryHub-User，内容为当前 user_id
         req->setRawHeader("X-MemoryHub-User", m_userId.toUtf8());
     }
+    if (!m_vnextTenantId.isEmpty())
+        req->setRawHeader("X-MemoryHub-Tenant", m_vnextTenantId.toUtf8());
+    if (!m_vnextAdminToken.isEmpty())
+        req->setRawHeader("X-MemoryHub-Admin", m_vnextAdminToken.toUtf8());
     if (req->header(QNetworkRequest::ContentTypeHeader).isNull()) {
         req->setHeader(QNetworkRequest::ContentTypeHeader,
                        QVariant(QStringLiteral("application/json")));
@@ -91,13 +104,13 @@ QString ApiClient::urlWithQuery(const QString &path,
 
 Result ApiClient::sendSync(const QString &method, const QString &path,
                            const QByteArray &body, bool useUserHeader) {
+    const quint64 userGeneration = m_userGeneration;
     Result r;
     const QString full = m_baseUrl + path;
     QNetworkRequest req((QUrl(full)));   // 双层括号避免 most vexing parse
     applyCommonHeaders(&req, useUserHeader);
 
-    const bool wantCursor = m_waitCursor;
-    if (wantCursor) QApplication::setOverrideCursor(Qt::WaitCursor);
+    QApplication::setOverrideCursor(Qt::WaitCursor);
 
     QNetworkReply *reply = nullptr;
     if (method == QLatin1String("GET")) {
@@ -141,9 +154,14 @@ Result ApiClient::sendSync(const QString &method, const QString &path,
         r = parseReply(reply);
     }
 
-    if (wantCursor) QApplication::restoreOverrideCursor();
+    QApplication::restoreOverrideCursor();
 
     reply->deleteLater();
+    if (userGeneration != m_userGeneration) {
+        r = Result{};
+        r.errorCode = "client.user_changed";
+        r.errorMessage = tr("用户已切换，请重新操作。");
+    }
     return r;
 }
 
@@ -154,14 +172,6 @@ Result ApiClient::get(const QString &path, bool useUserHeader) {
 Result ApiClient::post(const QString &path, const QJsonObject &body, bool useUserHeader) {
     return sendSync("POST", path, QJsonDocument(body).toJson(QJsonDocument::Compact),
                     useUserHeader);
-}
-
-Result ApiClient::postRaw(const QString &path, const QJsonValue &body, bool useUserHeader) {
-    QJsonDocument doc;
-    if (body.isArray()) doc = QJsonDocument(body.toArray());
-    else if (body.isObject()) doc = QJsonDocument(body.toObject());
-    else return Result{false};
-    return sendSync("POST", path, doc.toJson(QJsonDocument::Compact), useUserHeader);
 }
 
 Result ApiClient::patch(const QString &path, const QJsonObject &body, bool useUserHeader) {
@@ -178,13 +188,10 @@ Result ApiClient::del(const QString &path, bool useUserHeader) {
     return sendSync("DELETE", path, QByteArray(), useUserHeader);
 }
 
-Result ApiClient::delNoBody(const QString &path, bool useUserHeader) {
-    return sendSync("DELETE", path, QByteArray(), useUserHeader);
-}
-
 QNetworkReply *ApiClient::sendAsync(const QString &method, const QString &path,
                                     const QByteArray &body, bool useUserHeader,
                                     Callback callback, QObject *context, int timeoutMs) {
+    const quint64 userGeneration = m_userGeneration;
     const QString full = m_baseUrl + path;
     QNetworkRequest req((QUrl(full)));
     applyCommonHeaders(&req, useUserHeader);
@@ -202,7 +209,8 @@ QNetworkReply *ApiClient::sendAsync(const QString &method, const QString &path,
     QObject *receiver = context ? context : this;
     QObject::connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
     QObject::connect(reply, &QNetworkReply::finished, receiver,
-                     [this, reply, callback, timeoutMs]() {
+                     [this, reply, callback, userGeneration]() {
+                         if (userGeneration != m_userGeneration) return;
                          Result r = parseReply(reply);
                          if (reply->error() != QNetworkReply::NoError) {
                              r.networkError = true;

@@ -16,9 +16,11 @@ class QVBoxLayout;
 class QLabel;
 class QScrollArea;
 class PageStateView;
+class JsonViewer;
 
 class SearchPage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit SearchPage(QWidget *parent = nullptr);
 
@@ -30,6 +32,8 @@ private slots:
     void runSearch();
 
 private:
+    void clearResults();
+    void clearContext();
     void renderResults(const QJsonObject &resp);
     void renderGroup(const QString &title, const QColor &color, const QJsonArray &items);
     void generateContext();
@@ -50,13 +54,14 @@ private:
 
     QLabel *m_latencyLabel = nullptr;
     QLabel *m_totalLabel = nullptr;
-    QLabel *m_cacheLabel = nullptr;
     QLabel *m_contextText = nullptr;
     QPushButton *m_copyContextBtn = nullptr;
     QPushButton *m_searchButton = nullptr;
     QPushButton *m_contextButton = nullptr;
     PageStateView *m_stateView = nullptr;
+    JsonViewer *m_requestView = nullptr;
     int m_generation = 0;
+    int m_contextGeneration = 0;
     bool m_contextLoading = false;
 
     QJsonObject m_lastRequest;

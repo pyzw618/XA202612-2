@@ -11,6 +11,7 @@ from memoryhub.adapter.schemas import (
     SourceType,
 )
 from memoryhub.app import create_app
+from memoryhub.core.preference.confidence import ConfidenceCalculator
 from memoryhub.config import AppConfig, SafetyConfig, StorageConfig, UserRuleConfig
 
 
@@ -56,7 +57,17 @@ def test_put_updates_preference_metadata_version_and_evidence(tmp_path) -> None:
         assert updated["text"] == "Use concise markdown"
         assert updated["tags"] == ["markdown", "concise"]
         assert updated["is_global"] is True
-        assert updated["confidence"] == 0.88
+        # New contract: the request-body confidence is a placeholder. The write
+        # path recomputes it from the merged evidence chain via
+        # ConfidenceCalculator instead of persisting 0.88 verbatim.
+        assert updated["confidence"] != 0.88
+        recalc = PreferenceMemory(
+            user_id="u1",
+            text=updated["text"],
+            extract_source=updated.get("extract_source") or "implicit_inference",
+            evidences=[Evidence(**e) for e in updated["evidences"]],
+        )
+        assert updated["confidence"] == ConfidenceCalculator().calculate(recalc)
         assert updated["version"] == 2
         lineage = client.get(
             f"/api/memory/v2/memories/{memory.memory_id}/lineage",

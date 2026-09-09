@@ -1,11 +1,7 @@
-# 本地开发配置（生产配置样板见 config.example.yaml，配置说明见 docs/configuration.md）
 runtime:
   mode: development
   allow_fallback: true
-
-# vNext 链路切流（默认 vNext 主链路；回滚/观测模式见 docs/configuration.md）
 vnext:
-  # legacy | shadow | dual-read | canary | vnext
   mode: vnext
   canary_percent: 0
   policy_required: true
@@ -14,10 +10,8 @@ vnext:
   allow_legacy_read_fallback: true
   rollback_window_minutes: 60
   observation_window_requests: 1
-  # shadow | candidate-only | authority
   formation_mode: authority
   events_default: true
-
 storage:
   db_path: data/memoryhub.db
   vector_index_path: data/vector_index
@@ -31,16 +25,20 @@ retrieval:
   rerank_enabled: true
   cache_ttl_seconds: 300
 llm:
-  api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
-  # 仅通过 LLM_API_KEY / MEMORYHUB_LLM_API_KEY 注入，不要把密钥写入仓库。
-  api_key: ""
-  model: qwen-flash
+  api_base: https://api.deepseek.com
+  api_key: ''
+  model: deepseek-v4-flash
   temperature: 0.1
   max_tokens: 2048
 embedding:
   provider: mock
-  dimension: 768
+  dimension: 1024
   model_name: mock-embedding
+  query_timeout_ms: 250
+vector_engine:
+  provider: faiss
+  dimension: 1024
+  collection: memoryhub
 safety:
   rule_set_id: kylin-memoryhub.safety
   rule_set_version: '1.0'
@@ -94,5 +92,4 @@ safety:
   max_candidates: 2048
   max_findings: 1024
   max_path_chars: 4096
-# 服务监听地址/端口由 uvicorn 命令行参数控制（见 docs/configuration.md），不在本文件配置
 debug: true

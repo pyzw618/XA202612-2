@@ -1,5 +1,6 @@
 #include "ConflictPage.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -29,7 +30,7 @@ ConflictPage::ConflictPage(QWidget *parent) : BasePage(parent) {
 
     auto *header = new PageHeader(this);
     header->setTitle("冲突中心");
-    header->setSubtitle("新旧记忆内容对比，人工裁决：覆盖 / 合并 / 并存");
+    header->setSubtitle("新旧记忆内容对比 · 裁决仅记录结论，不自动覆盖/合并记忆");
     root->addWidget(header);
 
     // 统计条
@@ -53,8 +54,9 @@ ConflictPage::ConflictPage(QWidget *parent) : BasePage(parent) {
     m_typeCombo = new QComboBox(this);
     m_typeCombo->addItem("全部类型", "");
     m_typeCombo->addItem("偏好", "preference");
+    // 事实冲突已并入知识冲突链（后端 /facts/conflicts 亦然），
+    // 不存在 memory_type="fact" 的冲突记录，故不提供该筛选项。
     m_typeCombo->addItem("知识", "knowledge");
-    m_typeCombo->addItem("事实", "fact");
     m_prevBtn = new QPushButton("上一页", this);
     m_prevBtn->setEnabled(false);
     m_nextBtn = new QPushButton("下一页", this);
@@ -62,6 +64,7 @@ ConflictPage::ConflictPage(QWidget *parent) : BasePage(parent) {
     connect(m_prevBtn, &QPushButton::clicked, this, [this]() { loadPage(m_currentPage - 1); });
     connect(m_nextBtn, &QPushButton::clicked, this, [this]() { loadPage(m_currentPage + 1); });
     connect(m_statusCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &ConflictPage::onFilterChanged);
+    // 类型过滤同样由服务端完成，切换后重新请求
     connect(m_typeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &ConflictPage::onFilterChanged);
     filterRow->addWidget(m_statusCombo);
     filterRow->addWidget(m_typeCombo);
@@ -91,15 +94,24 @@ void ConflictPage::refresh() { loadPage(1); }
 void ConflictPage::onFilterChanged() { loadPage(1); }
 
 void ConflictPage::loadPage(int page) {
+    while (QLayoutItem *item = m_cardsLayout->takeAt(0)) {
+        if (QWidget *w = item->widget()) { w->hide(); w->deleteLater(); }
+        delete item;
+    }
+    m_statPending->setText("待处理：—");
+    m_statResolved->setText("已解决：—");
+    m_pageInfo->clear();
+    m_prevBtn->setEnabled(false);
+    m_nextBtn->setEnabled(false);
     m_currentPage = qMax(1, page);
     const int generation = ++m_generation;
-    ++m_pendingLoads;
     m_scroll->setEnabled(false);
     m_stateView->setState(PageState::Loading, "正在加载冲突", "正在读取统计与分页数据…");
     m_stateView->clearAction();
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
     const QString status = m_statusCombo->currentData().toString();
+    const QString type = m_typeCombo->currentData().toString();
 
     api->getAsync(api::ApiClient::urlWithQuery(
         "/api/memory/conflicts", {{"user_id", uid}, {"status", ""}}),
@@ -117,32 +129,34 @@ void ConflictPage::loadPage(int page) {
             }
         }, this);
 
-    // 分页数据
-    api->getAsync(api::ApiClient::urlWithQuery(
-        "/api/memory/conflicts",
-        {{"user_id", uid}, {"status", status}, {"page", QString::number(m_currentPage)},
-         {"size", QString::number(m_size)}}),
+    // 列表：过滤与分页全部交给服务端（status=resolved 表示"已裁决"，即 decision != pending）
+    QList<QPair<QString, QString>> params{{"user_id", uid}, {"status", status}};
+    if (!type.isEmpty()) params.append({"memory_type", type});
+    params.append({"page", QString::number(m_currentPage)});
+    params.append({"size", QString::number(m_size)});
+    api->getAsync(api::ApiClient::urlWithQuery("/api/memory/conflicts", params),
         [this, generation](const api::Result &r) {
             if (generation != m_generation) return;
             m_scroll->setEnabled(true);
-            if (!r.ok || (!r.hasJsonArray() && !r.hasJsonObject())) {
+            if (!r.ok || !r.hasJsonObject()) {
                 m_stateView->setState(r.networkError ? PageState::Offline : PageState::Error,
                                       r.networkError ? "后端离线" : "冲突加载失败",
                                       r.errorMessage.isEmpty() ? "请稍后重试。" : r.errorMessage);
                 m_stateView->setAction("重试", [this]() { loadPage(m_currentPage); });
                 return;
             }
-            QJsonArray items;
-            if (r.hasJsonObject() && r.jsonObject().contains("items")) {
-                items = j::arr(r.jsonObject(), "items");
-                m_total = j::integer(r.jsonObject(), "total");
-            } else { items = r.jsonArray(); m_total = int(items.size()); }
+            const QJsonArray items = j::arr(r.jsonObject(), "items");
+            const int total = j::integer(r.jsonObject(), "total");
+            m_total = total;
             m_stateView->setState(items.isEmpty() ? PageState::Empty : PageState::Content,
-                                  "暂无冲突", "有偏好、知识或事实写入冲突时会出现在这里。");
+                                  "暂无冲突",
+                                  "有偏好或知识写入冲突时会出现在这里；vNext 链路的冲突以 "
+                                  "REVIEW 状态呈现在偏好/知识页的待审队列中。");
             if (items.isEmpty()) m_stateView->setAction("刷新", [this]() { loadPage(m_currentPage); });
             renderCards(items);
-            const int maxPage = qMax(1, (m_total + m_size - 1) / m_size);
-            m_pageInfo->setText(QString("第 %1 / %2 页 · 共 %3 条").arg(m_currentPage).arg(maxPage).arg(m_total));
+            const int maxPage = qMax(1, (total + m_size - 1) / m_size);
+            m_pageInfo->setText(QString("第 %1 / %2 页 · 共 %3 条")
+                                    .arg(m_currentPage).arg(maxPage).arg(total));
             m_prevBtn->setEnabled(m_currentPage > 1);
             m_nextBtn->setEnabled(m_currentPage < maxPage);
         }, this);
@@ -152,14 +166,6 @@ void ConflictPage::renderCards(const QJsonArray &items) {
     while (QLayoutItem *item = m_cardsLayout->takeAt(0)) {
         if (QWidget *w = item->widget()) w->deleteLater();
         delete item;
-    }
-    if (items.isEmpty()) {
-        auto *empty = new EmptyState();
-        empty->setIcon(QIcon(":/icons/conflict.svg"));
-        empty->setTitle("暂无冲突");
-        empty->setHint("有偏好/知识写入冲突时会出现在这里");
-        m_cardsLayout->addWidget(empty, 1);
-        return;
     }
     for (const QJsonValue &v : items) buildCard(m_cardsContainer, v.toObject());
     m_cardsLayout->addStretch();
@@ -196,10 +202,12 @@ void ConflictPage::buildCard(QWidget *parent, const QJsonObject &c) {
     newTitle->setStyleSheet("color:#16A34A;font-weight:600;font-size:12px;");
     auto *oldBox = new QLabel(j::str(c, "old_content"));
     oldBox->setWordWrap(true);
+    oldBox->setTextFormat(Qt::PlainText);
     oldBox->setTextInteractionFlags(Qt::TextSelectableByMouse);
     oldBox->setStyleSheet("background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;padding:8px;color:#7F1D1D;");
     auto *newBox = new QLabel(j::str(c, "new_content"));
     newBox->setWordWrap(true);
+    newBox->setTextFormat(Qt::PlainText);
     newBox->setTextInteractionFlags(Qt::TextSelectableByMouse);
     newBox->setStyleSheet("background:#ECFDF5;border:1px solid #A7F3D0;border-radius:6px;padding:8px;color:#065F46;");
     cmp->addWidget(oldTitle, 0, 0);
@@ -208,14 +216,29 @@ void ConflictPage::buildCard(QWidget *parent, const QJsonObject &c) {
     cmp->addWidget(newBox, 1, 1);
     lay->addLayout(cmp);
 
-    // 冲突字段与原因
+    // 冲突字段与原因（记忆内容源自用户/Agent 写入，必须转义防止富文本注入）
     auto *meta = new QLabel();
     meta->setWordWrap(true);
     meta->setTextFormat(Qt::RichText);
     meta->setStyleSheet("color:#6B7280;font-size:12px;");
     meta->setText(QString("冲突字段：<b>%1</b>　原因：%2")
-                      .arg(j::str(c, "conflict_field"), j::str(c, "reason")));
+                      .arg(j::str(c, "conflict_field").toHtmlEscaped(),
+                           j::str(c, "reason").toHtmlEscaped()));
     lay->addWidget(meta);
+
+    // 记忆 ID（只读、可选中）：便于到偏好/知识页核对同一条记忆
+    const QString oldId = j::str(c, "old_memory_id");
+    const QString newId = j::str(c, "new_memory_id");
+    if (!oldId.isEmpty() || !newId.isEmpty()) {
+        auto *ids = new QLabel(QString("旧记忆 %1 · 新记忆 %2")
+                                   .arg(oldId.isEmpty() ? QStringLiteral("—") : oldId,
+                                        newId.isEmpty() ? QStringLiteral("—") : newId));
+        ids->setObjectName("pageSubtitle");
+        ids->setWordWrap(true);
+        ids->setTextFormat(Qt::PlainText);
+        ids->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        lay->addWidget(ids);
+    }
 
     // 底部操作区
     if (decision == "pending") {
@@ -241,14 +264,23 @@ void ConflictPage::buildCard(QWidget *parent, const QJsonObject &c) {
 
 void ConflictPage::resolveConflict(const QJsonObject &c, const QString &decision) {
     if (m_writeInProgress) return;
-    // 询问原因（可选）
+    // 询问原因（可选）+ 是否落地
     QDialog dlg(this);
-    dlg.setWindowTitle("解决冲突 · " + decision);
-    dlg.setMinimumWidth(400);
+    dlg.setWindowTitle("记录裁决结论 · " + decision);
+    dlg.setMinimumWidth(460);
     auto *form = new QFormLayout(&dlg);
+    auto *hint = new QLabel("默认仅记录裁决结论（用于审计与统计），不修改记忆内容；"
+                            "勾选下方选项后才会按裁决实际修改记忆。", &dlg);
+    hint->setWordWrap(true);
+    hint->setStyleSheet("color:#92400E;font-size:12px;");
+    form->addRow(hint);
     auto *reasonEdit = new QLineEdit(&dlg);
     reasonEdit->setPlaceholderText("处理原因（可选）");
     form->addRow("原因", reasonEdit);
+    auto *applyBox = new QCheckBox("同时应用到记忆（覆盖=归档旧记忆并生成新版本；"
+                                   "合并=归档旧记忆并生成合并版本；并存=保留两条）", &dlg);
+    applyBox->setChecked(false);
+    form->addRow(applyBox);
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
     bb->button(QDialogButtonBox::Ok)->setText("提交");
     bb->button(QDialogButtonBox::Cancel)->setText("取消");
@@ -262,6 +294,7 @@ void ConflictPage::resolveConflict(const QJsonObject &c, const QString &decision
     body["decision"] = decision;
     body["reason"] = reasonEdit->text().trimmed();
     body["result_id"] = j::str(c, "result_memory_id");
+    body["apply"] = applyBox->isChecked();
 
     api::ApiClient *api = AppContext::instance()->api();
     m_writeInProgress = true;
