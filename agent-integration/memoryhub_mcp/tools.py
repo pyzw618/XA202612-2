@@ -46,7 +46,21 @@ class ToolRegistry:
         self._add("memoryhub_forget", "Preview or execute precise forgetting; preview is the safe default.", {"instruction": {"type": "string"}, "preview": {"type": "boolean", "default": True}, "confirm": {"type": "boolean", "default": False}, "cascade": {"type": "boolean", "default": True}, "user_id": common["user_id"]}, ["instruction"], self._forget)
         self._add("memoryhub_feedback", "Confirm, reject or update a memory after use.", {"memory_id": {"type": "string"}, "action": {"type": "string", "enum": ["confirm", "reject", "update"]}, "feedback_text": {"type": "string"}, "user_id": common["user_id"]}, ["memory_id", "action"], self._feedback)
         self._add("memoryhub_vnext_feedback", "Record attributed vNext usage or task feedback.", {"retrieval_id": {"type": "string"}, "memory_ids": {"type": "array", "items": {"type": "string"}}, "feedback_id": {"type": "string"}, "feedback_type": {"type": "string", "enum": ["EXPLICIT_POSITIVE", "EXPLICIT_NEGATIVE", "TASK_SUCCESS", "TASK_FAILURE", "PARTIAL_SUCCESS", "USER_CORRECTION", "USER_CONFIRMATION", "UNKNOWN"]}, "outcome": {"type": "string"}, "project_id": {"type": "string"}, "task_id": {"type": "string"}, "session_id": {"type": "string"}, **common}, ["retrieval_id", "feedback_id", "feedback_type"], self._vnext_feedback)
-        self._add("memoryhub_knowledge_fact_propose", "Submit fact triples through the knowledge compatibility endpoint.", {"triples": {"type": "array"}, "source_id": {"type": "string"}, "scope": {"type": "string"}, "project_id": common["project_id"]}, ["triples"], self._fact_propose)
+        fact_triple = {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string"},
+                "predicate": {"type": "string"},
+                "object": {"type": "string"},
+                "subject_type": {"type": "string"},
+                "object_type": {"type": "string"},
+                "single_value": {"type": "boolean"},
+                "evidence": {"type": "string", "description": "Source text supporting this fact; required unless project scope itself is awaiting resolution."},
+                "source_id": {"type": "string"},
+            },
+            "required": ["subject", "predicate", "object"],
+        }
+        self._add("memoryhub_knowledge_fact_propose", "Submit evidenced fact triples through the knowledge compatibility endpoint.", {"triples": {"type": "array", "items": fact_triple}, "source_id": {"type": "string"}, "scope": {"type": "string", "enum": ["global", "project"]}, "project_id": common["project_id"]}, ["triples"], self._fact_propose)
         self._add("memoryhub_decide_facts", "Resolve a pending fact conflict or entity decision.", {"memory_id": {"type": "string"}, "action": {"type": "string", "enum": ["replace", "keep_old", "merge", "coexist", "select_existing", "create_new", "reject"]}, "subject": {"type": "string"}, "predicate": {"type": "string"}, "object_value": {"type": "string"}, "subject_id": {"type": "string"}, "predicate_id": {"type": "string"}, "object_id": {"type": "string"}, "subject_type": {"type": "string"}, "object_type": {"type": "string"}, "scope": {"type": "string", "enum": ["global", "project"]}, "project_id": {"type": "string"}, "create_new_subject": {"type": "boolean"}, "create_new_predicate": {"type": "boolean"}, "create_new_object": {"type": "boolean"}, "expected_version": {"type": "integer"}, "reason": {"type": "string"}, "user_id": common["user_id"]}, ["memory_id", "action"], self._fact_decide)
 
     def list(self) -> list[dict[str, Any]]:

@@ -75,12 +75,18 @@ class MemoryWriteService:
         payload = dict(getattr(memory, "extra_payload", {}) or {})
         authority = dict(payload.get("vnext_authority", {}) or {})
         fact_semantic = dict(payload.get("fact_semantic", {}) or {})
-        project_id = str(payload.get("project_id") or "").strip()
+        project_id = str(
+            getattr(memory, "project_id", "") or payload.get("project_id") or ""
+        ).strip()
+        tenant_id = str(
+            getattr(memory, "tenant_id", "") or authority.get("tenant_id") or "default"
+        ).strip() or "default"
         scope = memory.scope.model_dump()
         if project_id:
             scope["project_id"] = project_id
         return {
             "memory_type": memory.memory_type,
+            "tenant_id": tenant_id,
             "user_id": memory.user_id,
             "content": cls.index_text(memory),
             "confidence": memory.confidence,

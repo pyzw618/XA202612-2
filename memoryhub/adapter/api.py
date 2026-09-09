@@ -1705,6 +1705,7 @@ async def write_knowledge_memory(
         guarded_memory = req.model_copy(deep=True)
         guarded_memory.extra_payload = {
             **(guarded_memory.extra_payload or {}),
+            "project_id": guarded_memory.project_id,
             "vnext_authority": {
                 **dict((guarded_memory.extra_payload or {}).get("vnext_authority", {}) or {}),
                 "tenant_id": tenant_id,

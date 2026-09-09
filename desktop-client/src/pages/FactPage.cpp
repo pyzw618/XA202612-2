@@ -445,14 +445,17 @@ void FactPage::openProposeDialog() {
         [this](const api::Result &r) {
             m_proposeBtn->setEnabled(true);
             if (r.ok && r.hasJsonObject() && r.jsonObject().value("created").isArray()
+                    && r.jsonObject().value("pending").isArray()
                     && r.jsonObject().value("failed").isArray()) {
                 const QJsonArray created = j::arr(r.jsonObject(), "created");
+                const QJsonArray pending = j::arr(r.jsonObject(), "pending");
                 const QJsonArray failed = j::arr(r.jsonObject(), "failed");
-                if (!created.isEmpty()) onRefresh();
-                QString message = QString("写入成功 %1 条，失败 %2 条。").arg(created.size()).arg(failed.size());
+                if (!created.isEmpty() || !pending.isEmpty()) onRefresh();
+                QString message = QString("写入成功 %1 条，待裁决 %2 条，失败 %3 条。")
+                                      .arg(created.size()).arg(pending.size()).arg(failed.size());
                 for (const QJsonValue &value : failed)
                     message += "\n" + j::str(value.toObject(), "reason", "未知失败原因");
-                if (failed.isEmpty() && !created.isEmpty()) QMessageBox::information(this, "完成", message);
+                if (failed.isEmpty()) QMessageBox::information(this, "完成", message);
                 else QMessageBox::warning(this, "提交结果", message);
             } else if (r.errorCode == "memory.safety.review_required") {
                 QMessageBox::warning(this, "需人工复核", "提案需人工复核。");
@@ -569,9 +572,13 @@ void FactPage::renderCandidates() {
             auto *scope = new QComboBox(&dlg);
             scope->addItem("全局", "global");
             scope->addItem("项目", "project");
+            const QString proposalProject = j::str(proposal, "project_id");
+            if (!proposalProject.isEmpty() || j::str(proposal, "scope") == "project")
+                scope->setCurrentIndex(scope->findData("project"));
             form->addRow("作用域", scope);
             auto *proj = new QLineEdit(&dlg);
             proj->setPlaceholderText("project 作用域的项目 ID");
+            proj->setText(proposalProject);
             form->addRow("项目 ID", proj);
             auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
             bb->button(QDialogButtonBox::Ok)->setText("确认采纳");
@@ -584,6 +591,7 @@ void FactPage::renderCandidates() {
             body["memory_id"] = pid;
             body["action"] = action->currentData().toString();
             body["expected_version"] = j::integer(proposal, "version", 1);
+            body["scope"] = scope->currentData().toString();
             if (selection != nullptr) {
                 const QString selected = selection->currentData().toString();
                 if (selected == "__new__") {
@@ -597,7 +605,11 @@ void FactPage::renderCandidates() {
                 }
             }
             if (scope->currentData().toString() == "project" &&
-                !proj->text().trimmed().isEmpty()) {
+                proj->text().trimmed().isEmpty()) {
+                QMessageBox::warning(this, "缺少项目 ID", "选择项目作用域时必须填写项目 ID。");
+                return;
+            }
+            if (scope->currentData().toString() == "project") {
                 body["project_id"] = proj->text().trimmed();
             }
             QPointer<QPushButton> guardAccept(accept);
@@ -646,6 +658,7 @@ void FactPage::renderCandidates() {
                     if (r.ok) {
                         QMessageBox::information(this, "完成", "已驳回");
                         removeCandidate(pid);
+                        onRefresh();
                     } else if (r.errorCode == "memory.safety.review_required") {
                         QMessageBox::warning(this, "需人工复核", "驳回需人工复核。");
                     } else if (r.errorCode == "memory.safety.rejected") {
@@ -665,7 +678,8 @@ void FactPage::renderCandidates() {
 void FactPage::removeCandidate(const QString &proposalId) {
     QJsonArray kept;
     for (const QJsonValue &v : m_candidates) {
-        if (j::str(v.toObject(), "proposal_id") != proposalId) kept.append(v);
+        if (j::str(v.toObject(), "proposal_id",
+                   j::str(v.toObject(), "memory_id")) != proposalId) kept.append(v);
     }
     m_candidates = kept;
     renderCandidates();

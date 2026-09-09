@@ -26,6 +26,7 @@ def _propose(client: TestClient, object_value: str):
         "/api/memory/facts/propose",
         json={
             "user_id": "u1",
+            "evidence": "test evidence",
             "triples": [{
                 "subject": "项目A",
                 "predicate": "负责人",
@@ -84,7 +85,7 @@ def test_fact_memory_and_entities_are_tenant_isolated(client: TestClient):
     first = client.post(
         "/api/memory/facts/propose",
         headers={"X-MemoryHub-Tenant": "tenant-a"},
-        json={"user_id": "u1", "triples": [{
+        json={"user_id": "u1", "evidence": "test evidence", "triples": [{
             "subject": "同名公司", "predicate": "总部所在地", "object": "北京",
             "subject_type": "Organization", "object_type": "Location",
         }]},
@@ -92,7 +93,7 @@ def test_fact_memory_and_entities_are_tenant_isolated(client: TestClient):
     second = client.post(
         "/api/memory/facts/propose",
         headers={"X-MemoryHub-Tenant": "tenant-b"},
-        json={"user_id": "u1", "triples": [{
+        json={"user_id": "u1", "evidence": "test evidence", "triples": [{
             "subject": "同名公司", "predicate": "总部所在地", "object": "北京",
             "subject_type": "Organization", "object_type": "Location",
         }]},
@@ -126,6 +127,7 @@ def test_duplicate_proposal_reports_evidence_reinforcement(client: TestClient):
 def test_entity_resolution_proposal_does_not_overwrite_active_fact(client: TestClient):
     payload = {
         "user_id": "u1",
+        "evidence": "test evidence",
         "triples": [{
             "subject": "同名公司", "predicate": "总部所在地", "object": "北京",
             "subject_type": "Organization", "object_type": "Location",
@@ -165,7 +167,7 @@ def test_replace_only_targets_the_conflicting_subject(client: TestClient):
     company_b_id = ""
     for subject, value in (("公司A", "北京"), ("公司B", "上海")):
         result = client.post("/api/memory/facts/propose", json={
-            "user_id": "u1", "triples": [{
+            "user_id": "u1", "evidence": "test evidence", "triples": [{
                 "subject": subject, "predicate": "总部所在地", "object": value,
                 "subject_type": "Organization", "object_type": "Location",
                 "single_value": True,
@@ -176,7 +178,7 @@ def test_replace_only_targets_the_conflicting_subject(client: TestClient):
             company_b_id = result["created"][0]["memory_id"]
 
     pending = client.post("/api/memory/facts/propose", json={
-        "user_id": "u1", "triples": [{
+        "user_id": "u1", "evidence": "test evidence", "triples": [{
             "subject": "公司A", "predicate": "总部所在地", "object": "深圳",
             "subject_type": "Organization", "object_type": "Location",
             "single_value": True,
@@ -187,7 +189,7 @@ def test_replace_only_targets_the_conflicting_subject(client: TestClient):
 
 
 def test_missing_tenant_header_is_default_not_wildcard(client: TestClient):
-    base = {"user_id": "u1", "triples": [{
+    base = {"user_id": "u1", "evidence": "test evidence", "triples": [{
         "subject": "默认公司", "predicate": "总部所在地", "object": "北京",
         "subject_type": "Organization", "object_type": "Location",
     }]}
@@ -221,14 +223,14 @@ def test_project_scope_without_project_id_is_resumable(client: TestClient):
 
 def test_custom_predicate_cardinality_is_persistent(client: TestClient):
     first = client.post("/api/memory/facts/propose", json={
-        "user_id": "u1", "triples": [{
+        "user_id": "u1", "evidence": "test evidence", "triples": [{
             "subject": "系统", "predicate": "首选镜像", "object": "镜像A",
             "single_value": True,
         }],
     }).json()
     assert first["created"]
     changed = client.post("/api/memory/facts/propose", json={
-        "user_id": "u1", "triples": [{
+        "user_id": "u1", "evidence": "test evidence", "triples": [{
             "subject": "系统", "predicate": "首选镜像", "object": "镜像B",
             "single_value": False,
         }],
@@ -239,7 +241,7 @@ def test_custom_predicate_cardinality_is_persistent(client: TestClient):
 def test_concurrent_single_value_writes_leave_only_one_active(client: TestClient):
     def submit(value: str):
         return client.post("/api/memory/facts/propose", json={
-            "user_id": "concurrent-user", "triples": [{
+            "user_id": "concurrent-user", "evidence": "test evidence", "triples": [{
                 "subject": "并发项目", "predicate": "负责人", "object": value,
                 "subject_type": "Other", "object_type": "Person",
                 "single_value": True,

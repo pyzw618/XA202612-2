@@ -75,7 +75,9 @@ def _requested_project_id(request: MemoryRetrievalRequest) -> str | None:
 def _legacy_memory_metadata(memory: Any) -> dict[str, Any]:
     extra_payload = getattr(memory, "extra_payload", {}) or {}
     authority = extra_payload.get("vnext_authority", {})
-    project_id = str(extra_payload.get("project_id") or "").strip()
+    project_id = str(
+        getattr(memory, "project_id", "") or extra_payload.get("project_id") or ""
+    ).strip()
     raw_scope = getattr(memory, "scope", {})
     if hasattr(raw_scope, "model_dump"):
         raw_scope = raw_scope.model_dump()
@@ -153,7 +155,9 @@ def _search_result_to_retrieved_memory(
     owner = metadata.get("user_id") or user_id
     if owner != user_id:
         return None
-    result_tenant = metadata.get("tenant_id") or tenant_id
+    # Old index rows without ownership metadata belong only to the legacy
+    # default tenant.  Never relabel them as whichever tenant issued a query.
+    result_tenant = str(metadata.get("tenant_id") or "default")
     if result_tenant != tenant_id:
         return None
 

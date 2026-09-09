@@ -59,14 +59,14 @@ def test_fact_proposal_persists_evidence_and_isolates_project_and_user(tmp_path)
     assert hidden.value.status_code == 404
 
 
-def test_fact_proposal_rejects_missing_evidence_and_invalid_project_scope(tmp_path) -> None:
+def test_fact_proposal_rejects_missing_evidence_and_defers_project_scope(tmp_path) -> None:
     request, _ = _request(tmp_path)
     missing = _propose(request, evidence="")
     assert missing["created"] == []
     assert missing["failed"][0]["reason"] == "evidence is required"
-    with pytest.raises(HTTPException) as invalid:
-        _propose(request, scope="project", project_id=None)
-    assert invalid.value.status_code == 422
+    unresolved = _propose(request, scope="project", project_id=None)
+    assert unresolved["created"] == []
+    assert unresolved["pending"][0]["decision_task"]["decision_type"] == "scope_resolution"
 
 
 def test_same_scope_fact_updates_in_place_without_losing_new_evidence(tmp_path) -> None:

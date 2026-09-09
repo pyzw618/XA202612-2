@@ -8,6 +8,10 @@ from memoryhub.adapter.schemas import (
     SearchRequest,
     SearchResult,
 )
+from memoryhub.adapter.retrieval_executor import (
+    _legacy_memory_metadata,
+    _search_result_to_retrieved_memory,
+)
 from memoryhub.core.forget.forgetter import MemoryForgetter
 from memoryhub.core.memory_write import MemoryWriteService
 from memoryhub.retrieval.milvus_hybrid import MilvusHybridRetriever
@@ -110,6 +114,38 @@ def test_milvus_retriever_preserves_shared_empty_lookup() -> None:
         memory_lookup=lookup,
     )
     assert retriever.memory_lookup is lookup
+
+
+def test_index_metadata_carries_tenant_and_model_project_scope() -> None:
+    memory = KnowledgeMemory(
+        user_id="u1",
+        project_id="project-a",
+        extra_payload={"vnext_authority": {"tenant_id": "tenant-a"}},
+    )
+    metadata = MemoryWriteService.index_metadata(memory)
+    assert metadata["tenant_id"] == "tenant-a"
+    assert metadata["project_id"] == "project-a"
+    assert metadata["scope_level"] == "project"
+    assert metadata["scope"]["project_id"] == "project-a"
+    assert _legacy_memory_metadata(memory)["project_id"] == "project-a"
+
+
+def test_ownerless_tenant_metadata_is_never_adopted_by_foreign_request() -> None:
+    result = SearchResult(
+        memory_id="legacy-default",
+        memory_type="knowledge",
+        content="private",
+        score=0.5,
+        metadata={"user_id": "u1"},
+    )
+    assert _search_result_to_retrieved_memory(
+        result, tenant_id="tenant-a", user_id="u1"
+    ) is None
+    converted = _search_result_to_retrieved_memory(
+        result, tenant_id="default", user_id="u1"
+    )
+    assert converted is not None
+    assert converted.tenant_id == "default"
 
 
 def test_project_single_value_fact_shadows_global_result() -> None:

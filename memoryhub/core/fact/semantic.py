@@ -68,10 +68,14 @@ class FactSemanticService:
     @staticmethod
     def _scope(memory) -> str:
         payload = dict(getattr(memory, "extra_payload", {}) or {})
-        project_id = str(payload.get("project_id") or "").strip()
+        project_id = str(
+            getattr(memory, "project_id", "") or payload.get("project_id") or ""
+        ).strip()
         authority = dict(payload.get("vnext_authority", {}) or {})
         if not project_id and authority.get("scope_level") == "project":
             project_id = str(authority.get("scope") or "").strip()
+            if project_id.casefold().startswith("project:"):
+                project_id = project_id.split(":", 1)[1].strip()
         if project_id:
             return f"project:{project_id}"
         # A free-form scene is not a project identity.  Only explicit project
@@ -93,7 +97,9 @@ class FactSemanticService:
         user_id = str(memory.user_id or "default")
         metadata = dict(getattr(memory, "extra_payload", {}) or {})
         requested_scope = str(metadata.get("fact_requested_scope") or "").casefold()
-        if requested_scope == "project" and not str(metadata.get("project_id") or "").strip():
+        if requested_scope == "project" and not str(
+            getattr(memory, "project_id", "") or metadata.get("project_id") or ""
+        ).strip():
             return FactSemanticResult(
                 relation="DECISION_REQUIRED", tenant_id=tenant_id, scope="global",
                 reason="项目事实缺少明确的 project_id",
