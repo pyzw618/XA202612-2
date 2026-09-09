@@ -43,7 +43,16 @@ QString tripleText(const QJsonObject &f) {
     if (s.isEmpty()) s = j::str(f, "subject_id");
     if (p.isEmpty()) p = j::str(f, "predicate_id");
     if (o.isEmpty()) o = j::str(f, "object_id");
-    return QString("%1 → %2 → %3").arg(s, p, o);
+    QStringList parts;
+    for (const QString &part : {s, p, o}) {
+        if (!part.trimmed().isEmpty()) parts.append(part.trimmed());
+    }
+    if (parts.size() >= 2) return parts.join(QStringLiteral(" → "));
+
+    // Historical vNext rows may contain only a statement/source_text.  Do not
+    // render two misleading empty arrows for those unstructured records.
+    const QString source = j::str(f, "source_text").trimmed();
+    return !source.isEmpty() ? source : (parts.isEmpty() ? QStringLiteral("—") : parts.first());
 }
 } // namespace
 

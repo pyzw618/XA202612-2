@@ -791,13 +791,25 @@ def _fact_memory_to_dict(memory: KnowledgeMemory) -> dict:
     )
     semantic_scope = str(semantic.get("scope") or "")
     scope_name = "project" if project_id else "global"
+    subject = str(memory.subject or "").strip()
+    predicate = str(memory.predicate or "").strip()
+    object_value = str(memory.object_value or "").strip()
+    if not all((subject, predicate, object_value)):
+        # Compatibility for early vNext semantic rows that persisted only an
+        # explicit statement.  Recover conservative forms for presentation;
+        # ambiguous prose remains unstructured and is not guessed.
+        from memoryhub.core.knowledge.extractor import parse_explicit_fact_statement
+
+        recovered = parse_explicit_fact_statement(str(memory.content or ""))
+        if recovered is not None:
+            subject, predicate, object_value = recovered
     return {
         "fact_id": memory.memory_id,
         "memory_id": memory.memory_id,
         "user_id": memory.user_id,
-        "subject": memory.subject,
-        "predicate": memory.predicate,
-        "object_value": memory.object_value,
+        "subject": subject,
+        "predicate": predicate,
+        "object_value": object_value,
         "object_type": memory.object_type,
         "subject_id": semantic.get("subject_id", ""),
         "predicate_id": semantic.get("predicate_id", ""),

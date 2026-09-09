@@ -36,6 +36,25 @@ from memoryhub.core.memory.llm import StructuredLLMAdapter
 logger = logging.getLogger(__name__)
 
 
+_ENGLISH_POSSESSIVE_FACT = re.compile(
+    r"^\s*(?:the\s+)?(?P<subject>[A-Za-z][A-Za-z0-9 _-]*?)(?:'s|’s)\s+"
+    r"(?P<predicate>[A-Za-z][A-Za-z0-9 _-]*?)\s+is\s+(?P<object>.+?)\s*[.!?]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def parse_explicit_fact_statement(text: str) -> tuple[str, str, str] | None:
+    """Parse conservative, explicit statement forms without inventing facts."""
+    match = _ENGLISH_POSSESSIVE_FACT.match(text or "")
+    if match:
+        subject = match.group("subject").strip()
+        predicate = match.group("predicate").strip()
+        object_value = match.group("object").strip().rstrip(".!?").strip()
+        if subject and predicate and object_value:
+            return subject, predicate, object_value
+    return None
+
+
 class KnowledgeExtractionError(RuntimeError):
     """Stable extraction failure that can be persisted by the retry pipeline."""
 
@@ -117,6 +136,9 @@ class KnowledgeExtractor:
         if not text:
             return []
         triples: list[tuple[str, str, str]] = []
+        english = parse_explicit_fact_statement(text)
+        if english is not None:
+            triples.append(english)
         for match in self._DIALOGUE_FACT_PATTERN.finditer(text):
             subj = match.group("subj").strip()
             obj = match.group("obj").strip()

@@ -372,13 +372,25 @@ class ConsolidationService:
         """Materialize a promoted candidate into a Long-Term envelope."""
 
         scope_level = MemoryScope(candidate.scope_level.upper())
+        content = dict(candidate.claim)
+        if memory_type is MemoryType.SEMANTIC and not all(
+            str(content.get(key, "")).strip()
+            for key in ("subject", "predicate", "object_value")
+        ):
+            from memoryhub.core.knowledge.extractor import parse_explicit_fact_statement
+
+            triple = parse_explicit_fact_statement(str(content.get("statement", "")))
+            if triple is not None:
+                content.update(
+                    subject=triple[0], predicate=triple[1], object_value=triple[2]
+                )
         return LongTermEnvelope(
             tenant_id=candidate.tenant_id,
             user_id=candidate.user_id,
             memory_id=memory_id,
             memory_type=memory_type,
             normalized_key=candidate.normalized_key,
-            content=dict(candidate.claim),
+            content=content,
             scope_level=scope_level,
             scope=candidate.scope,
             evolution_status=EvolutionStatus.ACTIVE,

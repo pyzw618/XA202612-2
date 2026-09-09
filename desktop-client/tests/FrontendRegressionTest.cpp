@@ -231,6 +231,23 @@ private slots:
         QTest::newRow("all-failed") << QByteArray("{\"created\":[],\"pending\":[],\"failed\":[{\"reason\":\"write rejected\"}]}")
             << false << QStringLiteral("写入成功 0 条，待裁决 0 条，失败 1 条。\nwrite rejected");
     }
+    void factTripleDisplayDoesNotRenderEmptyArrows() {
+        FactPage page;
+        page.m_table->setRowCount(2);
+        page.populateRow(0, QJsonObject{{"subject", "user"}, {"predicate", "name"},
+                                        {"object_value", "Joe"}, {"confidence", 0.9}});
+        page.populateRow(1, QJsonObject{{"subject", "The user's name is Joe."},
+                                        {"source_text", "The user's name is Joe."},
+                                        {"confidence", 0.5}});
+
+        auto *structured = qobject_cast<QLabel *>(page.m_table->cellWidget(0, 0));
+        auto *legacy = qobject_cast<QLabel *>(page.m_table->cellWidget(1, 0));
+        QVERIFY(structured);
+        QVERIFY(legacy);
+        QCOMPARE(structured->text(), QStringLiteral("user → name → Joe"));
+        QCOMPARE(legacy->text(), QStringLiteral("The user's name is Joe."));
+        QVERIFY(!legacy->text().contains(QStringLiteral("→")));
+    }
     void factProposeReportsCreatedAndFailed() {
         QFETCH(QByteArray, response);
         QFETCH(bool, reload);

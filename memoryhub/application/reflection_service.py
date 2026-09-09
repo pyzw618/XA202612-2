@@ -14,6 +14,7 @@ from memoryhub.core.reflection.schema import (
     ReflectionRunError,
 )
 from memoryhub.domain.contracts import Candidate, CandidateStatus, MemoryScope, MemoryType
+from memoryhub.core.knowledge.extractor import parse_explicit_fact_statement
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,17 @@ class DeterministicReflectionModel:
         elif "fact" in text or "is" in text:
             memory_type = "SEMANTIC"
             normalized_key = "fact:extracted"
-            claim = {"statement": text}
+            triple = parse_explicit_fact_statement(text)
+            claim = (
+                {
+                    "statement": text,
+                    "subject": triple[0],
+                    "predicate": triple[1],
+                    "object_value": triple[2],
+                }
+                if triple is not None
+                else {"statement": text}
+            )
 
         if not text:
             confidence = 0.3
