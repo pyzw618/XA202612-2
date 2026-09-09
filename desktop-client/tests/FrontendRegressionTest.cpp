@@ -17,6 +17,7 @@
 #include <QTcpSocket>
 #include <QNetworkReply>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QLabel>
 #include <QPushButton>
 #include <QDialogButtonBox>
@@ -143,8 +144,8 @@ private slots:
     }
     void searchFiltersCachedResultsWithoutRequests() {
         SearchPage page;
-        QVERIFY(!page.m_sceneCombo->isEnabled());
-        QVERIFY(!page.m_taskEdit->isEnabled());
+        QVERIFY(page.m_sceneCombo->isEnabled());
+        QVERIFY(page.m_taskEdit->isEnabled());
         page.m_lastResponse = QJsonObject{{"facts", QJsonArray{
             QJsonObject{{"object_value", "Alice"}, {"confidence", 0.9}},
             QJsonObject{{"object_value", "Bob"}, {"confidence", 0.2}}}}};
@@ -223,12 +224,12 @@ private slots:
         QTest::addColumn<QByteArray>("response");
         QTest::addColumn<bool>("reload");
         QTest::addColumn<QString>("summary");
-        QTest::newRow("success") << QByteArray("{\"created\":[{\"fact_id\":\"know_fact_1\"}],\"failed\":[]}")
-            << true << QStringLiteral("写入成功 1 条，失败 0 条。");
-        QTest::newRow("partial") << QByteArray("{\"created\":[{}],\"failed\":[{\"reason\":\"write rejected\"}]}")
-            << true << QStringLiteral("写入成功 1 条，失败 1 条。\nwrite rejected");
-        QTest::newRow("all-failed") << QByteArray("{\"created\":[],\"failed\":[{\"reason\":\"write rejected\"}]}")
-            << false << QStringLiteral("写入成功 0 条，失败 1 条。\nwrite rejected");
+        QTest::newRow("success") << QByteArray("{\"created\":[{\"fact_id\":\"know_fact_1\"}],\"pending\":[],\"failed\":[]}")
+            << true << QStringLiteral("写入成功 1 条，待裁决 0 条，失败 0 条。");
+        QTest::newRow("partial") << QByteArray("{\"created\":[{}],\"pending\":[],\"failed\":[{\"reason\":\"write rejected\"}]}")
+            << true << QStringLiteral("写入成功 1 条，待裁决 0 条，失败 1 条。\nwrite rejected");
+        QTest::newRow("all-failed") << QByteArray("{\"created\":[],\"pending\":[],\"failed\":[{\"reason\":\"write rejected\"}]}")
+            << false << QStringLiteral("写入成功 0 条，待裁决 0 条，失败 1 条。\nwrite rejected");
     }
     void factProposeReportsCreatedAndFailed() {
         QFETCH(QByteArray, response);
@@ -240,7 +241,8 @@ private slots:
             if (r.path == "/api/memory/facts/propose") {
                 QCOMPARE(r.body.value("scope_hint").toString(), QStringLiteral("global"));
                 QVERIFY(!r.body.contains("project_id"));
-                QVERIFY(!r.body.value("triples").toArray().first().toObject().contains("evidence"));
+                QCOMPARE(r.body.value("triples").toArray().first().toObject().value("evidence").toString(),
+                         QStringLiteral("sample evidence"));
                 reply(r, response);
             }
             else { reloaded = true; reply(r, "[]"); }
@@ -249,6 +251,8 @@ private slots:
             auto *dlg = qobject_cast<QDialog *>(QApplication::activeModalWidget());
             if (!dlg) return;
             for (auto *input : dlg->findChildren<QLineEdit *>()) input->setText("sample");
+            for (auto *input : dlg->findChildren<QPlainTextEdit *>())
+                input->setPlainText("sample evidence");
             dlg->accept();
         });
         page.openProposeDialog();

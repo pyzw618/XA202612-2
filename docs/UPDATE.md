@@ -16,4 +16,5 @@
 - 明确事实提案契约：普通事实必须携带 evidence；缺少项目 ID 的项目事实进入可恢复的 scope-resolution pending。
 - FactPage 正确展示 pending 数量并刷新候选；裁决始终提交 scope，项目作用域校验 project_id，驳回后同步刷新，候选删除兼容 `memory_id`。
 - MCP 事实提案工具公开结构化三元组及 evidence 字段约束。
-- `compileall` 与 `git diff --check` 通过；定向 pytest 仍因当前 Python 缺少 FastAPI、且 Pydantic/解释器类型注解兼容问题而在收集阶段中止。
+- Windows MSVC + Qt 5.15.2 实编译发现并补齐 FactPage 候选成员函数声明；同步更新 evidence/pending 前端回归用例，并修复 SearchPage 已接线但未执行的缓存类型/置信度过滤。
+- Windows Release 主程序、API 测试和前端回归测试均编译成功，CTest 2/2 通过；`compileall` 与 `git diff --check` 通过。Python 定向 pytest 仍因当前默认 Python 缺少 FastAPI、且 Pydantic/解释器类型注解兼容问题而在收集阶段中止。

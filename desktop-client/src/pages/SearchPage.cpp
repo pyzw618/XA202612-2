@@ -319,9 +319,20 @@ void SearchPage::runSearch() {
 void SearchPage::renderResults(const QJsonObject &resp) {
     clearResults();
 
-    const QJsonArray prefs = j::arr(resp, "preferences");
-    const QJsonArray knows = j::arr(resp, "knowledge");
-    const QJsonArray facts = j::arr(resp, "facts");
+    const auto filtered = [this](const QJsonArray &source, bool typeEnabled) {
+        QJsonArray result;
+        if (!typeEnabled) return result;
+        const double minimum = m_minConf->value();
+        for (const QJsonValue &value : source) {
+            const QJsonObject item = value.toObject();
+            const double confidence = j::num(item, "confidence", j::num(item, "score"));
+            if (confidence >= minimum) result.append(value);
+        }
+        return result;
+    };
+    const QJsonArray prefs = filtered(j::arr(resp, "preferences"), m_cbPreference->isChecked());
+    const QJsonArray knows = filtered(j::arr(resp, "knowledge"), m_cbKnowledge->isChecked());
+    const QJsonArray facts = filtered(j::arr(resp, "facts"), m_cbFact->isChecked());
 
     const int total = prefs.size() + knows.size() + facts.size();
     if (total == 0) {
