@@ -151,7 +151,7 @@ Release 只有在上方三个未完成项全部勾选，且登记状态仍为 `R
 
 ## 发布建议
 
-1. 在银河麒麟真机执行 `evaluation/run_vnext_eval.py --suite all` 性能验收。
+1. 在银河麒麟真机执行 `evaluation/runners/run_vnext_eval.py --suite all` 性能验收。
 2. 按 `docs/vnext/spec/VNEXT_ROLLOUT.md` 执行 5%→25%→50%→100% 灰度切流。
 3. 切流期间每日执行 `scripts/repair_projections.py --dry-run` 与 `tests/test_forget_semantic.py`。
 4. 旧读取兼容窗口已登记为 2026-08-26 至 2026-09-25，最终下线日期为 2026-09-26；窗口期结束前由负责人复核并执行下线。

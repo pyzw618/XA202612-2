@@ -13,8 +13,8 @@ from typing import Any, Callable
 
 from evaluation.metrics.vnext_retrieval_eval import run_vnext_retrieval_eval
 
-ROOT = Path(__file__).resolve().parents[1]
-DATASET = ROOT / "evaluation/datasets/vnext_retrieval_eval.json"
+ROOT = Path(__file__).resolve().parents[2]
+DATASET = ROOT / "evaluation/showcase/datasets/vnext_retrieval_eval.json"
 SYSTEMS = ("NO_MEMORY", "FLAT_RAG", "ORIGINAL", "VNEXT")
 
 

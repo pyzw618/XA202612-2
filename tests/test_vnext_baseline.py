@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from evaluation.run_vnext_baseline import (
+from evaluation.runners.run_vnext_baseline import (
     DEFAULT_CONFIG,
     DEFAULT_DATASET,
     DEFAULT_OUTPUT_DIR,

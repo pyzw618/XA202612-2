@@ -19,10 +19,10 @@
 | `memoryhub_knowledge_retrieval_v1_dev.json` / `_test.json` | 知识检索 dev / test 集（人工标注，test 用于验收） |
 | `memoryhub_golden_retrieval_v1.json` | 检索 golden 集 |
 | `memoryhub_retrieval_latency_v1.json` | 延迟评测查询集 |
-| `preference_golden_v1.json` | 偏好提取 golden 集 |
-| `conflict_golden_v1.json` | 冲突处理 golden 集 |
+| `showcase/datasets/preference_golden_v1.json` | 偏好提取 golden 集（展示一键评测） |
+| `showcase/datasets/conflict_golden_v1.json` | 冲突处理 golden 集（展示一键评测） |
 | `vnext_formation_eval.json` / `vnext_formation_p1_pairs.json` | vNext 形成链评测集（P0/P1 场景对） |
-| `vnext_retrieval_eval.json` | vNext 检索场景评测集 |
+| `showcase/datasets/vnext_retrieval_eval.json` | vNext 检索场景评测集（展示一键评测） |
 | `sources_golden/`（7 个域） | 多源接入 golden 样例：办公 / 开发 / 个人 A / 个人 B / 系统 / 通信 / 金融 |
 | `memoryhub_retrieval_dataset_schema_v1.json` | 数据集 Schema（校验用） |
 | `memoryhub_retrieval_annotation_guideline_v1.md` / `_records_v1.jsonl` | 标注指南与标注记录（可复核） |
@@ -48,21 +48,22 @@ python evaluation/validate_retrieval_dataset.py
 | `conflict_eval.py` | 冲突处理正确率 |
 | `full_chain_benchmark.py` | 全链路基准（写入 → 检索端到端） |
 
-## 4. 评测驱动（evaluation/run_*.py）
+## 4. 评测驱动（evaluation/showcase/ 与 evaluation/runners/）
 
 | 命令 | 用途 |
 |---|---|
-| `python evaluation/run_retrieval_eval.py` | 检索质量评测（dev/test 数据集，mock 或 HTTP 后端） |
-| `python evaluation/run_latency_eval.py` | 延迟基准 |
-| `python evaluation/run_kylin_http_retrieval_evaluation.py` | 麒麟真机 HTTP 检索评测 |
-| `python evaluation/run_milvus_kylin_benchmark.py` | Milvus + 麒麟 SDK 真实基准（真机） |
-| `python evaluation/run_milvus_mock_benchmark.py` | Milvus mock 基准（开发机） |
-| `python evaluation/run_vnext_baseline.py` | vNext 基线固化 |
-| `python evaluation/run_vnext_eval.py` | vNext 形成/检索评测 |
-| `python evaluation/run_vnext_comparison.py` | vNext vs legacy 对照报告 |
-| `python evaluation/run_vnext_shadow.py` | Shadow 双读差异报告（脱敏，只观察） |
-| `python evaluation/run_vnext_rollout.py` | 灰度切流/回滚确定性演练 |
-| `python evaluation/run_reliability_eval.py` | 可靠性评测（故障注入维度） |
+| `python evaluation/showcase/run.py` | 四项展示评测（固定数据集，标记为演示证据） |
+| `python evaluation/runners/run_retrieval_eval.py` | 检索质量评测（dev/test 数据集，mock 或 HTTP 后端） |
+| `python evaluation/runners/run_latency_eval.py` | 延迟基准 |
+| `python evaluation/runners/run_kylin_http_retrieval_evaluation.py` | 麒麟真机 HTTP 检索评测 |
+| `python evaluation/runners/run_milvus_kylin_benchmark.py` | Milvus + 麒麟 SDK 真实基准（真机） |
+| `python evaluation/runners/run_milvus_mock_benchmark.py` | Milvus mock 基准（开发机） |
+| `python evaluation/runners/run_vnext_baseline.py` | vNext 基线固化 |
+| `python evaluation/runners/run_vnext_eval.py` | vNext 形成/检索评测 |
+| `python evaluation/runners/run_vnext_comparison.py` | vNext vs legacy 对照报告 |
+| `python evaluation/runners/run_vnext_shadow.py` | Shadow 双读差异报告（脱敏，只观察） |
+| `python evaluation/runners/run_vnext_rollout.py` | 灰度切流/回滚确定性演练 |
+| `python evaluation/runners/run_reliability_eval.py` | 可靠性评测（故障注入维度） |
 
 ## 5. 验收结果（evaluation/results/）
 

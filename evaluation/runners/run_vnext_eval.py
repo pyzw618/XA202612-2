@@ -17,7 +17,7 @@ from evaluation.metrics.vnext_retrieval_eval import run_vnext_retrieval_eval
 
 RUNNER_VERSION = "vnext-benchmark/v1"
 DEFAULT_SEED = 42
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _sha256(path: Path) -> str:
@@ -50,7 +50,7 @@ def run_vnext_eval(
     """Evaluate Formation, Retrieval, Infrastructure and E2E using fixed inputs."""
     formation = ROOT / "evaluation/datasets/vnext_formation_eval.json"
     pairs = ROOT / "evaluation/datasets/vnext_formation_p1_pairs.json"
-    retrieval = ROOT / "evaluation/datasets/vnext_retrieval_eval.json"
+    retrieval = ROOT / "evaluation/showcase/datasets/vnext_retrieval_eval.json"
     formation_report = run_formation_eval(formation, pairs).model_dump()
     retrieval_report = run_vnext_retrieval_eval(retrieval).model_dump()
     infrastructure_report = _run_infrastructure()

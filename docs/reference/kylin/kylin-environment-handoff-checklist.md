@@ -353,7 +353,7 @@ curl -X POST "http://127.0.0.1:8099/api/memory/search" \
 该脚本使用可复现的合成数据生成负载，不接受 `--dataset` 参数，也不计算检索质量指标。
 
 ```bash
-python3 evaluation/run_milvus_kylin_benchmark.py \
+python3 evaluation/runners/run_milvus_kylin_benchmark.py \
     --app_id "$MEMORYHUB_VECTOR_ENGINE_APP_ID" \
     --memory_count 10000 \
     --iterations 100 \
@@ -375,7 +375,7 @@ python3 evaluation/run_milvus_kylin_benchmark.py \
 
 ```bash
 export MEMORYHUB_VECTOR_ENGINE_APP_ID="<provided-by-deployment-platform>"
-python3 evaluation/run_retrieval_eval.py \
+python3 evaluation/runners/run_retrieval_eval.py \
     --engine milvus --provider kylin --dim 768 \
     --app-id "$MEMORYHUB_VECTOR_ENGINE_APP_ID" \
     --engine-so-path /path/to/libkysdk-vector-engine-client-capi.so \
@@ -484,7 +484,7 @@ python3 scripts/run_milvus_real_smoke_test.py \
     --host 127.0.0.1 --port 19530 --dimension 768
 
 # 跑性能基准
-python3 evaluation/run_milvus_kylin_benchmark.py --app_id "$MEMORYHUB_VECTOR_ENGINE_APP_ID" --memory_count 10000 --so_path /path/to/libkysdk-vector-engine-client-capi.so --embedding_so_path /path/to/libkylin-coreai-embedding.so
+python3 evaluation/runners/run_milvus_kylin_benchmark.py --app_id "$MEMORYHUB_VECTOR_ENGINE_APP_ID" --memory_count 10000 --so_path /path/to/libkysdk-vector-engine-client-capi.so --embedding_so_path /path/to/libkylin-coreai-embedding.so
 
 # 跑 API
 uvicorn memoryhub.app:app

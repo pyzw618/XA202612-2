@@ -65,7 +65,7 @@ class ConflictEvaluator:
 
     使用方式:
         evaluator = ConflictEvaluator(detector, resolver)
-        report = evaluator.run("evaluation/datasets/conflict_golden_v1.json")
+        report = evaluator.run("evaluation/showcase/datasets/conflict_golden_v1.json")
     """
 
     def __init__(self, conflict_detector=None, conflict_resolver=None):

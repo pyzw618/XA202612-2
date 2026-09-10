@@ -508,7 +508,7 @@ class VNextRetrievalEvaluator:
 
 
 def run_vnext_retrieval_eval(
-    dataset_path: str | Path = "evaluation/datasets/vnext_retrieval_eval.json",
+    dataset_path: str | Path = "evaluation/showcase/datasets/vnext_retrieval_eval.json",
     output_path: str | Path | None = None,
 ) -> VNextRetrievalEvalReport:
     """Run the segmented retrieval evaluation from a dataset file."""
@@ -534,7 +534,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run vNext segmented retrieval evaluation")
     parser.add_argument(
         "--dataset",
-        default="evaluation/datasets/vnext_retrieval_eval.json",
+        default="evaluation/showcase/datasets/vnext_retrieval_eval.json",
     )
     parser.add_argument("--output", default=None)
     args = parser.parse_args()

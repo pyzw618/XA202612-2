@@ -67,7 +67,7 @@ class PreferenceEvaluator:
 
     使用方式:
         evaluator = PreferenceEvaluator(extractor)
-        report = evaluator.run("evaluation/datasets/preference_golden_v1.json")
+        report = evaluator.run("evaluation/showcase/datasets/preference_golden_v1.json")
     """
 
     def __init__(self, preference_extractor=None):

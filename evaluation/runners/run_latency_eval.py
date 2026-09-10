@@ -2,7 +2,7 @@
 """MemoryHub 延迟测试 — cold / vector_hot / result_hot 三阶段对比。
 
 用法:
-    python evaluation/run_latency_eval.py \\
+    python evaluation/runners/run_latency_eval.py \\
         --memory-dataset evaluation/datasets/memoryhub_knowledge_retrieval_v1_test.json \\
         --latency-dataset evaluation/datasets/memoryhub_retrieval_latency_v1.json \\
         --provider mock \\
@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse, json, math, os, sys, time
 from datetime import datetime, timezone
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from memoryhub.adapter.schemas import SearchRequest
 from memoryhub.config import RetrievalConfig

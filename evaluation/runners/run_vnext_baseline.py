@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 DEFAULT_DATASET = ROOT / "evaluation" / "datasets" / (
@@ -316,7 +316,7 @@ def run_baseline(
     if run_retrieval:
         command_result = _run_command([
             sys.executable,
-            "evaluation/run_retrieval_eval.py",
+            "evaluation/runners/run_retrieval_eval.py",
             "--dataset",
             str(dataset_path.relative_to(ROOT)),
             "--provider",

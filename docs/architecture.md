@@ -160,7 +160,7 @@ legacy/0% → canary/5% → canary/25% → canary/50% → vnext/100%
 
 - 不允许跳级；每级需满足观察窗口（`observation_window_requests`）且**零容忍**：无 Policy 泄漏、无跨租户结果、无 Forget 残留、无观察错误，方可 `POST /rollout/advance`。
 - 回滚是只读开关（`POST /rollout/rollback`），回滚窗口 `rollback_window_minutes`（默认 60）；CUTOVER/ROLLBACK 均产生审计记录。
-- Shadow 对照：`formation_shadow.py`（写路径旁路观察）与 `shadow_read_service.py`（读路径双读对比），均不写 Authority 正文/状态；对比报告由 `evaluation/run_vnext_shadow.py` 产出。
+- Shadow 对照：`formation_shadow.py`（写路径旁路观察）与 `shadow_read_service.py`（读路径双读对比），均不写 Authority 正文/状态；对比报告由 `evaluation/runners/run_vnext_shadow.py` 产出。
 - 规范细节：[vnext/spec/VNEXT_ROLLOUT.md](vnext/spec/VNEXT_ROLLOUT.md)、[VNEXT_MIGRATION.md](vnext/spec/VNEXT_MIGRATION.md)。
 
 ## 10. 可观测性
