@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from memoryhub.adapter.schemas import ExtractionTask, ExtractionType, MemoryDecision
 from memoryhub.application.candidate_service import CandidateService
+from memoryhub.application.canonical_write import CanonicalWriteService
 from memoryhub.application.consolidation_service import (
     ConsolidationContext,
     ConsolidationService,
@@ -103,7 +104,13 @@ class FormationWorker:
                 user_id=event.user_id,
                 task_id=event.task_id,
             )
-            episode_id = episode.episode_id if episode is not None else f"episode-{event.task_id}"
+            episode_id = (
+                episode.episode_id
+                if episode is not None
+                # 与 canonical_write 保持同一条派生规则：episode_id 是全局主键，
+                # 只用 task_id 会让不同用户的同名任务碰撞。
+                else CanonicalWriteService._scoped_row_id("episode", event)
+            )
             working = self.working.get(
                 tenant_id=event.tenant_id,
                 user_id=event.user_id,

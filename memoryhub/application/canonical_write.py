@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -337,7 +338,12 @@ class CanonicalWriteService:
             task_id=event.task_id,
         )
         if episode is None:
-            episode_id = str(event.payload.get("episode_id") or f"episode-{event.task_id}")
+            episode_id = str(
+                event.payload.get("episode_id")
+                # 必须带 tenant/user：episode_id 是全局主键，只用 task_id 会让
+                # 不同用户的同名任务主键碰撞，第二个用户的写入整条失败。
+                or CanonicalWriteService._scoped_row_id("episode", event)
+            )
             self.episode_service.create(
                 episode_id=episode_id,
                 tenant_id=event.tenant_id,
@@ -409,8 +415,31 @@ class CanonicalWriteService:
         )
 
     @staticmethod
+    def _scoped_row_id(prefix: str, event: MemoryEventContract) -> str:
+        """Build a primary key from the (tenant, user, task) triple, ≤64 chars.
+
+        Two failure modes are avoided at once:
+
+        1. **Truncation collapse** —— plain ``[:64]`` cuts the ``task_id`` away
+           entirely for long user ids, so two different tasks of the same user
+           land on one primary key.
+        2. **Missing scope** —— deriving from ``task_id`` alone makes the key
+           global, so two users naming their task the same way collide.
+
+        Both surfaced as ``IntegrityError: UNIQUE constraint failed`` on what
+        looked like unrelated tables, and both silently kill the write (no
+        extraction runs at all). Short ids stay byte-identical for compatibility;
+        only over-long ones get a hashed suffix (51 + 1 + 12 = 64).
+        """
+        raw = f"{prefix}-{event.tenant_id}-{event.user_id}-{event.task_id}"
+        if len(raw) <= 64:
+            return raw
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+        return f"{raw[:51]}-{digest}"
+
+    @staticmethod
     def _working_state_id(event: MemoryEventContract) -> str:
-        return f"working-{event.tenant_id}-{event.user_id}-{event.task_id}"[:64]
+        return CanonicalWriteService._scoped_row_id("working", event)
 
     @staticmethod
     def _project_id(event: MemoryEventContract) -> str:

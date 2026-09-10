@@ -13,7 +13,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from memoryhub.storage.vector_engine._milvus_ctypes import (
     MilvusEngineError,
@@ -193,6 +193,34 @@ class MilvusVectorEngine(BaseVectorEngine):
                 logger.warning("milvus upsert_batch item failed: %s: %s", memory_id, exc)
                 failed.append(memory_id)
         return failed
+
+    def prime_metadata(
+        self, entries: Iterable[tuple[str, dict[str, Any]]]
+    ) -> int:
+        """启动时从权威存储重建 ``_metadata_store``，返回写入条数。
+
+        ``_metadata_store`` 只在 ``insert`` 时填充且没有任何持久化，进程重启后
+        即为空。而 ``hybrid_search`` 始终以 ``{"user_id":…, "status":"active"}``
+        做标量过滤，过滤走的正是这份内存映射——所以重启后**每条查询都会返回
+        0 条**，且现有任何启动路径都不会修复它。
+
+        本方法不改动 Milvus 中的向量，只把权威 SQLite 里已有的记忆元数据重新
+        装载回来，因此可安全地在每次启动时调用。
+        """
+        self._ensure_open()
+        count = 0
+        for memory_id, metadata in entries:
+            if metadata is None:
+                continue
+            self._metadata_store[memory_id] = dict(metadata)
+            count += 1
+        if count:
+            logger.info("milvus metadata store primed with %d entries", count)
+        return count
+
+    def metadata_store_size(self) -> int:
+        """当前内存标量映射的条目数，用于启动自检与诊断。"""
+        return len(self._metadata_store)
 
     def search(
         self,

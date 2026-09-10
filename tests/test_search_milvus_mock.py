@@ -222,5 +222,15 @@ def test_milvus_startup_only_syncs_pending_memories(tmp_path):
         )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    # 只有 pending 记录被同步到 Milvus，因此只有 pending_pref 可被召回
-    assert [p["memory_id"] for p in body["preferences"]] == [pending_pref.memory_id]
+    returned = {p["memory_id"] for p in body["preferences"]}
+
+    # 启动时**不得**对已同步记忆做全量重建（不重复 embedding/insert），
+    # 这是本测试原本要守住的性质；但它并不等于"已同步记忆不可检索"。
+    #
+    # 后者曾是启动回填缺失导致的缺陷：Milvus 的标量过滤依赖进程内的
+    # _metadata_store，而它只在 insert 时填充、不持久化，于是重启后已索引的
+    # 记忆会被 user_id/status 过滤全部滤掉（检索表现为"服务正常但返回 0 条"）。
+    # 现在启动时从权威 SQLite 回填该映射（只读元数据，不重新 embedding），
+    # 因此两条记录都应当可被召回。
+    assert pending_pref.memory_id in returned
+    assert synced_pref.memory_id in returned

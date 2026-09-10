@@ -4,3 +4,14 @@ set -eu
 install -d -m 0700 "$HOME/.local/share/MemoryHub"
 install -d -m 0700 "$HOME/.local/share/MemoryHub/data"
 install -d -m 0700 "$HOME/.config/memoryhub"
+
+# Seed a per-user copy of the service config.
+#
+# /etc/memoryhub/config.yaml is installed root-owned (0644), while the service
+# runs as the desktop user — so any attempt to persist settings from the
+# desktop "LLM 服务配置" page fails with llm.config_persist_failed (HTTP 500).
+# Seeding a user-writable copy keeps the shipped defaults as the starting point
+# while letting the service actually save. The launcher prefers this file.
+if [ ! -f "$HOME/.config/memoryhub/config.yaml" ] && [ -r /etc/memoryhub/config.yaml ]; then
+    install -m 0600 /etc/memoryhub/config.yaml "$HOME/.config/memoryhub/config.yaml"
+fi

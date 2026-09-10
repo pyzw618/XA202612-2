@@ -116,9 +116,16 @@ class MemorySyncService:
         memory_id = memory.memory_id
         if self.memory_write_service is not None:
             try:
+                # 统一写路径只负责持久化 + 入 projection outbox；pending_index
+                # 由投影真正完成后的 MemoryWriteService.sync_memory ->
+                # _mark_synchronized 清除。
+                #
+                # 这里不能提前 _mark_indexed：生产模式下 project_immediately=False，
+                # 提前清标志会让 pending_index 说谎——reconcile 与补偿任务都只扫
+                # pending_index=True 的行，于是待投影行不可见；一旦 outbox 投影
+                # 失败，该记忆会永久缺失且无人重试。
                 self.memory_write_service.upsert_memory(memory)
                 self.index_version = time.time_ns()
-                self._mark_indexed([memory_id], version=self.index_version)
                 self._bump_retriever_version()
                 self._invalidate_cache_for(memory_id)
                 return True, memory_id

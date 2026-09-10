@@ -808,11 +808,15 @@ def load_config(config_path: str | None = None) -> AppConfig:
         config.embedding.provider = os.environ["MEMORYHUB_EMBEDDING_PROVIDER"]
     if os.environ.get("MEMORYHUB_VECTOR_ENGINE_PROVIDER"):
         config.vector_engine.provider = os.environ["MEMORYHUB_VECTOR_ENGINE_PROVIDER"]
-    if "MEMORYHUB_VECTOR_ENGINE_APP_ID" in os.environ:
+    # 空值不覆盖：.env 里常见的 `KEY=` 占位行会被 load_dotenv 写入 os.environ
+    # 的空字符串。若按"键存在即覆盖"处理，一个空的 APP_ID 就会把配置文件里的
+    # 有效值清空（生产下 Milvus 直接连不上），空的 LOCAL_SOCKET 还会误报
+    # "must be a boolean"。与上面 provider 的判定口径保持一致。
+    if os.environ.get("MEMORYHUB_VECTOR_ENGINE_APP_ID"):
         config.vector_engine.app_id = os.environ["MEMORYHUB_VECTOR_ENGINE_APP_ID"]
-    if "MEMORYHUB_VECTOR_ENGINE_DB_PATH" in os.environ:
+    if os.environ.get("MEMORYHUB_VECTOR_ENGINE_DB_PATH"):
         config.vector_engine.db_path = os.environ["MEMORYHUB_VECTOR_ENGINE_DB_PATH"]
-    if "MEMORYHUB_VECTOR_ENGINE_LOCAL_SOCKET" in os.environ:
+    if os.environ.get("MEMORYHUB_VECTOR_ENGINE_LOCAL_SOCKET"):
         raw_value = os.environ["MEMORYHUB_VECTOR_ENGINE_LOCAL_SOCKET"].lower()
         if raw_value not in ("0", "1", "false", "true", "no", "yes"):
             raise ValueError("MEMORYHUB_VECTOR_ENGINE_LOCAL_SOCKET must be a boolean")

@@ -87,6 +87,37 @@ def _memory_metadata(memory) -> dict:
     }
 
 
+def _prime_vector_metadata(vector_engine, memories) -> int:
+    """启动时把权威存储中的记忆元数据回填到向量引擎的内存标量映射。
+
+    Milvus 的 C API 不暴露 scalar 字段，标量过滤由 Python 层的
+    ``_metadata_store`` 完成，而那份映射只在 ``insert`` 时填充、进程重启即空。
+    不回填的话，重启后 ``hybrid_search`` 的 ``user_id``/``status`` 过滤会把
+    所有候选滤掉，检索表现为"服务正常但永远 0 条结果"。
+
+    元数据用 ``MemoryWriteService.index_metadata`` 构建，与 ``sync_memory``
+    写入向量时使用的形状保持一致，避免两处口径漂移。
+
+    返回回填条数；引擎不支持（如 faiss）时返回 0。
+    """
+    prime = getattr(vector_engine, "prime_metadata", None)
+    if prime is None or vector_engine is None or not memories:
+        return 0
+    from memoryhub.core.memory_write import MemoryWriteService
+
+    entries = [
+        (memory.memory_id, MemoryWriteService.index_metadata(memory))
+        for memory in memories
+    ]
+    try:
+        return prime(entries)
+    except Exception:
+        # 回填失败不应阻断启动：检索会退化为"0 条"，但服务本身可用，
+        # 且日志能定位原因。下一次启动会重试。
+        logger.exception("vector metadata prime failed; retrieval may return no results")
+        return 0
+
+
 def _max_index_version(db) -> int:
     """获取 SQLite 中已同步记忆的当前最大 index_version（不存在时返回 1）。"""
     from sqlalchemy import func
@@ -516,6 +547,12 @@ def create_app(
 
         # 生产模式运行时门禁：校验 SDK/引擎可用性与实际维度
         validate_production_runtime(config, embedding_client, vector_engine)
+
+        # Milvus 的标量过滤依赖进程内的 _metadata_store（C API 不暴露 scalar
+        # 字段），而它只在 insert 时填充、不持久化。若不在此重建，任何一次重启
+        # 之后 hybrid_search 的 user_id/status 过滤都会把所有结果滤空——表现为
+        # "服务正常但检索永远返回 0 条"。这里从权威 SQLite 回填，不改动向量。
+        _prime_vector_metadata(vector_engine, memories)
 
         # 检索缓存（生产与 development/test 共用）
         cache = SearchCache(
