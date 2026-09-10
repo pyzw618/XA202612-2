@@ -26,7 +26,6 @@ private slots:
     void onFilterChanged();
 
 private:
-    void applyLocalView(bool resolvedView);
     void renderCards(const QJsonArray &items);
     void buildCard(QWidget *parent, const QJsonObject &c);
     void resolveConflict(const QJsonObject &c, const QString &decision);
@@ -42,7 +41,6 @@ private:
     QPushButton *m_prevBtn = nullptr;
     QPushButton *m_nextBtn = nullptr;
     PageStateView *m_stateView = nullptr;
-    QJsonArray m_cachedItems;  // 当前状态视图下已拉取的冲突，类型本地过滤用
     int m_generation = 0;
     bool m_writeInProgress = false;
 

@@ -1,5 +1,6 @@
 #include "ConflictPage.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -29,7 +30,7 @@ ConflictPage::ConflictPage(QWidget *parent) : BasePage(parent) {
 
     auto *header = new PageHeader(this);
     header->setTitle("冲突中心");
-    header->setSubtitle("新旧记忆内容对比，人工裁决：覆盖 / 合并 / 并存");
+    header->setSubtitle("新旧记忆内容对比 · 裁决仅记录结论，不自动覆盖/合并记忆");
     root->addWidget(header);
 
     // 统计条
@@ -53,8 +54,9 @@ ConflictPage::ConflictPage(QWidget *parent) : BasePage(parent) {
     m_typeCombo = new QComboBox(this);
     m_typeCombo->addItem("全部类型", "");
     m_typeCombo->addItem("偏好", "preference");
+    // 事实冲突已并入知识冲突链（后端 /facts/conflicts 亦然），
+    // 不存在 memory_type="fact" 的冲突记录，故不提供该筛选项。
     m_typeCombo->addItem("知识", "knowledge");
-    m_typeCombo->addItem("事实", "fact");
     m_prevBtn = new QPushButton("上一页", this);
     m_prevBtn->setEnabled(false);
     m_nextBtn = new QPushButton("下一页", this);
@@ -62,10 +64,8 @@ ConflictPage::ConflictPage(QWidget *parent) : BasePage(parent) {
     connect(m_prevBtn, &QPushButton::clicked, this, [this]() { loadPage(m_currentPage - 1); });
     connect(m_nextBtn, &QPushButton::clicked, this, [this]() { loadPage(m_currentPage + 1); });
     connect(m_statusCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &ConflictPage::onFilterChanged);
-    // 类型过滤对已拉取数据本地进行，不重新请求
-    connect(m_typeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this]() {
-        applyLocalView(m_statusCombo->currentData().toString() == "resolved");
-    });
+    // 类型过滤同样由服务端完成，切换后重新请求
+    connect(m_typeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &ConflictPage::onFilterChanged);
     filterRow->addWidget(m_statusCombo);
     filterRow->addWidget(m_typeCombo);
     filterRow->addStretch();
@@ -111,10 +111,7 @@ void ConflictPage::loadPage(int page) {
     const QString uid = AppContext::instance()->userId();
     api::ApiClient *api = AppContext::instance()->api();
     const QString status = m_statusCombo->currentData().toString();
-    // "已解决"不是落库裁决值（只有 override/merge/coexist/pending），后端按 decision == status 过滤恒空；
-    // 改为拉全量（status 传空）后本地过滤 decision != pending；已解决视图省略 page/size
-    // 走后端"不传 page 返回全量"的兼容行为，避免分页切片丢行（size 上限 200，超出必收 422）。
-    const bool resolvedView = status == "resolved";
+    const QString type = m_typeCombo->currentData().toString();
 
     api->getAsync(api::ApiClient::urlWithQuery(
         "/api/memory/conflicts", {{"user_id", uid}, {"status", ""}}),
@@ -132,64 +129,37 @@ void ConflictPage::loadPage(int page) {
             }
         }, this);
 
-    if (resolvedView) m_currentPage = 1;
-    // 分页数据；已解决视图省略 page/size（urlWithQuery 跳过 null），走后端全量返回
-    api->getAsync(api::ApiClient::urlWithQuery(
-        "/api/memory/conflicts",
-        {{"user_id", uid}, {"status", resolvedView ? "" : status},
-         {"page", resolvedView ? QString() : QString::number(m_currentPage)},
-         {"size", resolvedView ? QString() : QString::number(m_size)}}),
-        [this, generation, status, resolvedView](const api::Result &r) {
+    // 列表：过滤与分页全部交给服务端（status=resolved 表示"已裁决"，即 decision != pending）
+    QList<QPair<QString, QString>> params{{"user_id", uid}, {"status", status}};
+    if (!type.isEmpty()) params.append({"memory_type", type});
+    params.append({"page", QString::number(m_currentPage)});
+    params.append({"size", QString::number(m_size)});
+    api->getAsync(api::ApiClient::urlWithQuery("/api/memory/conflicts", params),
+        [this, generation](const api::Result &r) {
             if (generation != m_generation) return;
             m_scroll->setEnabled(true);
-            if (!r.ok || (!r.hasJsonArray() && !r.hasJsonObject())) {
+            if (!r.ok || !r.hasJsonObject()) {
                 m_stateView->setState(r.networkError ? PageState::Offline : PageState::Error,
                                       r.networkError ? "后端离线" : "冲突加载失败",
                                       r.errorMessage.isEmpty() ? "请稍后重试。" : r.errorMessage);
                 m_stateView->setAction("重试", [this]() { loadPage(m_currentPage); });
                 return;
             }
-            QJsonArray items;
-            if (r.hasJsonObject() && r.jsonObject().contains("items")) {
-                items = j::arr(r.jsonObject(), "items");
-                m_total = j::integer(r.jsonObject(), "total");
-            } else { items = r.jsonArray(); }
-            QJsonArray visible;
-            for (const QJsonValue &v : items) {
-                const QString decision = j::str(v.toObject(), "decision");
-                if ((status == "pending" && decision == "pending") ||
-                    (status == "resolved" && decision != "pending") || status.isEmpty())
-                    visible.append(v);
-            }
-            m_cachedItems = visible;
-            applyLocalView(resolvedView);
+            const QJsonArray items = j::arr(r.jsonObject(), "items");
+            const int total = j::integer(r.jsonObject(), "total");
+            m_total = total;
+            m_stateView->setState(items.isEmpty() ? PageState::Empty : PageState::Content,
+                                  "暂无冲突",
+                                  "有偏好或知识写入冲突时会出现在这里；vNext 链路的冲突以 "
+                                  "REVIEW 状态呈现在偏好/知识页的待审队列中。");
+            if (items.isEmpty()) m_stateView->setAction("刷新", [this]() { loadPage(m_currentPage); });
+            renderCards(items);
+            const int maxPage = qMax(1, (total + m_size - 1) / m_size);
+            m_pageInfo->setText(QString("第 %1 / %2 页 · 共 %3 条")
+                                    .arg(m_currentPage).arg(maxPage).arg(total));
+            m_prevBtn->setEnabled(m_currentPage > 1);
+            m_nextBtn->setEnabled(m_currentPage < maxPage);
         }, this);
-}
-
-void ConflictPage::applyLocalView(bool resolvedView) {
-    // 类型下拉对已拉取数据本地过滤；切换类型不再重复请求
-    const QString type = m_typeCombo->currentData().toString();
-    QJsonArray visible;
-    for (const QJsonValue &v : m_cachedItems) {
-        if (!type.isEmpty() && j::str(v.toObject(), "memory_type") != type) continue;
-        visible.append(v);
-    }
-    m_total = int(visible.size());
-    m_stateView->setState(visible.isEmpty() ? PageState::Empty : PageState::Content,
-                          "暂无冲突", "有偏好、知识或事实写入冲突时会出现在这里。");
-    if (visible.isEmpty()) m_stateView->setAction("刷新", [this]() { loadPage(m_currentPage); });
-    renderCards(visible);
-    if (resolvedView) {
-        // 已解决视图为全量单页：如实标注不分页，禁用翻页避免缺行错觉
-        m_pageInfo->setText(QString("共 %1 条 · 已解决视图不分页").arg(m_total));
-        m_prevBtn->setEnabled(false);
-        m_nextBtn->setEnabled(false);
-    } else {
-        const int maxPage = qMax(1, (m_total + m_size - 1) / m_size);
-        m_pageInfo->setText(QString("第 %1 / %2 页 · 共 %3 条").arg(m_currentPage).arg(maxPage).arg(m_total));
-        m_prevBtn->setEnabled(m_currentPage > 1);
-        m_nextBtn->setEnabled(m_currentPage < maxPage);
-    }
 }
 
 void ConflictPage::renderCards(const QJsonArray &items) {
@@ -256,6 +226,20 @@ void ConflictPage::buildCard(QWidget *parent, const QJsonObject &c) {
                            j::str(c, "reason").toHtmlEscaped()));
     lay->addWidget(meta);
 
+    // 记忆 ID（只读、可选中）：便于到偏好/知识页核对同一条记忆
+    const QString oldId = j::str(c, "old_memory_id");
+    const QString newId = j::str(c, "new_memory_id");
+    if (!oldId.isEmpty() || !newId.isEmpty()) {
+        auto *ids = new QLabel(QString("旧记忆 %1 · 新记忆 %2")
+                                   .arg(oldId.isEmpty() ? QStringLiteral("—") : oldId,
+                                        newId.isEmpty() ? QStringLiteral("—") : newId));
+        ids->setObjectName("pageSubtitle");
+        ids->setWordWrap(true);
+        ids->setTextFormat(Qt::PlainText);
+        ids->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        lay->addWidget(ids);
+    }
+
     // 底部操作区
     if (decision == "pending") {
         auto *row = new QHBoxLayout();
@@ -280,20 +264,23 @@ void ConflictPage::buildCard(QWidget *parent, const QJsonObject &c) {
 
 void ConflictPage::resolveConflict(const QJsonObject &c, const QString &decision) {
     if (m_writeInProgress) return;
-    // 询问原因（可选）
+    // 询问原因（可选）+ 是否落地
     QDialog dlg(this);
     dlg.setWindowTitle("记录裁决结论 · " + decision);
-    dlg.setMinimumWidth(400);
+    dlg.setMinimumWidth(460);
     auto *form = new QFormLayout(&dlg);
-    // 与后端能力对齐：resolve 只记录裁决结论，不自动落地/合并/拆分记忆内容
-    auto *hint = new QLabel("裁决仅记录处理结论（用于审计与统计），不会自动覆盖、合并或拆分对应记忆；"
-                            "如需修改记忆内容请到对应记忆页操作。", &dlg);
+    auto *hint = new QLabel("默认仅记录裁决结论（用于审计与统计），不修改记忆内容；"
+                            "勾选下方选项后才会按裁决实际修改记忆。", &dlg);
     hint->setWordWrap(true);
     hint->setStyleSheet("color:#92400E;font-size:12px;");
     form->addRow(hint);
     auto *reasonEdit = new QLineEdit(&dlg);
     reasonEdit->setPlaceholderText("处理原因（可选）");
     form->addRow("原因", reasonEdit);
+    auto *applyBox = new QCheckBox("同时应用到记忆（覆盖=归档旧记忆并生成新版本；"
+                                   "合并=归档旧记忆并生成合并版本；并存=保留两条）", &dlg);
+    applyBox->setChecked(false);
+    form->addRow(applyBox);
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
     bb->button(QDialogButtonBox::Ok)->setText("提交");
     bb->button(QDialogButtonBox::Cancel)->setText("取消");
@@ -307,6 +294,7 @@ void ConflictPage::resolveConflict(const QJsonObject &c, const QString &decision
     body["decision"] = decision;
     body["reason"] = reasonEdit->text().trimmed();
     body["result_id"] = j::str(c, "result_memory_id");
+    body["apply"] = applyBox->isChecked();
 
     api::ApiClient *api = AppContext::instance()->api();
     m_writeInProgress = true;

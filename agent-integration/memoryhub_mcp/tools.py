@@ -60,7 +60,12 @@ class ToolRegistry:
             return _error(exc)
 
     def _payload(self, args: dict[str, Any]) -> dict[str, Any]:
-        return self.client.build_search_payload(user_id=str(args.get("user_id") or self.config.user_id), query=str(args.get("query") or ""), top_k=int(args.get("top_k") or 5), scene=str(args.get("scene") or ""), task_type=str(args.get("task_type") or ""), app="memoryhub-mcp", project_id=str(args.get("project_id") or ""), level=str(args.get("level") or ""), session_id=str(args.get("session_id") or ""))
+        # Retrieval stays unscoped unless the caller narrows it.  The legacy
+        # contract treats context.app as a scope *selector*, not a provenance
+        # tag: sending our own name turned every search into an
+        # APPLICATION:memoryhub-mcp lookup and silently dropped every memory
+        # written by the CLI, the OpenCode plugin or the desktop console.
+        return self.client.build_search_payload(user_id=str(args.get("user_id") or self.config.user_id), query=str(args.get("query") or ""), top_k=int(args.get("top_k") or 5), scene=str(args.get("scene") or ""), task_type=str(args.get("task_type") or ""), project_id=str(args.get("project_id") or ""), level=str(args.get("level") or ""), session_id=str(args.get("session_id") or ""))
 
     def _search(self, args: dict[str, Any]) -> dict[str, Any]:
         return self.client.search(self._payload(args))

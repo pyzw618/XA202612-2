@@ -320,7 +320,7 @@ private slots:
             QVERIFY2(found, prefix.constData());
         }
     }
-    void conflictResolvedFilterOmitsStatusParam() {
+    void conflictResolvedFilterUsesServerStatus() {
         ConflictPage page;
         QComboBox *statusCombo = nullptr;
         for (auto *combo : page.findChildren<QComboBox *>())
@@ -330,14 +330,126 @@ private slots:
         QTRY_COMPARE(requests.size(), 2);
         bool found = false;
         for (const Request &r : requests) if (r.path.startsWith("/api/memory/conflicts?")) {
-            QVERIFY2(!r.path.contains("status=resolved"), r.path.constData());
-            // 已解决视图必须省略 page/size 走全量返回；size 上限 200，
-            // 传 500 会被后端参数校验拒绝（422），导致"已解决"筛选必然报错
-            QVERIFY2(!r.path.contains("page=") && !r.path.contains("size="),
-                     r.path.constData());
+            if (!r.path.contains("status=resolved")) continue;
+            // 服务端按 status=resolved 过滤后仍走分页，不再全量拉取
+            QVERIFY2(r.path.contains("page=") && r.path.contains("size="), r.path.constData());
             found = true;
         }
         QVERIFY(found);
+    }
+    void conflictTypeFilterOmitsFact() {
+        // 事实冲突已并入知识冲突链，不存在 memory_type="fact" 的记录
+        ConflictPage page;
+        QComboBox *typeCombo = nullptr;
+        for (auto *combo : page.findChildren<QComboBox *>())
+            if (combo->itemData(0).toString().isEmpty()) typeCombo = combo;
+        QVERIFY(typeCombo);
+        for (int i = 0; i < typeCombo->count(); ++i)
+            QVERIFY2(typeCombo->itemData(i).toString() != "fact", "不应提供事实筛选项");
+    }
+    void conflictPaginationKeepsServerTotal() {
+        ConflictPage page;
+        respond = [](const Request &r) {
+            if (r.path.contains("page=")) {
+                QJsonArray items;
+                for (int i = 0; i < 10; ++i)
+                    items.append(QJsonObject{{"conflict_id", QString("conf_%1").arg(i)},
+                                             {"memory_type", "preference"},
+                                             {"decision", "pending"},
+                                             {"old_content", "old"}, {"new_content", "new"}});
+                reply(r, QJsonDocument(QJsonObject{{"items", items}, {"total", 25},
+                                                   {"page", 1}, {"size", 10}})
+                              .toJson(QJsonDocument::Compact));
+            } else {
+                reply(r, "[]");
+            }
+        };
+        page.refresh();
+        // 页码必须使用服务端 total（25），否则 maxPage 恒为 1，第二页翻不到
+        auto pageInfoContains = [&page](const QString &needle) {
+            for (auto *label : page.findChildren<QLabel *>())
+                if (label->text().contains(needle)) return true;
+            return false;
+        };
+        QTRY_VERIFY2(pageInfoContains(QStringLiteral("共 25 条")), "页码文案应使用服务端 total");
+        bool nextEnabled = false;
+        for (auto *button : page.findChildren<QPushButton *>())
+            if (button->text() == QStringLiteral("下一页") && button->isEnabled()) nextEnabled = true;
+        QVERIFY2(nextEnabled, "存在第二页时下一页按钮应可用");
+    }
+    void conflictTypeFilterUsesServerFilter() {
+        ConflictPage page;
+        respond = [](const Request &r) {
+            if (r.path.contains("page=")) {
+                QJsonArray items;
+                items.append(QJsonObject{{"conflict_id", "conf_1"}, {"memory_type", "knowledge"},
+                                         {"decision", "pending"}, {"old_content", "old"},
+                                         {"new_content", "new"}});
+                reply(r, QJsonDocument(QJsonObject{{"items", items}, {"total", 12},
+                                                   {"page", 1}, {"size", 10}})
+                              .toJson(QJsonDocument::Compact));
+            } else {
+                reply(r, "[]");
+            }
+        };
+        page.refresh();
+        QComboBox *typeCombo = nullptr;
+        for (auto *combo : page.findChildren<QComboBox *>())
+            if (combo->itemData(0).toString().isEmpty()) typeCombo = combo;
+        QVERIFY(typeCombo);
+        auto pageInfoContains = [&page](const QString &needle) {
+            for (auto *label : page.findChildren<QLabel *>())
+                if (label->text().contains(needle)) return true;
+            return false;
+        };
+        QTRY_VERIFY(pageInfoContains(QStringLiteral("共 12 条")));
+        const int before = requests.size();
+        typeCombo->setCurrentIndex(2); // 知识：改为服务端过滤，需要重新请求
+        QTRY_VERIFY(requests.size() > before);
+        bool found = false;
+        for (const Request &r : requests)
+            if (r.path.contains("memory_type=knowledge")) found = true;
+        QVERIFY2(found, "类型筛选应由服务端完成");
+    }
+    void conflictResolveSendsApplyFlag() {
+        ConflictPage page;
+        QJsonObject sent;
+        respond = [&sent](const Request &r) {
+            if (r.path.contains("resolve")) {
+                sent = r.body;
+                reply(r, "{\"status\":\"resolved\"}");
+            } else if (r.path.contains("page=")) {
+                QJsonArray items;
+                items.append(QJsonObject{{"conflict_id", "conf_apply"}, {"memory_type", "preference"},
+                                         {"decision", "pending"}, {"old_content", "old"},
+                                         {"new_content", "new"}});
+                reply(r, QJsonDocument(QJsonObject{{"items", items}, {"total", 1},
+                                                   {"page", 1}, {"size", 10}})
+                              .toJson(QJsonDocument::Compact));
+            } else {
+                reply(r, "[]");
+            }
+        };
+        page.refresh();
+        auto findOverride = [&page]() -> QPushButton * {
+            for (auto *button : page.findChildren<QPushButton *>())
+                if (button->text().startsWith(QStringLiteral("覆盖"))) return button;
+            return nullptr;
+        };
+        QTRY_VERIFY(findOverride() != nullptr);
+        QTimer click;
+        connect(&click, &QTimer::timeout, this, []() {
+            if (auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget())) {
+                if (auto *box = dialog->findChild<QCheckBox *>()) box->setChecked(true);
+                if (auto *buttons = dialog->findChild<QDialogButtonBox *>())
+                    buttons->button(QDialogButtonBox::Ok)->click();
+            }
+        });
+        click.start(10);
+        findOverride()->click();
+        QTRY_VERIFY(!sent.isEmpty());
+        QCOMPARE(sent.value("decision").toString(), QStringLiteral("override"));
+        QCOMPARE(sent.value("apply").toBool(), true);
     }
     void consolidationSendsUserInQuery() {
         MemoryTierPage page;

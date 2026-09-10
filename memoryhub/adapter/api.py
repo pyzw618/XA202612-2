@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from pydantic import BaseModel, Field
 
 from memoryhub.adapter.schemas import (
+    ConflictDecision,
     EvalReport,
     Evidence,
     ExtractionTask,
@@ -50,6 +51,7 @@ from memoryhub.adapter.user_rule_schemas import (
 )
 from memoryhub.adapter.vnext_schemas import MemoryRetrievalRequest
 from memoryhub.application.event_gateway import GatewayStatus
+from memoryhub.core.conflict.resolver import ConflictResolver
 from memoryhub.core.forget import MemoryForgetter
 from memoryhub.core.forget.health import HealthCalculator
 from memoryhub.core.safety.gate import SafetyGateError
@@ -528,7 +530,12 @@ def _canonical_write_events(
     results: list[Any] = []
     committed_events: list[MemoryEvent] = []
     for event in events:
-        tenant_id = request.headers.get("X-MemoryHub-Tenant", event.user_id or "default")
+        # Tenant defaults to "default" exactly like every other endpoint
+        # (api.py search/context, agent_api.py).  Falling back to event.user_id
+        # here split the same user's data across two tenants: writes landed in
+        # tenant=<user_id> while retrieval looked in tenant="default", so every
+        # memory formed through this path was silently unretrievable.
+        tenant_id = request.headers.get("X-MemoryHub-Tenant", "default")
         contract = _to_memory_event_contract(event, tenant_id=tenant_id)
         result = canonical.write(contract)
         results.append(result)
@@ -1340,20 +1347,35 @@ async def get_knowledge(memory_id: str, request: Request, user_id: str = "defaul
 async def list_conflicts(
     status: str = "pending",
     user_id: str = "default",
+    memory_type: str = "",
     page: int | None = Query(default=None, ge=1),
     size: int = Query(default=10, ge=1, le=200),
     request: Request = None,
 ):
-    """列出冲突记录，支持按状态过滤。
+    """列出冲突记录，支持按状态与记忆类型过滤。
 
     向后兼容：不传 page 时返回全部列表；传 page 时返回分页结构
     {"items": [...], "total": N, "page": P, "size": S}。
+
+    ``status`` 取值：``pending`` / ``override`` / ``merge`` / ``coexist``（按
+    ``decision`` 精确匹配），以及 ``resolved``（新增，等价于 ``decision !=
+    pending``，即"已裁决"）。``memory_type`` 为空时不过滤。
     """
     # 尝试访问冲突仓储，若不可用则返回空
     repo = getattr(request.app.state, "conflict_repo", None) if request else None
     if repo is None:
         return [] if page is None else {"items": [], "total": 0, "page": page, "size": size}
-    values = repo.list_all(status, user_id=user_id)
+    if status == "resolved":
+        # "已解决"不是落库的 decision 值（库里只有 override/merge/coexist/pending）
+        values = [
+            item
+            for item in repo.list_all("", user_id=user_id)
+            if item.decision != ConflictDecision.PENDING
+        ]
+    else:
+        values = repo.list_all(status, user_id=user_id)
+    if memory_type:
+        values = [item for item in values if item.memory_type == memory_type]
     if page is None:
         return values
     total = len(values)
@@ -1371,35 +1393,97 @@ class ResolveConflictRequest(BaseModel):
     decision: str
     reason: str = ""
     result_id: str = ""
+    # 默认只记录结论（既有语义）；apply=True 时把裁决真正落到记忆上。
+    apply: bool = False
+
+
+def _apply_conflict_decision(state, conflict, decision: str, user_id: str) -> str:
+    """把裁决真正应用到冲突双方；返回处理后的记忆 ID。
+
+    写入统一经 ``memory_write_service``，因此安全门禁与版本链语义与其它写入口一致。
+    """
+    if decision == ConflictDecision.PENDING.value:
+        raise HTTPException(
+            status_code=400, detail={"code": "conflict.cannot_apply_pending"}
+        )
+    write_service = getattr(state, "memory_write_service", None)
+    if write_service is None:
+        raise HTTPException(status_code=503, detail={"code": "memory.writer_unavailable"})
+    repo = getattr(
+        state, "pref_repo" if conflict.memory_type == "preference" else "know_repo", None
+    )
+    if repo is None:
+        raise HTTPException(
+            status_code=503, detail={"code": "conflict.memory_repository_unavailable"}
+        )
+    old_memory = repo.get_by_id(conflict.old_memory_id)
+    new_memory = repo.get_by_id(conflict.new_memory_id)
+    if old_memory is None or new_memory is None:
+        raise HTTPException(status_code=409, detail={"code": "conflict.memory_missing"})
+    if user_id and (
+        old_memory.user_id != user_id or new_memory.user_id != user_id
+    ):
+        raise HTTPException(status_code=403, detail={"code": "conflict.owner_mismatch"})
+    conflict.decision = ConflictDecision(decision)
+    try:
+        resolved = ConflictResolver(write_service=write_service).resolve(
+            conflict, old_memory, new_memory
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - 门禁/仓储异常统一收敛为稳定错误码
+        logger.warning("conflict apply failed: %s: %s", type(exc).__name__, exc)
+        raise HTTPException(
+            status_code=409, detail={"code": "conflict.apply_failed"}
+        ) from None
+    return resolved.result_memory_id
 
 
 @router.post("/conflicts/{conflict_id}/resolve")
 async def resolve_conflict(conflict_id: str, body: ResolveConflictRequest, request: Request):
     """
-    手动解决待确认冲突
+    手动解决冲突
 
-    数据流: 用户确认 → resolve_conflict → ConflictResolver.resolve
-            → 更新记忆 → 记录 ConflictRecord
+    默认只记录裁决结论（用于审计与统计）；``apply=true`` 时按裁决实际修改记忆：
+    override 归档旧记忆并生成新版本、merge 归档旧记忆并生成合并版本、coexist 两条并存。
     """
     repo = getattr(request.app.state, "conflict_repo", None)
     if repo is None:
         raise HTTPException(status_code=503, detail="conflict repository not initialized")
+    # 裁决值受控：非法值一旦落库，前端会把任何非 pending 值都当成"已解决"，
+    # 且决策标签会退化成原始文本，故在入口拒绝。
     try:
-        resolved = repo.resolve(
-            conflict_id, body.decision, body.reason, body.result_id, user_id=body.user_id
-        )
-        if not resolved:
-            raise HTTPException(status_code=404, detail="conflict not found")
-        return {
-            "status": "resolved",
-            "conflict_id": conflict_id,
-            "decision": body.decision,
-            "result_id": body.result_id,
-        }
-    except HTTPException:
-        raise
+        decision = ConflictDecision(body.decision).value
     except ValueError:
-        raise HTTPException(status_code=400, detail="invalid conflict resolution") from None
+        raise HTTPException(status_code=400, detail="invalid conflict decision") from None
+    conflict = next(
+        (
+            item
+            for item in repo.list_all("", user_id=body.user_id)
+            if item.conflict_id == conflict_id
+        ),
+        None,
+    )
+    if conflict is None:
+        raise HTTPException(status_code=404, detail="conflict not found")
+    result_id = body.result_id
+    applied = False
+    if body.apply:
+        result_id = _apply_conflict_decision(
+            request.app.state, conflict, decision, body.user_id
+        )
+        applied = True
+    if not repo.resolve(
+        conflict_id, decision, body.reason, result_id, user_id=body.user_id
+    ):
+        raise HTTPException(status_code=404, detail="conflict not found")
+    return {
+        "status": "resolved",
+        "conflict_id": conflict_id,
+        "decision": decision,
+        "result_id": result_id,
+        "applied": applied,
+    }
 
 
 # ============================================================
