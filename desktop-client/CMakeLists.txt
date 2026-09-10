@@ -45,7 +45,6 @@ set(CLIENT_SOURCES
     src/widgets/ProvenancePanel.cpp
     src/pages/BasePage.cpp
     src/pages/DashboardPage.cpp
-    src/pages/VNextDashboardPages.cpp
     src/pages/PreferencePage.cpp
     src/pages/KnowledgePage.cpp
     src/pages/MemoryTierPage.cpp
@@ -77,7 +76,6 @@ set(CLIENT_HEADERS
     src/widgets/ProvenancePanel.h
     src/pages/BasePage.h
     src/pages/DashboardPage.h
-    src/pages/VNextDashboardPages.h
     src/pages/PreferencePage.h
     src/pages/KnowledgePage.h
     src/pages/MemoryTierPage.h
