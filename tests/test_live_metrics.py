@@ -227,7 +227,12 @@ def test_conflict_is_found_by_user_not_by_memory_id() -> None:
     assert report["sample_results"][0]["observed_decision"] == "override"
 
 
-def test_missing_conflict_record_is_a_drive_failure_not_a_wrong_answer() -> None:
+def test_missing_conflict_record_counts_against_end_to_end_accuracy() -> None:
+    """未关联的偏好对在端到端口径下计为未正确处理。
+
+    报告以端到端为 headline：系统没能把两条偏好关联起来时，用户看到的就是
+    "处理失败"，不能因为"关联之后没算错"就从分母里消失。条件正确率另给。
+    """
     from evaluation.live.metrics_conflict import evaluate_conflict
 
     dataset = {
@@ -243,4 +248,6 @@ def test_missing_conflict_record_is_a_drive_failure_not_a_wrong_answer() -> None
     report = evaluate_conflict(_ConflictClient([]), dataset, USER)
     assert report["drive_failure_count"] == 1
     assert report["scored_cases"] == 0
-    assert report["accuracy"] is None
+    # 端到端：1 例全错 → 0.0；条件值无样本 → None
+    assert report["accuracy"] == 0.0
+    assert report["accuracy_conditional"] is None

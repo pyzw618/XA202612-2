@@ -26,7 +26,6 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -66,16 +65,6 @@ FILLER_BODIES: dict[str, str] = {
     "口径说明": "统计口径以相关方共同确认的版本为准，口径变更需留痕。",
     "失败案例": "曾因输入未做校验导致结果偏差，事后补充了复核环节。",
 }
-
-
-def _git_commit() -> str:
-    try:
-        return subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, cwd=REPO_ROOT, check=False,
-        ).stdout.strip() or "unknown"
-    except OSError:
-        return "unknown"
 
 
 def name_leak_violations(query_text: str, name: str, min_run: int = 6) -> list[str]:
@@ -435,7 +424,6 @@ def generate(
             "split": split,
             "created_at": created_at,
             "generator": GENERATOR_NAME,
-            "generator_git_commit": _git_commit(),
             "generator_random_seed": seed,
             "spec_version": SPEC_VERSION,
             "label_source": LABEL_SOURCE,

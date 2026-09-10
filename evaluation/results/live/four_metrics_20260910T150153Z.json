@@ -1,7 +1,7 @@
 {
   "schema_version": "memoryhub/live-four-metrics/v1",
   "evidence_level": "LIVE_HTTP",
-  "generated_at": "2026-09-10T14:39:05.111882+00:00",
+  "generated_at": "2026-09-10T15:01:53.603582+00:00",
   "environment": {
     "base_url": "http://127.0.0.1:8099",
     "runtime_mode": "production",
@@ -32,11 +32,11 @@
       },
       "cache_ttl_seconds": 300,
       "compensation": {
-        "total_runs": 41,
-        "total_succeeded": 0,
-        "total_failed": 0,
-        "last_run_at": 1789051129.7168193,
-        "last_duration_ms": 1.812163998692995
+        "total_runs": 86,
+        "total_succeeded": 15,
+        "total_failed": 2,
+        "last_run_at": 1789052493.0304086,
+        "last_duration_ms": 2.226597996923374
       }
     },
     "system_status": {
@@ -46,11 +46,11 @@
       "storage": {
         "engine": "sqlite",
         "db_path": "/home/lcz/.local/share/MemoryHub/data/memoryhub.db",
-        "event_count": 1521,
-        "preference_count": 1033,
-        "knowledge_count": 1284,
+        "event_count": 1524,
+        "preference_count": 1036,
+        "knowledge_count": 1294,
         "fact_count": 0,
-        "conflict_count": 320,
+        "conflict_count": 321,
         "forget_count": 0,
         "extraction_task_count": 0
       },
@@ -79,11 +79,11 @@
         },
         "cache_ttl_seconds": 300,
         "compensation": {
-          "total_runs": 41,
-          "total_succeeded": 0,
-          "total_failed": 0,
-          "last_run_at": 1789051129.7168193,
-          "last_duration_ms": 1.812163998692995
+          "total_runs": 86,
+          "total_succeeded": 15,
+          "total_failed": 2,
+          "last_run_at": 1789052493.0304086,
+          "last_duration_ms": 2.226597996923374
         }
       },
       "safety": {
@@ -191,13 +191,13 @@
   "datasets": {
     "retrieval": {
       "path": "/home/lcz/XA202612-2/evaluation/datasets/memoryhub_graded_retrieval_v2.1_dev.json",
-      "sha256": "bbfe16d4f647f9988b577065a5c36c189234cf39e025ca1ce830d40a50a0b344",
+      "sha256": "b029d7875f5a70a30bf0095eac11ef0b3f5f6d232f6472624011938216146802",
       "dataset_id": "memoryhub-graded-retrieval-v2.1",
       "version": "2.0.0",
       "spec_version": "v2.1",
       "label_source": "spec:graded-retrieval-v2.1#relevance-grading",
       "generator": "generate_graded_retrieval_v2",
-      "generator_git_commit": "7e310cd",
+      "generator_git_commit": "",
       "counts": {
         "queries": 120,
         "memories": 600
@@ -244,7 +244,7 @@
     },
     {
       "name": "知识检索响应时间 P95",
-      "value": 75.27,
+      "value": 73.14,
       "threshold": 500.0,
       "unit": "ms",
       "verdict": "达标",
@@ -269,7 +269,7 @@
       "synced": 0,
       "failed": 0,
       "still_pending": 0,
-      "duration_ms": 2.2041470001568086
+      "duration_ms": 0.8270130019809585
     },
     "canary_sampled": 20,
     "canary_hits": 20,
@@ -1159,11 +1159,11 @@
       "isolation_violation_rate": 0.0,
       "latency": {
         "count": 120,
-        "p50_ms": 42.19,
-        "p95_ms": 81.85,
-        "p99_ms": 97.02,
-        "max_ms": 106.94,
-        "mean_ms": 43.75
+        "p50_ms": 44.55,
+        "p95_ms": 78.82,
+        "p99_ms": 100.23,
+        "max_ms": 114.37,
+        "mean_ms": 46.94
       },
       "by_difficulty": {
         "cross_scope": {
@@ -1216,8 +1216,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 60.39,
-          "server_latency_ms": 49.14,
+          "client_e2e_ms": 74.09,
+          "server_latency_ms": 62.63,
           "error": ""
         },
         {
@@ -1242,8 +1242,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 70.13,
-          "server_latency_ms": 60.57,
+          "client_e2e_ms": 74.54,
+          "server_latency_ms": 64.63,
           "error": ""
         },
         {
@@ -1269,8 +1269,8 @@
           "ndcg_5": 0.7522,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 68.41,
-          "server_latency_ms": 58.53,
+          "client_e2e_ms": 71.92,
+          "server_latency_ms": 60.89,
           "error": ""
         },
         {
@@ -1288,8 +1288,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 55.3,
-          "server_latency_ms": 51.46,
+          "client_e2e_ms": 61.06,
+          "server_latency_ms": 54.93,
           "error": ""
         },
         {
@@ -1308,8 +1308,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 39.99,
-          "server_latency_ms": 35.23,
+          "client_e2e_ms": 49.15,
+          "server_latency_ms": 42.65,
           "error": ""
         },
         {
@@ -1334,8 +1334,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 62.85,
-          "server_latency_ms": 53.2,
+          "client_e2e_ms": 72.98,
+          "server_latency_ms": 62.52,
           "error": ""
         },
         {
@@ -1360,8 +1360,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 86.08,
-          "server_latency_ms": 76.38,
+          "client_e2e_ms": 70.67,
+          "server_latency_ms": 60.79,
           "error": ""
         },
         {
@@ -1385,8 +1385,8 @@
           "ndcg_5": 0.5958,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 74.12,
-          "server_latency_ms": 65.45,
+          "client_e2e_ms": 62.12,
+          "server_latency_ms": 53.03,
           "error": ""
         },
         {
@@ -1404,8 +1404,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 49.58,
-          "server_latency_ms": 45.01,
+          "client_e2e_ms": 48.73,
+          "server_latency_ms": 44.55,
           "error": ""
         },
         {
@@ -1424,8 +1424,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 13.89,
-          "server_latency_ms": 9.59,
+          "client_e2e_ms": 13.48,
+          "server_latency_ms": 8.78,
           "error": ""
         },
         {
@@ -1451,8 +1451,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 35.83,
-          "server_latency_ms": 24.59,
+          "client_e2e_ms": 39.54,
+          "server_latency_ms": 28.9,
           "error": ""
         },
         {
@@ -1477,8 +1477,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 34.25,
-          "server_latency_ms": 24.23,
+          "client_e2e_ms": 32.62,
+          "server_latency_ms": 22.34,
           "error": ""
         },
         {
@@ -1504,8 +1504,8 @@
           "ndcg_5": 0.7522,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 38.4,
-          "server_latency_ms": 26.92,
+          "client_e2e_ms": 46.23,
+          "server_latency_ms": 35.68,
           "error": ""
         },
         {
@@ -1523,8 +1523,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 10.48,
-          "server_latency_ms": 6.94,
+          "client_e2e_ms": 10.91,
+          "server_latency_ms": 7.32,
           "error": ""
         },
         {
@@ -1543,8 +1543,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 17.94,
-          "server_latency_ms": 9.93,
+          "client_e2e_ms": 14.13,
+          "server_latency_ms": 9.25,
           "error": ""
         },
         {
@@ -1569,8 +1569,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 38.73,
-          "server_latency_ms": 28.69,
+          "client_e2e_ms": 41.92,
+          "server_latency_ms": 32.11,
           "error": ""
         },
         {
@@ -1595,8 +1595,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 38.91,
-          "server_latency_ms": 27.8,
+          "client_e2e_ms": 37.31,
+          "server_latency_ms": 27.73,
           "error": ""
         },
         {
@@ -1620,8 +1620,8 @@
           "ndcg_5": 0.5958,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 29.41,
-          "server_latency_ms": 20.32,
+          "client_e2e_ms": 30.15,
+          "server_latency_ms": 21.28,
           "error": ""
         },
         {
@@ -1639,8 +1639,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 10.61,
-          "server_latency_ms": 6.94,
+          "client_e2e_ms": 9.98,
+          "server_latency_ms": 6.48,
           "error": ""
         },
         {
@@ -1659,8 +1659,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 13.41,
-          "server_latency_ms": 8.85,
+          "client_e2e_ms": 19.71,
+          "server_latency_ms": 10.91,
           "error": ""
         },
         {
@@ -1685,8 +1685,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 85.08,
-          "server_latency_ms": 75.94,
+          "client_e2e_ms": 78.9,
+          "server_latency_ms": 68.56,
           "error": ""
         },
         {
@@ -1712,8 +1712,8 @@
           "ndcg_5": 0.9218,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 68.36,
-          "server_latency_ms": 55.41,
+          "client_e2e_ms": 73.55,
+          "server_latency_ms": 61.81,
           "error": ""
         },
         {
@@ -1738,8 +1738,8 @@
           "ndcg_5": 0.8508,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 65.54,
-          "server_latency_ms": 55.57,
+          "client_e2e_ms": 75.01,
+          "server_latency_ms": 65.76,
           "error": ""
         },
         {
@@ -1757,8 +1757,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 43.4,
-          "server_latency_ms": 39.32,
+          "client_e2e_ms": 40.93,
+          "server_latency_ms": 36.71,
           "error": ""
         },
         {
@@ -1773,8 +1773,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": true,
-          "client_e2e_ms": 39.38,
-          "server_latency_ms": 37.27,
+          "client_e2e_ms": 34.16,
+          "server_latency_ms": 32.07,
           "error": ""
         },
         {
@@ -1799,8 +1799,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 68.9,
-          "server_latency_ms": 58.33,
+          "client_e2e_ms": 75.02,
+          "server_latency_ms": 59.37,
           "error": ""
         },
         {
@@ -1821,8 +1821,8 @@
           "ndcg_5": 0.7522,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 56.05,
-          "server_latency_ms": 49.37,
+          "client_e2e_ms": 60.37,
+          "server_latency_ms": 53.14,
           "error": ""
         },
         {
@@ -1845,8 +1845,8 @@
           "ndcg_5": 0.7522,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 74.34,
-          "server_latency_ms": 47.37,
+          "client_e2e_ms": 59.76,
+          "server_latency_ms": 50.4,
           "error": ""
         },
         {
@@ -1863,8 +1863,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 42.27,
-          "server_latency_ms": 39.36,
+          "client_e2e_ms": 40.54,
+          "server_latency_ms": 37.22,
           "error": ""
         },
         {
@@ -1879,8 +1879,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": true,
-          "client_e2e_ms": 4.72,
-          "server_latency_ms": 3.03,
+          "client_e2e_ms": 4.65,
+          "server_latency_ms": 3.02,
           "error": ""
         },
         {
@@ -1905,8 +1905,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 51.99,
-          "server_latency_ms": 41.88,
+          "client_e2e_ms": 61.01,
+          "server_latency_ms": 50.95,
           "error": ""
         },
         {
@@ -1932,8 +1932,8 @@
           "ndcg_5": 0.9218,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 37.12,
-          "server_latency_ms": 26.24,
+          "client_e2e_ms": 40.74,
+          "server_latency_ms": 29.12,
           "error": ""
         },
         {
@@ -1958,8 +1958,8 @@
           "ndcg_5": 0.8508,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 31.75,
-          "server_latency_ms": 22.13,
+          "client_e2e_ms": 37.38,
+          "server_latency_ms": 26.74,
           "error": ""
         },
         {
@@ -1977,8 +1977,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 11.33,
-          "server_latency_ms": 6.88,
+          "client_e2e_ms": 11.19,
+          "server_latency_ms": 7.62,
           "error": ""
         },
         {
@@ -1993,8 +1993,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": true,
-          "client_e2e_ms": 4.64,
-          "server_latency_ms": 2.87,
+          "client_e2e_ms": 4.56,
+          "server_latency_ms": 2.69,
           "error": ""
         },
         {
@@ -2019,8 +2019,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 35.29,
-          "server_latency_ms": 20.82,
+          "client_e2e_ms": 32.41,
+          "server_latency_ms": 22.8,
           "error": ""
         },
         {
@@ -2041,8 +2041,8 @@
           "ndcg_5": 0.7522,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 22.9,
-          "server_latency_ms": 15.89,
+          "client_e2e_ms": 21.59,
+          "server_latency_ms": 14.94,
           "error": ""
         },
         {
@@ -2065,8 +2065,8 @@
           "ndcg_5": 0.7522,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 25.02,
-          "server_latency_ms": 16.79,
+          "client_e2e_ms": 25.87,
+          "server_latency_ms": 18.11,
           "error": ""
         },
         {
@@ -2083,8 +2083,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 9.24,
-          "server_latency_ms": 5.57,
+          "client_e2e_ms": 6.96,
+          "server_latency_ms": 4.38,
           "error": ""
         },
         {
@@ -2099,8 +2099,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": true,
-          "client_e2e_ms": 5.51,
-          "server_latency_ms": 3.44,
+          "client_e2e_ms": 4.95,
+          "server_latency_ms": 2.98,
           "error": ""
         },
         {
@@ -2126,8 +2126,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 66.8,
-          "server_latency_ms": 55.77,
+          "client_e2e_ms": 64.39,
+          "server_latency_ms": 53.46,
           "error": ""
         },
         {
@@ -2153,8 +2153,8 @@
           "ndcg_5": 0.7522,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 98.71,
-          "server_latency_ms": 87.08,
+          "client_e2e_ms": 85.27,
+          "server_latency_ms": 73.1,
           "error": ""
         },
         {
@@ -2180,8 +2180,8 @@
           "ndcg_5": 0.5958,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 64.3,
-          "server_latency_ms": 54.9,
+          "client_e2e_ms": 70.92,
+          "server_latency_ms": 60.17,
           "error": ""
         },
         {
@@ -2199,8 +2199,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 45.83,
-          "server_latency_ms": 41.57,
+          "client_e2e_ms": 51.53,
+          "server_latency_ms": 47.17,
           "error": ""
         },
         {
@@ -2210,9 +2210,9 @@
           "retrieved": [
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_template",
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler3",
-            "recall2_20260910T125322Z_883f__gv2_ops_alert_dedup_workflow",
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler1",
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler4",
+            "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler6",
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_workflow",
             "recall2_20260910T125322Z_883f__gv2_ops_incident_review_filler1"
           ],
@@ -2223,8 +2223,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 58.49,
-          "server_latency_ms": 49.71,
+          "client_e2e_ms": 56.9,
+          "server_latency_ms": 48.98,
           "error": ""
         },
         {
@@ -2248,8 +2248,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 60.17,
-          "server_latency_ms": 51.71,
+          "client_e2e_ms": 65.19,
+          "server_latency_ms": 54.9,
           "error": ""
         },
         {
@@ -2275,8 +2275,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 72.0,
-          "server_latency_ms": 56.91,
+          "client_e2e_ms": 85.43,
+          "server_latency_ms": 74.69,
           "error": ""
         },
         {
@@ -2301,8 +2301,8 @@
           "ndcg_5": 0.8508,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 64.17,
-          "server_latency_ms": 54.23,
+          "client_e2e_ms": 68.93,
+          "server_latency_ms": 57.93,
           "error": ""
         },
         {
@@ -2320,8 +2320,8 @@
           "ndcg_5": 1.0,
           "isolation_violations": [],
           "no_answer_ok": null,
-          "client_e2e_ms": 58.29,
-          "server_latency_ms": 51.89,
+          "client_e2e_ms": 59.83,
+          "server_latency_ms": 55.21,
           "error": ""
         },
         {
@@ -2331,9 +2331,9 @@
           "retrieved": [
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_template",
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler3",
-            "recall2_20260910T125322Z_883f__gv2_ops_alert_dedup_workflow",
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler1",
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler4",
+            "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler6",
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_workflow",
             "recall2_20260910T125322Z_883f__gv2_ops_incident_review_filler1"
           ],
@@ -2344,8 +2344,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 27.59,
-          "server_latency_ms": 19.28,
+          "client_e2e_ms": 27.25,
+          "server_latency_ms": 18.88,
           "error": ""
         }
       ]
@@ -2367,11 +2367,11 @@
       "isolation_violation_rate": null,
       "latency": {
         "count": 120,
-        "p50_ms": 50.59,
-        "p95_ms": 70.1,
-        "p99_ms": 85.93,
-        "max_ms": 131.75,
-        "mean_ms": 50.8
+        "p50_ms": 50.63,
+        "p95_ms": 72.06,
+        "p99_ms": 82.13,
+        "max_ms": 85.58,
+        "mean_ms": 53.18
       },
       "by_difficulty": {
         "cross_scope": {
@@ -2426,8 +2426,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_weekly_report_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 52.03,
-          "server_latency_ms": 41.61,
+          "client_e2e_ms": 51.02,
+          "server_latency_ms": 40.45,
           "error": ""
         },
         {
@@ -2455,8 +2455,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_meeting_minutes_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 56.51,
-          "server_latency_ms": 45.22,
+          "client_e2e_ms": 60.23,
+          "server_latency_ms": 47.89,
           "error": ""
         },
         {
@@ -2484,8 +2484,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_expense_form_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 53.65,
-          "server_latency_ms": 42.36,
+          "client_e2e_ms": 50.74,
+          "server_latency_ms": 39.63,
           "error": ""
         },
         {
@@ -2513,8 +2513,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_travel_request_workflow"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 50.41,
-          "server_latency_ms": 39.59,
+          "client_e2e_ms": 56.53,
+          "server_latency_ms": 45.36,
           "error": ""
         },
         {
@@ -2540,8 +2540,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 69.67,
-          "server_latency_ms": 59.87,
+          "client_e2e_ms": 63.44,
+          "server_latency_ms": 53.08,
           "error": ""
         },
         {
@@ -2569,8 +2569,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_asset_ledger_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 59.89,
-          "server_latency_ms": 47.37,
+          "client_e2e_ms": 54.76,
+          "server_latency_ms": 44.99,
           "error": ""
         },
         {
@@ -2598,8 +2598,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_training_notice_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 50.77,
-          "server_latency_ms": 39.79,
+          "client_e2e_ms": 49.88,
+          "server_latency_ms": 39.98,
           "error": ""
         },
         {
@@ -2627,8 +2627,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_contract_archive_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 57.04,
-          "server_latency_ms": 43.9,
+          "client_e2e_ms": 56.96,
+          "server_latency_ms": 45.19,
           "error": ""
         },
         {
@@ -2656,8 +2656,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_visitor_log_workflow"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 57.63,
-          "server_latency_ms": 46.31,
+          "client_e2e_ms": 53.58,
+          "server_latency_ms": 43.0,
           "error": ""
         },
         {
@@ -2683,8 +2683,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 38.56,
-          "server_latency_ms": 28.25,
+          "client_e2e_ms": 44.05,
+          "server_latency_ms": 33.02,
           "error": ""
         },
         {
@@ -2712,8 +2712,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_weekly_report_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 39.29,
-          "server_latency_ms": 29.05,
+          "client_e2e_ms": 39.66,
+          "server_latency_ms": 26.95,
           "error": ""
         },
         {
@@ -2741,8 +2741,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_meeting_minutes_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 39.28,
-          "server_latency_ms": 28.64,
+          "client_e2e_ms": 45.13,
+          "server_latency_ms": 33.92,
           "error": ""
         },
         {
@@ -2770,8 +2770,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_expense_form_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 46.26,
-          "server_latency_ms": 34.47,
+          "client_e2e_ms": 44.8,
+          "server_latency_ms": 33.22,
           "error": ""
         },
         {
@@ -2799,8 +2799,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_travel_request_workflow"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 55.74,
-          "server_latency_ms": 31.36,
+          "client_e2e_ms": 48.98,
+          "server_latency_ms": 33.24,
           "error": ""
         },
         {
@@ -2826,8 +2826,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 42.52,
-          "server_latency_ms": 31.24,
+          "client_e2e_ms": 49.56,
+          "server_latency_ms": 32.03,
           "error": ""
         },
         {
@@ -2855,8 +2855,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_asset_ledger_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 46.01,
-          "server_latency_ms": 34.35,
+          "client_e2e_ms": 44.07,
+          "server_latency_ms": 32.72,
           "error": ""
         },
         {
@@ -2884,8 +2884,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_training_notice_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 40.87,
-          "server_latency_ms": 30.19,
+          "client_e2e_ms": 46.91,
+          "server_latency_ms": 36.84,
           "error": ""
         },
         {
@@ -2913,8 +2913,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_contract_archive_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 49.06,
-          "server_latency_ms": 35.24,
+          "client_e2e_ms": 45.18,
+          "server_latency_ms": 34.14,
           "error": ""
         },
         {
@@ -2942,8 +2942,8 @@
             "recall2_20260910T125322Z_883f__gv2_office_visitor_log_workflow"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 45.09,
-          "server_latency_ms": 34.31,
+          "client_e2e_ms": 39.55,
+          "server_latency_ms": 28.65,
           "error": ""
         },
         {
@@ -2969,8 +2969,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 41.61,
-          "server_latency_ms": 30.85,
+          "client_e2e_ms": 47.35,
+          "server_latency_ms": 30.53,
           "error": ""
         },
         {
@@ -2998,8 +2998,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_code_review_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 71.38,
-          "server_latency_ms": 59.86,
+          "client_e2e_ms": 75.92,
+          "server_latency_ms": 64.03,
           "error": ""
         },
         {
@@ -3027,8 +3027,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_unit_test_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 58.8,
-          "server_latency_ms": 47.53,
+          "client_e2e_ms": 59.92,
+          "server_latency_ms": 48.71,
           "error": ""
         },
         {
@@ -3056,8 +3056,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_api_doc_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 65.1,
-          "server_latency_ms": 54.51,
+          "client_e2e_ms": 53.4,
+          "server_latency_ms": 42.52,
           "error": ""
         },
         {
@@ -3085,8 +3085,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_dependency_upgrade_workflow"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 59.19,
-          "server_latency_ms": 47.08,
+          "client_e2e_ms": 59.55,
+          "server_latency_ms": 47.21,
           "error": ""
         },
         {
@@ -3112,8 +3112,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 70.04,
-          "server_latency_ms": 59.25,
+          "client_e2e_ms": 83.59,
+          "server_latency_ms": 68.38,
           "error": ""
         },
         {
@@ -3141,8 +3141,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_branch_merge_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 56.86,
-          "server_latency_ms": 45.98,
+          "client_e2e_ms": 54.86,
+          "server_latency_ms": 42.33,
           "error": ""
         },
         {
@@ -3170,8 +3170,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_load_test_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 55.42,
-          "server_latency_ms": 43.03,
+          "client_e2e_ms": 60.77,
+          "server_latency_ms": 48.4,
           "error": ""
         },
         {
@@ -3199,8 +3199,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_config_management_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 56.64,
-          "server_latency_ms": 44.7,
+          "client_e2e_ms": 53.42,
+          "server_latency_ms": 42.5,
           "error": ""
         },
         {
@@ -3228,8 +3228,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_canary_release_workflow"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 77.32,
-          "server_latency_ms": 64.99,
+          "client_e2e_ms": 60.47,
+          "server_latency_ms": 48.1,
           "error": ""
         },
         {
@@ -3255,8 +3255,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 54.5,
-          "server_latency_ms": 43.32,
+          "client_e2e_ms": 64.62,
+          "server_latency_ms": 52.32,
           "error": ""
         },
         {
@@ -3284,8 +3284,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_code_review_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 56.79,
-          "server_latency_ms": 39.99,
+          "client_e2e_ms": 72.49,
+          "server_latency_ms": 61.16,
           "error": ""
         },
         {
@@ -3313,8 +3313,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_unit_test_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 41.84,
-          "server_latency_ms": 30.06,
+          "client_e2e_ms": 39.2,
+          "server_latency_ms": 28.55,
           "error": ""
         },
         {
@@ -3342,8 +3342,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_api_doc_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 38.09,
-          "server_latency_ms": 28.0,
+          "client_e2e_ms": 48.6,
+          "server_latency_ms": 38.5,
           "error": ""
         },
         {
@@ -3371,8 +3371,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_dependency_upgrade_workflow"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 56.03,
-          "server_latency_ms": 45.63,
+          "client_e2e_ms": 41.07,
+          "server_latency_ms": 29.94,
           "error": ""
         },
         {
@@ -3398,8 +3398,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 48.0,
-          "server_latency_ms": 38.46,
+          "client_e2e_ms": 56.75,
+          "server_latency_ms": 40.69,
           "error": ""
         },
         {
@@ -3427,8 +3427,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_branch_merge_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 43.4,
-          "server_latency_ms": 28.65,
+          "client_e2e_ms": 44.13,
+          "server_latency_ms": 29.52,
           "error": ""
         },
         {
@@ -3456,8 +3456,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_load_test_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 39.24,
-          "server_latency_ms": 28.33,
+          "client_e2e_ms": 41.57,
+          "server_latency_ms": 30.84,
           "error": ""
         },
         {
@@ -3485,8 +3485,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_config_management_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 39.16,
-          "server_latency_ms": 28.9,
+          "client_e2e_ms": 46.74,
+          "server_latency_ms": 35.43,
           "error": ""
         },
         {
@@ -3514,8 +3514,8 @@
             "recall2_20260910T125322Z_883f__gv2_dev_canary_release_workflow"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 43.96,
-          "server_latency_ms": 32.67,
+          "client_e2e_ms": 41.35,
+          "server_latency_ms": 29.78,
           "error": ""
         },
         {
@@ -3541,8 +3541,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 53.42,
-          "server_latency_ms": 42.92,
+          "client_e2e_ms": 72.04,
+          "server_latency_ms": 60.75,
           "error": ""
         },
         {
@@ -3570,8 +3570,8 @@
             "recall2_20260910T125322Z_883f__gv2_ops_service_inspection_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 65.31,
-          "server_latency_ms": 54.4,
+          "client_e2e_ms": 55.4,
+          "server_latency_ms": 43.24,
           "error": ""
         },
         {
@@ -3599,8 +3599,8 @@
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 52.53,
-          "server_latency_ms": 40.37,
+          "client_e2e_ms": 55.6,
+          "server_latency_ms": 44.85,
           "error": ""
         },
         {
@@ -3628,8 +3628,8 @@
             "recall2_20260910T125322Z_883f__gv2_ops_capacity_planning_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 54.7,
-          "server_latency_ms": 42.61,
+          "client_e2e_ms": 50.1,
+          "server_latency_ms": 40.01,
           "error": ""
         },
         {
@@ -3657,8 +3657,8 @@
             "recall2_20260910T125322Z_883f__gv2_ops_alert_dedup_workflow"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 55.86,
-          "server_latency_ms": 44.59,
+          "client_e2e_ms": 60.4,
+          "server_latency_ms": 47.66,
           "error": ""
         },
         {
@@ -3672,10 +3672,10 @@
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_template",
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler3",
             "recall2_20260910T125322Z_883f__gv2_safety_incident_playbook_workflow",
-            "recall2_20260910T125322Z_883f__gv2_ops_alert_dedup_workflow",
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler1",
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler4",
-            "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_workflow"
+            "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_workflow",
+            "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler6"
           ],
           "recall_5": null,
           "recall_10": null,
@@ -3684,8 +3684,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 56.61,
-          "server_latency_ms": 46.83,
+          "client_e2e_ms": 50.53,
+          "server_latency_ms": 40.77,
           "error": ""
         },
         {
@@ -3713,8 +3713,8 @@
             "recall2_20260910T125322Z_883f__gv2_ops_incident_review_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 48.07,
-          "server_latency_ms": 37.95,
+          "client_e2e_ms": 55.91,
+          "server_latency_ms": 43.31,
           "error": ""
         },
         {
@@ -3742,8 +3742,8 @@
             "recall2_20260910T125322Z_883f__gv2_ops_cert_renewal_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 55.7,
-          "server_latency_ms": 43.95,
+          "client_e2e_ms": 54.96,
+          "server_latency_ms": 43.73,
           "error": ""
         },
         {
@@ -3771,8 +3771,8 @@
             "recall2_20260910T125322Z_883f__gv2_ops_cluster_scale_xproj"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 51.84,
-          "server_latency_ms": 41.7,
+          "client_e2e_ms": 61.48,
+          "server_latency_ms": 47.28,
           "error": ""
         },
         {
@@ -3800,8 +3800,8 @@
             "recall2_20260910T125322Z_883f__gv2_ops_network_diagnosis_workflow"
           ],
           "no_answer_ok": null,
-          "client_e2e_ms": 73.99,
-          "server_latency_ms": 64.35,
+          "client_e2e_ms": 64.81,
+          "server_latency_ms": 53.6,
           "error": ""
         },
         {
@@ -3815,10 +3815,10 @@
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_template",
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler3",
             "recall2_20260910T125322Z_883f__gv2_safety_incident_playbook_workflow",
-            "recall2_20260910T125322Z_883f__gv2_ops_alert_dedup_workflow",
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler1",
             "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler4",
-            "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_workflow"
+            "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_workflow",
+            "recall2_20260910T125322Z_883f__gv2_ops_backup_restore_filler6"
           ],
           "recall_5": null,
           "recall_10": null,
@@ -3827,8 +3827,8 @@
           "ndcg_5": 0.0,
           "isolation_violations": [],
           "no_answer_ok": false,
-          "client_e2e_ms": 38.87,
-          "server_latency_ms": 28.72,
+          "client_e2e_ms": 49.89,
+          "server_latency_ms": 37.89,
           "error": ""
         }
       ]
@@ -3848,117 +3848,117 @@
       "phases": {
         "cold_c1": {
           "count": 500,
-          "p50_ms": 52.14,
-          "p95_ms": 75.27,
-          "p99_ms": 91.65,
-          "max_ms": 161.82,
-          "mean_ms": 55.27,
+          "p50_ms": 54.82,
+          "p95_ms": 73.14,
+          "p99_ms": 95.87,
+          "max_ms": 228.32,
+          "mean_ms": 56.16,
           "server": {
             "count": 500,
-            "p50_ms": 45.03,
-            "p95_ms": 67.58,
-            "p99_ms": 83.46,
-            "max_ms": 155.54,
-            "mean_ms": 48.23
+            "p50_ms": 47.14,
+            "p95_ms": 65.22,
+            "p99_ms": 84.17,
+            "max_ms": 222.2,
+            "mean_ms": 48.24
           },
           "requested": 500,
           "errors": 0,
           "error_rate": 0.0,
-          "wall_clock_s": 27.64,
-          "qps": 18.09,
+          "wall_clock_s": 28.09,
+          "qps": 17.8,
           "error_samples": []
         },
         "cold_c4": {
           "count": 500,
-          "p50_ms": 208.88,
-          "p95_ms": 241.2,
-          "p99_ms": 332.84,
-          "max_ms": 367.95,
-          "mean_ms": 211.64,
+          "p50_ms": 204.0,
+          "p95_ms": 233.78,
+          "p99_ms": 257.17,
+          "max_ms": 402.25,
+          "mean_ms": 206.74,
           "server": {
             "count": 500,
-            "p50_ms": 44.16,
-            "p95_ms": 64.87,
-            "p99_ms": 75.05,
-            "max_ms": 185.8,
-            "mean_ms": 47.18
+            "p50_ms": 43.92,
+            "p95_ms": 58.69,
+            "p99_ms": 67.2,
+            "max_ms": 248.55,
+            "mean_ms": 45.77
           },
           "requested": 500,
           "errors": 0,
           "error_rate": 0.0,
-          "wall_clock_s": 26.52,
-          "qps": 18.85,
+          "wall_clock_s": 25.9,
+          "qps": 19.3,
           "error_samples": []
         },
         "cold_c8": {
           "count": 500,
-          "p50_ms": 426.66,
-          "p95_ms": 489.11,
-          "p99_ms": 860.11,
-          "max_ms": 898.25,
-          "mean_ms": 434.73,
+          "p50_ms": 409.31,
+          "p95_ms": 471.85,
+          "p99_ms": 794.73,
+          "max_ms": 881.96,
+          "mean_ms": 416.98,
           "server": {
             "count": 500,
-            "p50_ms": 44.55,
-            "p95_ms": 66.81,
-            "p99_ms": 78.02,
-            "max_ms": 503.73,
-            "mean_ms": 48.69
+            "p50_ms": 43.83,
+            "p95_ms": 57.87,
+            "p99_ms": 74.73,
+            "max_ms": 458.37,
+            "mean_ms": 46.44
           },
           "requested": 500,
           "errors": 0,
           "error_rate": 0.0,
-          "wall_clock_s": 27.32,
-          "qps": 18.3,
+          "wall_clock_s": 26.19,
+          "qps": 19.09,
           "error_samples": []
         },
         "cold_c16": {
           "count": 500,
-          "p50_ms": 845.5,
-          "p95_ms": 897.13,
-          "p99_ms": 1289.67,
-          "max_ms": 3293.18,
-          "mean_ms": 849.11,
+          "p50_ms": 841.33,
+          "p95_ms": 1009.58,
+          "p99_ms": 1161.31,
+          "max_ms": 3510.84,
+          "mean_ms": 851.61,
           "server": {
             "count": 500,
-            "p50_ms": 44.73,
-            "p95_ms": 65.7,
-            "p99_ms": 73.22,
-            "max_ms": 209.18,
-            "mean_ms": 47.76
+            "p50_ms": 45.53,
+            "p95_ms": 59.35,
+            "p99_ms": 70.72,
+            "max_ms": 251.54,
+            "mean_ms": 47.39
           },
           "requested": 500,
           "errors": 0,
           "error_rate": 0.0,
-          "wall_clock_s": 26.81,
-          "qps": 18.65,
+          "wall_clock_s": 26.84,
+          "qps": 18.63,
           "error_samples": []
         },
         "vector_hot_c1": {
           "count": 50,
-          "p50_ms": 52.01,
-          "p95_ms": 68.32,
-          "p99_ms": 79.9,
-          "max_ms": 79.98,
-          "mean_ms": 55.17,
+          "p50_ms": 51.75,
+          "p95_ms": 67.87,
+          "p99_ms": 73.82,
+          "max_ms": 74.08,
+          "mean_ms": 53.46,
           "server": {
             "count": 50,
-            "p50_ms": 44.98,
-            "p95_ms": 60.31,
-            "p99_ms": 71.86,
-            "max_ms": 72.53,
-            "mean_ms": 47.84
+            "p50_ms": 44.21,
+            "p95_ms": 59.11,
+            "p99_ms": 65.59,
+            "max_ms": 65.91,
+            "mean_ms": 46.01
           },
           "requested": 50,
           "errors": 0,
           "error_rate": 0.0,
-          "wall_clock_s": 2.76,
-          "qps": 18.12,
+          "wall_clock_s": 2.67,
+          "qps": 18.7,
           "error_samples": []
         }
       },
       "notes": "cold 阶段每条查询文本只使用一次以绕过向量与结果缓存；vector_hot 复用已出现的查询，单独报告；cold_start_first_request_ms 为冷启动后首个请求，单独列出不并入 p95。",
-      "cold_start_first_request_ms": 49.78
+      "cold_start_first_request_ms": 40.31
     },
     "conflict": {
       "total_cases": 180,
