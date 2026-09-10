@@ -58,6 +58,9 @@ class VNextRetrievalSampleResult:
     predicted_intent: str
     router_correct: bool
     recall_at_k: float
+    candidate_recall_at_k: float
+    selected_precision: float
+    selected_recall: float
     precision_at_k: float
     mrr: float
     ndcg_at_k: float
@@ -81,6 +84,9 @@ class VNextRetrievalEvalReport:
     router_accuracy: float = 0.0
     router_intent_counts: dict[str, int] = field(default_factory=dict)
     recall_at_k: float = 0.0
+    candidate_recall_at_k: float = 0.0
+    selected_precision: float = 0.0
+    selected_recall: float = 0.0
     precision_at_k: float = 0.0
     mrr: float = 0.0
     ndcg_at_k: float = 0.0
@@ -100,6 +106,9 @@ class VNextRetrievalEvalReport:
             "router_accuracy": self.router_accuracy,
             "router_intent_counts": self.router_intent_counts,
             "recall_at_k": self.recall_at_k,
+            "candidate_recall_at_k": self.candidate_recall_at_k,
+            "selected_precision": self.selected_precision,
+            "selected_recall": self.selected_recall,
             "precision_at_k": self.precision_at_k,
             "mrr": self.mrr,
             "ndcg_at_k": self.ndcg_at_k,
@@ -122,6 +131,9 @@ class VNextRetrievalEvalReport:
             "predicted_intent": s.predicted_intent,
             "router_correct": s.router_correct,
             "recall_at_k": s.recall_at_k,
+            "candidate_recall_at_k": s.candidate_recall_at_k,
+            "selected_precision": s.selected_precision,
+            "selected_recall": s.selected_recall,
             "precision_at_k": s.precision_at_k,
             "mrr": s.mrr,
             "ndcg_at_k": s.ndcg_at_k,
@@ -383,11 +395,13 @@ class VNextRetrievalEvaluator:
         predicted_intent = response.intent.value
         router_correct = predicted_intent == expected_intent
 
-        expected_ids = list(query.get("expected_memory_ids", []))
+        candidate_ids = list(query.get("expected_candidate_memory_ids", query.get("expected_memory_ids", [])))
+        expected_ids = list(query.get("expected_selected_memory_ids", query.get("expected_memory_ids", [])))
         forbidden_ids = list(query.get("forbidden_memory_ids", []))
         expected_context_ids = list(query.get("expected_context_ids", []))
         required_constraints = list(query.get("required_constraints", []))
 
+        candidate_recall = _recall_at_k(candidate_ids, selected_ids, self.top_k)
         recall = _recall_at_k(expected_ids, selected_ids, self.top_k)
         precision = _precision_at_k(expected_ids, selected_ids, self.top_k)
         mrr = _mrr(expected_ids, selected_ids)
@@ -433,6 +447,9 @@ class VNextRetrievalEvaluator:
             predicted_intent=predicted_intent,
             router_correct=router_correct,
             recall_at_k=recall,
+            candidate_recall_at_k=candidate_recall,
+            selected_precision=precision,
+            selected_recall=recall,
             precision_at_k=precision,
             mrr=mrr,
             ndcg_at_k=ndcg,
@@ -488,6 +505,9 @@ class VNextRetrievalEvaluator:
             router_accuracy=mean(lambda s: float(s.router_correct)),
             router_intent_counts=router_intent_counts,
             recall_at_k=mean(lambda s: s.recall_at_k),
+            candidate_recall_at_k=mean(lambda s: s.candidate_recall_at_k),
+            selected_precision=mean(lambda s: s.selected_precision),
+            selected_recall=mean(lambda s: s.selected_recall),
             precision_at_k=mean(lambda s: s.precision_at_k),
             mrr=mean(lambda s: s.mrr),
             ndcg_at_k=mean(lambda s: s.ndcg_at_k),

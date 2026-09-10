@@ -115,10 +115,10 @@ def build_report(*, config_path: Path, repeats: int) -> dict[str, Any]:
         },
         {
             "name": "知识检索召回率 Recall@K",
-            "value": retrieval["recall_at_k"],
+            "value": retrieval["candidate_recall_at_k"],
             "threshold": RECALL_TARGET,
             "unit": "ratio",
-            "passed": retrieval["recall_at_k"] >= RECALL_TARGET,
+            "passed": retrieval["candidate_recall_at_k"] >= RECALL_TARGET,
             "sample_count": retrieval["total_queries"],
         },
         {
