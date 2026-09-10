@@ -1,0 +1,3544 @@
+{
+  "metadata": {
+    "dataset_id": "memoryhub-preference-extraction-v2.1",
+    "version": "2.0.0",
+    "created_at": "2026-09-10T00:00:00Z",
+    "generator": "generate_preference_v2",
+    "generator_random_seed": 42,
+    "spec_version": "v2.1",
+    "label_source": "spec:preference-extraction-v2.1#blocks",
+    "sample_count": 240,
+    "blocks": {
+      "rule_hit": 100,
+      "llm_required": 100,
+      "hard_negative": 40
+    },
+    "annotation_rules": "标签描述规格语义（类型 + payload target/value），非任何运行输出；rule_hit 必须命中规则、llm_required 必须不命中规则，由生成器机械校验。"
+  },
+  "samples": [
+    {
+      "case_id": "pref2_rule_0001",
+      "block": "rule_hit",
+      "input_text": "以后都用 markdown 写周报",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "MARKDOWN",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0002",
+      "block": "rule_hit",
+      "input_text": "默认用 html 输出接口数据",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "HTML",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0003",
+      "block": "rule_hit",
+      "input_text": "每次汇报都改用 json 格式",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "JSON",
+      "expected_global": false,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0004",
+      "block": "rule_hit",
+      "input_text": "始终用 xml 格式返回结果",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "XML",
+      "expected_global": true,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0005",
+      "block": "rule_hit",
+      "input_text": "所有场景都用 csv 输出",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "CSV",
+      "expected_global": true,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0006",
+      "block": "rule_hit",
+      "input_text": "常规情况下用 markdown 格式整理材料",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "MARKDOWN",
+      "expected_global": false,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0007",
+      "block": "rule_hit",
+      "input_text": "以后写运维周报一律用 html",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "HTML",
+      "expected_global": true,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0008",
+      "block": "rule_hit",
+      "input_text": "从现在起默认用 json 保存配置说明",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "JSON",
+      "expected_global": false,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0009",
+      "block": "rule_hit",
+      "input_text": "任何场景都用 xml 格式交付",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "XML",
+      "expected_global": true,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0010",
+      "block": "rule_hit",
+      "input_text": "长期用 csv 格式沉淀文档",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "CSV",
+      "expected_global": false,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0011",
+      "block": "rule_hit",
+      "input_text": "以后都用 markdown 写周报",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "MARKDOWN",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0012",
+      "block": "rule_hit",
+      "input_text": "默认用 html 输出接口数据",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "HTML",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0013",
+      "block": "rule_hit",
+      "input_text": "每次汇报都改用 json 格式",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "JSON",
+      "expected_global": false,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0014",
+      "block": "rule_hit",
+      "input_text": "始终用 xml 格式返回结果",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "XML",
+      "expected_global": true,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0015",
+      "block": "rule_hit",
+      "input_text": "所有场景都用 csv 输出",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "CSV",
+      "expected_global": true,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0016",
+      "block": "rule_hit",
+      "input_text": "常规情况下用 markdown 格式整理材料",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "MARKDOWN",
+      "expected_global": false,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0017",
+      "block": "rule_hit",
+      "input_text": "以后写运维周报一律用 html",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "HTML",
+      "expected_global": true,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0018",
+      "block": "rule_hit",
+      "input_text": "从现在起默认用 json 保存配置说明",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "JSON",
+      "expected_global": false,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0019",
+      "block": "rule_hit",
+      "input_text": "任何场景都用 xml 格式交付",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "XML",
+      "expected_global": true,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0020",
+      "block": "rule_hit",
+      "input_text": "长期用 csv 格式沉淀文档",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "CSV",
+      "expected_global": false,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0021",
+      "block": "rule_hit",
+      "input_text": "以后都用 markdown 写周报",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "MARKDOWN",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0022",
+      "block": "rule_hit",
+      "input_text": "默认用 html 输出接口数据",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "HTML",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0023",
+      "block": "rule_hit",
+      "input_text": "每次汇报都改用 json 格式",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "JSON",
+      "expected_global": false,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0024",
+      "block": "rule_hit",
+      "input_text": "始终用 xml 格式返回结果",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "XML",
+      "expected_global": true,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0025",
+      "block": "rule_hit",
+      "input_text": "所有场景都用 csv 输出",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "CSV",
+      "expected_global": true,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0026",
+      "block": "rule_hit",
+      "input_text": "常规情况下用 markdown 格式整理材料",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "MARKDOWN",
+      "expected_global": false,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0027",
+      "block": "rule_hit",
+      "input_text": "以后写运维周报一律用 html",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "HTML",
+      "expected_global": true,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0028",
+      "block": "rule_hit",
+      "input_text": "从现在起默认用 json 保存配置说明",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "JSON",
+      "expected_global": false,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0029",
+      "block": "rule_hit",
+      "input_text": "任何场景都用 xml 格式交付",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "XML",
+      "expected_global": true,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0030",
+      "block": "rule_hit",
+      "input_text": "长期用 csv 格式沉淀文档",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "CSV",
+      "expected_global": false,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0031",
+      "block": "rule_hit",
+      "input_text": "以后都用 markdown 写周报",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "MARKDOWN",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0032",
+      "block": "rule_hit",
+      "input_text": "默认用 html 输出接口数据",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "HTML",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0033",
+      "block": "rule_hit",
+      "input_text": "每次汇报都改用 json 格式",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "JSON",
+      "expected_global": false,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0034",
+      "block": "rule_hit",
+      "input_text": "始终用 xml 格式返回结果",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "XML",
+      "expected_global": true,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0035",
+      "block": "rule_hit",
+      "input_text": "所有场景都用 csv 输出",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "CSV",
+      "expected_global": true,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0036",
+      "block": "rule_hit",
+      "input_text": "常规情况下用 markdown 格式整理材料",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "MARKDOWN",
+      "expected_global": false,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0037",
+      "block": "rule_hit",
+      "input_text": "以后写运维周报一律用 html",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "HTML",
+      "expected_global": true,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0038",
+      "block": "rule_hit",
+      "input_text": "从现在起默认用 json 保存配置说明",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "JSON",
+      "expected_global": false,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0039",
+      "block": "rule_hit",
+      "input_text": "任何场景都用 xml 格式交付",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "XML",
+      "expected_global": true,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0040",
+      "block": "rule_hit",
+      "input_text": "长期用 csv 格式沉淀文档",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "CSV",
+      "expected_global": false,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0041",
+      "block": "rule_hit",
+      "input_text": "以后都用 markdown 写周报",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "MARKDOWN",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0042",
+      "block": "rule_hit",
+      "input_text": "默认用 html 输出接口数据",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "HTML",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0043",
+      "block": "rule_hit",
+      "input_text": "每次汇报都改用 json 格式",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "JSON",
+      "expected_global": false,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0044",
+      "block": "rule_hit",
+      "input_text": "始终用 xml 格式返回结果",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "XML",
+      "expected_global": true,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0045",
+      "block": "rule_hit",
+      "input_text": "所有场景都用 csv 输出",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "CSV",
+      "expected_global": true,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0046",
+      "block": "rule_hit",
+      "input_text": "常规情况下用 markdown 格式整理材料",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "MARKDOWN",
+      "expected_global": false,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0047",
+      "block": "rule_hit",
+      "input_text": "以后写运维周报一律用 html",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "HTML",
+      "expected_global": true,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0048",
+      "block": "rule_hit",
+      "input_text": "从现在起默认用 json 保存配置说明",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "JSON",
+      "expected_global": false,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0049",
+      "block": "rule_hit",
+      "input_text": "任何场景都用 xml 格式交付",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "XML",
+      "expected_global": true,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0050",
+      "block": "rule_hit",
+      "input_text": "长期用 csv 格式沉淀文档",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "CSV",
+      "expected_global": false,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0051",
+      "block": "rule_hit",
+      "input_text": "以后都用 markdown 写周报",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "MARKDOWN",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0052",
+      "block": "rule_hit",
+      "input_text": "默认用 html 输出接口数据",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "HTML",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0053",
+      "block": "rule_hit",
+      "input_text": "每次汇报都改用 json 格式",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "JSON",
+      "expected_global": false,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0054",
+      "block": "rule_hit",
+      "input_text": "始终用 xml 格式返回结果",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "XML",
+      "expected_global": true,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0055",
+      "block": "rule_hit",
+      "input_text": "所有场景都用 csv 输出",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "CSV",
+      "expected_global": true,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0056",
+      "block": "rule_hit",
+      "input_text": "常规情况下用 markdown 格式整理材料",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "MARKDOWN",
+      "expected_global": false,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0057",
+      "block": "rule_hit",
+      "input_text": "以后写运维周报一律用 html",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "HTML",
+      "expected_global": true,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0058",
+      "block": "rule_hit",
+      "input_text": "从现在起默认用 json 保存配置说明",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "JSON",
+      "expected_global": false,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0059",
+      "block": "rule_hit",
+      "input_text": "任何场景都用 xml 格式交付",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "XML",
+      "expected_global": true,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0060",
+      "block": "rule_hit",
+      "input_text": "长期用 csv 格式沉淀文档",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "CSV",
+      "expected_global": false,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0061",
+      "block": "rule_hit",
+      "input_text": "以后都用 markdown 写周报",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "MARKDOWN",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0062",
+      "block": "rule_hit",
+      "input_text": "默认用 html 输出接口数据",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "HTML",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0063",
+      "block": "rule_hit",
+      "input_text": "每次汇报都改用 json 格式",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "JSON",
+      "expected_global": false,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0064",
+      "block": "rule_hit",
+      "input_text": "始终用 xml 格式返回结果",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "XML",
+      "expected_global": true,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0065",
+      "block": "rule_hit",
+      "input_text": "所有场景都用 csv 输出",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "CSV",
+      "expected_global": true,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0066",
+      "block": "rule_hit",
+      "input_text": "常规情况下用 markdown 格式整理材料",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "MARKDOWN",
+      "expected_global": false,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0067",
+      "block": "rule_hit",
+      "input_text": "以后写运维周报一律用 html",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "HTML",
+      "expected_global": true,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0068",
+      "block": "rule_hit",
+      "input_text": "从现在起默认用 json 保存配置说明",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "JSON",
+      "expected_global": false,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0069",
+      "block": "rule_hit",
+      "input_text": "任何场景都用 xml 格式交付",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "XML",
+      "expected_global": true,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0070",
+      "block": "rule_hit",
+      "input_text": "长期用 csv 格式沉淀文档",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "format_preference"
+      ],
+      "expected_target": "output_format",
+      "expected_value": "CSV",
+      "expected_global": false,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：显式格式指令（全局/默认修饰词 + 用 + 格式词）应抽为格式偏好，payload.target=output_format，value 归一化为大写格式名；含全局修饰词时 is_global=true。"
+    },
+    {
+      "case_id": "pref2_rule_0071",
+      "block": "rule_hit",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0072",
+      "block": "rule_hit",
+      "input_text": "别记录我的手机号",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0073",
+      "block": "rule_hit",
+      "input_text": "以后不要记住我的身份证号",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0074",
+      "block": "rule_hit",
+      "input_text": "禁止保存聊天里的银行卡信息",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0075",
+      "block": "rule_hit",
+      "input_text": "不要保存我的登录凭证",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0076",
+      "block": "rule_hit",
+      "input_text": "别把密钥写进持久存储",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0077",
+      "block": "rule_hit",
+      "input_text": "不要记录我的家庭地址",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0078",
+      "block": "rule_hit",
+      "input_text": "擦除我之前的行程轨迹",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0079",
+      "block": "rule_hit",
+      "input_text": "不准保存客户的身份信息",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0080",
+      "block": "rule_hit",
+      "input_text": "别存任何 token 到磁盘",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0081",
+      "block": "rule_hit",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0082",
+      "block": "rule_hit",
+      "input_text": "别记录我的手机号",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0083",
+      "block": "rule_hit",
+      "input_text": "以后不要记住我的身份证号",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0084",
+      "block": "rule_hit",
+      "input_text": "禁止保存聊天里的银行卡信息",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0085",
+      "block": "rule_hit",
+      "input_text": "不要保存我的登录凭证",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0086",
+      "block": "rule_hit",
+      "input_text": "别把密钥写进持久存储",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0087",
+      "block": "rule_hit",
+      "input_text": "不要记录我的家庭地址",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0088",
+      "block": "rule_hit",
+      "input_text": "擦除我之前的行程轨迹",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0089",
+      "block": "rule_hit",
+      "input_text": "不准保存客户的身份信息",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0090",
+      "block": "rule_hit",
+      "input_text": "别存任何 token 到磁盘",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0091",
+      "block": "rule_hit",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0092",
+      "block": "rule_hit",
+      "input_text": "别记录我的手机号",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0093",
+      "block": "rule_hit",
+      "input_text": "以后不要记住我的身份证号",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0094",
+      "block": "rule_hit",
+      "input_text": "禁止保存聊天里的银行卡信息",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0095",
+      "block": "rule_hit",
+      "input_text": "不要保存我的登录凭证",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0096",
+      "block": "rule_hit",
+      "input_text": "别把密钥写进持久存储",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0097",
+      "block": "rule_hit",
+      "input_text": "不要记录我的家庭地址",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0098",
+      "block": "rule_hit",
+      "input_text": "擦除我之前的行程轨迹",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0099",
+      "block": "rule_hit",
+      "input_text": "不准保存客户的身份信息",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_rule_0100",
+      "block": "rule_hit",
+      "input_text": "别存任何 token 到磁盘",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "safety_preference"
+      ],
+      "expected_target": "sensitive_data",
+      "expected_value": "forbidden",
+      "expected_global": true,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：涉及隐私/凭证的存储限制应抽为安全硬约束，payload.target=sensitive_data，value=forbidden，且作用域为全局。"
+    },
+    {
+      "case_id": "pref2_llm_0101",
+      "block": "llm_required",
+      "input_text": "处理数据时我更倾向于用 Python 而不是表格软件",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：表达工具选择倾向 → tool_preference（payload 命名不作要求）。"
+    },
+    {
+      "case_id": "pref2_llm_0102",
+      "block": "llm_required",
+      "input_text": "复杂查询我一般直接用命令行工具搞定",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference（工具名不作硬性要求）。"
+    },
+    {
+      "case_id": "pref2_llm_0103",
+      "block": "llm_required",
+      "input_text": "画流程图我习惯用 draw.io",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0104",
+      "block": "llm_required",
+      "input_text": "看日志我更愿意用命令行而不是图形界面",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0105",
+      "block": "llm_required",
+      "input_text": "抓网页数据我都用脚本而不是手工复制",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0106",
+      "block": "llm_required",
+      "input_text": "报告开头先给结论，细节放到后面展开",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：输出组织方式偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0107",
+      "block": "llm_required",
+      "input_text": "给我的说明尽量短，能一句话说清就别写三段",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：篇幅与风格偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0108",
+      "block": "llm_required",
+      "input_text": "代码示例请带上必要的注释说明",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：产出风格偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0109",
+      "block": "llm_required",
+      "input_text": "回答时先说明风险再给建议",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：回答结构偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0110",
+      "block": "llm_required",
+      "input_text": "表格里的数字统一保留两位小数",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：呈现细节偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0111",
+      "block": "llm_required",
+      "input_text": "部署前先跑一遍回归测试再发布",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0112",
+      "block": "llm_required",
+      "input_text": "提交代码前自动格式化并跑静态检查",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0113",
+      "block": "llm_required",
+      "input_text": "立项之前先把验收口径写清楚",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0114",
+      "block": "llm_required",
+      "input_text": "处理线上问题先留存现场再动手改",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：处置流程偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0115",
+      "block": "llm_required",
+      "input_text": "需求确认后再排期，避免反复返工",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0116",
+      "block": "llm_required",
+      "input_text": "对客户的材料统一用中文撰写",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0117",
+      "block": "llm_required",
+      "input_text": "技术文档保持英文，方便外部协作",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0118",
+      "block": "llm_required",
+      "input_text": "给日本合作方的内容尽量用日文",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0119",
+      "block": "llm_required",
+      "input_text": "内部沟通用中英混排也没问题，不用刻意翻译",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0120",
+      "block": "llm_required",
+      "input_text": "开会的时候把通知静音，别打断",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：场景相关偏好 → scene_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0121",
+      "block": "llm_required",
+      "input_text": "专注写代码时段不要推送消息",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：场景相关偏好 → scene_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0122",
+      "block": "llm_required",
+      "input_text": "演示场合尽量少用专业术语",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：场景相关偏好 → scene_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0123",
+      "block": "llm_required",
+      "input_text": "评审会上先把背景讲清楚再谈细节",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference",
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：会议流程偏好，允许流程或场景类型。"
+    },
+    {
+      "case_id": "pref2_llm_0124",
+      "block": "llm_required",
+      "input_text": "关注的信息优先看结论和数字",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：信息取舍偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0125",
+      "block": "llm_required",
+      "input_text": "给我的清单按优先级排序",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：组织方式偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0126",
+      "block": "llm_required",
+      "input_text": "处理数据时我更倾向于用 Python 而不是表格软件",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：表达工具选择倾向 → tool_preference（payload 命名不作要求）。"
+    },
+    {
+      "case_id": "pref2_llm_0127",
+      "block": "llm_required",
+      "input_text": "复杂查询我一般直接用命令行工具搞定",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference（工具名不作硬性要求）。"
+    },
+    {
+      "case_id": "pref2_llm_0128",
+      "block": "llm_required",
+      "input_text": "画流程图我习惯用 draw.io",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0129",
+      "block": "llm_required",
+      "input_text": "看日志我更愿意用命令行而不是图形界面",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0130",
+      "block": "llm_required",
+      "input_text": "抓网页数据我都用脚本而不是手工复制",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0131",
+      "block": "llm_required",
+      "input_text": "报告开头先给结论，细节放到后面展开",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：输出组织方式偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0132",
+      "block": "llm_required",
+      "input_text": "给我的说明尽量短，能一句话说清就别写三段",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：篇幅与风格偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0133",
+      "block": "llm_required",
+      "input_text": "代码示例请带上必要的注释说明",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：产出风格偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0134",
+      "block": "llm_required",
+      "input_text": "回答时先说明风险再给建议",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：回答结构偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0135",
+      "block": "llm_required",
+      "input_text": "表格里的数字统一保留两位小数",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：呈现细节偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0136",
+      "block": "llm_required",
+      "input_text": "部署前先跑一遍回归测试再发布",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0137",
+      "block": "llm_required",
+      "input_text": "提交代码前自动格式化并跑静态检查",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0138",
+      "block": "llm_required",
+      "input_text": "立项之前先把验收口径写清楚",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0139",
+      "block": "llm_required",
+      "input_text": "处理线上问题先留存现场再动手改",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：处置流程偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0140",
+      "block": "llm_required",
+      "input_text": "需求确认后再排期，避免反复返工",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0141",
+      "block": "llm_required",
+      "input_text": "对客户的材料统一用中文撰写",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0142",
+      "block": "llm_required",
+      "input_text": "技术文档保持英文，方便外部协作",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0143",
+      "block": "llm_required",
+      "input_text": "给日本合作方的内容尽量用日文",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0144",
+      "block": "llm_required",
+      "input_text": "内部沟通用中英混排也没问题，不用刻意翻译",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0145",
+      "block": "llm_required",
+      "input_text": "开会的时候把通知静音，别打断",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：场景相关偏好 → scene_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0146",
+      "block": "llm_required",
+      "input_text": "专注写代码时段不要推送消息",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：场景相关偏好 → scene_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0147",
+      "block": "llm_required",
+      "input_text": "演示场合尽量少用专业术语",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：场景相关偏好 → scene_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0148",
+      "block": "llm_required",
+      "input_text": "评审会上先把背景讲清楚再谈细节",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference",
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：会议流程偏好，允许流程或场景类型。"
+    },
+    {
+      "case_id": "pref2_llm_0149",
+      "block": "llm_required",
+      "input_text": "关注的信息优先看结论和数字",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：信息取舍偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0150",
+      "block": "llm_required",
+      "input_text": "给我的清单按优先级排序",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：组织方式偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0151",
+      "block": "llm_required",
+      "input_text": "处理数据时我更倾向于用 Python 而不是表格软件",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：表达工具选择倾向 → tool_preference（payload 命名不作要求）。"
+    },
+    {
+      "case_id": "pref2_llm_0152",
+      "block": "llm_required",
+      "input_text": "复杂查询我一般直接用命令行工具搞定",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference（工具名不作硬性要求）。"
+    },
+    {
+      "case_id": "pref2_llm_0153",
+      "block": "llm_required",
+      "input_text": "画流程图我习惯用 draw.io",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0154",
+      "block": "llm_required",
+      "input_text": "看日志我更愿意用命令行而不是图形界面",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0155",
+      "block": "llm_required",
+      "input_text": "抓网页数据我都用脚本而不是手工复制",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0156",
+      "block": "llm_required",
+      "input_text": "报告开头先给结论，细节放到后面展开",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：输出组织方式偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0157",
+      "block": "llm_required",
+      "input_text": "给我的说明尽量短，能一句话说清就别写三段",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：篇幅与风格偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0158",
+      "block": "llm_required",
+      "input_text": "代码示例请带上必要的注释说明",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：产出风格偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0159",
+      "block": "llm_required",
+      "input_text": "回答时先说明风险再给建议",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：回答结构偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0160",
+      "block": "llm_required",
+      "input_text": "表格里的数字统一保留两位小数",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：呈现细节偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0161",
+      "block": "llm_required",
+      "input_text": "部署前先跑一遍回归测试再发布",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0162",
+      "block": "llm_required",
+      "input_text": "提交代码前自动格式化并跑静态检查",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0163",
+      "block": "llm_required",
+      "input_text": "立项之前先把验收口径写清楚",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0164",
+      "block": "llm_required",
+      "input_text": "处理线上问题先留存现场再动手改",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：处置流程偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0165",
+      "block": "llm_required",
+      "input_text": "需求确认后再排期，避免反复返工",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0166",
+      "block": "llm_required",
+      "input_text": "对客户的材料统一用中文撰写",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0167",
+      "block": "llm_required",
+      "input_text": "技术文档保持英文，方便外部协作",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0168",
+      "block": "llm_required",
+      "input_text": "给日本合作方的内容尽量用日文",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0169",
+      "block": "llm_required",
+      "input_text": "内部沟通用中英混排也没问题，不用刻意翻译",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0170",
+      "block": "llm_required",
+      "input_text": "开会的时候把通知静音，别打断",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：场景相关偏好 → scene_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0171",
+      "block": "llm_required",
+      "input_text": "专注写代码时段不要推送消息",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：场景相关偏好 → scene_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0172",
+      "block": "llm_required",
+      "input_text": "演示场合尽量少用专业术语",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：场景相关偏好 → scene_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0173",
+      "block": "llm_required",
+      "input_text": "评审会上先把背景讲清楚再谈细节",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference",
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：会议流程偏好，允许流程或场景类型。"
+    },
+    {
+      "case_id": "pref2_llm_0174",
+      "block": "llm_required",
+      "input_text": "关注的信息优先看结论和数字",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：信息取舍偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0175",
+      "block": "llm_required",
+      "input_text": "给我的清单按优先级排序",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：组织方式偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0176",
+      "block": "llm_required",
+      "input_text": "处理数据时我更倾向于用 Python 而不是表格软件",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：表达工具选择倾向 → tool_preference（payload 命名不作要求）。"
+    },
+    {
+      "case_id": "pref2_llm_0177",
+      "block": "llm_required",
+      "input_text": "复杂查询我一般直接用命令行工具搞定",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference（工具名不作硬性要求）。"
+    },
+    {
+      "case_id": "pref2_llm_0178",
+      "block": "llm_required",
+      "input_text": "画流程图我习惯用 draw.io",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0179",
+      "block": "llm_required",
+      "input_text": "看日志我更愿意用命令行而不是图形界面",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0180",
+      "block": "llm_required",
+      "input_text": "抓网页数据我都用脚本而不是手工复制",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "tool_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：工具选择倾向 → tool_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0181",
+      "block": "llm_required",
+      "input_text": "报告开头先给结论，细节放到后面展开",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：输出组织方式偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0182",
+      "block": "llm_required",
+      "input_text": "给我的说明尽量短，能一句话说清就别写三段",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：篇幅与风格偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0183",
+      "block": "llm_required",
+      "input_text": "代码示例请带上必要的注释说明",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：产出风格偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0184",
+      "block": "llm_required",
+      "input_text": "回答时先说明风险再给建议",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：回答结构偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0185",
+      "block": "llm_required",
+      "input_text": "表格里的数字统一保留两位小数",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：呈现细节偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0186",
+      "block": "llm_required",
+      "input_text": "部署前先跑一遍回归测试再发布",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0187",
+      "block": "llm_required",
+      "input_text": "提交代码前自动格式化并跑静态检查",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0188",
+      "block": "llm_required",
+      "input_text": "立项之前先把验收口径写清楚",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0189",
+      "block": "llm_required",
+      "input_text": "处理线上问题先留存现场再动手改",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：处置流程偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0190",
+      "block": "llm_required",
+      "input_text": "需求确认后再排期，避免反复返工",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：流程习惯偏好 → workflow_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0191",
+      "block": "llm_required",
+      "input_text": "对客户的材料统一用中文撰写",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0192",
+      "block": "llm_required",
+      "input_text": "技术文档保持英文，方便外部协作",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0193",
+      "block": "llm_required",
+      "input_text": "给日本合作方的内容尽量用日文",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0194",
+      "block": "llm_required",
+      "input_text": "内部沟通用中英混排也没问题，不用刻意翻译",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "language_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：语言偏好 → language_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0195",
+      "block": "llm_required",
+      "input_text": "开会的时候把通知静音，别打断",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：场景相关偏好 → scene_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0196",
+      "block": "llm_required",
+      "input_text": "专注写代码时段不要推送消息",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：场景相关偏好 → scene_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0197",
+      "block": "llm_required",
+      "input_text": "演示场合尽量少用专业术语",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：场景相关偏好 → scene_preference。"
+    },
+    {
+      "case_id": "pref2_llm_0198",
+      "block": "llm_required",
+      "input_text": "评审会上先把背景讲清楚再谈细节",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "workflow_preference",
+        "scene_preference"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：会议流程偏好，允许流程或场景类型。"
+    },
+    {
+      "case_id": "pref2_llm_0199",
+      "block": "llm_required",
+      "input_text": "关注的信息优先看结论和数字",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：信息取舍偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_llm_0200",
+      "block": "llm_required",
+      "input_text": "给我的清单按优先级排序",
+      "expected_found": true,
+      "expected_type_any_of": [
+        "output_style"
+      ],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": null,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：组织方式偏好 → output_style。"
+    },
+    {
+      "case_id": "pref2_neg_0201",
+      "block": "hard_negative",
+      "input_text": "服务器 IP 是 10.0.0.5",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：客观事实不是偏好，必须判为未抽取。"
+    },
+    {
+      "case_id": "pref2_neg_0202",
+      "block": "hard_negative",
+      "input_text": "这个项目的负责人是张工",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：人员归属是事实，不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0203",
+      "block": "hard_negative",
+      "input_text": "账单日期是每月 7 号",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：日期事实不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0204",
+      "block": "hard_negative",
+      "input_text": "本周的版本号是 2.4.1",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：版本信息是事实。"
+    },
+    {
+      "case_id": "pref2_neg_0205",
+      "block": "hard_negative",
+      "input_text": "会议室在三楼东侧",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：地点事实不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0206",
+      "block": "hard_negative",
+      "input_text": "这次用红色标注一下就行",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：一次性指令不构成长期偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0207",
+      "block": "hard_negative",
+      "input_text": "今天先提交一版草稿",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：临时安排不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0208",
+      "block": "hard_negative",
+      "input_text": "这一单先按老流程走",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：单次行为不构成偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0209",
+      "block": "hard_negative",
+      "input_text": "怎么把周报导出成 PDF？",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：疑问句不是偏好陈述。"
+    },
+    {
+      "case_id": "pref2_neg_0210",
+      "block": "hard_negative",
+      "input_text": "帮我查一下上周的提交记录",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：一次性请求不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0211",
+      "block": "hard_negative",
+      "input_text": "现在几点了",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：无偏好语义。"
+    },
+    {
+      "case_id": "pref2_neg_0212",
+      "block": "hard_negative",
+      "input_text": "把这段日志贴给我看看",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：即时操作请求。"
+    },
+    {
+      "case_id": "pref2_neg_0213",
+      "block": "hard_negative",
+      "input_text": "明天的会议记得提前十分钟到",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：单次提醒不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0214",
+      "block": "hard_negative",
+      "input_text": "这个方案定价是 199 元",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：金额事实不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0215",
+      "block": "hard_negative",
+      "input_text": "数据库当前的连接数是 42",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：运行时状态不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0216",
+      "block": "hard_negative",
+      "input_text": "客户下周三来拜访",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：日程事实不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0217",
+      "block": "hard_negative",
+      "input_text": "服务器 IP 是 10.0.0.5",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：客观事实不是偏好，必须判为未抽取。"
+    },
+    {
+      "case_id": "pref2_neg_0218",
+      "block": "hard_negative",
+      "input_text": "这个项目的负责人是张工",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：人员归属是事实，不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0219",
+      "block": "hard_negative",
+      "input_text": "账单日期是每月 7 号",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：日期事实不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0220",
+      "block": "hard_negative",
+      "input_text": "本周的版本号是 2.4.1",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：版本信息是事实。"
+    },
+    {
+      "case_id": "pref2_neg_0221",
+      "block": "hard_negative",
+      "input_text": "会议室在三楼东侧",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：地点事实不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0222",
+      "block": "hard_negative",
+      "input_text": "这次用红色标注一下就行",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：一次性指令不构成长期偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0223",
+      "block": "hard_negative",
+      "input_text": "今天先提交一版草稿",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：临时安排不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0224",
+      "block": "hard_negative",
+      "input_text": "这一单先按老流程走",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：单次行为不构成偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0225",
+      "block": "hard_negative",
+      "input_text": "怎么把周报导出成 PDF？",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：疑问句不是偏好陈述。"
+    },
+    {
+      "case_id": "pref2_neg_0226",
+      "block": "hard_negative",
+      "input_text": "帮我查一下上周的提交记录",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：一次性请求不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0227",
+      "block": "hard_negative",
+      "input_text": "现在几点了",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：无偏好语义。"
+    },
+    {
+      "case_id": "pref2_neg_0228",
+      "block": "hard_negative",
+      "input_text": "把这段日志贴给我看看",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：即时操作请求。"
+    },
+    {
+      "case_id": "pref2_neg_0229",
+      "block": "hard_negative",
+      "input_text": "明天的会议记得提前十分钟到",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：单次提醒不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0230",
+      "block": "hard_negative",
+      "input_text": "这个方案定价是 199 元",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：金额事实不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0231",
+      "block": "hard_negative",
+      "input_text": "数据库当前的连接数是 42",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：运行时状态不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0232",
+      "block": "hard_negative",
+      "input_text": "客户下周三来拜访",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：日程事实不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0233",
+      "block": "hard_negative",
+      "input_text": "服务器 IP 是 10.0.0.5",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "security",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：客观事实不是偏好，必须判为未抽取。"
+    },
+    {
+      "case_id": "pref2_neg_0234",
+      "block": "hard_negative",
+      "input_text": "这个项目的负责人是张工",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "project_management",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：人员归属是事实，不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0235",
+      "block": "hard_negative",
+      "input_text": "账单日期是每月 7 号",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "personal",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：日期事实不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0236",
+      "block": "hard_negative",
+      "input_text": "本周的版本号是 2.4.1",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：版本信息是事实。"
+    },
+    {
+      "case_id": "pref2_neg_0237",
+      "block": "hard_negative",
+      "input_text": "会议室在三楼东侧",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：地点事实不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0238",
+      "block": "hard_negative",
+      "input_text": "这次用红色标注一下就行",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "office",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：一次性指令不构成长期偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0239",
+      "block": "hard_negative",
+      "input_text": "今天先提交一版草稿",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "development",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：临时安排不是偏好。"
+    },
+    {
+      "case_id": "pref2_neg_0240",
+      "block": "hard_negative",
+      "input_text": "这一单先按老流程走",
+      "expected_found": false,
+      "expected_type_any_of": [],
+      "expected_target": "",
+      "expected_value": "",
+      "expected_global": false,
+      "scene": "operations",
+      "label_source": "spec:preference-extraction-v2.1#blocks",
+      "spec_rationale": "规格：单次行为不构成偏好。"
+    }
+  ]
+}
