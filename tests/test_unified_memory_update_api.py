@@ -11,6 +11,8 @@ from memoryhub.adapter.schemas import (
     SourceType,
 )
 from memoryhub.app import create_app
+from memoryhub.core.knowledge.confidence import KnowledgeConfidenceCalculator
+from memoryhub.core.memory_write import _TIEBREAK_SPAN
 from memoryhub.core.preference.confidence import ConfidenceCalculator
 from memoryhub.config import AppConfig, SafetyConfig, StorageConfig, UserRuleConfig
 
@@ -67,7 +69,11 @@ def test_put_updates_preference_metadata_version_and_evidence(tmp_path) -> None:
             extract_source=updated.get("extract_source") or "implicit_inference",
             evidences=[Evidence(**e) for e in updated["evidences"]],
         )
-        assert updated["confidence"] == ConfidenceCalculator().calculate(recalc)
+        # 落库值 = 公式值 ± 有界的内容微扰（微扰只用来打破并列）。
+        assert (
+            abs(updated["confidence"] - ConfidenceCalculator().calculate(recalc))
+            <= _TIEBREAK_SPAN
+        )
         assert updated["version"] == 2
         lineage = client.get(
             f"/api/memory/v2/memories/{memory.memory_id}/lineage",
@@ -164,7 +170,25 @@ def test_put_updates_fact_knowledge_confidence_and_evidence(tmp_path) -> None:
         updated = body["memory"]
         assert body["action"] == "supersede"
         assert updated["content"] == "Project A owner changed to Bob"
-        assert updated["confidence"] == 0.91
+        # 请求体 confidence 同样是占位值：知识记忆与偏好一样在写入收口点按证据链重算，
+        # 而不是把调用方传的 0.91 原样落库。
+        assert updated["confidence"] != 0.91
+        recalc = KnowledgeMemory(
+            user_id=user_id,
+            knowledge_type=KnowledgeType.FACT,
+            subject="Project A",
+            predicate="owner",
+            object_value="Bob",
+            content=updated["content"],
+            evidences=[Evidence(**item) for item in updated["evidences"]],
+        )
+        assert (
+            abs(
+                updated["confidence"]
+                - KnowledgeConfidenceCalculator().from_memory(recalc)
+            )
+            <= _TIEBREAK_SPAN
+        )
         assert updated["version"] == 2
         evidence = client.get(
             f"/api/memory/v2/memories/{fact.memory_id}/evidence",

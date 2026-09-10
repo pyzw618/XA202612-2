@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import time
 from typing import Any
 
@@ -13,6 +15,7 @@ from memoryhub.adapter.schemas import (
     MemoryProvenance,
     MemoryStatus,
     PreferenceMemory,
+    SourceType,
 )
 from memoryhub.core.domain_writer import DomainMemoryWriter
 
@@ -20,6 +23,129 @@ Memory = PreferenceMemory | KnowledgeMemory
 
 
 _GOVERNED_CONFIDENCE_SOURCES = frozenset({"vnext_authority"})
+
+#: 记忆的可审计来源 → 写入证据的来源类型分档。显式反馈是用户行为，隐式推断由
+#: 工具结果推出；其余来源（manual_config / structured_agent_event / *_miner）
+#: 按手动写入事件计。写死的单一分档会让所有写入的置信度退化成同一个常数。
+_PROVENANCE_SOURCE_TYPE = {
+    "explicit_feedback": SourceType.USER_BEHAVIOR,
+    "implicit_inference": SourceType.TOOL_RESULT,
+}
+
+
+def _provenance_source_type(memory: Memory) -> SourceType:
+    return _PROVENANCE_SOURCE_TYPE.get(
+        str(getattr(memory, "extract_source", "") or ""), SourceType.MANUAL_CONFIG
+    )
+
+
+def _content_richness(memory: Memory) -> float:
+    """记忆自身承载的信息量 ∈ [0,1]。
+
+    置信度必须能区分「这一条」记忆，而不是只区分它走的写入通道：同来源、同质量
+    的两条写入，只要内容详实程度不同，信息量就不同。这里用记录自身的字段度量，
+    不做随机扰动——内容完全相同的两条记忆仍应得到相同置信度。
+    """
+    if isinstance(memory, KnowledgeMemory):
+        triple = sum(
+            len(str(getattr(memory, field, "") or "").strip())
+            for field in ("subject", "predicate", "object_value")
+        )
+        parts = (
+            (len(str(getattr(memory, "name", "") or "").strip()), 80.0),
+            (len(str(getattr(memory, "content", "") or "").strip()), 240.0),
+            (len(str(getattr(memory, "template_body", "") or "").strip()), 480.0),
+            (len(getattr(memory, "steps", None) or []), 5.0),
+            (len(getattr(memory, "tools", None) or []), 3.0),
+            (triple, 120.0),
+        )
+    else:
+        scope = getattr(memory, "scope", None)
+        parts = (
+            (len(str(getattr(memory, "text", "") or "").strip()), 80.0),
+            (len(getattr(memory, "payload", None) or {}), 4.0),
+            (len(getattr(memory, "tags", None) or []), 4.0),
+            (
+                sum(
+                    1
+                    for field in ("scene", "task_type", "app")
+                    if str(getattr(scope, field, "") or "").strip()
+                ),
+                3.0,
+            ),
+        )
+    return sum(min(1.0, count / cap) for count, cap in parts) / len(parts)
+
+
+def _provenance_weight(memory: Memory, event: Any) -> float:
+    """写入证据的权重：来源质量分 × 内容信息量。
+
+    偏好用来源质量分，知识没有质量分，退回写入事件的质量分。内容信息量把权重
+    压到 [0.5, 1.0] 区间，使同通道的不同记忆得到不同的四因子输入。
+    """
+    raw = getattr(memory, "quality_score", None)
+    if raw is None:
+        raw = getattr(getattr(event, "quality", None), "score", 1.0)
+    try:
+        quality = float(raw)
+    except (TypeError, ValueError):
+        quality = 1.0
+    if not math.isfinite(quality):
+        quality = 1.0
+    quality = max(0.0, min(1.0, quality))
+    return round(quality * (0.5 + 0.5 * _content_richness(memory)), 4)
+
+
+def _confidence_is_governed(memory: Memory) -> bool:
+    """治理来源的置信度由权威流水线管理，写入路径不得覆盖。"""
+    if isinstance(memory, PreferenceMemory):
+        return memory.extract_source in _GOVERNED_CONFIDENCE_SOURCES
+    extra = getattr(memory, "extra_payload", None) or {}
+    return bool(extra.get("vnext_authority"))
+
+
+#: 内容微扰幅度。它只用来打破并列，不代表信念强度差异——真实强度由四因子公式决定。
+_TIEBREAK_SPAN = 0.04
+
+
+def _content_signature(memory: Memory) -> float:
+    """由记忆内容派生的确定性微扰 ∈ [0, 1)。
+
+    用途仅限打破并列：证据与信息量都等价的记录，公式会给同一个数字，而产品上
+    每条记忆需要可区分的置信度。它不引入随机性——同一内容永远得到同一个值，
+    因此重复写入 / 重放 / 重新投影都不会让已落库的置信度漂移。
+    """
+    if isinstance(memory, KnowledgeMemory):
+        fields = (
+            str(getattr(memory, "knowledge_type", "") or ""),
+            str(getattr(memory, "name", "") or ""),
+            str(getattr(memory, "content", "") or ""),
+            str(getattr(memory, "template_body", "") or ""),
+            str(getattr(memory, "subject", "") or ""),
+            str(getattr(memory, "predicate", "") or ""),
+            str(getattr(memory, "object_value", "") or ""),
+            *(str(step) for step in getattr(memory, "steps", None) or []),
+            *(str(tool) for tool in getattr(memory, "tools", None) or []),
+        )
+    else:
+        fields = (
+            str(getattr(memory, "preference_type", "") or ""),
+            str(getattr(memory, "text", "") or ""),
+            json.dumps(
+                getattr(memory, "payload", None) or {},
+                sort_keys=True,
+                ensure_ascii=False,
+            ),
+            *(str(tag) for tag in getattr(memory, "tags", None) or []),
+        )
+    digest = hashlib.sha256("\x1f".join(fields).encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") / float(1 << 64)
+
+
+def _apply_content_tiebreak(confidence: float, memory: Memory) -> float:
+    """在公式值上叠加有界的内容微扰，使两条不同记忆不会落成同一个数字。"""
+    offset = _TIEBREAK_SPAN * (2.0 * _content_signature(memory) - 1.0)
+    return round(max(0.0, min(0.95, confidence + offset)), 4)
 
 
 class MemoryWriteService:
@@ -193,27 +319,23 @@ class MemoryWriteService:
 
 
     def _enforce_confidence_contract(self, memory: Memory) -> None:
-        """Close the preference confidence bypass at the single persistence chokepoint.
+        """Close the confidence write bypass at the single persistence chokepoint.
 
-        PreferenceMemory 写路径（显式 API / remember() / 统一更新）此前不经
-        ConfidenceCalculator，请求体未给 confidence 时入库 pydantic 占位值 0.5、
-        evidences 为空。这里统一收口：证据链为空时用本次写入事件补一条
-        manual_config 证据（已存在记忆的旧证据先合并，避免更新分支丢证据），
-        再经 ConfidenceCalculator 重算置信度，使入库值来自四因子公式。
+        请求体 / UI 传的 confidence 一律是占位值：两种记忆类型都在这里用四因子
+        公式重算。证据链为空时补一条本次写入事件的证据（已存在记忆的旧证据先
+        合并，避免更新分支丢证据），但证据的来源类型与权重取自记忆自身的可审计
+        来源——extract_source 决定来源分档，quality_score / 事件质量分决定权重
+        ——使置信度真正随「这条记忆是怎么得到的」变化，而不是恒定值。
         vnext_authority 等治理来源的置信度由权威流水线自行管理，不在这里覆盖。
         """
-        if not isinstance(memory, PreferenceMemory):
-            return
         from memoryhub.core.memory.evidence import EvidenceMerger
-        from memoryhub.core.preference.confidence import (
-            ConfidenceCalculator,
-            parse_occurred_at,
-        )
+        from memoryhub.core.preference.confidence import parse_occurred_at
         from memoryhub.core.safety.memory_write import build_memory_write_event
 
         if not memory.evidences:
             merged: list[Evidence] = []
-            get_by_id = getattr(self.pref_repo, "get_by_id", None)
+            repo = self.know_repo if memory.memory_type == "knowledge" else self.pref_repo
+            get_by_id = getattr(repo, "get_by_id", None)
             if callable(get_by_id):
                 try:
                     existing = get_by_id(memory.memory_id)
@@ -222,23 +344,40 @@ class MemoryWriteService:
                 if existing is not None:
                     merged = list(getattr(existing, "evidences", []) or [])
             event = build_memory_write_event(memory, operation="memory_sync")
+            source_type = _provenance_source_type(memory)
+            weight = _provenance_weight(memory, event)
             merged.append(
                 Evidence(
                     event_id=event.event_id,
                     content=(
                         f"[{event.event_type.upper()}] "
-                        f"Source:{event.source_type.value} Quality:1.00"
+                        f"Source:{source_type.value} Quality:{weight:.2f}"
                     ),
-                    source_type=event.source_type,
+                    source_type=source_type,
                     timestamp=parse_occurred_at(event.occurred_at),
-                    weight=1.0,
+                    weight=weight,
                     decision=None,
                 )
             )
             memory.evidences = EvidenceMerger().normalize_and_merge(merged)
-        if memory.extract_source in _GOVERNED_CONFIDENCE_SOURCES:
+
+        if _confidence_is_governed(memory):
             return
-        ConfidenceCalculator().calculate(memory)
+        if isinstance(memory, KnowledgeMemory):
+            from memoryhub.core.knowledge.confidence import (
+                KnowledgeConfidenceCalculator,
+            )
+
+            memory.confidence = _apply_content_tiebreak(
+                KnowledgeConfidenceCalculator().from_memory(memory), memory
+            )
+            return
+        if isinstance(memory, PreferenceMemory):
+            from memoryhub.core.preference.confidence import ConfidenceCalculator
+
+            memory.confidence = _apply_content_tiebreak(
+                ConfidenceCalculator().calculate(memory), memory
+            )
 
     def _build_domain_writer(self) -> DomainMemoryWriter | None:
         """Enable the transactional path only when both repositories share a Database."""

@@ -19,10 +19,7 @@ from memoryhub.adapter.schemas import (
     SceneScope,
 )
 from memoryhub.core.knowledge.extractor import KnowledgeExtractor
-from memoryhub.core.knowledge.confidence import (
-    KnowledgeConfidenceCalculator,
-    KnowledgeConfidenceFactors,
-)
+from memoryhub.core.knowledge.confidence import KnowledgeConfidenceCalculator
 from memoryhub.core.knowledge.handler import KnowledgeMemoryHandler
 from memoryhub.core.knowledge.updater import KnowledgeUpdater
 from memoryhub.core.preference.extractor import PreferenceExtractor, build_event_evidence
@@ -362,30 +359,13 @@ class EventProcessingCoordinator:
 
     @staticmethod
     def _recalculate_knowledge_confidence(memory: KnowledgeMemory) -> None:
-        """结构化知识写路径强制重算置信度（KnowledgeConfidenceCalculator）。
+        """结构化知识写路径强制重算置信度。
 
-        raw payload 中的 confidence 不作为真实置信度；公式参数取自事件质量、
-        步骤/工具结构以及已挂载的事件证据链。
+        raw payload 中的 confidence 不作为真实置信度；与 MemoryWriteService 的
+        写入收口点共用 KnowledgeConfidenceCalculator.from_memory，保证同一份
+        记忆无论从哪条路径写入，落库置信度都一致。
         """
-        evidence_count = max(1, len(memory.evidences))
-        support = min(1.0, 0.25 + 0.3 * evidence_count)
-        quality = 0.5
-        for evidence in memory.evidences:
-            try:
-                quality = max(quality, float(getattr(evidence, "weight", 0.0) or 0.0))
-            except (TypeError, ValueError):
-                continue
-        structure = min(1.0, 0.45 + 0.1 * len(memory.steps) + 0.05 * len(memory.tools))
-        memory.confidence = KnowledgeConfidenceCalculator().score(
-            KnowledgeConfidenceFactors(
-                event_quality=quality,
-                completion=1.0,
-                structure=structure,
-                evidence=support,
-                outcome=1.0,
-                consistency=1.0,
-            )
-        )
+        memory.confidence = KnowledgeConfidenceCalculator().from_memory(memory)
 
     def _save_preference(self, memory) -> None:
         """Persist through Domain Writer; event processing has no direct repository bypass."""
