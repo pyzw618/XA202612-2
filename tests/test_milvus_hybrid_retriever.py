@@ -248,21 +248,30 @@ class TestMilvusHybridRetrieverSearch:
         retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
         assert len(reranker.calls) == 0
 
-    def test_rerank_only_top_20_candidates(self) -> None:
+    def test_rerank_is_bounded_by_the_candidate_limit(self) -> None:
+        """重排只能处理有限候选；上限由 _RERANK_CANDIDATE_LIMIT 决定。
+
+        这里断言的是"不超过上限"而不是某个具体数字——上限本身就是可调参数
+        （放宽它是为了让被融合分数埋没的候选仍有机会被捞回）。
+        """
+        from memoryhub.retrieval.milvus_hybrid import _RERANK_CANDIDATE_LIMIT
+
         engine = FakeVectorEngine()
         engine.set_results(
-            [VectorSearchResult(memory_id=f"m{i}", content="c", score=0.5) for i in range(30)]
+            [VectorSearchResult(memory_id=f"m{i}", content="c", score=0.5)
+             for i in range(_RERANK_CANDIDATE_LIMIT + 30)]
         )
         reranker = FakeReranker()
         retriever = MilvusHybridRetriever(
             engine=engine,
             embedding_fn=_embedding_fn,
-            config=RetrievalConfig(candidate_multiplier=6, rerank_enabled=True, default_top_k=5),
+            config=RetrievalConfig(candidate_multiplier=20, rerank_enabled=True, default_top_k=5),
             reranker=reranker,
         )
         retriever.search(SearchRequest(user_id="u1", query="周报", top_k=5))
         assert len(reranker.calls) == 1
-        assert len(reranker.calls[0]) == 20
+        assert len(reranker.calls[0]) <= _RERANK_CANDIDATE_LIMIT
+        assert len(reranker.calls[0]) > 0
 
     def test_filter_by_memory_type(self) -> None:
         engine = FakeVectorEngine()
@@ -512,3 +521,80 @@ class TestMilvusHybridRetrieverSearch:
         )
         with pytest.raises(KylinEmbeddingError):
             retriever.search(SearchRequest(user_id="u1", query="周报", top_k=3))
+
+
+class _FakeKeywordSearch:
+    """固定 BM25 排序的 stub。"""
+
+    def __init__(self, ids: list[str]) -> None:
+        self._ids = ids
+        self.calls: list[tuple[str, int]] = []
+
+    def search(self, query: str, top_k: int = 5):
+        from memoryhub.adapter.schemas import SearchResult
+
+        self.calls.append((query, top_k))
+        # 真实 KeywordSearcher 会从索引元数据里带上 user_id/status，
+        # 否则会被 _filter_by_context 剔掉——桩必须保持一致。
+        return [
+            SearchResult(
+                memory_id=i,
+                content="c",
+                score=1.0,
+                source="keyword",
+                metadata={"user_id": "u1", "status": "active"},
+            )
+            for i in self._ids[:top_k]
+        ]
+
+
+class TestWeightedFusion:
+    """Python 侧加权融合：绕开引擎内部写死的等权 RRF。"""
+
+    def _retriever(self, dense_ids, keyword_ids, **cfg):
+        engine = FakeVectorEngine()
+        engine.set_results(
+            [VectorSearchResult(memory_id=i, content="c", score=0.5) for i in dense_ids]
+        )
+        return MilvusHybridRetriever(
+            engine=engine,
+            embedding_fn=_embedding_fn,
+            config=RetrievalConfig(**cfg),
+            keyword_search=_FakeKeywordSearch(keyword_ids),
+        ), engine
+
+    def test_keyword_hits_survive_when_dense_disagrees(self) -> None:
+        """稠密通道把目标排得很后时，词面通道仍应把它带进结果。"""
+        dense = [f"n{i}" for i in range(30)] + ["target"]
+        retriever, _ = self._retriever(dense, ["target"])
+        response = retriever.search(SearchRequest(user_id="u1", query="周报", top_k=5))
+        assert "target" in [r.memory_id for r in response.results]
+
+    def test_dense_only_weight_still_works(self) -> None:
+        retriever, _ = self._retriever(
+            ["d1", "d2"], ["k1"], vector_weight=1.0, keyword_weight=0.0
+        )
+        response = retriever.search(SearchRequest(user_id="u1", query="周报", top_k=5))
+        assert [r.memory_id for r in response.results][:2] == ["d1", "d2"]
+
+    def test_keyword_only_weight_still_works(self) -> None:
+        retriever, _ = self._retriever(
+            ["d1", "d2"], ["k1"], vector_weight=0.0, keyword_weight=1.0
+        )
+        response = retriever.search(SearchRequest(user_id="u1", query="周报", top_k=5))
+        assert [r.memory_id for r in response.results][0] == "k1"
+
+    def test_engine_hybrid_search_is_bypassed(self) -> None:
+        """接线关键词通道后，不应再走引擎内部的等权融合。"""
+        retriever, engine = self._retriever(["d1"], ["k1"])
+        retriever.search(SearchRequest(user_id="u1", query="周报", top_k=5))
+        assert engine.hybrid_search_calls == []
+
+    def test_without_keyword_channel_engine_fusion_is_used(self) -> None:
+        engine = FakeVectorEngine()
+        engine.set_results([VectorSearchResult(memory_id="d1", content="c", score=0.5)])
+        retriever = MilvusHybridRetriever(
+            engine=engine, embedding_fn=_embedding_fn, config=RetrievalConfig()
+        )
+        retriever.search(SearchRequest(user_id="u1", query="周报", top_k=5))
+        assert len(engine.hybrid_search_calls) == 1

@@ -8,6 +8,7 @@ Milvus 混合检索器
 """
 
 import logging
+import math
 import re
 import time
 from collections import OrderedDict
@@ -24,12 +25,16 @@ from memoryhub.adapter.schemas import (
 )
 from memoryhub.config import RetrievalConfig, RuntimeConfig
 from memoryhub.retrieval.cache import SearchCache
+from memoryhub.retrieval.keyword_search import _tokenize
 from memoryhub.storage.vector_engine import BaseVectorEngine, build_sparse_vector
 
 logger = logging.getLogger(__name__)
 
 # 生产模式下普通重排最多只能处理前 20 个候选
 _RERANK_CANDIDATE_LIMIT = 20
+
+# RRF 融合常数：与 fusion.py / C 侧保持一致，避免两处口径不同
+_RRF_K = 60
 
 # 稳定的检索超时/不可用错误码，供 API 层映射为 HTTP 503/504
 _RETRIEVAL_TIMEOUT_CODES = {
@@ -146,6 +151,7 @@ class MilvusHybridRetriever:
         memory_lookup: dict | None = None,
         cache: SearchCache | None = None,
         index_version: str = "",
+        keyword_search: Any | None = None,
         reranker: Any | None = None,
         query_vector_cache_size: int = 1000,
         fallback_retriever: Callable[[SearchRequest], SearchResponse] | None = None,
@@ -175,6 +181,9 @@ class MilvusHybridRetriever:
         self.memory_lookup = memory_lookup if memory_lookup is not None else {}
         self.cache = cache
         self.index_version = index_version
+        # 可选的关键词通道。给定时改用 Python 侧加权 RRF 融合稠密与词面两路，
+        # 绕开引擎内部写死的等权融合（见 _weighted_fuse）。
+        self.keyword_search = keyword_search
         self.reranker = reranker
         # 查询向量 LRU 缓存：query text -> dense vector
         self._query_vector_cache: OrderedDict[str, list[float]] = OrderedDict()
@@ -275,9 +284,14 @@ class MilvusHybridRetriever:
                 "user_id": search_request.user_id,
                 "status": "active",
             }
-            hits = self.engine.hybrid_search(
-                dense_vector, sparse_terms, fetch_k, filters=engine_filters
-            )
+            if self.keyword_search is not None:
+                hits = self._weighted_fuse(
+                    dense_vector, normalized_query, fetch_k, engine_filters
+                )
+            else:
+                hits = self.engine.hybrid_search(
+                    dense_vector, sparse_terms, fetch_k, filters=engine_filters
+                )
             timings["hybrid_search_ms"] = (time.perf_counter() - t0) * 1000
         except Exception as exc:
             timings["hybrid_search_ms"] = (time.perf_counter() - t0) * 1000
@@ -454,6 +468,92 @@ class MilvusHybridRetriever:
 
         # 非生产模式也不允许降级时，同样抛出原始异常
         raise
+
+    def _weighted_fuse(
+        self,
+        dense_vector: list[float],
+        query: str,
+        fetch_k: int,
+        engine_filters: dict[str, Any],
+    ) -> list[SearchResult]:
+        """在 Python 侧按权重融合稠密与词面两路，取代引擎内部的等权 RRF。
+
+        **为什么需要这一层**：引擎的 ``hybrid_search`` 在 C 侧做 RRF，两路权重
+        写死为等权，且 C API 不接受权重参数。当稠密通道区分度低时（语料偏模板化
+        是常见成因），它接近随机的排序会被等权带进融合结果，把词面通道精确的
+        顺序冲掉——实测召回因此从 1.00 掉到 0.65。这里让两路权重可配
+        （``retrieval.vector_weight`` / ``retrieval.keyword_weight``）。
+
+        两路各自独立取 ``fetch_k`` 个候选，再按 RRF（k=60）融合；返回的
+        ``SearchResult.score`` 即融合分，后续过滤与截断逻辑不变。
+        """
+        dense_hits = self.engine.search(dense_vector, fetch_k, filters=engine_filters)
+        keyword_hits = self.keyword_search.search(query, fetch_k)
+
+        dense_weight = float(getattr(self.config, "vector_weight", 0.5) or 0.0)
+        keyword_weight = float(getattr(self.config, "keyword_weight", 0.5) or 0.0)
+        coverage_boost = float(getattr(self.config, "coverage_boost", 0.0) or 0.0)
+
+        fused: dict[str, float] = {}
+        payload: dict[str, SearchResult] = {}
+        for weight, hits in ((dense_weight, dense_hits), (keyword_weight, keyword_hits)):
+            if weight <= 0:
+                continue
+            for rank, hit in enumerate(hits, start=1):
+                memory_id = getattr(hit, "memory_id", "")
+                if not memory_id:
+                    continue
+                fused[memory_id] = fused.get(memory_id, 0.0) + weight / (_RRF_K + rank)
+                payload.setdefault(
+                    memory_id,
+                    hit if isinstance(hit, SearchResult) else SearchResult(
+                        memory_id=memory_id,
+                        content=getattr(hit, "content", ""),
+                        score=0.0,
+                        metadata=dict(getattr(hit, "metadata", {}) or {}),
+                    ),
+                )
+
+        if coverage_boost > 0:
+            query_tokens = set(_tokenize(query))
+            if query_tokens and fused:
+                doc_tokens = {
+                    memory_id: set(_tokenize(str(payload[memory_id].metadata.get("content", ""))))
+                    for memory_id in fused
+                }
+                # **必须按词罕见度加权**。不加权时"历史/处理/案例"这类通用词会把
+                # 结构相同、主题不同的记忆抬到同分（实测连按名称精确检索的 canary
+                # 都从 100% 掉到 70%）。这里用候选集内的文档频率近似 IDF：
+                # 只在少数候选里出现的词才具备区分力。
+                total = len(doc_tokens) or 1
+                doc_freq: dict[str, int] = {}
+                for tokens in doc_tokens.values():
+                    for token in query_tokens & tokens:
+                        doc_freq[token] = doc_freq.get(token, 0) + 1
+                idf = {
+                    token: math.log((total + 1) / (doc_freq.get(token, 0) + 1)) + 1.0
+                    for token in query_tokens
+                }
+                denominator = sum(idf.values()) or 1.0
+                for memory_id, tokens in doc_tokens.items():
+                    numerator = sum(idf[t] for t in query_tokens & tokens)
+                    # 加性项，量级显著高于 RRF（RRF 各项约 0.01 量级）。
+                    # 查询词覆盖更全的候选因此优先；当查询与候选**没有**词面
+                    # 交集时 coverage 全为 0，排序自动退回 RRF（稠密为主），
+                    # 语义检索能力得以保留。
+                    #
+                    # 用 coverage（|q∩d|/|q|）而非 Jaccard：后者按并集归一化会
+                    # 惩罚长文档，实测接线后召回反而下降。
+                    fused[memory_id] += coverage_boost * (numerator / denominator)
+
+        ordered = sorted(fused.items(), key=lambda item: item[1], reverse=True)
+        results: list[SearchResult] = []
+        for memory_id, score in ordered:
+            base = payload[memory_id]
+            results.append(
+                base.model_copy(update={"score": float(score), "source": "hybrid"})
+            )
+        return results
 
     def _to_search_result(self, hit, timings: dict[str, float] | None = None) -> SearchResult:
         """VectorSearchResult → adapter 的 SearchResult（source 固定为 hybrid）"""

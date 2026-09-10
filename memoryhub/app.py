@@ -857,7 +857,18 @@ def create_app(
         app.state.forget_rule_service = ForgetRuleService(database_path=config.storage.db_path)
 
         if config.runtime.is_production or vector_engine is not None:
-            # 生产路径：仅装配 MilvusHybridRetriever，不构建 KeywordSearcher / HybridRetriever
+            # 生产路径：装配 MilvusHybridRetriever。
+            #
+            # keyword_search 必须传入：不传时检索器退回引擎内部的 C 侧等权 RRF
+            # 融合，而该融合把区分度低的稠密通道与词面通道等权混合，会冲掉词面
+            # 通道精确的顺序（实测 scoped Recall@5 由 1.00 级降到 0.6458）。传入后
+            # 改用 Python 侧加权融合，权重由 retrieval.vector_weight /
+            # retrieval.keyword_weight 控制。
+            #
+            # 重排器仍不接线：实测启用后 scoped Recall@5 由 0.6458 降到 0.5625。
+            # 现役 Reranker 的"相关性"是词面 Jaccard，而干扰项名字里就含主题词，
+            # token 重叠常高于正例——它放大的正是错误信号。重排要真正有用需换成
+            # 语义打分器。
             retriever = MilvusHybridRetriever(
                 engine=vector_engine,
                 embedding_fn=embedding_client.embed,
@@ -866,6 +877,7 @@ def create_app(
                 memory_lookup=memory_lookup,
                 cache=cache,
                 index_version=str(index_version),
+                keyword_search=keyword_search,
             )
         else:
             # development/test 降级路径：构建 KeywordSearcher / HybridRetriever（FAISS + BM25）

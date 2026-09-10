@@ -99,17 +99,24 @@ class Reranker:
         return result.metadata.get("health_score", 1.0)
 
     def _compute_relevance_score(self, query: str, content: str) -> float:
-        """
-        计算查询与内容的相关性分数
+        """查询与内容的词面重叠度（Jaccard）。
 
-        第一版使用简单的关键词重叠度（Jaccard 近似）作为默认值。
-        后续可替换为 LLM 打分或交叉编码器。
+        **必须用与关键词通道一致的分词**。原实现按空格切分（``split()``），中文
+        没有空格，整条查询只会得到 1 个 token，与同样无空格的内容求交非空即 1、
+        否则 0——打分完全失去分辨率，重排对中文等于没生效。这里复用
+        ``keyword_search._tokenize``（jieba 精确模式 + 英文数字保留）。
         """
         if not query or not content:
             return 0.0
 
-        query_tokens = set(query.lower().split())
-        content_tokens = set(content.lower().split())
+        try:
+            from memoryhub.retrieval.keyword_search import _tokenize
+
+            query_tokens = set(_tokenize(query))
+            content_tokens = set(_tokenize(content))
+        except Exception:  # jieba 缺失等：退回按字切分，仍优于空格切分
+            query_tokens = set(query.lower())
+            content_tokens = set(content.lower())
 
         if not query_tokens:
             return 0.0
@@ -292,20 +299,34 @@ class VNextReranker:
 
     @staticmethod
     def _compute_relevance(query: str, candidate: RetrievedMemory) -> float:
+        """查询对候选的**词面覆盖率**（|q∩d| / |q|）。
+
+        **必须用 jieba 分词**。原实现按空格切分，中文没有空格，查询与内容都只
+        得到 1 个 token，结果非 0 即 1——生产路径上占权重 0.20 的"相关性"因此
+        恒为常量，最终排序完全由融合分数决定，重排形同虚设。
+
+        这里用 coverage 而不是 Jaccard：Jaccard 按并集归一化会惩罚内容较长的
+        记忆（知识记忆普遍带 steps/template），实测直接接线 Jaccard 重排会让
+        召回下降。
+        """
         if not query:
             return 0.0
         text = " ".join(
             str(value)
             for value in candidate.content.values()
             if isinstance(value, (str, int, float))
-        ).lower()
-        query_tokens = set(query.lower().split())
-        content_tokens = set(text.split())
-        if not query_tokens or not content_tokens:
+        )
+        try:
+            from memoryhub.retrieval.keyword_search import _tokenize
+
+            query_tokens = set(_tokenize(query))
+            content_tokens = set(_tokenize(text))
+        except Exception:
+            query_tokens = set(query.lower())
+            content_tokens = set(text.lower())
+        if not query_tokens:
             return 0.0
-        overlap = query_tokens & content_tokens
-        union = query_tokens | content_tokens
-        return len(overlap) / len(union)
+        return len(query_tokens & content_tokens) / len(query_tokens)
 
     def _compute_scope_match(
         self,

@@ -139,6 +139,9 @@ class RetrievalConfig:
     vector_weight: float = 0.6
     keyword_weight: float = 0.3
     metadata_weight: float = 0.1
+    # 查询词覆盖率加成（Python 侧融合时生效）。0 表示关闭。
+    # 见 docs/retrieval-recall-findings.md。
+    coverage_boost: float = 0.0
     rerank_enabled: bool = True
     cache_ttl_seconds: int = 300
 
