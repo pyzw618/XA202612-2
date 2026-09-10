@@ -13,7 +13,9 @@
 
 ```bash
 sudo apt install -y python3 python3-venv python3-pip build-essential cmake \
-  dpkg-dev qtbase5-dev qtbase5-dev-tools libqt5charts5-dev
+  dpkg-dev qtbase5-dev qtbase5-dev-tools libqt5charts5-dev pkg-config \
+  libgrpc++-dev libprotobuf-dev protobuf-compiler-grpc nlohmann-json3-dev \
+  libkylin-ai-proto-dev libsqlitecpp-dev libsqlcipher-dev
 ```
 
 ## 构建
@@ -31,7 +33,9 @@ packaging/linux/dist/kylin-memoryhub_<version>-1_<arch>.deb
 packaging/linux/dist/kylin-memoryhub_<version>-1_<arch>.deb.sha256
 ```
 
-构建脚本会先生成 Python wheelhouse、编译并测试 Qt 客户端，再生成 DEB。wheelhouse 会随包安装，因此目标机配置阶段不需要访问 PyPI。
+构建脚本会先生成 Python wheelhouse、编译项目内置的麒麟向量 SDK 与 C API 桥接库、编译并测试 Qt 客户端，再生成 DEB。wheelhouse 会随包安装，因此目标机配置阶段不需要访问 PyPI。
+
+安装后的服务默认使用真实麒麟 Embedding SDK 与向量引擎，不启用 mock/FAISS 回退。向量客户端通过 `/tmp/kylin-ai-vector-engine-<uid>.sock` 连接用户级服务，并使用该服务已加载的用户默认数据库；这与银河麒麟 V11 的 `kylin-ai-vector-engine.service` 生命周期一致。
 
 ## 安装与验证
 

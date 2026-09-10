@@ -503,6 +503,10 @@ def create_app(
                 "collection": config.vector_engine.collection,
                 "dimension": embedding_client.get_dimension(),
                 "search_timeout_ms": config.vector_engine.search_timeout_ms,
+                "local_socket": config.vector_engine.local_socket,
+                "db_path": config.vector_engine.db_path,
+                "db_encrypt": config.vector_engine.db_encrypt,
+                "db_key": os.environ.get(config.vector_engine.db_key_env, ""),
             }
             if config.vector_engine.so_path:
                 engine_kwargs["so_path"] = config.vector_engine.so_path

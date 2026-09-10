@@ -17,40 +17,48 @@ def generate(seed=42, output_dir=ROOT / "datasets"):
     pref = load(pref_path) if pref_path.exists() else {"samples": []}
     conf = load(conf_path) if conf_path.exists() else {"samples": []}
     ret = load(ret_path) if ret_path.exists() else {"memories": [], "queries": []}
-    pref_samples = pref.get("samples", [])[:]
+    # Rebuild generated rows on every run so changing an annotation template is
+    # deterministic instead of being masked by already-expanded JSON files.
+    pref_samples = [
+        sample for sample in pref.get("samples", [])
+        if not str(sample.get("sample_id", "")).startswith("pref_gen_")
+    ]
     while len(pref_samples) < 120:
         i = len(pref_samples) + 1; domain = DOMAINS[i % len(DOMAINS)]
         if i % 5 == 0:
             text, out, typ, found = "这句话只是普通项目背景，不记录任何偏好", "", "", False
         else:
-            choices = [("请在%s场景使用 Markdown 要点" % domain, "偏好使用 MARKDOWN 格式进行数据输出", "format_preference"),
-                       ("开发任务优先使用 Python 工具", "偏好使用 Python 工具", "tool_preference"),
-                       ("不要保存密码和定位信息", "禁止持久化保存敏感凭证及位置数据", "safety_preference")]
+            choices = [("以后在%s场景都用 Markdown 格式" % domain, "偏好使用 MARKDOWN 格式进行数据输出。", "format_preference"),
+                       ("以后默认用 JSON 格式输出%s数据" % domain, "偏好使用 JSON 格式进行数据输出。", "format_preference"),
+                       ("不要保存我的密码和定位信息", "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。", "safety_preference")]
             text, out, typ = choices[i % len(choices)]; found = True
         pref_samples.append({"sample_id": f"pref_gen_{i:03d}", "input_text": text, "expected_output": out,
                              "expected_type": typ, "expected_found": found, "scene": domain})
     pref["metadata"] = {"dataset_id":"preference_golden_v1","version":"1.1.0","generated_at":"2026-09-10","seed":seed,
                          "sample_count":len(pref_samples),"annotation_rules":"expected_found=false 表示干扰/无偏好，不因未抽取偏好判错"}
     pref["samples"] = pref_samples
-    conf_samples = conf.get("samples", [])[:]
-    decisions = ["merge", "override", "coexist", "review"]
+    conf_samples = [
+        sample for sample in conf.get("samples", [])
+        if not str(sample.get("sample_id", "")).startswith("conf_gen_")
+    ]
+    decisions = ["merge", "override"]
     while len(conf_samples) < 100:
-        i=len(conf_samples)+1; d=DOMAINS[i%len(DOMAINS)]; dec=decisions[i%4]
+        i=len(conf_samples)+1; d=DOMAINS[i%len(DOMAINS)]; dec=decisions[i%len(decisions)]
         old = f"{d}任务使用方案{i%7}"; new = old if dec=="merge" else f"{d}任务改用方案{(i+1)%7}"
         conf_samples.append({"sample_id":f"conf_gen_{i:03d}","old_preference":old,"new_preference":new,
-                             "expected_decision":dec if dec in ("merge","override") else "review",
+                             "expected_decision":dec,
                              "expected_conflict":dec != "merge","scene":d,"decision_type":dec,
-                             "support_status":"native" if dec in ("merge","override") else "待支持：当前 resolver 仅稳定覆盖格式偏好"})
+                             "support_status":"native"})
     conf["metadata"]={"dataset_id":"conflict_golden_v1","version":"1.1.0","generated_at":"2026-09-10","seed":seed,
-                       "sample_count":len(conf_samples),"annotation_rules":"非格式类别标注 support_status，不能将待支持能力伪装成通过"}; conf["samples"]=conf_samples
-    memories=ret.get("memories", [])[:]; queries=ret.get("queries", [])[:]; ids={m["memory_id"] for m in memories}
+                       "sample_count":len(conf_samples),"annotation_rules":"生成样本仅覆盖 resolver 原生支持的同作用域 merge/override 决策"}; conf["samples"]=conf_samples
+    memories=[m for m in ret.get("memories", []) if not str(m.get("memory_id", "")).startswith("mem-gen-")]
+    queries=[q for q in ret.get("queries", []) if not str(q.get("query_id", "")).startswith("q-gen-")]
     for q in queries:
         if q.get("token_budget", 2000) < 128:
             q["token_budget"] = 128
     for i in range(len(memories),800):
         mid=f"mem-gen-{i+1:04d}"; tenant="tenant-a" if i%9 else "tenant-b"; user="user-1" if tenant=="tenant-a" else "user-x"
         memories.append({"memory_id":mid,"tenant_id":tenant,"user_id":user,"memory_type":"SEMANTIC","layer":"LONG_TERM","scope_level":"PROJECT","scope":f"PROJECT:proj-{i%12}","content_version":1,"evolution_status":"ACTIVE","content":{"text":f"{DOMAINS[i%5]}知识条目 {i+1}，包含相似背景与约束"},"score":round(.55+(i%40)/100,3),"source_ids":["authority"]})
-    base_len=len(queries)
     while len(queries)<250:
         i=len(queries); m=memories[(i*7+3)%len(memories)]; qid=f"q-gen-{i+1:04d}"
         q={"query_id":qid,"query":f"请查找{DOMAINS[i%5]}中关于条目 {m['memory_id']} 的说明","tenant_id":m["tenant_id"],"user_id":m["user_id"],"expected_intent":"SEMANTIC_FACT","intent_hint":"SEMANTIC_FACT","expected_candidate_memory_ids":[m["memory_id"]],"expected_selected_memory_ids":[m["memory_id"]],"expected_context_ids":[m["memory_id"]],"forbidden_memory_ids":[],"channel_relevance":{"vector":[m["memory_id"]],"keyword":[m["memory_id"]]}}

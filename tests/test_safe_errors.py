@@ -38,6 +38,64 @@ def _client_with_library(library: object) -> KylinEmbeddingClient:
     return client
 
 
+def test_embedding_loader_allows_ldconfig_soname_resolution(monkeypatch) -> None:
+    loaded = object()
+    attempted: list[str] = []
+    client = object.__new__(KylinEmbeddingClient)
+    client._so_path = None
+    client._use_mock = False
+
+    def fake_cdll(path: str):
+        attempted.append(path)
+        if path == "libkysdk-coreai-embedding.so.1":
+            return loaded
+        raise OSError("not found")
+
+    monkeypatch.setattr(ctypes, "CDLL", fake_cdll)
+
+    assert client._find_and_load_so() is loaded
+    assert attempted == ["libkysdk-coreai-embedding.so.1"]
+
+
+def test_embedding_legacy_v11_sdk_uses_default_model_loaded_by_session() -> None:
+    session = ctypes.c_void_p(17)
+    library = type(
+        "LegacyV11Library",
+        (),
+        {
+            "text_embedding_create_session": _FakeCFunction(lambda: session.value),
+            "text_embedding_init_session": _FakeCFunction(lambda _session: 0),
+        },
+    )()
+    client = object.__new__(KylinEmbeddingClient)
+    client._model_name = "ensemble-embd_gte-base_uint8-text"
+
+    assert client._init_session(library).value == session.value
+
+
+def test_embedding_legacy_v11_sdk_rejects_unselectable_custom_model() -> None:
+    destroyed = False
+
+    def destroy(session_pointer: object) -> None:
+        nonlocal destroyed
+        destroyed = True
+
+    library = type(
+        "LegacyV11Library",
+        (),
+        {
+            "text_embedding_create_session": _FakeCFunction(lambda: 17),
+            "text_embedding_init_session": _FakeCFunction(lambda _session: 0),
+            "text_embedding_destroy_session": _FakeCFunction(destroy),
+        },
+    )()
+    client = object.__new__(KylinEmbeddingClient)
+    client._model_name = "custom-model"
+
+    assert client._init_session(library) is None
+    assert destroyed is True
+
+
 def test_memory_event_validation_string_does_not_echo_input() -> None:
     with pytest.raises(ValidationError) as caught:
         MemoryEvent.model_validate(

@@ -93,11 +93,15 @@
 | `embedding.query_timeout_ms` | `250` | 单次调用超时（超时返回 `embedding.timeout`，不崩溃） |
 | `vector_engine.provider` | `faiss` | `milvus`（生产）/ `milvus_mock` / `faiss` |
 | `vector_engine.app_id` | `""` | **milvus / milvus_mock 必填**（部署平台提供），缺失直接配置报错 |
-| `vector_engine.so_path` | `""` | Milvus C API 动态库显式路径 |
-| `vector_engine.host` / `port` | `127.0.0.1` / `19530` | Milvus 服务地址 |
+| `vector_engine.so_path` | `""` | 麒麟向量引擎 C API 桥接库路径；DEB 内置于 `/usr/lib/memoryhub/native/` |
+| `vector_engine.host` / `port` | `127.0.0.1` / `19530` | 远程模式的向量服务地址 |
 | `vector_engine.collection` | `memoryhub` | 集合名 |
 | `vector_engine.dimension` | `768` | 向量维度 |
 | `vector_engine.search_timeout_ms` | `120` | 检索超时 |
+| `vector_engine.local_socket` | `false` | `true` 时使用麒麟每用户 Unix Socket `/tmp/kylin-ai-vector-engine-<uid>.sock`，忽略 `host` |
+| `vector_engine.db_path` | `""` | 可选数据库文件；留空使用 V11 用户服务已加载的默认数据库。仅服务端支持动态切库时才显式配置 |
+| `vector_engine.db_encrypt` | `false` | 是否由麒麟向量服务加密数据库 |
+| `vector_engine.db_key_env` | `MEMORYHUB_VECTOR_ENGINE_DB_KEY` | 数据库加密密钥对应的环境变量名 |
 
 ## 8. 记忆流水线（`extraction_retry` / `memory_tier` / `knowledge_merge`）
 
@@ -151,6 +155,7 @@
 | `MEMORYHUB_VNEXT_POLICY_REQUIRED` / `_AUTHORITY_SINGLE_WRITER` / `_ALLOW_POLICY_BYPASS` / `_LEGACY_READ_FALLBACK` / `_EVENTS_DEFAULT` | `vnext.*` 布尔键（接受 0/1/true/false/yes/no） |
 | `MEMORYHUB_DB_PATH` / `MEMORYHUB_DEBUG` | `storage.db_path` / `debug` |
 | `MEMORYHUB_EMBEDDING_PROVIDER` / `MEMORYHUB_VECTOR_ENGINE_PROVIDER` / `MEMORYHUB_VECTOR_ENGINE_APP_ID` | `embedding.provider` / `vector_engine.*` |
+| `MEMORYHUB_VECTOR_ENGINE_LOCAL_SOCKET` / `MEMORYHUB_VECTOR_ENGINE_DB_PATH` / `MEMORYHUB_VECTOR_ENGINE_DB_KEY` | 麒麟本地 Socket 模式、数据库路径与可选加密密钥 |
 | `LLM_API_BASE` / `LLM_API_KEY` / `LLM_MODEL`（别名 `MEMORYHUB_LLM_API_BASE` / `_API_KEY` / `_MODEL`） | `llm.*`（便携名优先） |
 | `MEMORYHUB_SAFETY_KEY_FILE` | 密钥库文件路径覆盖 |
 | `MEMORYHUB_AUDIT_HMAC_KEY` / `MEMORYHUB_QUARANTINE_KEY` / `MEMORYHUB_USER_RULE_KEY` | 三把安全密钥（可选，缺省自动生成） |

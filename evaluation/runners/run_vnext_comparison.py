@@ -42,6 +42,14 @@ def _all_channels(query: dict[str, Any]) -> list[str]:
     )
 
 
+def _expected_ids(query: dict[str, Any]) -> set[str]:
+    """Use the v2 selected-memory contract while retaining v1 compatibility."""
+    return set(
+        query.get("expected_selected_memory_ids")
+        or query.get("expected_memory_ids", [])
+    )
+
+
 def _system_selectors(vnext: dict[str, Any]) -> dict[str, Callable[[dict[str, Any]], list[str]]]:
     selected = {
         item["query_id"]: list(item["details"]["selected_memory_ids"])
@@ -68,7 +76,7 @@ def _evaluate_variant(
             started = time.perf_counter()
             retrieved = selector(query)
             latency.append((time.perf_counter() - started) * 1000)
-            expected = set(query.get("expected_memory_ids", []))
+            expected = _expected_ids(query)
             forbidden = set(query.get("forbidden_memory_ids", []))
             success.append(len(expected & set(retrieved)) / len(expected) if expected else 1.0)
             leakage.append(len(forbidden & set(retrieved)) / len(forbidden) if forbidden else 0.0)

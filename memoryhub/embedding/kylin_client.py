@@ -1,7 +1,8 @@
 """
 Kylin Embedding 客户端 — 通过 ctypes 对接麒麟 C SDK。
 
-在 Kylin OS 上加载 libkylin-coreai-embedding.so，
+在 Kylin OS 上加载 libkysdk-coreai-embedding.so（兼容旧名称
+libkylin-coreai-embedding.so），
 通过 DBus 与 Embedding 服务通信，获取真实语义向量。
 
 非 Linux / 无 .so 时自动降级（is_available() → False），
@@ -14,7 +15,8 @@ SDK 调用流程（基于 kylin-coreai-embedding C API 公开头文件，
 见 docs/reference/kylin/kylin-embedding-sdk-api-signatures.md）：
   1. text_embedding_create_session()                     → 创建会话
   2. text_embedding_init_session(session)                → 连接后端
-  3. text_embedding_init_model(session, model_name)      → 初始化模型
+  3. text_embedding_init_model(session, model_name)      → 新版 SDK 初始化模型
+     （V11 1.2.0 兼容 ABI 在 init_session 时已加载默认模型，无此符号）
   4. text_embedding(session, text, &result)              → 调用 Embedding
   5. embedding_result_get_vector_data(result)            → 取 float* 向量
   6. embedding_result_destroy(&result)                   → 清理结果
@@ -46,6 +48,8 @@ MAX_QUERY_CHARS = 512
 
 # .so 搜索路径（按优先级）
 SO_CANDIDATES = [
+    "libkysdk-coreai-embedding.so.1",
+    "libkysdk-coreai-embedding.so",
     "libkylin-coreai-embedding.so",
     "libcoreai-embedding.so",
     "/usr/lib/libkylin-coreai-embedding.so",
@@ -207,11 +211,15 @@ class KylinEmbeddingClient(BaseEmbeddingClient):
             candidates = SO_CANDIDATES
 
         for path in candidates:
-            if os.path.exists(path):
-                try:
-                    return ctypes.CDLL(path)
-                except OSError:
-                    continue
+            # Bare sonames are resolved by the dynamic loader/ldconfig cache;
+            # explicit paths must exist before attempting to load them.
+            is_explicit_path = os.path.isabs(path) or os.path.dirname(path)
+            if is_explicit_path and not os.path.exists(path):
+                continue
+            try:
+                return ctypes.CDLL(path)
+            except OSError:
+                continue
         return None
 
     def _init_session(self, lib):
@@ -240,8 +248,16 @@ class KylinEmbeddingClient(BaseEmbeddingClient):
             self._destroy_session(lib, session)
             return None
 
-        # 3. 初始化模型: int text_embedding_init_model(session, const char* model)
-        init_model_fn = lib.text_embedding_init_model
+        # 3. 新版 SDK 需要显式初始化模型。银河麒麟 V11 当前随系统发布的
+        # 1.2.0 ABI 没有该符号，init_session() 已加载默认文本模型；这种情形
+        # 仅允许使用契约中的默认模型，避免把自定义模型配置静默映射到错误模型。
+        init_model_fn = getattr(lib, "text_embedding_init_model", None)
+        if init_model_fn is None:
+            if self._model_name != DEFAULT_MODEL_NAME:
+                self._destroy_session(lib, session)
+                return None
+            return session
+
         init_model_fn.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
         init_model_fn.restype = ctypes.c_int
 

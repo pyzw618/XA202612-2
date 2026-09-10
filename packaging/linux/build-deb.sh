@@ -17,6 +17,9 @@ STAGE="$BUILD_ROOT/${PACKAGE_NAME}_${VERSION}-${REVISION}_${ARCH}"
 WHEELHOUSE="$STAGE/usr/share/memoryhub/wheelhouse"
 BUILD_VENV="$BUILD_ROOT/build-venv"
 CLIENT_BUILD="$BUILD_ROOT/desktop-client"
+VECTOR_SDK_SOURCE="$PROJECT_ROOT/third_party/libkysdk-vector-engine-client-nile-sp2"
+VECTOR_SDK_BUILD="$BUILD_ROOT/vector-sdk"
+NATIVE_LIB_DIR="$STAGE/usr/lib/memoryhub/native"
 OUTPUT="$DIST_DIR/${PACKAGE_NAME}_${VERSION}-${REVISION}_${ARCH}.deb"
 WHEEL_CACHE="${MEMORYHUB_WHEEL_CACHE:-}"
 
@@ -44,7 +47,7 @@ done
 rm -rf "$BUILD_ROOT"
 mkdir -p "$BUILD_ROOT" "$DIST_DIR" "$STAGE/DEBIAN" "$WHEELHOUSE"
 
-echo "[1/5] Building Python wheels"
+echo "[1/6] Building Python wheels"
 if [[ -n "$WHEEL_CACHE" ]]; then
     test -d "$WHEEL_CACHE" || { echo "Wheel cache does not exist: $WHEEL_CACHE" >&2; exit 2; }
     python3 -m venv --system-site-packages "$BUILD_VENV"
@@ -60,7 +63,15 @@ fi
 project_wheel="$(find "$WHEELHOUSE" -maxdepth 1 -name 'kylin_memoryhub-*.whl' -print -quit)"
 "$BUILD_VENV/bin/python" -c 'import sys, zipfile; required={"memoryhub/safety_rules/data/__init__.py", "memoryhub/safety_rules/data/catalog.json", "memoryhub/safety_rules/data/builtin-1.0.json"}; names=set(zipfile.ZipFile(sys.argv[1]).namelist()); missing=required-names; assert not missing, f"wheel missing resources: {sorted(missing)}"' "$project_wheel"
 
-echo "[2/5] Building Qt desktop client"
+echo "[2/6] Building Kylin vector engine SDK bridge"
+cmake -S "$VECTOR_SDK_SOURCE" -B "$VECTOR_SDK_BUILD" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON \
+    -DCMAKE_INSTALL_RPATH='$ORIGIN'
+cmake --build "$VECTOR_SDK_BUILD" --parallel "$(nproc)" \
+    --target kysdk-vector-engine-client-capi
+
+echo "[3/6] Building Qt desktop client"
 cmake -S "$PROJECT_ROOT/desktop-client" -B "$CLIENT_BUILD" -DCMAKE_BUILD_TYPE=Release
 cmake --build "$CLIENT_BUILD" --parallel "$(nproc)"
 if command -v /usr/sbin/kyexectl >/dev/null 2>&1; then
@@ -82,11 +93,12 @@ env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
     QT_QPA_PLATFORM=offscreen ctest --test-dir "$CLIENT_BUILD" --output-on-failure \
     --timeout 120
 
-echo "[3/5] Staging package"
+echo "[4/6] Staging package"
 install -d "$STAGE/opt/memoryhub" \
     "$STAGE/etc/memoryhub" \
     "$STAGE/usr/bin" \
     "$STAGE/usr/lib/memoryhub" \
+    "$NATIVE_LIB_DIR" \
     "$STAGE/usr/share/applications" \
     "$STAGE/usr/share/icons/hicolor/scalable/apps" \
     "$STAGE/usr/share/memoryhub/opencode" \
@@ -105,6 +117,8 @@ install -m 0755 "$SCRIPT_DIR/assets/memoryhub-mcp-user-launcher" "$STAGE/usr/lib
 install -m 0755 "$SCRIPT_DIR/assets/memoryhub-open-agent" "$STAGE/usr/bin/memoryhub-open-agent"
 install -m 0755 "$SCRIPT_DIR/assets/open-agent-shell" "$STAGE/usr/lib/memoryhub/open-agent-shell"
 install -m 0644 "$SCRIPT_DIR/assets/config.yaml" "$STAGE/etc/memoryhub/config.yaml"
+cp -a "$VECTOR_SDK_BUILD"/libkysdk-vector-engine-client.so* "$NATIVE_LIB_DIR/"
+cp -a "$VECTOR_SDK_BUILD"/libkysdk-vector-engine-client-capi.so* "$NATIVE_LIB_DIR/"
 install -m 0644 "$SCRIPT_DIR/assets/memoryhub.desktop" "$STAGE/usr/share/applications/memoryhub.desktop"
 install -m 0644 "$SCRIPT_DIR/assets/memoryhub-first-login.desktop" "$STAGE/etc/xdg/autostart/memoryhub-first-login.desktop"
 install -m 0644 "$PROJECT_ROOT/desktop-client/resources/icons/logo.svg" \
@@ -149,7 +163,7 @@ Priority: optional
 Architecture: $ARCH
 Maintainer: Kylin MemoryHub Team <memoryhub@localhost>
 Installed-Size: $installed_size
-Depends: python3 (>= 3.11), python3-venv, python3-pip, ca-certificates, libqt5core5a, libqt5gui5, libqt5widgets5, libqt5network5, libqt5charts5, libstdc++6
+Depends: python3 (>= 3.11), python3-venv, python3-pip, ca-certificates, libkylin-coreai-embedding, kylin-ai-vector-engine, libqt5core5a, libqt5gui5, libqt5widgets5, libqt5network5, libqt5charts5, libstdc++6
 Description: local memory engine and OpenCode integration for Kylin OS
  MemoryHub provides a local FastAPI memory service, Qt desktop console,
  command-line client, MCP server and an automatically configured OpenCode
@@ -158,7 +172,7 @@ EOF
 
 (cd "$STAGE" && find . -type f ! -path './DEBIAN/*' -print0 | sort -z | xargs -0 md5sum > DEBIAN/md5sums)
 
-echo "[4/5] Validating staged package"
+echo "[5/6] Validating staged package"
 test -x "$STAGE/usr/bin/memoryhub-client"
 test -x "$STAGE/usr/bin/memoryhub_service_launcher"
 test -x "$STAGE/usr/bin/memoryhub_session_launcher"
@@ -166,6 +180,8 @@ test -x "$STAGE/usr/bin/memoryhub_app_launcher"
 test -x "$STAGE/usr/bin/memoryhub-open-agent"
 test -x "$STAGE/usr/lib/memoryhub/open-agent-shell"
 test -f "$STAGE/usr/lib/memoryhub/configure_opencode.py"
+test -e "$NATIVE_LIB_DIR/libkysdk-vector-engine-client.so"
+test -e "$NATIVE_LIB_DIR/libkysdk-vector-engine-client-capi.so"
 test -x "$STAGE/usr/lib/memoryhub/mcp-user-launcher"
 grep -q "$VERSION-$REVISION" "$STAGE/DEBIAN/postinst"
 test ! -e "$STAGE/usr/lib/systemd/user/memoryhub.service"
@@ -173,7 +189,7 @@ test -f "$STAGE/usr/share/memoryhub/opencode/memoryhub.plugin.mjs"
 test -f "$STAGE/usr/share/memoryhub/opencode/skills/memory-awareness/SKILL.md"
 test -n "$(find "$WHEELHOUSE" -maxdepth 1 -name 'kylin_memoryhub-*.whl' -print -quit)"
 
-echo "[5/5] Creating DEB"
+echo "[6/6] Creating DEB"
 dpkg-deb --root-owner-group --build "$STAGE" "$OUTPUT"
 
 # Kylin's patched dpkg-deb may append an internal `_compat` archive member

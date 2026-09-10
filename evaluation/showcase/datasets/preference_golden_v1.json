@@ -115,33 +115,33 @@
     },
     {
       "sample_id": "pref_gen_016",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出开发数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_017",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_018",
-      "input_text": "请在项目管理场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在项目管理场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_019",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出个人偏好数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "个人偏好"
     },
@@ -155,32 +155,32 @@
     },
     {
       "sample_id": "pref_gen_021",
-      "input_text": "请在开发场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在开发场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_022",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出运维数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_023",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_024",
-      "input_text": "请在个人偏好场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在个人偏好场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "个人偏好"
@@ -195,32 +195,32 @@
     },
     {
       "sample_id": "pref_gen_026",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_027",
-      "input_text": "请在运维场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在运维场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_028",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出项目管理数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_029",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "个人偏好"
@@ -235,33 +235,33 @@
     },
     {
       "sample_id": "pref_gen_031",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出开发数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_032",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_033",
-      "input_text": "请在项目管理场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在项目管理场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_034",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出个人偏好数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "个人偏好"
     },
@@ -275,32 +275,32 @@
     },
     {
       "sample_id": "pref_gen_036",
-      "input_text": "请在开发场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在开发场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_037",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出运维数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_038",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_039",
-      "input_text": "请在个人偏好场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在个人偏好场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "个人偏好"
@@ -315,32 +315,32 @@
     },
     {
       "sample_id": "pref_gen_041",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_042",
-      "input_text": "请在运维场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在运维场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_043",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出项目管理数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_044",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "个人偏好"
@@ -355,33 +355,33 @@
     },
     {
       "sample_id": "pref_gen_046",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出开发数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_047",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_048",
-      "input_text": "请在项目管理场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在项目管理场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_049",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出个人偏好数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "个人偏好"
     },
@@ -395,32 +395,32 @@
     },
     {
       "sample_id": "pref_gen_051",
-      "input_text": "请在开发场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在开发场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_052",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出运维数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_053",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_054",
-      "input_text": "请在个人偏好场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在个人偏好场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "个人偏好"
@@ -435,32 +435,32 @@
     },
     {
       "sample_id": "pref_gen_056",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_057",
-      "input_text": "请在运维场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在运维场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_058",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出项目管理数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_059",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "个人偏好"
@@ -475,33 +475,33 @@
     },
     {
       "sample_id": "pref_gen_061",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出开发数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_062",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_063",
-      "input_text": "请在项目管理场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在项目管理场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_064",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出个人偏好数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "个人偏好"
     },
@@ -515,32 +515,32 @@
     },
     {
       "sample_id": "pref_gen_066",
-      "input_text": "请在开发场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在开发场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_067",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出运维数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_068",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_069",
-      "input_text": "请在个人偏好场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在个人偏好场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "个人偏好"
@@ -555,32 +555,32 @@
     },
     {
       "sample_id": "pref_gen_071",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_072",
-      "input_text": "请在运维场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在运维场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_073",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出项目管理数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_074",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "个人偏好"
@@ -595,33 +595,33 @@
     },
     {
       "sample_id": "pref_gen_076",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出开发数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_077",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_078",
-      "input_text": "请在项目管理场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在项目管理场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_079",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出个人偏好数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "个人偏好"
     },
@@ -635,32 +635,32 @@
     },
     {
       "sample_id": "pref_gen_081",
-      "input_text": "请在开发场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在开发场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_082",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出运维数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_083",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_084",
-      "input_text": "请在个人偏好场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在个人偏好场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "个人偏好"
@@ -675,32 +675,32 @@
     },
     {
       "sample_id": "pref_gen_086",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_087",
-      "input_text": "请在运维场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在运维场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_088",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出项目管理数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_089",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "个人偏好"
@@ -715,33 +715,33 @@
     },
     {
       "sample_id": "pref_gen_091",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出开发数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_092",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_093",
-      "input_text": "请在项目管理场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在项目管理场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_094",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出个人偏好数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "个人偏好"
     },
@@ -755,32 +755,32 @@
     },
     {
       "sample_id": "pref_gen_096",
-      "input_text": "请在开发场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在开发场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_097",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出运维数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_098",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_099",
-      "input_text": "请在个人偏好场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在个人偏好场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "个人偏好"
@@ -795,32 +795,32 @@
     },
     {
       "sample_id": "pref_gen_101",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_102",
-      "input_text": "请在运维场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在运维场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_103",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出项目管理数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_104",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "个人偏好"
@@ -835,33 +835,33 @@
     },
     {
       "sample_id": "pref_gen_106",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出开发数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_107",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_108",
-      "input_text": "请在项目管理场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在项目管理场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_109",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出个人偏好数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "个人偏好"
     },
@@ -875,32 +875,32 @@
     },
     {
       "sample_id": "pref_gen_111",
-      "input_text": "请在开发场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在开发场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_112",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出运维数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_113",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_114",
-      "input_text": "请在个人偏好场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在个人偏好场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "个人偏好"
@@ -915,32 +915,32 @@
     },
     {
       "sample_id": "pref_gen_116",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "开发"
     },
     {
       "sample_id": "pref_gen_117",
-      "input_text": "请在运维场景使用 Markdown 要点",
-      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出",
+      "input_text": "以后在运维场景都用 Markdown 格式",
+      "expected_output": "偏好使用 MARKDOWN 格式进行数据输出。",
       "expected_type": "format_preference",
       "expected_found": true,
       "scene": "运维"
     },
     {
       "sample_id": "pref_gen_118",
-      "input_text": "开发任务优先使用 Python 工具",
-      "expected_output": "偏好使用 Python 工具",
-      "expected_type": "tool_preference",
+      "input_text": "以后默认用 JSON 格式输出项目管理数据",
+      "expected_output": "偏好使用 JSON 格式进行数据输出。",
+      "expected_type": "format_preference",
       "expected_found": true,
       "scene": "项目管理"
     },
     {
       "sample_id": "pref_gen_119",
-      "input_text": "不要保存密码和定位信息",
-      "expected_output": "禁止持久化保存敏感凭证及位置数据",
+      "input_text": "不要保存我的密码和定位信息",
+      "expected_output": "硬约束：任何时候都禁止在持久存储中保留敏感会话凭证及位置轨迹数据。",
       "expected_type": "safety_preference",
       "expected_found": true,
       "scene": "个人偏好"

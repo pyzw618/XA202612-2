@@ -35,9 +35,16 @@ typedef void (*vector_engine_free_fn)(void* ptr);
 // Returns engine handle, NULL on failure.
 VE_CAPI_EXPORT vector_engine_t vector_engine_create();
 
-// Connect to the Milvus gRPC service with the non-empty SDK application identity.
+// Connect to the vector service with the non-empty SDK application identity.
+// An empty host selects Kylin's per-user Unix socket; a non-empty host selects
+// the explicit host:port endpoint.
 // Returns 0 on success, non-zero StatusCode on failure.
 VE_CAPI_EXPORT int vector_engine_connect(vector_engine_t engine, const char* app_id, const char* host, int port);
+
+// Ask the local Kylin vector service to open/create its persistent database.
+// `encrypt` is treated as a boolean.  `key` may be empty when encryption is off.
+VE_CAPI_EXPORT int vector_engine_load_db_file(vector_engine_t engine, const char* db_file, int encrypt,
+                                              const char* key);
 
 // Disconnect from Milvus. Returns 0 on success, non-zero on failure.
 VE_CAPI_EXPORT int vector_engine_disconnect(vector_engine_t engine);

@@ -55,6 +55,22 @@ class TestVectorEngineAppIdConfiguration:
 
         assert config.vector_engine.app_id == "test-app-id"
 
+    def test_yaml_preserves_kylin_local_vector_settings(self, tmp_path: Path) -> None:
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            "vector_engine:\n"
+            "  provider: milvus\n"
+            "  app_id: kylin-memoryhub\n"
+            "  local_socket: true\n"
+            "  db_path: ~/.local/share/MemoryHub/data/vector-engine.db\n",
+            encoding="utf-8",
+        )
+
+        config = load_config(str(config_path))
+
+        assert config.vector_engine.local_socket is True
+        assert config.vector_engine.db_path.endswith("vector-engine.db")
+
     @pytest.mark.parametrize("app_id", ["", " ", "\t\n"])
     def test_milvus_rejects_blank_app_id_before_engine_creation(
         self, app_id: str
@@ -89,4 +105,34 @@ class TestMilvusCAPIAppIdABI:
 
         assert library.vector_engine_connect.calls == [
             (handle, "测试-app-id".encode("utf-8"), b"127.0.0.1", 19530)
+        ]
+
+    def test_empty_host_selects_kylin_local_socket(self) -> None:
+        api, library = self._api_with_fake_cdll()
+        handle = c_void_p(123)
+
+        api.connect(handle, "kylin-memoryhub", "", 19530)
+
+        assert library.vector_engine_connect.calls == [
+            (handle, b"kylin-memoryhub", b"", 19530)
+        ]
+
+    def test_load_db_file_forwards_persistence_options(self) -> None:
+        api, library = self._api_with_fake_cdll()
+        handle = c_void_p(123)
+
+        api.load_db_file(
+            handle,
+            "/home/test/.local/share/MemoryHub/data/vector-engine.db",
+            encrypt=True,
+            key="secret",
+        )
+
+        assert library.vector_engine_load_db_file.calls == [
+            (
+                handle,
+                b"/home/test/.local/share/MemoryHub/data/vector-engine.db",
+                1,
+                b"secret",
+            )
         ]

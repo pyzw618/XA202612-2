@@ -33,9 +33,12 @@ def evaluator(retrieval_service: RetrievalService) -> VNextRetrievalEvaluator:
     return VNextRetrievalEvaluator(retrieval_service, top_k=5, seed=42)
 
 
-def test_evaluator_runs_and_reports_all_segments(evaluator: VNextRetrievalEvaluator) -> None:
+def test_evaluator_runs_and_reports_all_segments(
+    evaluator: VNextRetrievalEvaluator, dataset: dict
+) -> None:
     report = evaluator.evaluate(DATASET_PATH)
-    assert report.total_queries == 10
+    expected_count = len(dataset["queries"])
+    assert report.total_queries == expected_count
     assert 0.0 <= report.router_accuracy <= 1.0
     assert 0.0 <= report.recall_at_k <= 1.0
     assert 0.0 <= report.precision_at_k <= 1.0
@@ -48,7 +51,7 @@ def test_evaluator_runs_and_reports_all_segments(evaluator: VNextRetrievalEvalua
     assert 0.0 <= report.context_recall <= 1.0
     assert 0.0 <= report.constraint_preservation <= 1.0
     assert 0.0 <= report.budget_compliance <= 1.0
-    assert len(report.sample_results) == 10
+    assert len(report.sample_results) == expected_count
 
 
 def test_router_accuracy_perfect_when_intent_hinted(evaluator: VNextRetrievalEvaluator) -> None:
@@ -138,9 +141,12 @@ def test_mock_executor_blocks_candidate_memory(retrieval_service: RetrievalServi
     assert "candidate-memory" not in context_ids
 
 
-def test_report_model_dump_is_serializable(evaluator: VNextRetrievalEvaluator) -> None:
+def test_report_model_dump_is_serializable(
+    evaluator: VNextRetrievalEvaluator, dataset: dict
+) -> None:
     report = evaluator.evaluate(DATASET_PATH)
     dumped = report.model_dump()
     assert dumped["schema_version"] == "vnext/v1"
-    assert dumped["total_queries"] == 10
-    assert len(dumped["sample_results"]) == 10
+    expected_count = len(dataset["queries"])
+    assert dumped["total_queries"] == expected_count
+    assert len(dumped["sample_results"]) == expected_count

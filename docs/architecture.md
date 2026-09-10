@@ -185,7 +185,7 @@ legacy/0% → canary/5% → canary/25% → canary/50% → vnext/100%
 
 ## 12. Embedding 与 LLM
 
-- **Embedding**（`embedding/`）：生产使用麒麟 `kylin-coreai-embedding` C SDK（ctypes 加载 `.so`，DBus 连接后端服务，模型 `ensemble-embd_gte-base_uint8-text`，固定 **768 维**，维度不符直接失败关闭）；开发使用 `MockEmbeddingClient`（确定性向量）或 `kylin_mock`（third_party 内与真实 SDK 同符号的 mock 动态库，可跑通 ctypes 链路）。运行时契约：[reference/kylin-embedding-runtime-contract.md](reference/kylin-embedding-runtime-contract.md)。
+- **Embedding**（`embedding/`）：生产使用麒麟 `libkylin-coreai-embedding` 包提供的 C SDK（V11 soname 为 `libkysdk-coreai-embedding.so.1`，同时兼容旧 soname；ctypes + DBus，固定 **768 维**），并兼容“显式 init_model”与“init_session 自动加载默认模型”两代 ABI；开发使用 `MockEmbeddingClient` 或 `kylin_mock`。运行时契约：[reference/kylin-embedding-runtime-contract.md](reference/kylin-embedding-runtime-contract.md)。
 - **LLM**（`llm/openai_client.py`）：云端 OpenAI 兼容接口（默认 dashscope/qwen-flash），用于抽取、冲突裁决、遗忘意图解析等语义决策；LLM 不可用时全部有确定性规则兜底，写入链路不因 LLM 阻塞（`llm.fact_extraction_timeout_seconds` 限制增强步骤耗时）。
 - **生产双层门禁**（`config.py`）：`validate_production_gate()` 静态校验（provider=kylin/milvus、768 维、禁 fallback、vNext policy_required/authority_single_writer 强制），`validate_production_runtime()` 在客户端/引擎构造后动态校验（.so 加载、连通性）；违规抛 `ProductionGateError` 拒绝启动。
 

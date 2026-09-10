@@ -180,6 +180,12 @@ class VectorEngineConfig:
     collection: str = "memoryhub"
     dimension: int = 768
     search_timeout_ms: int = 120
+    # True 使用 libkysdk 默认的每用户 Unix Socket：
+    # /tmp/kylin-ai-vector-engine-<uid>.sock；False 使用 host:port。
+    local_socket: bool = False
+    db_path: str = ""
+    db_encrypt: bool = False
+    db_key_env: str = "MEMORYHUB_VECTOR_ENGINE_DB_KEY"
 
     def __post_init__(self) -> None:
         """校验向量引擎配置，确保 Milvus 在加载动态库前已有 app_id。"""
@@ -190,6 +196,16 @@ class VectorEngineConfig:
             raise ValueError(
                 "vector_engine.app_id must be a non-empty string for Milvus providers"
             )
+        if not isinstance(self.db_path, str):
+            raise ValueError("vector_engine.db_path must be a string")
+        if self.db_encrypt and not self.db_path.strip():
+            raise ValueError(
+                "vector_engine.db_path must be set when database encryption is enabled"
+            )
+        if not isinstance(self.db_encrypt, bool):
+            raise ValueError("vector_engine.db_encrypt must be a boolean")
+        if not isinstance(self.db_key_env, str) or not self.db_key_env.strip():
+            raise ValueError("vector_engine.db_key_env must be a non-empty string")
 
 
 @dataclass
@@ -794,6 +810,13 @@ def load_config(config_path: str | None = None) -> AppConfig:
         config.vector_engine.provider = os.environ["MEMORYHUB_VECTOR_ENGINE_PROVIDER"]
     if "MEMORYHUB_VECTOR_ENGINE_APP_ID" in os.environ:
         config.vector_engine.app_id = os.environ["MEMORYHUB_VECTOR_ENGINE_APP_ID"]
+    if "MEMORYHUB_VECTOR_ENGINE_DB_PATH" in os.environ:
+        config.vector_engine.db_path = os.environ["MEMORYHUB_VECTOR_ENGINE_DB_PATH"]
+    if "MEMORYHUB_VECTOR_ENGINE_LOCAL_SOCKET" in os.environ:
+        raw_value = os.environ["MEMORYHUB_VECTOR_ENGINE_LOCAL_SOCKET"].lower()
+        if raw_value not in ("0", "1", "false", "true", "no", "yes"):
+            raise ValueError("MEMORYHUB_VECTOR_ENGINE_LOCAL_SOCKET must be a boolean")
+        config.vector_engine.local_socket = raw_value in ("1", "true", "yes")
     # Prefer the portable LLM_API_* names used by desktop configuration;
     # retain MEMORYHUB_* aliases for deployed service compatibility.
     if os.environ.get("LLM_API_BASE") or os.environ.get("MEMORYHUB_LLM_API_BASE"):

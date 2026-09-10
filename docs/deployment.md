@@ -28,8 +28,8 @@ scripts/start-memoryhub-service.ps1    # Windows 启动
 | 项 | 契约 |
 |---|---|
 | 操作系统 | 银河麒麟桌面 V10 系（含 SP1+）/ V11，`x86_64` 或 `aarch64`（动态库须匹配架构） |
-| Embedding | `kylin-coreai-embedding` C SDK（`libkylin-coreai-embedding.so`），DBus 后端服务，模型 `ensemble-embd_gte-base_uint8-text`，固定 **768 维** |
-| 向量引擎 | Milvus（麒麟 C API，`libkysdk-vector-engine-client`），需部署平台提供的 `app_id` |
+| Embedding | `libkylin-coreai-embedding` 包提供的 C SDK（V11 soname：`libkysdk-coreai-embedding.so.1`），DBus 后端服务，模型 `ensemble-embd_gte-base_uint8-text`，固定 **768 维** |
+| 向量引擎 | 麒麟向量引擎 SDK（`libkysdk-vector-engine-client`）；DEB 默认使用每用户 Unix Socket 与系统用户服务已加载的默认数据库，`app_id=kylin-memoryhub` |
 | 配置 | `runtime.mode=production` + `config.example.yaml` 为样板；双层门禁不满足即拒绝启动 |
 
 完整契约（.so 搜索路径、DBus、超时与错误码、embedding profile 升级规则）：[reference/kylin-embedding-runtime-contract.md](reference/kylin-embedding-runtime-contract.md)。
@@ -50,7 +50,9 @@ python scripts/run_milvus_real_smoke_test.py      # Milvus 真实 SDK 烟测
 
 ```bash
 sudo apt install -y python3 python3-venv python3-pip build-essential cmake \
-  dpkg-dev qtbase5-dev qtbase5-dev-tools libqt5charts5-dev
+  dpkg-dev qtbase5-dev qtbase5-dev-tools libqt5charts5-dev pkg-config \
+  libgrpc++-dev libprotobuf-dev protobuf-compiler-grpc nlohmann-json3-dev \
+  libkylin-ai-proto-dev libsqlitecpp-dev libsqlcipher-dev
 bash packaging/linux/build-deb.sh
 # 产物：packaging/linux/dist/kylin-memoryhub_<version>-<revision>_amd64.deb (+ .sha256)
 # 版本号取自 pyproject.toml；可用 MEMORYHUB_PACKAGE_VERSION / MEMORYHUB_PACKAGE_REVISION 覆盖
@@ -59,13 +61,14 @@ bash packaging/linux/build-deb.sh
 MEMORYHUB_WHEEL_CACHE=/path/to/wheelhouse bash packaging/linux/build-deb.sh
 ```
 
-构建流程：生成 Python wheelhouse（离线依赖）→ 编译并测试 Qt 客户端 → 装配 DEB。目标机安装时**无需访问 PyPI**。
+构建流程：生成 Python wheelhouse（离线依赖）→ 编译麒麟向量 SDK 与 C API 桥接库 → 编译并测试 Qt 客户端 → 装配 DEB。目标机安装时**无需访问 PyPI**。
 
 ### 安装包内容
 
 - MemoryHub Python 后端（`/opt/memoryhub/venv`）+ 离线 wheel 依赖
 - Qt 桌面控制台
 - `memoryhub` CLI 与 `memoryhub-mcp`
+- 麒麟向量引擎客户端 SDK 与 MemoryHub C API 桥接库
 - 桌面会话自启动服务（兼容银河麒麟 KARE）
 - OpenCode 插件、工具、命令与 `memory-awareness` 技能
 - 首次登录按用户自动配置脚本

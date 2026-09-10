@@ -67,6 +67,17 @@ typedef struct Engine {
     Collection *collections;
 } Engine;
 
+KYLIN_EXPORT int vector_engine_load_db_file(vector_engine_t engine,
+                                             const char *db_file,
+                                             int encrypt,
+                                             const char *key) {
+    Engine *e = (Engine *)engine;
+    (void)encrypt;
+    (void)key;
+    if (!e || !e->connected || !db_file || db_file[0] == '\0') return 1;
+    return 0;
+}
+
 /* ---------------- Small utilities ---------------- */
 
 static char *mock_strdup(const char *s) {

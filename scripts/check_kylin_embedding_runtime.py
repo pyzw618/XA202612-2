@@ -3,7 +3,7 @@
 
 对照 docs/reference/kylin-embedding-runtime-contract.md §6，逐项检查：
   1. 操作系统是否为麒麟桌面、CPU 架构
-  2. libkylin-coreai-embedding.so 是否存在于预期路径并可加载
+  2. 麒麟 CoreAI Embedding SDK 是否可由系统动态加载器发现并加载
   3. 依赖动态库（libstdc++/libgcc）是否可解析
   4. DBus 会话可用性
   5. 模型名 = ensemble-embd_gte-base_uint8-text
@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import ctypes
-import ctypes.util
 import json
 import os
 import platform
@@ -87,31 +86,41 @@ def check_os() -> None:
 
 
 def check_dynamic_library() -> None:
-    found = next((p for p in SO_CANDIDATES if os.path.exists(p)), None)
-    if found is None:
+    found = None
+    handle = None
+    last_error = None
+    for candidate in SO_CANDIDATES:
+        is_explicit_path = os.path.isabs(candidate) or os.path.dirname(candidate)
+        if is_explicit_path and not os.path.exists(candidate):
+            continue
+        loaded = _load_shared(candidate)
+        if isinstance(loaded, Exception):
+            last_error = loaded
+            continue
+        found = candidate
+        handle = loaded
+        break
+    if found is None or handle is None:
         _record(
             "embedding.so",
             False,
-            f"未找到 {SO_CANDIDATES[0]}（候选 {len(SO_CANDIDATES)} 个路径）",
+            f"未找到可加载的麒麟 Embedding SDK（候选 {len(SO_CANDIDATES)} 个；"
+            f"最后错误: {last_error or 'none'}）",
             code="embedding.so_not_found",
         )
         return
-    handle = _load_shared(found)
-    ok = not isinstance(handle, Exception)
     _record(
         "embedding.so",
-        ok,
-        f"{found} {'可加载' if ok else '加载失败: ' + str(handle)}",
-        code="embedding.unavailable" if not ok else "",
+        True,
+        f"{found} 可加载",
     )
-    if ok:
-        missing = [dep for dep in REQUIRED_DEPS if ctypes.util.find_library(dep) is None]
-        _record(
-            "embedding.deps",
-            not missing,
-            f"缺失依赖: {', '.join(missing) if missing else '全部可解析'}",
-            code="embedding.deps_missing" if missing else "",
-        )
+    missing = [dep for dep in REQUIRED_DEPS if isinstance(_load_shared(dep), Exception)]
+    _record(
+        "embedding.deps",
+        not missing,
+        f"缺失依赖: {', '.join(missing) if missing else '全部可解析'}",
+        code="embedding.deps_missing" if missing else "",
+    )
 
 
 def check_model_and_dimension() -> None:
@@ -119,7 +128,7 @@ def check_model_and_dimension() -> None:
     try:
         from memoryhub.embedding.kylin_client import KylinEmbeddingClient
 
-        client = KylinEmbeddingClient(use_mock=False)
+        client = KylinEmbeddingClient(use_mock=False, query_timeout_ms=5000)
         if not client.is_available():
             _record(
                 "embedding.sdk",
@@ -129,7 +138,8 @@ def check_model_and_dimension() -> None:
             )
             return
         model = getattr(client, "_model_name", "") or ""
-        dim = getattr(client, "dim", None) or getattr(client, "_dim", None)
+        vector = client.embed("MemoryHub 麒麟运行时自检")
+        dim = len(vector)
         model_ok = model == CONTRACT_MODEL
         dim_ok = int(dim) == CONTRACT_DIM
         _record(
@@ -144,6 +154,7 @@ def check_model_and_dimension() -> None:
             f"dim={dim}（期望 {CONTRACT_DIM}）",
             code="embedding.dimension_mismatch" if not dim_ok else "",
         )
+        client.close()
     except Exception as exc:  # noqa: BLE001
         _record(
             "embedding.sdk",

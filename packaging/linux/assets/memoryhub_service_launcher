@@ -7,13 +7,23 @@ set -eu
 /usr/lib/memoryhub/prepare-user
 
 : "${MEMORYHUB_CONFIG:=/etc/memoryhub/config.yaml}"
-: "${MEMORYHUB_RUNTIME_MODE:=development}"
-: "${MEMORYHUB_RUNTIME_ALLOW_FALLBACK:=true}"
-: "${MEMORYHUB_EMBEDDING_PROVIDER:=mock}"
-: "${MEMORYHUB_VECTOR_ENGINE_PROVIDER:=faiss}"
+: "${MEMORYHUB_RUNTIME_MODE:=production}"
+: "${MEMORYHUB_RUNTIME_ALLOW_FALLBACK:=false}"
+: "${MEMORYHUB_EMBEDDING_PROVIDER:=kylin}"
+: "${MEMORYHUB_VECTOR_ENGINE_PROVIDER:=milvus}"
+: "${MEMORYHUB_VECTOR_ENGINE_APP_ID:=kylin-memoryhub}"
+: "${MEMORYHUB_VECTOR_ENGINE_LOCAL_SOCKET:=true}"
 : "${MEMORYHUB_DB_PATH:=$HOME/.local/share/MemoryHub/data/memoryhub.db}"
 export MEMORYHUB_CONFIG MEMORYHUB_RUNTIME_MODE MEMORYHUB_RUNTIME_ALLOW_FALLBACK
-export MEMORYHUB_EMBEDDING_PROVIDER MEMORYHUB_VECTOR_ENGINE_PROVIDER MEMORYHUB_DB_PATH
+export MEMORYHUB_EMBEDDING_PROVIDER MEMORYHUB_VECTOR_ENGINE_PROVIDER
+export MEMORYHUB_VECTOR_ENGINE_APP_ID MEMORYHUB_VECTOR_ENGINE_LOCAL_SOCKET
+export MEMORYHUB_DB_PATH
+
+native_lib_dir=/usr/lib/memoryhub/native
+if [ -d "$native_lib_dir" ]; then
+    LD_LIBRARY_PATH="$native_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH
+fi
 
 exec /opt/memoryhub/venv/bin/python -m uvicorn memoryhub.app:app \
     --host 127.0.0.1 --port 8099

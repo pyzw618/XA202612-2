@@ -122,6 +122,36 @@ def test_api_03_preferences_list_detail_versions(client: TestClient) -> None:
     assert isinstance(archived, list)
 
 
+def test_api_03b_conflicting_preferences_surface_in_conflict_list(
+    client: TestClient,
+) -> None:
+    """相同作用域的显式格式偏好发生覆盖后，前端冲突列表可读取完整双方内容。"""
+    _write_event(client, "以后会议纪要都使用 Markdown 格式", "evt-conflict-markdown")
+    _write_event(client, "以后会议纪要都使用 JSON 格式", "evt-conflict-json")
+
+    response = client.get(
+        "/api/memory/conflicts",
+        params={
+            "user_id": "u-api",
+            "status": "resolved",
+            "memory_type": "preference",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    conflicts = response.json()
+    assert len(conflicts) == 1
+    conflict = conflicts[0]
+    assert conflict["conflict_id"].startswith("conf_pref_")
+    assert conflict["decision"] == "override"
+    assert conflict["old_content"] == "偏好使用 MARKDOWN 格式进行数据输出。"
+    assert conflict["new_content"] == "偏好使用 JSON 格式进行数据输出。"
+    assert conflict["old_memory_id"]
+    assert conflict["new_memory_id"]
+    assert conflict["result_memory_id"]
+    assert conflict["resolved_at"] is not None
+
+
 def test_api_04_knowledge_list_detail_filter(client: TestClient) -> None:
     """GET /knowledge[/{id}] → 200,支持 type 过滤"""
     resp = client.post(
@@ -198,7 +228,14 @@ def test_api_05b_conflict_resolve_persists_valid_decision(client: TestClient) ->
     assert stored[0]["resolved_at"] is not None
 
 
-def _seed_conflict(client: TestClient, *, conflict_id: str, old, new, memory_type: str = "preference"):
+def _seed_conflict(
+    client: TestClient,
+    *,
+    conflict_id: str,
+    old,
+    new,
+    memory_type: str = "preference",
+):
     """写入冲突双方并登记一条 PENDING 冲突记录，返回 app.state。"""
     state = client.app.state
     state.memory_write_service.upsert_memory(old)

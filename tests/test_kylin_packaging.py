@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 import importlib.util
 import json
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "packaging" / "linux" / "assets"
@@ -55,7 +54,9 @@ def _load_configure_opencode_module():
     return module
 
 
-def test_opencode_configuration_registers_memoryhub_mcp_and_preserves_settings(tmp_path: Path) -> None:
+def test_opencode_configuration_registers_memoryhub_mcp_and_preserves_settings(
+    tmp_path: Path,
+) -> None:
     module = _load_configure_opencode_module()
     opencode_root = tmp_path / "opencode"
     opencode_root.mkdir()
@@ -136,3 +137,26 @@ def test_fact_proposal_uses_current_desktop_user_and_canonical_triple_fields() -
     assert 'body["user_id"] = AppContext::instance()->userId();' in fact_page
     assert 'j::str(f, "subject")' in fact_page
     assert 'j::str(f, "predicate")' in fact_page
+
+
+def test_deb_uses_real_kylin_embedding_and_vector_sdk() -> None:
+    config = (ASSETS / "config.yaml").read_text(encoding="utf-8")
+    launcher = (ASSETS / "memoryhub_service_launcher").read_text(encoding="utf-8")
+    build_script = (
+        ROOT / "packaging" / "linux" / "build-deb.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "mode: production" in config
+    assert "allow_fallback: false" in config
+    assert "provider: kylin" in config
+    assert "provider: milvus" in config
+    assert "local_socket: true" in config
+    assert "app_id: \"kylin-memoryhub\"" in config
+    assert "libkysdk-coreai-embedding.so.1" in config
+    assert "libkysdk-vector-engine-client-capi.so" in config
+    assert "MEMORYHUB_EMBEDDING_PROVIDER:=kylin" in launcher
+    assert "MEMORYHUB_VECTOR_ENGINE_PROVIDER:=milvus" in launcher
+    assert "MEMORYHUB_VECTOR_ENGINE_LOCAL_SOCKET:=true" in launcher
+    assert "libkysdk-vector-engine-client-capi.so*" in build_script
+    assert "libkylin-coreai-embedding" in build_script
+    assert "kylin-ai-vector-engine" in build_script

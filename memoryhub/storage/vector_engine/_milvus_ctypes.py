@@ -150,6 +150,14 @@ class _MilvusCAPI:
             c_int,
         ]
 
+        lib.vector_engine_load_db_file.restype = c_int
+        lib.vector_engine_load_db_file.argtypes = [
+            vector_engine_t,
+            c_char_p,
+            c_int,
+            c_char_p,
+        ]
+
         lib.vector_engine_disconnect.restype = c_int
         lib.vector_engine_disconnect.argtypes = [vector_engine_t]
 
@@ -223,6 +231,24 @@ class _MilvusCAPI:
             handle, app_id.encode("utf-8"), host.encode("utf-8"), port
         )
         self._check_rc(handle, rc, "connect")
+
+    def load_db_file(
+        self,
+        handle: vector_engine_t,
+        db_file: str,
+        *,
+        encrypt: bool = False,
+        key: str = "",
+    ) -> None:
+        if not isinstance(db_file, str) or not db_file.strip():
+            raise MilvusEngineError("milvus.db_path must be a non-empty string")
+        rc = self._lib.vector_engine_load_db_file(
+            handle,
+            db_file.encode("utf-8"),
+            int(encrypt),
+            key.encode("utf-8"),
+        )
+        self._check_rc(handle, rc, "load_db_file")
 
     def disconnect(self, handle: vector_engine_t) -> None:
         rc = self._lib.vector_engine_disconnect(handle)

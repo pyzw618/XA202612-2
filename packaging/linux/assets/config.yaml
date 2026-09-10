@@ -1,6 +1,6 @@
 runtime:
-  mode: development
-  allow_fallback: true
+  mode: production
+  allow_fallback: false
 
 # vNext 链路切流（默认 vNext 主链路；说明见 docs/configuration.md）
 vnext:
@@ -45,22 +45,31 @@ llm:
   fact_extraction_timeout_seconds: 1.0
 
 embedding:
-  provider: mock
+  provider: kylin
   # 麒麟 Embedding SDK 契约固定 768 维（docs/reference/kylin-embedding-runtime-contract.md）
   dimension: 768
-  model_name: mock-embedding
+  model_name: ensemble-embd_gte-base_uint8-text
+  # 留空时由动态加载器/ldconfig 自动定位 V11 的
+  # libkysdk-coreai-embedding.so.1，并兼容旧名称与 multiarch 路径。
   so_path: ""
   query_timeout_ms: 250
 
 vector_engine:
-  provider: faiss
-  app_id: ""
-  so_path: ""
-  host: 127.0.0.1
+  provider: milvus
+  app_id: "kylin-memoryhub"
+  so_path: "/usr/lib/memoryhub/native/libkysdk-vector-engine-client-capi.so"
+  # 空 host + local_socket=true 使用麒麟每用户 Unix Socket。
+  host: ""
   port: 19530
   collection: memoryhub
   dimension: 768
   search_timeout_ms: 120
+  local_socket: true
+  # 留空时使用 kylin-ai-vector-engine 用户服务已加载的默认数据库；V11
+  # 对运行中的服务再次 LoadDBFile 会返回 SERVER_FAILED。
+  db_path: ""
+  db_encrypt: false
+  db_key_env: MEMORYHUB_VECTOR_ENGINE_DB_KEY
 
 safety:
   rule_set_id: kylin-memoryhub.safety

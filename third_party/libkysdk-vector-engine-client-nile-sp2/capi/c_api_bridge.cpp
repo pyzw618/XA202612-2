@@ -318,15 +318,37 @@ int vector_engine_connect(vector_engine_t engine, const char* app_id, const char
     if (app_id == nullptr || app_id[0] == '\0') {
         return SetError(handle, "app_id cannot be empty", static_cast<int>(VectorDB::StatusCode::INVALID_AGUMENT));
     }
-    if (port < 1 || port > 65535) {
+    const bool use_local_socket = host == nullptr || host[0] == '\0';
+    if (!use_local_socket && (port < 1 || port > 65535)) {
         return SetError(handle, "port must be between 1 and 65535", static_cast<int>(VectorDB::StatusCode::INVALID_AGUMENT));
     }
     try {
-        VectorDB::ConnectParam param(
-            app_id,
-            host != nullptr ? host : "127.0.0.1",
-            static_cast<uint16_t>(port));
+        VectorDB::ConnectParam param = use_local_socket
+            ? VectorDB::ConnectParam(app_id)
+            : VectorDB::ConnectParam(app_id, host, static_cast<uint16_t>(port));
         auto status = handle->db->Connect(param);
+        if (!status.IsOk()) {
+            return SetError(handle, status);
+        }
+        return 0;
+    } catch (const std::exception& e) {
+        return SetError(handle, std::string("exception: ") + e.what(),
+                        static_cast<int>(VectorDB::StatusCode::UNKNOWN_ERROR));
+    } catch (...) {
+        return SetError(handle, "unknown C++ exception", static_cast<int>(VectorDB::StatusCode::UNKNOWN_ERROR));
+    }
+}
+
+int vector_engine_load_db_file(vector_engine_t engine, const char* db_file, int encrypt, const char* key) {
+    auto* handle = AsHandle(engine);
+    if (handle == nullptr || !handle->db) {
+        return static_cast<int>(VectorDB::StatusCode::UNKNOWN_ERROR);
+    }
+    if (db_file == nullptr || db_file[0] == '\0') {
+        return SetError(handle, "db_file cannot be empty", static_cast<int>(VectorDB::StatusCode::INVALID_AGUMENT));
+    }
+    try {
+        auto status = handle->db->LoadDBFile(db_file, encrypt != 0, key != nullptr ? key : "");
         if (!status.IsOk()) {
             return SetError(handle, status);
         }

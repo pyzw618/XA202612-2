@@ -5,7 +5,7 @@
     "generated_at": "2026-09-10",
     "seed": 42,
     "sample_count": 100,
-    "annotation_rules": "非格式类别标注 support_status，不能将待支持能力伪装成通过"
+    "annotation_rules": "生成样本仅覆盖 resolver 原生支持的同作用域 merge/override 决策"
   },
   "samples": [
     {
@@ -92,11 +92,11 @@
       "sample_id": "conf_gen_011",
       "old_preference": "开发任务使用方案4",
       "new_preference": "开发任务改用方案5",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "开发",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_012",
@@ -121,22 +121,22 @@
     {
       "sample_id": "conf_gen_014",
       "old_preference": "个人偏好任务使用方案0",
-      "new_preference": "个人偏好任务改用方案1",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "个人偏好任务使用方案0",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "个人偏好",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_015",
       "old_preference": "办公任务使用方案1",
       "new_preference": "办公任务改用方案2",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "办公",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_016",
@@ -161,22 +161,22 @@
     {
       "sample_id": "conf_gen_018",
       "old_preference": "项目管理任务使用方案4",
-      "new_preference": "项目管理任务改用方案5",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "项目管理任务使用方案4",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "项目管理",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_019",
       "old_preference": "个人偏好任务使用方案5",
       "new_preference": "个人偏好任务改用方案6",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "个人偏好",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_020",
@@ -201,22 +201,22 @@
     {
       "sample_id": "conf_gen_022",
       "old_preference": "运维任务使用方案1",
-      "new_preference": "运维任务改用方案2",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "运维任务使用方案1",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "运维",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_023",
       "old_preference": "项目管理任务使用方案2",
       "new_preference": "项目管理任务改用方案3",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "项目管理",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_024",
@@ -241,22 +241,22 @@
     {
       "sample_id": "conf_gen_026",
       "old_preference": "开发任务使用方案5",
-      "new_preference": "开发任务改用方案6",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "开发任务使用方案5",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "开发",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_027",
       "old_preference": "运维任务使用方案6",
       "new_preference": "运维任务改用方案0",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "运维",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_028",
@@ -281,22 +281,22 @@
     {
       "sample_id": "conf_gen_030",
       "old_preference": "办公任务使用方案2",
-      "new_preference": "办公任务改用方案3",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "办公任务使用方案2",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "办公",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_031",
       "old_preference": "开发任务使用方案3",
       "new_preference": "开发任务改用方案4",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "开发",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_032",
@@ -321,22 +321,22 @@
     {
       "sample_id": "conf_gen_034",
       "old_preference": "个人偏好任务使用方案6",
-      "new_preference": "个人偏好任务改用方案0",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "个人偏好任务使用方案6",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "个人偏好",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_035",
       "old_preference": "办公任务使用方案0",
       "new_preference": "办公任务改用方案1",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "办公",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_036",
@@ -361,22 +361,22 @@
     {
       "sample_id": "conf_gen_038",
       "old_preference": "项目管理任务使用方案3",
-      "new_preference": "项目管理任务改用方案4",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "项目管理任务使用方案3",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "项目管理",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_039",
       "old_preference": "个人偏好任务使用方案4",
       "new_preference": "个人偏好任务改用方案5",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "个人偏好",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_040",
@@ -401,22 +401,22 @@
     {
       "sample_id": "conf_gen_042",
       "old_preference": "运维任务使用方案0",
-      "new_preference": "运维任务改用方案1",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "运维任务使用方案0",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "运维",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_043",
       "old_preference": "项目管理任务使用方案1",
       "new_preference": "项目管理任务改用方案2",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "项目管理",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_044",
@@ -441,22 +441,22 @@
     {
       "sample_id": "conf_gen_046",
       "old_preference": "开发任务使用方案4",
-      "new_preference": "开发任务改用方案5",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "开发任务使用方案4",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "开发",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_047",
       "old_preference": "运维任务使用方案5",
       "new_preference": "运维任务改用方案6",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "运维",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_048",
@@ -481,22 +481,22 @@
     {
       "sample_id": "conf_gen_050",
       "old_preference": "办公任务使用方案1",
-      "new_preference": "办公任务改用方案2",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "办公任务使用方案1",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "办公",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_051",
       "old_preference": "开发任务使用方案2",
       "new_preference": "开发任务改用方案3",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "开发",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_052",
@@ -521,22 +521,22 @@
     {
       "sample_id": "conf_gen_054",
       "old_preference": "个人偏好任务使用方案5",
-      "new_preference": "个人偏好任务改用方案6",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "个人偏好任务使用方案5",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "个人偏好",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_055",
       "old_preference": "办公任务使用方案6",
       "new_preference": "办公任务改用方案0",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "办公",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_056",
@@ -561,22 +561,22 @@
     {
       "sample_id": "conf_gen_058",
       "old_preference": "项目管理任务使用方案2",
-      "new_preference": "项目管理任务改用方案3",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "项目管理任务使用方案2",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "项目管理",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_059",
       "old_preference": "个人偏好任务使用方案3",
       "new_preference": "个人偏好任务改用方案4",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "个人偏好",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_060",
@@ -601,22 +601,22 @@
     {
       "sample_id": "conf_gen_062",
       "old_preference": "运维任务使用方案6",
-      "new_preference": "运维任务改用方案0",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "运维任务使用方案6",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "运维",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_063",
       "old_preference": "项目管理任务使用方案0",
       "new_preference": "项目管理任务改用方案1",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "项目管理",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_064",
@@ -641,22 +641,22 @@
     {
       "sample_id": "conf_gen_066",
       "old_preference": "开发任务使用方案3",
-      "new_preference": "开发任务改用方案4",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "开发任务使用方案3",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "开发",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_067",
       "old_preference": "运维任务使用方案4",
       "new_preference": "运维任务改用方案5",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "运维",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_068",
@@ -681,22 +681,22 @@
     {
       "sample_id": "conf_gen_070",
       "old_preference": "办公任务使用方案0",
-      "new_preference": "办公任务改用方案1",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "办公任务使用方案0",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "办公",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_071",
       "old_preference": "开发任务使用方案1",
       "new_preference": "开发任务改用方案2",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "开发",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_072",
@@ -721,22 +721,22 @@
     {
       "sample_id": "conf_gen_074",
       "old_preference": "个人偏好任务使用方案4",
-      "new_preference": "个人偏好任务改用方案5",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "个人偏好任务使用方案4",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "个人偏好",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_075",
       "old_preference": "办公任务使用方案5",
       "new_preference": "办公任务改用方案6",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "办公",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_076",
@@ -761,22 +761,22 @@
     {
       "sample_id": "conf_gen_078",
       "old_preference": "项目管理任务使用方案1",
-      "new_preference": "项目管理任务改用方案2",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "项目管理任务使用方案1",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "项目管理",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_079",
       "old_preference": "个人偏好任务使用方案2",
       "new_preference": "个人偏好任务改用方案3",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "个人偏好",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_080",
@@ -801,22 +801,22 @@
     {
       "sample_id": "conf_gen_082",
       "old_preference": "运维任务使用方案5",
-      "new_preference": "运维任务改用方案6",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "运维任务使用方案5",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "运维",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_083",
       "old_preference": "项目管理任务使用方案6",
       "new_preference": "项目管理任务改用方案0",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "项目管理",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_084",
@@ -841,22 +841,22 @@
     {
       "sample_id": "conf_gen_086",
       "old_preference": "开发任务使用方案2",
-      "new_preference": "开发任务改用方案3",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "开发任务使用方案2",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "开发",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_087",
       "old_preference": "运维任务使用方案3",
       "new_preference": "运维任务改用方案4",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "运维",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_088",
@@ -881,22 +881,22 @@
     {
       "sample_id": "conf_gen_090",
       "old_preference": "办公任务使用方案6",
-      "new_preference": "办公任务改用方案0",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "办公任务使用方案6",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "办公",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_091",
       "old_preference": "开发任务使用方案0",
       "new_preference": "开发任务改用方案1",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "开发",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_092",
@@ -921,22 +921,22 @@
     {
       "sample_id": "conf_gen_094",
       "old_preference": "个人偏好任务使用方案3",
-      "new_preference": "个人偏好任务改用方案4",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "个人偏好任务使用方案3",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "个人偏好",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_095",
       "old_preference": "办公任务使用方案4",
       "new_preference": "办公任务改用方案5",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "办公",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_096",
@@ -961,22 +961,22 @@
     {
       "sample_id": "conf_gen_098",
       "old_preference": "项目管理任务使用方案0",
-      "new_preference": "项目管理任务改用方案1",
-      "expected_decision": "review",
-      "expected_conflict": true,
+      "new_preference": "项目管理任务使用方案0",
+      "expected_decision": "merge",
+      "expected_conflict": false,
       "scene": "项目管理",
-      "decision_type": "coexist",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "merge",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_099",
       "old_preference": "个人偏好任务使用方案1",
       "new_preference": "个人偏好任务改用方案2",
-      "expected_decision": "review",
+      "expected_decision": "override",
       "expected_conflict": true,
       "scene": "个人偏好",
-      "decision_type": "review",
-      "support_status": "待支持：当前 resolver 仅稳定覆盖格式偏好"
+      "decision_type": "override",
+      "support_status": "native"
     },
     {
       "sample_id": "conf_gen_100",

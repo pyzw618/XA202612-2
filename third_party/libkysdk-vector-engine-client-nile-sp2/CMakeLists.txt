@@ -61,6 +61,13 @@ target_link_libraries(kysdk-vector-engine-client-capi
         PUBLIC kysdk-vector-engine-client)
 set_target_properties(kysdk-vector-engine-client-capi PROPERTIES VERSION 0.0.1 SOVERSION 1)
 
+# The MemoryHub DEB keeps both libraries together in
+# /usr/lib/memoryhub/native.  A relative RUNPATH lets the C API bridge resolve
+# the bundled C++ SDK without relying on a global ldconfig entry.
+set_target_properties(kysdk-vector-engine-client kysdk-vector-engine-client-capi PROPERTIES
+        BUILD_RPATH_USE_ORIGIN ON
+        INSTALL_RPATH "$ORIGIN")
+
 install(TARGETS kysdk-vector-engine-client kysdk-vector-engine-client-capi
         DESTINATION ${CMAKE_INSTALL_LIBDIR})
 

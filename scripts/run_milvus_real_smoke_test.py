@@ -34,7 +34,7 @@ from memoryhub.embedding import create_embedding_client
 from memoryhub.storage.vector_engine import build_sparse_vector, create_vector_engine
 
 DEFAULT_ENGINE_SO = "/usr/lib/libkysdk-vector-engine-client-capi.so"
-DEFAULT_EMBEDDING_SO = "/usr/lib/libkylin-coreai-embedding.so"
+DEFAULT_EMBEDDING_SO = "libkysdk-coreai-embedding.so.1"
 
 # 10 条中英文混合记忆（内容各异，保证 top-1 自召回不受重复干扰）
 SMOKE_MEMORIES = [

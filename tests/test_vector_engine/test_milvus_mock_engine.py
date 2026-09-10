@@ -109,6 +109,36 @@ class TestMilvusMockEngine:
         with pytest.raises(ValueError, match="unknown vector_engine provider"):
             create_vector_engine(provider="not_exist")
 
+    def test_kylin_local_socket_uses_service_managed_database_by_default(self):
+        with create_vector_engine(
+            provider="milvus_mock",
+            app_id="kylin-memoryhub",
+            collection="local_socket_default_test",
+            dimension=DIM,
+            local_socket=True,
+        ) as local_engine:
+            local_engine.insert("mem_local", "麒麟本地向量引擎", _one_hot(0))
+            results = local_engine.search(_one_hot(0), top_k=1)
+            assert results[0].memory_id == "mem_local"
+            assert local_engine.local_socket is True
+            assert local_engine.db_path == ""
+
+    def test_kylin_local_socket_can_explicitly_load_database(self, tmp_path):
+        db_path = tmp_path / "vector-engine.db"
+        with create_vector_engine(
+            provider="milvus_mock",
+            app_id="kylin-memoryhub",
+            collection="local_socket_test",
+            dimension=DIM,
+            local_socket=True,
+            db_path=str(db_path),
+        ) as local_engine:
+            local_engine.insert("mem_local", "麒麟本地向量引擎", _one_hot(0))
+            results = local_engine.search(_one_hot(0), top_k=1)
+            assert results[0].memory_id == "mem_local"
+            assert local_engine.local_socket is True
+            assert local_engine.db_path == str(db_path)
+
     def test_dimension_mismatch(self, engine):
         with pytest.raises(ValueError, match="维度"):
             engine.insert("mem_1", "文本", [0.1] * 10)

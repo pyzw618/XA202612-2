@@ -10,7 +10,9 @@ content 生成；查询侧稀疏向量由调用方用 sparse.build_sparse_vector
 
 import json
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from pathlib import Path
 from typing import Any, Optional
 
 from memoryhub.storage.vector_engine._milvus_ctypes import (
@@ -50,6 +52,10 @@ class MilvusVectorEngine(BaseVectorEngine):
         dimension: int = 768,
         connect: bool = True,
         search_timeout_ms: int = 120,
+        local_socket: bool = False,
+        db_path: str = "",
+        db_encrypt: bool = False,
+        db_key: str = "",
     ):
         """
         参数:
@@ -63,9 +69,20 @@ class MilvusVectorEngine(BaseVectorEngine):
             connect: 是否在构造时完成 connect + collection 准备；
                 False 时仅加载库并创建句柄（由调用方自行 connect）
             search_timeout_ms: 查询超时毫秒数；超时时返回稳定错误码 milvus.timeout
+            local_socket: 使用麒麟每用户 Unix Socket，而非显式 host:port
+            db_path: 可选的本地麒麟向量数据库路径；留空时使用系统用户服务
+                已加载的默认数据库（银河麒麟 V11 的标准运行方式）
+            db_encrypt: 是否让麒麟向量服务加密数据库
+            db_key: 数据库加密密钥；仅在 db_encrypt=True 时使用
         """
         self._validate_app_id(app_id)
         self._validate_dimension(dimension)
+        self.local_socket = bool(local_socket)
+        self.db_path = os.path.abspath(os.path.expanduser(db_path)) if db_path else ""
+        self.db_encrypt = bool(db_encrypt)
+        self._db_key = db_key
+        if self.db_encrypt and not self._db_key:
+            raise MilvusEngineError("milvus.db_key must be set when database encryption is enabled")
         self._app_id = app_id
         self._api = _MilvusCAPI(so_path=so_path, mock=mock)
         self._handle: Optional[vector_engine_t] = self._api.create()
@@ -74,7 +91,6 @@ class MilvusVectorEngine(BaseVectorEngine):
         self._connected = False
         self._closed = False
         self.search_timeout_ms = max(0, search_timeout_ms)
-
         # 内存中的 scalar fields 映射：memory_id -> metadata。
         # 当前 C API 不直接暴露 scalar 字段接口，因此由 Python 层维护，
         # 供 hybrid_search 的 filters 做后过滤；后续 C API 支持 scalar 字段后，
@@ -101,8 +117,17 @@ class MilvusVectorEngine(BaseVectorEngine):
         self._ensure_open()
 
         def _connect():
-            self._api.connect(self._handle, self._app_id, host, port)
+            endpoint_host = "" if self.local_socket else host
+            self._api.connect(self._handle, self._app_id, endpoint_host, port)
             self._connected = True
+            if self.local_socket and self.db_path:
+                Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+                self._api.load_db_file(
+                    self._handle,
+                    self.db_path,
+                    encrypt=self.db_encrypt,
+                    key=self._db_key,
+                )
             try:
                 self._api.create_collection(self._handle, self.collection, self.dimension)
             except MilvusEngineError as exc:
