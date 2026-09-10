@@ -7,10 +7,10 @@ Milvus mock 环境性能基准驱动脚本（阶段七 TASK-014 验证用）
 如需仅验证引擎层（embed → sparse → hybrid_search），可传 --engine_only。
 
 用法:
-    python evaluation/run_milvus_mock_benchmark.py
-    python evaluation/run_milvus_mock_benchmark.py \
+    python evaluation/runners/run_milvus_mock_benchmark.py
+    python evaluation/runners/run_milvus_mock_benchmark.py \
         --memory_count 500 --query_count 20 --iterations 3
-    python evaluation/run_milvus_mock_benchmark.py --engine_only
+    python evaluation/runners/run_milvus_mock_benchmark.py --engine_only
 
 注意: mock 环境的延迟数值与召回数值不具真实参考意义，仅用于验证脚本路径。
 """
@@ -30,7 +30,7 @@ except AttributeError:
     pass
 
 # 将项目根目录加入路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from evaluation.metrics.full_chain_benchmark import run_full_chain_benchmark
 from evaluation.metrics.latency_benchmark import LatencyBenchmark

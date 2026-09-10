@@ -1753,6 +1753,7 @@ class EvalSample(BaseModel):
     input_text: str = ""
     expected_output: str = ""
     expected_type: str = ""  # 期望的记忆类型
+    expected_found: bool = True
     scene: str = ""
 
 

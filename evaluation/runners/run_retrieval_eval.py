@@ -2,7 +2,7 @@
 """MemoryHub 检索评测驱动（支持新数据集格式：0-3 级相关性标注）
 
 用法:
-    python evaluation/run_retrieval_eval.py \\
+    python evaluation/runners/run_retrieval_eval.py \\
         --dataset evaluation/datasets/memoryhub_knowledge_retrieval_v1_dev.json \\
         --provider mock \\
         --engine faiss \\
@@ -35,7 +35,7 @@ try:
 except AttributeError:
     pass
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from memoryhub.adapter.schemas import SearchRequest
 from memoryhub.config import RetrievalConfig
@@ -466,7 +466,7 @@ def make_markdown(report: dict, dataset_path: str) -> str:
     lines.append("### 5.5 原 eval_dataset.py 格式兼容")
     lines.append("- 当前脚本仅支持新格式（0-3 级 relevance 标注），不支持旧的 "
               "`relevant_ids` 扁平列表格式。")
-    lines.append("- 旧格式评测请使用原 `evaluation/run_retrieval_eval.py`（版本请查阅 git log）。")
+    lines.append("- 旧格式评测请使用 `evaluation/runners/run_retrieval_eval.py`（版本请查阅 git log）。")
     lines.append("")
 
     return "\n".join(lines)

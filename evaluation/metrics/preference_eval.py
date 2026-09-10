@@ -67,7 +67,7 @@ class PreferenceEvaluator:
 
     使用方式:
         evaluator = PreferenceEvaluator(extractor)
-        report = evaluator.run("evaluation/datasets/preference_golden_v1.json")
+        report = evaluator.run("evaluation/showcase/datasets/preference_golden_v1.json")
     """
 
     def __init__(self, preference_extractor=None):
@@ -138,7 +138,10 @@ class PreferenceEvaluator:
             or predicted_text.lower() in expected_output
             or _normalize(predicted_text) == _normalize(sample.expected_output)
         )
-        correct = found and type_ok and output_ok
+        # Negative/neutral golden rows explicitly assert that no preference is
+        # expected; absence is a correct result, not a missed extraction.
+        expected_found = getattr(sample, "expected_found", True)
+        correct = (not expected_found and not found) or (expected_found and found and type_ok and output_ok)
         return EvalResult(
             sample_id=sample.sample_id,
             predicted=predicted_text,

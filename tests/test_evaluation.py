@@ -97,8 +97,8 @@ def test_preference_golden_run_returns_report(tmp_path):
 
 def test_api_evaluate_preference_and_conflict(client: TestClient) -> None:
     """/evaluate/preference|conflict 接入 golden 数据集返回 EvalReport。"""
-    pref_path = "evaluation/datasets/preference_golden_v1.json"
-    conflict_path = "evaluation/datasets/conflict_golden_v1.json"
+    pref_path = "evaluation/showcase/datasets/preference_golden_v1.json"
+    conflict_path = "evaluation/showcase/datasets/conflict_golden_v1.json"
 
     r = client.post("/api/memory/evaluate/preference", params={"dataset_path": pref_path})
     assert r.status_code == 200, r.text

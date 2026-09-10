@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from evaluation.run_vnext_comparison import SYSTEMS, run_vnext_comparison
+from evaluation.runners.run_vnext_comparison import SYSTEMS, run_vnext_comparison
 
 
 def test_comparison_uses_four_systems_same_methodology_and_one_at_a_time_ablations(

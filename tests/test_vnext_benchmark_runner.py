@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from evaluation.run_vnext_eval import run_vnext_eval
+from evaluation.runners.run_vnext_eval import run_vnext_eval
 
 
 def test_four_layer_runner_writes_versioned_reproducible_report(tmp_path: Path) -> None:

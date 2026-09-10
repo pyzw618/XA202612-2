@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 def percentile(data: list[float], p: float) -> float:

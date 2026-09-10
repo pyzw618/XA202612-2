@@ -23,21 +23,21 @@
 
 用法:
     # 默认 10K 记忆、Top-K=5 的完整链路基准（推荐）
-    python evaluation/run_milvus_kylin_benchmark.py
+    python evaluation/runners/run_milvus_kylin_benchmark.py
 
     # 小数据量快速验证脚本路径
-    python evaluation/run_milvus_kylin_benchmark.py --memory_count 100 --query_count 20
+    python evaluation/runners/run_milvus_kylin_benchmark.py --memory_count 100 --query_count 20
 
     # 显式指定 .so 路径与服务地址
     export MEMORYHUB_VECTOR_ENGINE_APP_ID="<provided-by-deployment-platform>"
-    python evaluation/run_milvus_kylin_benchmark.py \
+    python evaluation/runners/run_milvus_kylin_benchmark.py \
         --so_path /usr/lib/libkysdk-vector-engine-client-capi.so \
         --embedding_so_path /usr/lib/libkylin-coreai-embedding.so \
         --app_id "$MEMORYHUB_VECTOR_ENGINE_APP_ID" \
         --host 127.0.0.1 --port 19530
 
     # 输出 JSON 结果到文件，便于 CI/评测系统解析
-    python evaluation/run_milvus_kylin_benchmark.py --output results/kylin_bench.json
+    python evaluation/runners/run_milvus_kylin_benchmark.py --output results/kylin_bench.json
 
 退出码:
     0: 基准成功完成
@@ -62,7 +62,7 @@ except AttributeError:
     pass
 
 # 将项目根目录加入路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from evaluation.metrics.full_chain_benchmark import run_full_chain_benchmark
 from memoryhub.embedding import create_embedding_client

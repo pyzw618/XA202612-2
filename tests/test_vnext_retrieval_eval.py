@@ -15,7 +15,7 @@ from evaluation.metrics.vnext_retrieval_eval import (
 from memoryhub.adapter.vnext_schemas import MemoryRetrievalRequest
 from memoryhub.application.retrieval_service import RetrievalService
 
-DATASET_PATH = Path("evaluation/datasets/vnext_retrieval_eval.json")
+DATASET_PATH = Path("evaluation/showcase/datasets/vnext_retrieval_eval.json")
 
 
 @pytest.fixture

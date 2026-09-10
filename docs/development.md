@@ -103,7 +103,7 @@ node agent-integration/plugin/opencode/install_plugin.mjs
 
 # 演示与评测
 python -m examples.vnext_demo.run_demo --scenario all --output-dir examples/vnext_demo/output
-python evaluation/run_retrieval_eval.py
+python evaluation/runners/run_retrieval_eval.py
 
 # 桌面端
 cd desktop-client && bash build-linux.sh && ./build/memoryhub-client

@@ -221,10 +221,11 @@ bash build-linux.sh              # 麒麟 / Linux
 覆盖检索质量（Recall@K / MRR / NDCG / Precision）、延迟（P95/P99）、偏好提取、冲突处理、vNext 形成/检索/反馈、可靠性与全链路基准：
 
 ```bash
-python evaluation/run_retrieval_eval.py        # 检索质量评测（dev/test 数据集）
-python evaluation/run_latency_eval.py          # 延迟基准
-python evaluation/run_vnext_eval.py            # vNext 形成/检索评测
-python evaluation/run_vnext_comparison.py      # vNext vs legacy 对照
+python evaluation/showcase/run.py              # 四项展示评测
+python evaluation/runners/run_retrieval_eval.py # 检索质量评测（dev/test 数据集）
+python evaluation/runners/run_latency_eval.py   # 延迟基准
+python evaluation/runners/run_vnext_eval.py     # vNext 形成/检索评测
+python evaluation/runners/run_vnext_comparison.py # vNext vs legacy 对照
 python -m examples.vnext_demo.run_demo --scenario all --output-dir examples/vnext_demo/output   # 固定验收演示（六类场景）
 ```
 
