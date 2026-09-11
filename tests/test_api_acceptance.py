@@ -462,6 +462,98 @@ def test_api_07_manual_memory_write(client: TestClient) -> None:
     assert know.json()["memory_id"]
 
 
+def test_api_07b_direct_preference_write_uses_conflict_version_chain(
+    client: TestClient,
+) -> None:
+    """Free-text REST/CLI writes must not bypass preference conflict handling."""
+    common = {
+        "user_id": "u-direct-pref-conflict",
+        "preference_type": "output_style",
+        "scope": {
+            "scene": "office",
+            "task_type": "weekly-report",
+            "app": "memoryhub-cli",
+        },
+    }
+    first = client.post(
+        "/api/memory/memories/preference",
+        json={**common, "memory_id": "pref_direct_old", "text": "Use Markdown for weekly reports"},
+    )
+    second = client.post(
+        "/api/memory/memories/preference",
+        json={
+            **common,
+            "memory_id": "pref_direct_new",
+            "text": "Do not use Markdown for weekly reports",
+        },
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert second.json()["memory_id"] == "pref_direct_new"
+
+    old = client.app.state.pref_repo.get_by_id("pref_direct_old")
+    new = client.app.state.pref_repo.get_by_id("pref_direct_new")
+    assert old.status is MemoryStatus.ARCHIVED
+    assert new.status is MemoryStatus.ACTIVE
+    assert new.parent_id == old.memory_id
+    assert new.version == old.version + 1
+    assert new.extract_source == "explicit_feedback"
+
+    records = client.app.state.conflict_repo.list_all(user_id=common["user_id"])
+    assert len(records) == 1
+    assert records[0].decision is ConflictDecision.OVERRIDE
+    assert records[0].old_memory_id == old.memory_id
+    assert records[0].new_memory_id == new.memory_id
+    assert records[0].result_memory_id == new.memory_id
+
+
+def test_api_07c_direct_fact_write_uses_knowledge_conflict_version_chain(
+    client: TestClient,
+) -> None:
+    """Direct knowledge writes must use the same fact conflict logic as events."""
+    common = {
+        "user_id": "u-direct-fact-conflict",
+        "knowledge_type": "fact",
+        "subject": "Project Atlas",
+        "predicate": "owner",
+        "single_value": True,
+        "scope": {"scene": "office", "task_type": "planning", "app": "memoryhub-cli"},
+    }
+    first = client.post(
+        "/api/memory/memories/knowledge",
+        json={
+            **common,
+            "memory_id": "know_direct_old",
+            "name": "Atlas owner",
+            "content": "Project Atlas is owned by Alice",
+            "object_value": "Alice",
+        },
+    )
+    second = client.post(
+        "/api/memory/memories/knowledge",
+        json={
+            **common,
+            "memory_id": "know_direct_new",
+            "name": "Atlas owner",
+            "content": "Project Atlas is owned by Bob",
+            "object_value": "Bob",
+        },
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert second.json()["memory_id"] == "know_direct_new"
+
+    old = client.app.state.know_repo.get_by_id("know_direct_old")
+    new = client.app.state.know_repo.get_by_id("know_direct_new")
+    assert old.status is MemoryStatus.ARCHIVED
+    assert new.status is MemoryStatus.ACTIVE
+    assert new.parent_id == old.memory_id
+    assert new.version == old.version + 1
+    assert new.object_value == "Bob"
+
+
 def test_api_08_forget_and_history(client: TestClient) -> None:
     """POST /forget + GET /forget/history → 200;遗忘后详情 404"""
     pref = client.post(

@@ -64,7 +64,30 @@ class _FailingSync:
         raise RuntimeError("untrusted downstream detail 13800138000")
 
 
-def _api(gate=None, sync_service=None, *, pref_repo=None, know_repo=None, writer=None):
+class _UpdaterThroughSync:
+    """Minimal conflict-path seam for safety-gate focused endpoint tests."""
+
+    def __init__(self, sync_service):
+        self.sync_service = sync_service
+
+    def add(self, memory, *, skip_write_gate=False):
+        assert skip_write_gate is True
+        sqlite_ok, memory_id = self.sync_service.index_memory(memory)
+        if not sqlite_ok:
+            raise RuntimeError("memory write failed")
+        return memory_id
+
+
+def _api(
+    gate=None,
+    sync_service=None,
+    *,
+    pref_repo=None,
+    know_repo=None,
+    writer=None,
+    preference_updater=None,
+    knowledge_updater=None,
+):
     app = FastAPI()
     app.include_router(router)
     app.state.safety_gate = gate
@@ -72,6 +95,12 @@ def _api(gate=None, sync_service=None, *, pref_repo=None, know_repo=None, writer
     app.state.pref_repo = pref_repo
     app.state.know_repo = know_repo
     app.state.memory_write_service = writer
+    app.state.preference_updater = preference_updater or (
+        _UpdaterThroughSync(sync_service) if sync_service is not None else None
+    )
+    app.state.knowledge_updater = knowledge_updater or (
+        _UpdaterThroughSync(sync_service) if sync_service is not None else None
+    )
     return TestClient(app)
 
 

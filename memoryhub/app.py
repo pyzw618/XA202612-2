@@ -274,6 +274,8 @@ def create_app(
     app.state.extraction_retry_task = None
     app.state.formation_worker = None
     app.state.memory_write_service = None
+    app.state.preference_updater = None
+    app.state.knowledge_updater = None
     app.state.memory_service = memory_service
     app.state.owns_memory_service = False
     app.state.rollout_controller = None
@@ -740,14 +742,17 @@ def create_app(
             write_service=app.state.memory_write_service,
         )
         knowledge_extractor = KnowledgeExtractor(llm_client=llm_client)
+        knowledge_updater = KnowledgeUpdater(
+            write_service=app.state.memory_write_service,
+            merge_config=config.knowledge_merge,
+            conflict_repo=conflict_repo,
+        )
+        app.state.preference_updater = preference_updater
+        app.state.knowledge_updater = knowledge_updater
         preference_handler = PreferenceMemoryHandler(preference_extractor, preference_updater)
         knowledge_handler = KnowledgeMemoryHandler(
             knowledge_extractor,
-            KnowledgeUpdater(
-                write_service=app.state.memory_write_service,
-                merge_config=config.knowledge_merge,
-                conflict_repo=conflict_repo,
-            ),
+            knowledge_updater,
         )
         extraction_executor = ExtractionExecutor(
             memory_write_service=app.state.memory_write_service,

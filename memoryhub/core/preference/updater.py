@@ -137,7 +137,17 @@ class ConflictDetector:
             except Exception:
                 pass
 
-        negation_words = {"不要", "禁止", "不", "no", "never", "avoid"}
+        negation_words = {
+            "不要",
+            "禁止",
+            "不",
+            "no",
+            "not",
+            "never",
+            "avoid",
+            "don't",
+            "do not",
+        }
         has_neg_a = any(w in old_pref.text for w in negation_words)
         has_neg_b = any(w in new_pref.text for w in negation_words)
         return has_neg_a != has_neg_b
@@ -484,6 +494,21 @@ class PreferenceUpdater:
                     pref.payload.get("target"),
                     preference.memory_id,
                     preference.payload.get("target"),
+                )
+                return pref
+            # CLI/MCP free-text writes do not always carry payload.target/value.
+            # They still need to enter the conflict resolver when their texts are
+            # contradictory; otherwise the direct-write channel silently creates
+            # a second active preference and bypasses the version chain.
+            if (
+                not str(pref.payload.get("target", "")).strip()
+                and not str(preference.payload.get("target", "")).strip()
+                and self.detector.check_preference(pref, preference)
+            ):
+                logger.info(
+                    "find_existing: text conflict %s <-> %s",
+                    pref.memory_id,
+                    preference.memory_id,
                 )
                 return pref
             if self._llm_targets_same_domain(pref, preference):

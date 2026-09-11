@@ -1571,12 +1571,26 @@ async def submit_feedback(req: FeedbackRequest, request: Request):
 # ============================================================
 
 
-def _get_sync_service(request: Request):
-    """从应用状态获取 MemorySyncService 实例。"""
-    service = getattr(request.app.state, "sync_service", None)
-    if service is None:
-        raise HTTPException(status_code=503, detail="memory sync service not initialized")
-    return service
+def _get_preference_updater(request: Request):
+    """Return the conflict-aware preference write path or fail closed."""
+    updater = getattr(request.app.state, "preference_updater", None)
+    if updater is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="preference updater not initialized",
+        )
+    return updater
+
+
+def _get_knowledge_updater(request: Request):
+    """Return the conflict-aware knowledge write path or fail closed."""
+    updater = getattr(request.app.state, "knowledge_updater", None)
+    if updater is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="knowledge updater not initialized",
+        )
+    return updater
 
 
 def _get_safety_gate(request: Request):
@@ -1643,29 +1657,30 @@ def _guarded_memory_write(
     return result
 
 
-def _write_through_sync_service(sync_service, memory):
-    sqlite_ok, memory_id = sync_service.index_memory(memory)
-    if not sqlite_ok:
-        raise RuntimeError("memory write failed")
-    return memory_id
-
-
 @router.post("/memories/preference")
 async def write_preference_memory(
     req: PreferenceMemory,
     request: Request,
-    sync_service=Depends(_get_sync_service),
+    preference_updater=Depends(_get_preference_updater),
 ):
     """
     显式写入/更新偏好记忆，并同步到 Milvus。
 
-    数据流: PreferenceMemory → SafetyWriteGate → 安全副本 → SQLite → Embedding → Milvus
-            → 标记 index_version → 失效检索缓存
+    数据流: PreferenceMemory → SafetyWriteGate → PreferenceUpdater 冲突检测/版本决策
+            → MemoryWriteService → SQLite/outbox → 检索投影
     """
+    # This endpoint is an explicit user/tool write.  Preserve a caller-supplied
+    # source, but do not let the schema's implicit-inference default turn a
+    # contradictory CLI/REST write into an unintended pending inference.
+    memory = req
+    if "extract_source" not in req.model_fields_set:
+        memory = req.model_copy(update={"extract_source": "explicit_feedback"})
     result = _guarded_memory_write(
         request,
-        req,
-        lambda safe_memory: _write_through_sync_service(sync_service, safe_memory),
+        memory,
+        lambda safe_memory: preference_updater.add(
+            safe_memory, skip_write_gate=True
+        ),
         operation="explicit_write",
     )
     return {
@@ -1680,18 +1695,20 @@ async def write_preference_memory(
 async def write_knowledge_memory(
     req: KnowledgeMemory,
     request: Request,
-    sync_service=Depends(_get_sync_service),
+    knowledge_updater=Depends(_get_knowledge_updater),
 ):
     """
     显式写入/更新知识记忆，并同步到 Milvus。
 
-    数据流: KnowledgeMemory → SafetyWriteGate → 安全副本 → SQLite → Embedding → Milvus
-            → 标记 index_version → 失效检索缓存
+    数据流: KnowledgeMemory → SafetyWriteGate → KnowledgeUpdater 去重/冲突/版本决策
+            → MemoryWriteService → SQLite/outbox → 检索投影
     """
     result = _guarded_memory_write(
         request,
         req,
-        lambda safe_memory: _write_through_sync_service(sync_service, safe_memory),
+        lambda safe_memory: knowledge_updater.add(
+            safe_memory, skip_write_gate=True
+        ),
         operation="explicit_write",
     )
     return {
