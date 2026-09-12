@@ -35,7 +35,9 @@ Rules:
    reports"), return a Candidate with memory_type=PREFERENCE and scope_level=TASK
    or PROJECT, never GLOBAL unless the user explicitly names a global rule.
 2. If the event is a repeated successful procedure, return memory_type=PROCEDURAL.
-3. If the event is a factual claim, return memory_type=SEMANTIC.
+3. If the event is a factual claim, return memory_type=SEMANTIC. Its claim must
+   contain subject, predicate, and object_value (and may also retain statement).
+   Never put the whole sentence into one of those three fields.
 4. If the event is episodic, return memory_type=EPISODIC.
 5. If you are uncertain, return status=REVIEW and lower confidence.
 6. Do not fabricate multiple independent evidences from the same event.

@@ -681,7 +681,10 @@ def _retrieved_memory_to_legacy_typed(
             scope=scope_label,
             fact_id=item.memory_id,
             source_text=content_text,
-            object_value=content_text,
+            subject=str(item.content.get("subject", "")),
+            predicate=str(item.content.get("predicate", "")),
+            object_value=str(item.content.get("object_value", "")),
+            object_type=str(item.content.get("object_type", "")),
         )
     if item.memory_type in (MemoryType.PROCEDURAL, MemoryType.EPISODIC):
         knowledge_type = item.content.get("knowledge_type")

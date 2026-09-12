@@ -781,13 +781,24 @@ def _fact_memory_to_dict(memory: KnowledgeMemory) -> dict:
     """knowledge(FACT) → fact 风格响应（/facts 兼容转发，REFACTOR_PLAN_V2 §4.8.8）。"""
     project_id = getattr(memory, "project_id", "") or ""
     scope_name = "project" if project_id else "global"
+    subject = str(memory.subject or "").strip()
+    predicate = str(memory.predicate or "").strip()
+    object_value = str(memory.object_value or "").strip()
+    if not all((subject, predicate, object_value)):
+        # Compatibility for early vNext semantic rows that persisted only an
+        # explicit statement. Recover only conservative, unambiguous forms.
+        from memoryhub.core.knowledge.extractor import parse_explicit_fact_statement
+
+        recovered = parse_explicit_fact_statement(str(memory.content or ""))
+        if recovered is not None:
+            subject, predicate, object_value = recovered
     return {
         "fact_id": memory.memory_id,
         "memory_id": memory.memory_id,
         "user_id": memory.user_id,
-        "subject": memory.subject,
-        "predicate": memory.predicate,
-        "object_value": memory.object_value,
+        "subject": subject,
+        "predicate": predicate,
+        "object_value": object_value,
         "object_type": memory.object_type,
         "source_text": memory.content,
         "source_id": "",
