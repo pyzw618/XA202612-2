@@ -190,7 +190,16 @@ void ForgetPrecisePage::refresh() {
             QString content = j::str(m, "text");
             if (content.isEmpty()) content = j::str(m, "name");
             if (content.isEmpty()) content = j::str(m, "content");
+            if (content.isEmpty() && label == "事实") {
+                QString subject = j::str(m, "subject");
+                if (subject.isEmpty()) subject = j::str(m, "subject_id");
+                QString predicate = j::str(m, "predicate");
+                if (predicate.isEmpty()) predicate = j::str(m, "predicate_id");
+                content = QString("%1 %2 %3").arg(subject, predicate, j::str(m, "object_value")).simplified();
+                if (content.isEmpty()) content = j::str(m, "source_text");
+            }
             const QString id = j::str(m, "memory_id").isEmpty() ? j::str(m, "fact_id") : j::str(m, "memory_id");
+            if (content.isEmpty()) content = id;
             auto *item = new QListWidgetItem(QString("[%1] %2").arg(label, content));
             item->setData(Qt::UserRole, id);
             item->setData(Qt::UserRole + 1, label);

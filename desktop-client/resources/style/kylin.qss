@@ -1,10 +1,10 @@
 /* MemoryHub modern workstation · Qt 5 / UKUI compatible */
 * { font-family: "Noto Sans CJK SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif; font-size: 13px; font-weight: 400; color: #29313D; }
-QMainWindow, QWidget#centralRoot { background: transparent; }
+QMainWindow, QWidget#centralRoot { background: #F6F8FC; }
 QWidget#rightPane, QWidget#dashboardBody, QScrollArea#dashboardScroll { background: #F3F6FA; }
 
 /* Application shell */
-QWidget#sidebar { background: rgba(246, 248, 252, 0.52); border-right: 1px solid rgba(180, 192, 208, 0.35); }
+QWidget#sidebar { background: #F6F8FC; border-right: 1px solid #DDE3EC; }
 QWidget#brandBlock { background: transparent; }
 QLabel#brandIcon { background: #E8F0FF; border-radius: 10px; padding: 5px; }
 QLabel#brandTitle { color: #252C36; font-size: 16px; font-weight: 600; }

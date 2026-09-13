@@ -28,6 +28,7 @@
 #include <QComboBox>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
+#include <QListWidget>
 
 // Real pages and ApiClient against a local HTTP fixture; no production backend writes.
 class FrontendRegressionTest : public QObject {
@@ -481,6 +482,20 @@ private slots:
         QCOMPARE(requests.first().path, QByteArray("/api/memory/lifecycle/consolidate?user_id=alice"));
         QVERIFY(requests.first().body.isEmpty());
         QTRY_VERIFY(!messages.isEmpty());
+    }
+    void preciseForgetDisplaysFactTriplesAndKeepsExactIds() {
+        respond = [](const Request &r) {
+            reply(r, r.path.startsWith("/api/memory/facts")
+                ? "[{\"memory_id\":\"know_fact_qa\",\"fact_id\":\"fact_qa\",\"subject\":\"report\",\"predicate\":\"owner\",\"object_value\":\"Bob\"},{\"fact_id\":\"fact_old\",\"subject_id\":\"project\",\"predicate_id\":\"owner\",\"object_value\":\"Alice\"}]"
+                : "[]");
+        };
+        ForgetPrecisePage page;
+        page.refresh();
+        QTRY_COMPARE(page.m_idList->count(), 2);
+        QCOMPARE(page.m_idList->item(0)->text(), QStringLiteral("[事实] report owner Bob"));
+        QCOMPARE(page.m_idList->item(0)->data(Qt::UserRole).toString(), QStringLiteral("know_fact_qa"));
+        QCOMPARE(page.m_idList->item(1)->text(), QStringLiteral("[事实] project owner Alice"));
+        QCOMPARE(page.m_idList->item(1)->data(Qt::UserRole).toString(), QStringLiteral("fact_old"));
     }
     void archivedAndRecycleFactUseKnowledgeRoute() {
         respond = [](const Request &r) {

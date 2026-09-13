@@ -24,6 +24,7 @@ class MemoryFilterBar;
 // ---- P4.1 精准遗忘：NL / 范围 / ID 三种定位 + 预览 + 执行 ----
 class ForgetPrecisePage : public BasePage {
     Q_OBJECT
+    friend class FrontendRegressionTest;
 public:
     explicit ForgetPrecisePage(QWidget *parent = nullptr);
     void refresh() override;
