@@ -591,7 +591,12 @@ class MilvusHybridRetriever:
             if status and status != "active":
                 continue
             if request.memory_types and result.memory_type:
-                if result.memory_type not in request.memory_types:
+                canonical_fact = (
+                    result.memory_type == "knowledge"
+                    and str(result.metadata.get("knowledge_type", "")).lower() == "fact"
+                    and "fact" in request.memory_types
+                )
+                if result.memory_type not in request.memory_types and not canonical_fact:
                     continue
             confidence = result.metadata.get("confidence")
             if confidence is not None and confidence < request.min_confidence:

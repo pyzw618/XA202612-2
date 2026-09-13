@@ -2,7 +2,9 @@ from memoryhub.adapter.api import _fact_memory_to_dict, _render_legacy_context
 from memoryhub.adapter.retrieval_executor import _legacy_memory_metadata, _retrieved_content
 from memoryhub.adapter.schemas import KnowledgeMemory, KnowledgeType
 from memoryhub.adapter.vnext_schemas import RetrievedMemory, _retrieved_memory_to_legacy_typed
-from memoryhub.adapter.schemas import SearchResponse
+from memoryhub.adapter.schemas import SearchRequest, SearchResponse, SearchResult
+from memoryhub.retrieval.hybrid import HybridRetriever
+from memoryhub.retrieval.milvus_hybrid import MilvusHybridRetriever
 from memoryhub.domain.contracts import LifecycleLayer, MemoryScope, MemoryType
 import pytest
 from memoryhub.application.reflection_service import DeterministicReflectionModel
@@ -94,3 +96,16 @@ def test_fact_compatibility_accepts_legacy_ids_and_canonical_claim(content: dict
 def test_statement_only_fact_context_is_not_an_empty_bullet() -> None:
     fact = _retrieved_memory_to_legacy_typed(_retrieved_fact({"text": "legacy statement"}))
     assert _render_legacy_context(SearchResponse(facts=[fact])) == "## 事实记忆\n- legacy statement"
+
+
+@pytest.mark.parametrize("retriever_type", [HybridRetriever, MilvusHybridRetriever])
+def test_fact_only_filter_accepts_canonical_fact_but_not_other_knowledge(retriever_type) -> None:
+    retriever = retriever_type.__new__(retriever_type)
+    retriever.memory_lookup = {}
+    results = [SearchResult(
+        memory_id=subtype, memory_type="knowledge", score=0.9,
+        metadata={"user_id": "alice", "status": "active", "knowledge_type": subtype},
+    ) for subtype in ("fact", "workflow", "case")]
+    selected = retriever._filter_by_context(results, SearchRequest(user_id="alice", memory_types=["fact"]))
+    assert [item.memory_id for item in selected] == ["fact"]
+    assert retriever._filter_by_context(results, SearchRequest(user_id="bob", memory_types=["fact"])) == []
