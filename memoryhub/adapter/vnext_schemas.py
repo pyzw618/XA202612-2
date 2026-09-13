@@ -676,15 +676,17 @@ def _retrieved_memory_to_legacy_typed(
         )
     if item.memory_type is MemoryType.SEMANTIC:
         scope_label = "global" if item.scope_level is MemoryScope.GLOBAL else "project"
+        claim = item.content.get("claim")
+        fact_content = claim if isinstance(claim, dict) else item.content
         return FactMemory(
             **common,
             scope=scope_label,
             fact_id=item.memory_id,
             source_text=content_text,
-            subject=str(item.content.get("subject", "")),
-            predicate=str(item.content.get("predicate", "")),
-            object_value=str(item.content.get("object_value", "")),
-            object_type=str(item.content.get("object_type", "")),
+            subject_id=str(fact_content.get("subject_id") or fact_content.get("subject") or ""),
+            predicate_id=str(fact_content.get("predicate_id") or fact_content.get("predicate") or ""),
+            object_id=str(fact_content.get("object_id") or ""),
+            object_value=str(fact_content.get("object_value") or ""),
         )
     if item.memory_type in (MemoryType.PROCEDURAL, MemoryType.EPISODIC):
         knowledge_type = item.content.get("knowledge_type")

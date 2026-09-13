@@ -98,6 +98,9 @@ def _legacy_memory_metadata(memory: Any) -> dict[str, Any]:
                 "steps": list(getattr(memory, "steps", []) or []),
                 "tools": list(getattr(memory, "tools", []) or []),
                 "template_body": getattr(memory, "template_body", ""),
+                "subject": getattr(memory, "subject", ""),
+                "predicate": getattr(memory, "predicate", ""),
+                "object_value": getattr(memory, "object_value", ""),
             }
         )
     return metadata
@@ -235,6 +238,8 @@ def _retrieved_content(text: str, metadata: dict[str, Any]) -> dict[str, Any]:
         "template_body",
         "subject_id",
         "predicate_id",
+        "subject",
+        "predicate",
         "object_id",
         "object_value",
     ):

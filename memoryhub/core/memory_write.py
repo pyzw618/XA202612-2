@@ -220,6 +220,7 @@ class MemoryWriteService:
             "evidence_count": len(getattr(memory, "evidences", []) or []),
             "subject": getattr(memory, "subject", "") or "",
             "predicate": getattr(memory, "predicate", "") or "",
+            "object_value": getattr(memory, "object_value", "") or "",
             "level": getattr(memory, "level", "long") or "long",
             "safety": dict(
                 getattr(memory, "extra_payload", {}).get("safety", {}) or {}

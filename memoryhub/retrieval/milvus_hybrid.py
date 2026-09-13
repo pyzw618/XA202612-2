@@ -98,6 +98,9 @@ def _memory_metadata(memory) -> dict:
             "steps": list(getattr(memory, "steps", []) or []),
             "tools": list(getattr(memory, "tools", []) or []),
             "template_body": getattr(memory, "template_body", ""),
+            "subject": getattr(memory, "subject", ""),
+            "predicate": getattr(memory, "predicate", ""),
+            "object_value": getattr(memory, "object_value", ""),
         }
     return {
         "memory_type": memory.memory_type,

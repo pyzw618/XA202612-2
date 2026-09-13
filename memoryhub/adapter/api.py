@@ -1154,7 +1154,11 @@ def _render_legacy_context(response: SearchResponse) -> str:
     if response.facts:
         lines.append("## 事实记忆")
         lines.extend(
-            f"- {item.subject_id} {item.predicate_id} {item.object_value}".strip()
+            "- " + (
+                " ".join(value for value in (item.subject_id, item.predicate_id, item.object_value) if value)
+                or item.source_text
+                or item.fact_id
+            )
             for item in response.facts
         )
     return "\n".join(lines)
