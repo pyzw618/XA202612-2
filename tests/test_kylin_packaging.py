@@ -162,6 +162,26 @@ def test_deb_uses_real_kylin_embedding_and_vector_sdk() -> None:
     assert "kylin-ai-vector-engine" in build_script
 
 
+def test_native_sdk_links_transitive_dependencies_and_is_load_checked() -> None:
+    cmake = (
+        ROOT / "third_party" / "libkysdk-vector-engine-client-nile-sp2" / "CMakeLists.txt"
+    ).read_text(encoding="utf-8")
+    build_script = (ROOT / "packaging" / "linux" / "build-deb.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "pkg_check_modules(GRPCPP REQUIRED IMPORTED_TARGET grpc++)" in cmake
+    assert "PUBLIC PkgConfig::GRPCPP" in cmake
+    assert "PUBLIC protobuf::libprotobuf" in cmake
+    assert "-Wl,--no-undefined" in cmake
+    load_check = build_script.index("ctypes.CDLL(sys.argv[1])")
+    assert build_script.index("--target kysdk-vector-engine-client-capi") < load_check
+    assert load_check < build_script.index("[3/6] Building Qt desktop client")
+    assert "libgrpc++1.51t64 | libgrpc++1.51" in build_script
+    assert "libprotobuf32t64 | libprotobuf32" in build_script
+    assert "libsqlcipher1" in build_script
+
+
 def test_packaged_config_resolves_to_production_kylin_milvus() -> None:
     """真正解析打包配置，而不只是匹配字符串。
 

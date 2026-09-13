@@ -22,7 +22,7 @@ set(CMAKE_CXX_STANDARD 17)
 find_package(PkgConfig REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(SQLiteCpp REQUIRED)
-pkg_check_modules(GRPC REQUIRED IMPORTED_TARGET grpc)
+pkg_check_modules(GRPCPP REQUIRED IMPORTED_TARGET grpc++)
 pkg_check_modules(SQLCIPHER REQUIRED IMPORTED_TARGET sqlcipher)
 
 file(GLOB_RECURSE SOURCE_LIST ${PROJECT_SOURCE_DIR}/src/*.cpp)
@@ -46,8 +46,8 @@ add_library(kysdk-vector-engine-client SHARED
         ${RETURNED_GRPC_SERVICE_FILES})
 
 target_link_libraries(kysdk-vector-engine-client
-        PUBLIC grpc++
-        PUBLIC protobuf
+        PUBLIC PkgConfig::GRPCPP
+        PUBLIC protobuf::libprotobuf
         PUBLIC nlohmann_json::nlohmann_json
         SQLiteCpp
         PkgConfig::SQLCIPHER)
@@ -60,6 +60,14 @@ add_library(kysdk-vector-engine-client-capi SHARED
 target_link_libraries(kysdk-vector-engine-client-capi
         PUBLIC kysdk-vector-engine-client)
 set_target_properties(kysdk-vector-engine-client-capi PROPERTIES VERSION 0.0.1 SOVERSION 1)
+
+# Shared-library links otherwise allow unresolved references.  In particular,
+# static gRPC installations need grpc/gpr/Abseil as well as grpc++ itself.
+# Fail the build instead of shipping a library that ctypes cannot load.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set_target_properties(kysdk-vector-engine-client kysdk-vector-engine-client-capi
+            PROPERTIES LINK_FLAGS "-Wl,--no-undefined")
+endif()
 
 # The MemoryHub DEB keeps both libraries together in
 # /usr/lib/memoryhub/native.  A relative RUNPATH lets the C API bridge resolve

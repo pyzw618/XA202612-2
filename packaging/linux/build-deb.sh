@@ -71,6 +71,11 @@ cmake -S "$VECTOR_SDK_SOURCE" -B "$VECTOR_SDK_BUILD" \
 cmake --build "$VECTOR_SDK_BUILD" --parallel "$(nproc)" \
     --target kysdk-vector-engine-client-capi
 
+echo "Checking that the native vector SDK can actually load"
+LD_LIBRARY_PATH="$VECTOR_SDK_BUILD${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    python3 -c 'import ctypes, sys; ctypes.CDLL(sys.argv[1])' \
+    "$VECTOR_SDK_BUILD/libkysdk-vector-engine-client-capi.so"
+
 echo "[3/6] Building Qt desktop client"
 cmake -S "$PROJECT_ROOT/desktop-client" -B "$CLIENT_BUILD" -DCMAKE_BUILD_TYPE=Release
 cmake --build "$CLIENT_BUILD" --parallel "$(nproc)"
@@ -163,7 +168,7 @@ Priority: optional
 Architecture: $ARCH
 Maintainer: Kylin MemoryHub Team <memoryhub@localhost>
 Installed-Size: $installed_size
-Depends: python3 (>= 3.11), python3-venv, python3-pip, ca-certificates, libkylin-coreai-embedding, kylin-ai-vector-engine, libqt5core5a, libqt5gui5, libqt5widgets5, libqt5network5, libqt5charts5, libstdc++6
+Depends: python3 (>= 3.11), python3-venv, python3-pip, ca-certificates, libkylin-coreai-embedding, kylin-ai-vector-engine, libgrpc++1.51t64 | libgrpc++1.51, libgrpc29t64 | libgrpc29, libprotobuf32t64 | libprotobuf32, libsqlcipher1, libqt5core5a, libqt5gui5, libqt5widgets5, libqt5network5, libqt5charts5, libstdc++6
 Description: local memory engine and OpenCode integration for Kylin OS
  MemoryHub provides a local FastAPI memory service, Qt desktop console,
  command-line client, MCP server and an automatically configured OpenCode
