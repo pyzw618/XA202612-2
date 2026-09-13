@@ -491,7 +491,7 @@ private slots:
         };
         ForgetPrecisePage page;
         page.refresh();
-        QTRY_COMPARE(page.m_idList->count(), 2);
+        QTRY_COMPARE_WITH_TIMEOUT(page.m_idList->count(), 2, 15000);
         QCOMPARE(page.m_idList->item(0)->text(), QStringLiteral("[事实] report owner Bob"));
         QCOMPARE(page.m_idList->item(0)->data(Qt::UserRole).toString(), QStringLiteral("know_fact_qa"));
         QCOMPARE(page.m_idList->item(1)->text(), QStringLiteral("[事实] project owner Alice"));

@@ -33,9 +33,11 @@ private:
                 return;
             }
             promise.set_value(server.serverPort());
-            if (!server.waitForNewConnection(5000)) return;
+            // Cold Qt networking initialization can exceed five seconds on
+            // software-rendered Kylin VMs; keep the fixture alive until then.
+            if (!server.waitForNewConnection(15000)) return;
             QTcpSocket *socket = server.nextPendingConnection();
-            if (socket && (socket->bytesAvailable() > 0 || socket->waitForReadyRead(5000))) {
+            if (socket && (socket->bytesAvailable() > 0 || socket->waitForReadyRead(15000))) {
                 socket->write(response);
                 socket->waitForBytesWritten(5000);
                 socket->disconnectFromHost();
