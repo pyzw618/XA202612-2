@@ -6,6 +6,7 @@ REST API 路由定义 — Memory Adapter 标准接口
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import logging
@@ -20,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from memoryhub.adapter.schemas import (
     ConflictDecision,
+    ConflictRecord,
     EvalReport,
     Evidence,
     ExtractionTask,
@@ -31,6 +33,7 @@ from memoryhub.adapter.schemas import (
     ForgetRequest,
     ForgetResponse,
     KnowledgeMemory,
+    KnowledgeType,
     ManualConfig,
     MemoryEvent,
     MemoryStatus,
@@ -1650,6 +1653,200 @@ def _write_through_sync_service(sync_service, memory):
     return memory_id
 
 
+#: 显式写入路径的冲突检测只比对置信度最高的有限条候选（``get_by_type`` 按
+#: confidence 倒序返回）。评测播种会一次性写入上万条同类知识，逐条全量扫描候选
+#: 集会把播种退化成 O(N²)；上界使单次写入的检测开销恒定（实测约 +13ms/条），
+#: 真实用户的记忆规模远小于该值，检测结果不受影响。
+_EXPLICIT_CONFLICT_CANDIDATE_LIMIT = 100
+
+
+def _detect_explicit_write_conflict(state, memory) -> ConflictRecord | None:
+    """检测显式写入（MCP/CLI/控制台）的冲突，返回待记录的冲突或 ``None``。
+
+    检测规则与事件链路共用一套实现 —— 直接复用 ``EventProcessingCoordinator``
+    里已经装配好的 ``PreferenceUpdater`` / ``KnowledgeUpdater``（同一套
+    ConflictDetector / 阈值 / LLM 客户端），避免出现第三套判定规则。
+
+    必须在**落库之前**调用：检测是从仓储读候选旧记忆，先落库会让新记忆把自己
+    当成候选，产出一条 old==new 的伪冲突。
+
+    与事件链路的关键差别是「只记录」：本路径不归档、不合并、不改状态，因此冲突
+    记录保持 ``PENDING``、``resolved_at`` 为空 —— 记录不能声称一个并未执行的
+    裁决已经落地。要真正应用，走 ``POST /conflicts/{id}/resolve?apply=true``
+    （``_apply_conflict_decision`` 会重新读取冲突双方再执行）。
+
+    检测失败一律吞掉并记日志：显式写入的成败只由安全门禁和落库决定。
+    """
+    try:
+        coordinator = getattr(state, "event_processor", None)
+        if coordinator is None:
+            return None
+        if getattr(memory, "memory_type", "") == "knowledge":
+            return _detect_knowledge_conflict(coordinator, memory)
+        return _detect_preference_conflict(coordinator, memory)
+    except Exception:  # noqa: BLE001 — 检测失败不得影响写入
+        logger.warning(
+            "explicit-write conflict detection failed for %s",
+            getattr(memory, "memory_id", "?"),
+            exc_info=True,
+        )
+        return None
+
+
+def _save_explicit_write_conflict(state, conflict: ConflictRecord | None) -> None:
+    """落库成功后再持久化冲突记录：冲突两端此时都已存在，后续 apply 才读得回。"""
+    if conflict is None:
+        return
+    conflict_repo = getattr(state, "conflict_repo", None)
+    if conflict_repo is None:
+        return
+    try:
+        conflict_repo.save(conflict)
+    except Exception:  # noqa: BLE001 — 记录失败同样不得影响已经成功的写入
+        logger.warning(
+            "explicit-write conflict persist failed for %s",
+            conflict.conflict_id,
+            exc_info=True,
+        )
+
+
+def _explicit_conflict(
+    *,
+    prefix: str,
+    memory_type: str,
+    user_id: str,
+    old_memory_id: str,
+    new_memory_id: str,
+    old_content: str,
+    new_content: str,
+    conflict_field: str,
+    reason: str,
+) -> ConflictRecord:
+    """构造一条 PENDING 冲突记录，id 摘要规则与事件链路一致。
+
+    显式写入不裁决，故 decision 恒为 ``PENDING``（``resolved_at`` 留空）；同一
+    (user, old, new) 三元组的摘要相同，``ConflictRepository.save`` 会 upsert 而
+    不是插入重复行。
+    """
+    digest = hashlib.sha256(
+        f"{user_id}|{old_memory_id}|{new_memory_id}".encode("utf-8")
+    ).hexdigest()[:24]
+    return ConflictRecord(
+        conflict_id=f"{prefix}_{digest}",
+        user_id=user_id,
+        old_memory_id=old_memory_id,
+        new_memory_id=new_memory_id,
+        memory_type=memory_type,
+        old_content=old_content,
+        new_content=new_content,
+        conflict_field=conflict_field,
+        decision=ConflictDecision.PENDING,
+        reason=reason,
+    )
+
+
+def _detect_preference_conflict(coordinator, memory) -> ConflictRecord | None:
+    updater = coordinator.preference_updater
+    existing = updater._find_existing(memory)
+    # 同一 memory_id 的重复写入（客户端重试）会匹配到自己，那不是冲突。
+    if existing is None or existing.memory_id == memory.memory_id:
+        return None
+
+    decision, reason = updater.resolver.auto_resolve(
+        existing, memory, updater.detector
+    )
+    # auto_resolve 对「内容完全相同」「scope 无重叠」「语义上并不矛盾」都返回
+    # MERGE；只有「语义上并不矛盾」这一种不是冲突，不该产生冲突记录。
+    if decision == ConflictDecision.MERGE and not updater.resolver._is_same_content(
+        existing, memory
+    ):
+        return None
+
+    return _explicit_conflict(
+        prefix="conf_pref",
+        memory_type="preference",
+        user_id=memory.user_id,
+        old_memory_id=existing.memory_id,
+        new_memory_id=memory.memory_id,
+        old_content=existing.text,
+        new_content=memory.text,
+        conflict_field="text/payload",
+        reason=(
+            f"explicit write: {reason} "
+            f"(suggested decision: {decision.value}; recorded only, not applied)"
+        ),
+    )
+
+
+def _detect_knowledge_conflict(coordinator, memory) -> ConflictRecord | None:
+    updater = coordinator.knowledge_updater
+    know_repo = updater.know_repo
+    if know_repo is None:
+        return None
+
+    knowledge_type = str(
+        getattr(memory.knowledge_type, "value", memory.knowledge_type)
+    )
+    if knowledge_type == KnowledgeType.FACT.value:
+        return _detect_fact_conflict(updater, memory)
+
+    # 与 KnowledgeUpdater._find_best_candidate 同一组谓词（同 user、同类型、
+    # scope 兼容、取相似度最高者），区别仅在于把类型过滤下推到 SQL 并给候选集
+    # 设上界——见 _EXPLICIT_CONFLICT_CANDIDATE_LIMIT。
+    candidates = know_repo.get_by_type(
+        memory.user_id, knowledge_type=knowledge_type, status="active"
+    )[:_EXPLICIT_CONFLICT_CANDIDATE_LIMIT]
+    best = None
+    best_score = 0.0
+    for candidate in candidates:
+        if candidate.memory_id == memory.memory_id:
+            continue
+        if not updater._scope_compatible(candidate, memory):
+            continue
+        score = updater._similarity(candidate, memory)
+        if score > best_score:
+            best, best_score = candidate, score
+    if best is None or best_score < updater.config.conflict_threshold:
+        return None
+
+    return _explicit_conflict(
+        prefix="conf_know",
+        memory_type="knowledge",
+        user_id=memory.user_id,
+        old_memory_id=best.memory_id,
+        new_memory_id=memory.memory_id,
+        old_content=best.content,
+        new_content=memory.content,
+        conflict_field="semantic_equivalence",
+        reason=(
+            f"knowledge.semantic_similarity={best_score:.4f} "
+            f"(threshold={updater.config.conflict_threshold}; "
+            "explicit write: recorded only, not applied)"
+        ),
+    )
+
+
+def _detect_fact_conflict(updater, memory) -> ConflictRecord | None:
+    """事实性知识按 S/P/O 精确匹配，同 S/P 但不同 O 才算冲突。"""
+    existing = updater._find_best_fact_candidate(memory)
+    if existing is None or updater._same_fact(existing, memory):
+        return None
+    return _explicit_conflict(
+        prefix="conf_know",
+        memory_type="knowledge",
+        user_id=memory.user_id,
+        old_memory_id=existing.memory_id,
+        new_memory_id=memory.memory_id,
+        old_content=str(existing.object_value or existing.content),
+        new_content=str(memory.object_value or memory.content),
+        conflict_field="object_value",
+        reason=(
+            "same subject/predicate with a different value "
+            "(explicit write: recorded only, not applied)"
+        ),
+    )
+
+
 @router.post("/memories/preference")
 async def write_preference_memory(
     req: PreferenceMemory,
@@ -1659,13 +1856,20 @@ async def write_preference_memory(
     """
     显式写入/更新偏好记忆，并同步到 Milvus。
 
-    数据流: PreferenceMemory → SafetyWriteGate → 安全副本 → SQLite → Embedding → Milvus
-            → 标记 index_version → 失效检索缓存
+    数据流: PreferenceMemory → SafetyWriteGate → 安全副本 → 冲突检测（只记录，不裁决）
+            → SQLite → Embedding → Milvus → 标记 index_version → 失效检索缓存
     """
+    def sink(safe_memory):
+        # 检测在落库之前：否则新记忆会把自己当成候选旧记忆。
+        conflict = _detect_explicit_write_conflict(request.app.state, safe_memory)
+        memory_id = _write_through_sync_service(sync_service, safe_memory)
+        _save_explicit_write_conflict(request.app.state, conflict)
+        return memory_id
+
     result = _guarded_memory_write(
         request,
         req,
-        lambda safe_memory: _write_through_sync_service(sync_service, safe_memory),
+        sink,
         operation="explicit_write",
     )
     return {
@@ -1685,13 +1889,20 @@ async def write_knowledge_memory(
     """
     显式写入/更新知识记忆，并同步到 Milvus。
 
-    数据流: KnowledgeMemory → SafetyWriteGate → 安全副本 → SQLite → Embedding → Milvus
-            → 标记 index_version → 失效检索缓存
+    数据流: KnowledgeMemory → SafetyWriteGate → 安全副本 → 冲突检测（只记录，不裁决）
+            → SQLite → Embedding → Milvus → 标记 index_version → 失效检索缓存
     """
+    def sink(safe_memory):
+        # 检测在落库之前：否则新记忆会把自己当成候选旧记忆。
+        conflict = _detect_explicit_write_conflict(request.app.state, safe_memory)
+        memory_id = _write_through_sync_service(sync_service, safe_memory)
+        _save_explicit_write_conflict(request.app.state, conflict)
+        return memory_id
+
     result = _guarded_memory_write(
         request,
         req,
-        lambda safe_memory: _write_through_sync_service(sync_service, safe_memory),
+        sink,
         operation="explicit_write",
     )
     return {
